@@ -52,6 +52,14 @@ htmlcov/
 # not package documentation — DESIGN.md is where decisions land)
 .claude/
 docs/superpowers/
+# Same rule, newer directory. `.agents/evidence/` holds what a task's audit and
+# review agents wrote, copied out of the session scratchpad so it survives
+# /private/tmp being cleared; T-002's is 38 MB. Ignoring it keeps `git add -A`
+# from committing it to a public repo, and `git clean -fd` from deleting it.
+# `.agents/plans/` is deliberately NOT ignored: it is untracked like the rest,
+# but `aw context` ends with `git status -uall`, and with the evidence ignored
+# that section names the two plan documents instead of 3344 evidence files.
+/.agents/evidence/
 
 # Local reference material (contains unpublished draft; repo is public)
 assets/

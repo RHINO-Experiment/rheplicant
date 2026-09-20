@@ -160,9 +160,9 @@ _B5_REST = (
     "can still generate its own data. Dropping the cycle instead -- "
     "observation.switching: {{mode: none}}, and model.cal_loads with it -- "
     "silences this too, but on a model whose only sources ARE the loads it "
-    "leaves a pure transform chain with nothing to transform, and the next "
-    "simulation fails with 'This assembly is a pure transform chain'; it is a "
-    "fix only for a run that has a source elsewhere. This check runs after "
+    "leaves a pure transform chain with nothing to transform, which check "
+    "A31 refuses; it is a fix only for a run that has a source elsewhere. "
+    "This check runs after "
     "build_resources, so it saves no beam: what it buys is the refusal "
     "instead of a plausible answer (check B5)."
 )
@@ -318,20 +318,23 @@ class TestB5:
         "Drop the cycle and model.cal_loads with it" reads as a second fix and
         is one only for a run with a source elsewhere.  Applied to THIS
         document -- whose only sources are the loads -- it leaves a pure
-        transform chain, and the shipped fixture's ``inference.observed:
-        {from: simulation}`` then fails at ``AssemblyError: This assembly is a
-        pure transform chain``.  Measured, and the message names the
-        condition rather than the bare alternative.
+        transform chain.  That used to fail inside ``load_document`` at
+        ``AssemblyError: This assembly is a pure transform chain``, when the
+        shipped fixture's ``inference.observed: {from: simulation}`` called
+        the twin; check A31 now refuses it in the text pass, and the message
+        names that check rather than the bare alternative.
         """
-        from rheplicant.core.graph import AssemblyError
-
         stripped = preflight_document(
             observation={"switching": {"mode": "none"}})
         stripped["model"] = dict(DARK)
-        with pytest.raises(AssemblyError, match="pure transform chain"):
+        with pytest.raises(ConfigError) as refused:
             load_document(stripped)
+        assert "no source node" in str(refused.value)
+        assert "(check A31)" in str(refused.value)
         assert "pure transform chain" in built_only(dark_antenna(),
                                                     "B5").message
+        assert "which check A31 refuses" in built_only(dark_antenna(),
+                                                       "B5").message
         # ... and on a run that HAS a source elsewhere, the same edit works.
         with_source = preflight_document(
             observation={"switching": {"mode": "none"}})

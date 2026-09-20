@@ -631,3 +631,88 @@ class TestTheExecutorRegistryNoLongerAsserts:
         done = subprocess.run([sys.executable, "-O", "-c", source],
                               capture_output=True, text=True, check=True)
         assert done.stdout.strip() == "ConfigError", done.stdout
+
+
+class TestNoFindingInThisLayerIsIdLess:
+    """Every finding the config layer constructs carries a check id.
+
+    ``Finding`` allows ``check=""`` (the type is also used by tests and by
+    passes that are not pinned to schema §6), but the audit trace does not:
+    ``AuditTrace.record_findings`` validates ``check`` as a non-empty string,
+    so an id-less finding reached ``rheplicant validate`` as "finding.check
+    must be a non-empty string." with the finding's own sentence lost.
+    Measured before the fix: exactly one such call site, the ``plan.*``
+    engine-enum refusal in ``preflight/fitting.py``.
+
+    A text scan rather than a table of documents, because it sees the
+    branches no test document takes.  A check id that is not a literal is
+    taken from a table of ids (``gating.CHECK_ID``, a C1/C2 choice, the
+    A2/A3/A4 triples of ``node_placement_problems``); those are allowed and
+    listed, so a new computed id is a decision someone makes here.
+    """
+
+    #: (module, the expression) for every finding built with a computed id.
+    COMPUTED = {
+        ("gating.py", "AUTO_SKIP_ID"), ("gating.py", "check"),
+        ("inflight/axes.py", "check"), ("preflight/model.py", "check"),
+        ("findings.py", "check"),
+    }
+
+    #: The constructors of :mod:`rheplicant.config.findings`.
+    BUILDERS = frozenset({"refuse", "warn", "report", "Finding"})
+
+    @classmethod
+    def _calls(cls):
+        """``(module, line, the check-id expression)`` per finding built.
+
+        A bare call counts when its name is imported from
+        ``rheplicant.config.findings`` (or is defined there), and an attribute
+        call when it is ``findings.<builder>``; ``warnings.warn`` is neither.
+        """
+        import ast
+        import pathlib
+
+        root = pathlib.Path(__file__).parents[2] / "src" / "rheplicant" / "config"
+        for path in sorted(root.rglob("*.py")):
+            tree = ast.parse(path.read_text())
+            bare = {alias.asname or alias.name
+                    for node in ast.walk(tree)
+                    if isinstance(node, ast.ImportFrom)
+                    and node.module == "rheplicant.config.findings"
+                    for alias in node.names} & cls.BUILDERS
+            if path.name == "findings.py":
+                bare = set(cls.BUILDERS)
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.Call):
+                    continue
+                func = node.func
+                named = (isinstance(func, ast.Name) and func.id in bare) or (
+                    isinstance(func, ast.Attribute)
+                    and isinstance(func.value, ast.Name)
+                    and func.value.id == "findings"
+                    and func.attr in cls.BUILDERS)
+                if not named:
+                    continue
+                check = next((kw.value for kw in node.keywords
+                              if kw.arg == "check"),
+                             node.args[0] if node.args else None)
+                yield (path.relative_to(root).as_posix(), node.lineno, check)
+
+    def test_no_finding_is_built_with_an_empty_or_missing_id(self):
+        import ast
+
+        calls = list(self._calls())
+        # Measured: 109 calls. A floor, so the scan going blind is loud.
+        assert len(calls) >= 100, "the scan stopped seeing finding calls"
+        empty = [(module, line) for module, line, check in calls
+                 if check is None or (isinstance(check, ast.Constant)
+                                      and check.value in ("", None))]
+        assert empty == []
+
+    def test_every_computed_id_is_one_of_the_known_tables(self):
+        import ast
+
+        computed = {(module, ast.unparse(check))
+                    for module, _line, check in self._calls()
+                    if check is not None and not isinstance(check, ast.Constant)}
+        assert computed == self.COMPUTED

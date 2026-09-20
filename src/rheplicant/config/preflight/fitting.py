@@ -650,8 +650,10 @@ def _t7_engines(named: str, listed: str, site: str,
         names = _t7_names(entry) or ()
         declared = entry.get("engine")
 
-        # The enum, closed.  `check=""` -- schema §6 gives this no row of its
-        # own, and §3.1 allows an id-less Finding.  It is not decoration:
+        # The enum, closed, under A19 -- the row for an explicit `engine:`
+        # the block cannot have.  It was id-less (`check=""`), which the
+        # audit trace refuses: `validate` printed "finding.check must be a
+        # non-empty string." in place of this sentence.  It is not decoration:
         # `_engine_of` returns a declared engine unvalidated, so without this
         # an `engine: banana` block would reach the A17 test as
         # `engine == _T7_CONJUGATE` -> False and be silently accepted by this pass
@@ -665,11 +667,11 @@ def _t7_engines(named: str, listed: str, site: str,
         if declared is not None and not (isinstance(declared, str)
                                          and declared in _ENGINES):
             yield refuse(
-                "", block_where,
+                "A19", block_where,
                 f"{named}: {site}[{position}] asks for engine: {declared!r}; "
                 f"the engines are {sorted(_ENGINES)}. Leave engine: out and "
                 "it is derived from linear: true on each member, which is the "
-                "normal case -- an explicit engine is an override.")
+                "normal case -- an explicit engine is an override (check A19).")
             continue
 
         # The log route, which reads the block's declared engine and the

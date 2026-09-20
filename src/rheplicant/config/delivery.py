@@ -234,16 +234,28 @@ def deliver(
 
 
 def origin_for_delivery(
-    context: ResolutionContext, destination: DestinationDescriptor, *, defaulted: bool = False
+    context: ResolutionContext,
+    destination: DestinationDescriptor,
+    *,
+    defaulted: bool = False,
+    authority: str | None = None,
 ) -> Origin:
-    """Find the payload authority exactly; never fabricate a user origin."""
+    """Find the payload authority exactly; never fabricate a user origin.
+
+    ``authority`` is the document path whose origin the payload carries when
+    that is not the destination's own: a builder that derives a value from a
+    key the user wrote under another name (a ``format: npy`` beam's maps are
+    read from its ``path:``) names that key, so the audit says where the value
+    came from instead of looking up a key the document never wrote.
+    """
     if defaulted:
         return Origin("rheplicant-default")
     if context.origin_lookup is None:
         raise ConfigError(f"audit: no origin lookup for {destination.document_path!r}")
-    origin = context.origin_lookup(destination.document_path)
+    path = destination.document_path if authority is None else authority
+    origin = context.origin_lookup(path)
     if origin is None:
-        raise ConfigError(f"audit: no origin for {destination.document_path!r}")
+        raise ConfigError(f"audit: no origin for {path!r}")
     return origin
 
 
@@ -288,15 +300,21 @@ def record_resolved_delivery(
     *,
     defaulted: bool = False,
     expected: DimensionSignature | None | object = _EXPECTED_FROM_DESTINATION,
+    authority: str | None = None,
 ) -> None:
-    """Record a non-model value at the point its typed owner accepts it."""
+    """Record a non-model value at the point its typed owner accepts it.
+
+    ``authority``: see :func:`origin_for_delivery`.
+    """
     if context.trace is None:
         return
     context.trace.record_delivery(
         context.layer,
         destination,
         dtype=context.dtype,
-        origin=origin_for_delivery(context, destination, defaulted=defaulted),
+        origin=origin_for_delivery(
+            context, destination, defaulted=defaulted, authority=authority
+        ),
         unit=canonical_unit_for_delivery(
             context, destination, unit, expected=expected
         ),

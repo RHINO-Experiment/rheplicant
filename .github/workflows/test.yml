@@ -26,10 +26,17 @@ concurrency:
   group: tests-${{ github.ref }}
   cancel-in-progress: true
 
-# bayesmith 0.9.0 is a local release and not on PyPI (see CLAUDE.md's
+# bayesmith 0.10.0 is a local release and not on PyPI (see CLAUDE.md's
 # complete-environment section), so until it is published the environment
-# steps below cannot resolve `bayesmith>=0.9,<0.10` and the suite jobs fail at
+# steps below cannot resolve `bayesmith>=0.10,<0.11` and the suite jobs fail at
 # install. The lint job does not depend on it.
+
+env:
+  # The import names whose absence fails the Suite job's completeness report
+  # and the Coverage job's required check, spelled once for both. Each is
+  # installable on a public runner, and without one the suite skips modules
+  # and still passes. Space-separated; both checks also fail if it is empty.
+  REQUIRED_IMPORTS: h5py rhino_cal_jax limtod_jax numpyro pyuvdata pygdsm MomentRFI
 
 jobs:
   lint:
@@ -72,21 +79,45 @@ jobs:
           # locally -- with no test failing to say so. `gui` deliberately
           # excludes `httpx2` because the shipped server does not need it;
           # this installs the TEST dependency rather than moving it into the
-          # runtime extra.
-          uv pip install -e ".[rhino,numpyro,gui,gui-react]" --group dev
+          # runtime extra. `uvbeam` brings pyuvdata, and pygdsm is on PyPI with
+          # no extra of its own; tests/config importorskips both. pygdsm
+          # downloads its component data from the network when a test first
+          # builds a sky (gsm2016_components.h5, 303 MB, for limTOD's GSM16)
+          # into astropy's download cache; the cache step below keeps that
+          # download off later runs.
+          uv pip install -e ".[rhino,numpyro,gui,gui-react,uvbeam]" --group dev
+          uv pip install pygdsm
 
-      - name: Install the integrations that are not on an index
-        # `editables` is not decoration: rhino-cal-jax's editable hook needs it.
-        # The branch is not decoration either -- rhino_cal_jax/ lives only on
-        # feat/rhino-cal-jax, and the default branch has no pyproject.toml at
-        # all, so a URL without the ref installs nothing and fails at the build
-        # backend. Both are recorded in this repo's pyproject.toml.
-        continue-on-error: true
-        id: integrations
+      - name: Install rhino-cal-jax
+        # Required, so a failure here fails the job. `editables` is not
+        # decoration: rhino-cal-jax's editable hook needs it. The branch is not
+        # decoration either -- rhino_cal_jax/ lives only on feat/rhino-cal-jax,
+        # and the default branch has no pyproject.toml at all, so a URL without
+        # the ref installs nothing and fails at the build backend. Both are
+        # recorded in this repo's pyproject.toml.
         run: |
           uv pip install editables
           uv pip install "rhino-cal-jax @ git+https://github.com/RHINO-Experiment/rhino-cal@feat/rhino-cal-jax"
-          uv pip install "MomentRFI @ git+https://github.com/zzhang0123/MomentRFI"
+
+      - name: Install MomentRFI and MomentEmu
+        # Required. Neither is on PyPI, and MomentRFI declares MomentEmu, so
+        # the two are installed from git in one command: MomentRFI named alone
+        # does not resolve. With both present tests/radio/test_flagging_momentrfi.py
+        # runs all 13 of its tests; without MomentRFI ten of them skip
+        # (measured 2026-09-19).
+        run: >-
+          uv pip install
+          "MomentEmu @ git+https://github.com/zzhang0123/MomentEmu"
+          "MomentRFI @ git+https://github.com/zzhang0123/MomentRFI"
+
+      - name: Cache astropy downloads (pygdsm component data)
+        # pygdsm fetches through astropy.utils.data.download_file(cache=True),
+        # which writes under ~/.astropy/cache. The files are fixed releases,
+        # so a constant key is enough.
+        uses: actions/cache@v4
+        with:
+          path: ~/.astropy/cache
+          key: astropy-download-cache-pygdsm-v1
 
       # The two TypeScript typecheck guards shell out to `node_modules/.bin/tsc`
       # and raised FileNotFoundError without it -- not a skip, a crash, which
@@ -117,22 +148,38 @@ jobs:
         # The difference between what this environment collects and what the
         # README claims IS the completeness report -- that is the design of
         # tests/test_readme_counts.py, which SKIPS (loudly) rather than opining
-        # when a module fails to collect. Printed, never asserted on here: a
-        # public runner cannot hold the RHEPLICANT_RHINO_* datasets, so its
-        # count is legitimately lower and must not be written into the README.
+        # when a module fails to collect. The count is printed, never asserted
+        # on: a public runner cannot hold the RHEPLICANT_RHINO_* datasets, so
+        # its count is legitimately lower and must not be written into the
+        # README.
+        #
+        # The package check does fail the step, after the count is printed,
+        # when a required package is absent: each of these is installable on
+        # this runner, and without one the suite skips modules and still
+        # passes.
         run: |
+          status=0
           .venv/bin/python -c "
-          import importlib
-          for name in ('h5py', 'rhino_cal_jax', 'limtod_jax', 'numpyro', 'MomentRFI'):
+          import importlib, os, sys
+          required = os.environ['REQUIRED_IMPORTS'].split()
+          if not required:
+              sys.exit('REQUIRED_IMPORTS is empty')
+          missing = []
+          for name in required:
               try:
                   importlib.import_module(name)
                   print(f'{name:16s} present')
               except Exception as error:
                   print(f'{name:16s} ABSENT  ({type(error).__name__})')
-          "
+                  missing.append(name)
+          if missing:
+              print('required packages absent: ' + ', '.join(missing))
+              sys.exit(1)
+          " || status=$?
           .venv/bin/python -m pytest --collect-only -q --no-cov 2>/dev/null \
             | awk -F': ' '/^tests\/.*: [0-9]+$/ {n += $2} END {print "collected:", n}'
           grep -oE '\([0-9]+ tests, [0-9.]+ % coverage' README.md || true
+          exit $status
 
       - name: Run the suite
         # Judged by pytest's own exit code. A pipe would report the exit status
@@ -157,15 +204,59 @@ jobs:
           # locally -- with no test failing to say so. `gui` deliberately
           # excludes `httpx2` because the shipped server does not need it;
           # this installs the TEST dependency rather than moving it into the
-          # runtime extra.
-          uv pip install -e ".[rhino,numpyro,gui,gui-react]" --group dev
+          # runtime extra. `uvbeam` brings pyuvdata, and pygdsm is on PyPI with
+          # no extra of its own; tests/config importorskips both. pygdsm
+          # downloads its component data from the network when a test first
+          # builds a sky (gsm2016_components.h5, 303 MB, for limTOD's GSM16)
+          # into astropy's download cache; the cache step below keeps that
+          # download off later runs.
+          uv pip install -e ".[rhino,numpyro,gui,gui-react,uvbeam]" --group dev
+          uv pip install pygdsm
 
-      - name: Install the integrations that are not on an index
-        continue-on-error: true
+      - name: Install rhino-cal-jax
+        # Required; see the Suite job's step of the same name.
         run: |
           uv pip install editables
           uv pip install "rhino-cal-jax @ git+https://github.com/RHINO-Experiment/rhino-cal@feat/rhino-cal-jax"
-          uv pip install "MomentRFI @ git+https://github.com/zzhang0123/MomentRFI"
+
+      - name: Install MomentRFI and MomentEmu
+        # Required; see the Suite job's step of the same name.
+        run: >-
+          uv pip install
+          "MomentEmu @ git+https://github.com/zzhang0123/MomentEmu"
+          "MomentRFI @ git+https://github.com/zzhang0123/MomentRFI"
+
+      - name: Cache astropy downloads (pygdsm component data)
+        # pygdsm fetches through astropy.utils.data.download_file(cache=True),
+        # which writes under ~/.astropy/cache. The files are fixed releases,
+        # so a constant key is enough.
+        uses: actions/cache@v4
+        with:
+          path: ~/.astropy/cache
+          key: astropy-download-cache-pygdsm-v1
+
+      - name: Require the complete environment
+        # The same REQUIRED_IMPORTS the Suite job's completeness report reads.
+        # This job measures the coverage figure, and a required package that
+        # did not arrive would lower it through skips rather than through
+        # failures.
+        run: |
+          .venv/bin/python -c "
+          import importlib, os, sys
+          required = os.environ['REQUIRED_IMPORTS'].split()
+          if not required:
+              sys.exit('REQUIRED_IMPORTS is empty')
+          missing = []
+          for name in required:
+              try:
+                  importlib.import_module(name)
+              except Exception as error:
+                  missing.append(f'{name} ({type(error).__name__})')
+          if missing:
+              print('required packages absent: ' + ', '.join(missing))
+              sys.exit(1)
+          print('all required packages present')
+          "
 
       # The SAME three steps the Suite job above runs, and they are here
       # because they were not. `8ed385f` added them to Suite alone -- the

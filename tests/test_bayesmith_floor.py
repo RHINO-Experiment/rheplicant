@@ -1,6 +1,6 @@
 """The declared bayesmith range, checked by capability and by policy, not by version.
 
-``pyproject.toml`` declares ``bayesmith>=0.9,<0.10``, and that range holds two
+``pyproject.toml`` declares ``bayesmith>=0.10,<0.11``, and that range holds two
 numbers which this file keeps apart.
 
 * The **capability floor**, :data:`CAPABILITY_FLOOR`, is the highest release
@@ -9,16 +9,27 @@ numbers which this file keeps apart.
   a behaviour. ``CLAUDE.md`` states what each level buys; the cases turn those
   statements into assertions, so a floor that silently drops a name anywhere
   below the top fails here rather than at a call site three modules away.
-* The **declared range** starts at 0.9 although the code needs nothing newer
-  than 0.6, because the stable baseline relies on bayesmith 0.9's stability
-  contract and is tested only against 0.9. It is closed at the next minor,
+
+  How an install below a level fails differs by level, measured against
+  source exports of the tags on 2026-09-19. Below 0.5, ``import
+  rheplicant.inference`` fails outright, because ``bayesmith.marginal``, which
+  it imports, first ships in 0.5. The 0.4 and 0.5 capabilities are keyword
+  arguments on names that already existed, so taken alone each is a
+  ``TypeError`` at the call on the release below. A 0.5 install imports, and
+  differs from 0.6 in behaviour only.
+* The **declared range** starts at 0.10 although the code needs nothing newer
+  than 0.6, because the stable baseline relies on bayesmith 0.10's stability
+  contract and is tested only against 0.10. It is closed at the next minor,
   because a pre-1.0 minor may move the deep module paths this package imports.
+  0.10 moved one: ``bayesmith.optimize`` became a package. The imports here
+  survived it, which is the point of closing the range rather than evidence
+  that closing it was unnecessary.
 
 **No case reads the installed version.** For most of this file's history
 bayesmith was installed editable from ``../bayesmith``, and an editable install
 reports the version its metadata was written with: 0.2.0 against 0.5.0 source
 on 2026-08-28, and still 0.2.0 against 0.9.0 source on 2026-09-19. The
-checkout now installs bayesmith from its local 0.9.0 wheel, where the metadata
+checkout now installs bayesmith from its local 0.10.0 wheel, where the metadata
 is right, but a guard that holds in one kind of environment only is what this
 file replaced. Whether a capability is reachable holds in every environment.
 """
@@ -48,11 +59,13 @@ def test_the_0_2_surface_is_reachable():
 
 def test_the_0_3_surface_is_reachable():
     """``AffinityRefused``'s structured PAYLOAD and ``ComplexNormal`` -- what
-    ``graph_bridge.py`` needs. A 0.2 install satisfies the import statements of
-    this pair and then fails at the CALL, which is the shape a floor exists to
-    turn into a resolution error.
+    ``graph_bridge.py`` needs. Both are new in 0.3: a 0.2 install has neither
+    ``bayesmith.distributions`` nor ``AffinityRefused``, so this case fails at
+    its import statement on 0.2. The payload assertion below therefore cannot
+    fail on its own against any tagged release; it is kept as a statement of
+    what 0.3 bought.
 
-    **So the payload is what is asserted, not the name**, and the first version
+    **The payload is what is asserted, not the name**, and the first version
     of this case got that wrong: it asserted ``hasattr(AffinityRefused,
     "__mro__")``, which is true of every class in Python and could not have
     failed for any reason. Asking whether it could is what found it -- and the
@@ -73,36 +86,50 @@ def test_the_0_3_surface_is_reachable():
                "failed"}
     missing = payload - set(inspect.signature(AffinityRefused).parameters)
     assert not missing, (
-        f"AffinityRefused is missing {sorted(missing)}, so the installed "
-        "bayesmith carries the name without the structured payload -- which "
-        "is exactly the 0.2-install failure the >=0.3 half of the floor exists "
-        "to turn into a resolution error rather than a TypeError at the call"
+        f"AffinityRefused is missing {sorted(missing)}: the installed bayesmith "
+        "defines the class without the structured payload graph_bridge.py "
+        "passes. No tagged release does that: 0.2 has no AffinityRefused at "
+        "all, and every release from 0.3.0 to 0.9.0 has the full payload"
     )
 
 
 def test_the_0_4_surface_is_reachable():
-    """``observed_mask`` -- how the adapter presents a ``FlaggedNoise``.
+    """``observe(..., mask=)`` and the node field ``Probabilistic.observed_mask``
+    -- how ``graph_bridge.py`` presents a ``FlaggedNoise``: it passes
+    ``mask=`` to ``bayesmith.observe``, and the graph carries it on the node.
 
-    **The first version of this test passed for the wrong reason**, and the
-    correction is worth keeping visible. It searched ``bayesmith.exact``'s
-    ``gaussian`` and ``precision`` for the name, in the module or in any
-    signature, and went green -- because ``gaussian.Probabilistic`` happens to
-    take a PARAMETER called ``observed_mask``. The function the floor is about
-    lives in ``bayesmith.marginal``, which the search never looked at. A guard
-    that hunts a name across several modules will find a homonym sooner or
-    later; this one asks the single question it means.
+    Both arrived in 0.4. On a 0.3 install ``observe`` exists without ``mask``,
+    so the adapter's call raises ``TypeError``.
+
+    The previous version of this case had the story backwards. The first
+    version searched ``bayesmith.exact`` for the name ``observed_mask`` and
+    found it on ``gaussian.Probabilistic``, which is the node class imported
+    from ``bayesmith.graph.nodes``, so it had found the 0.4 field. It was
+    rewritten as a "homonym" into an import of the FUNCTION
+    ``bayesmith.marginal.observed_mask``. That function is not what 0.4 added:
+    it has existed since 0.2 as ``bayesmith.evidence.compress.observed_mask``,
+    and ``bayesmith.marginal`` first ships in 0.5, so the rewrite failed on
+    0.4.0, a release that has the capability.
     """
-    from bayesmith.marginal import observed_mask
+    import dataclasses
 
-    assert callable(observed_mask)
-    assert "precision" in inspect.signature(observed_mask).parameters
+    from bayesmith.graph.nodes import Probabilistic
+
+    assert "mask" in inspect.signature(bayesmith.observe).parameters, (
+        "bayesmith.observe takes no `mask`, so the installed bayesmith is below "
+        "the 0.4 level and the adapter's FlaggedNoise call raises TypeError"
+    )
+    assert "observed_mask" in {field.name for field in dataclasses.fields(Probabilistic)}, (
+        "Probabilistic has no `observed_mask` field, so the graph cannot carry "
+        "a flag mask; the installed bayesmith is below the 0.4 level"
+    )
 
 
 def test_the_0_5_surface_is_reachable():
     """``local_block(..., priors=True)`` -- G15's third block constructor,
     which ``uncertainty.fisher_information(space=...)`` delegates its prior
-    curvature to. A 0.4 install imports fine and raises ``TypeError:
-    unexpected keyword argument 'priors'`` at the call."""
+    curvature to. On a 0.4 install ``local_block`` imports and the call raises
+    ``TypeError: unexpected keyword argument 'priors'``."""
     from bayesmith.diagnose.local import local_block
 
     assert "priors" in inspect.signature(local_block).parameters, (

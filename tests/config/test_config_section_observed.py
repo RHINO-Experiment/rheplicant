@@ -9,6 +9,7 @@ import numpy as np
 import pytest
 
 from rheplicant.config import ConfigError
+from rheplicant.config.draws import _digest
 from rheplicant.config.sections import observed as observed_module
 from rheplicant.config.sections.noise import build_noise
 from rheplicant.config.sections.observed import build_observed
@@ -154,11 +155,20 @@ class TestRealise:
         assert jnp.array_equal(observed.entries["primary"], expected)
 
     def test_an_undeclared_seed_name_derives_by_blake2s_not_luck(self):
-        ctx, full, space = harness()   # runtime.seeds is empty; seed is set
+        # runtime.seeds is empty and runtime.seed is set, so the recorded seed
+        # is derived: the blake2s digest of the name XOR the root seed. It is
+        # also the seed the scatter was drawn from.
+        ctx, full, space = harness()
         observed = build(self.spec("homoscedastic",
                                    sigma={"value": 0.5, "unit": "K"}),
                          ctx=ctx, full=full, space=space)
-        assert observed.records["primary"]["seed"] is not None
+        derived = _digest("observed_noise") ^ int(ctx.seed)
+        assert observed.records["primary"]["seed"] == derived
+        clean = build({"from": "simulation"}, ctx=ctx, full=full, space=space)
+        expected = HomoscedasticNoise(jnp.asarray(0.5, dtype=jnp.float32)
+                                      ).realise(clean.entries["primary"],
+                                                key=jax.random.key(derived))
+        assert jnp.array_equal(observed.entries["primary"], expected)
 
     def test_the_seed_is_required_on_a_drawing_kind(self):
         ctx, full, space = harness()

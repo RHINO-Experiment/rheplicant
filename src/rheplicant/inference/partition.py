@@ -219,11 +219,14 @@ def auto_blocks(
             **A log-conjugate block is a claim about the
             LIKELIHOOD, not only about the prediction**, so whether one exists
             cannot be settled without it: taking logs simplifies a
-            multiplicative noise and merely restates an additive one, and the
+            multiplicative noise and merely restates an additive one, the
             first-order equivalence holds only up to
-            :data:`~rheplicant.inference.loglinear.FIRST_ORDER_MAX_FRACTIONAL`.
-            Given one, those two refusals are applied HERE, and a latent they
-            reject is filed to the gradient block — the same verdict, the same
+            :data:`~rheplicant.inference.loglinear.FIRST_ORDER_MAX_FRACTIONAL`,
+            and a declared ``RadiometerNoise.floor`` makes sigma constant
+            wherever it binds. Given one, those refusals
+            (:func:`~rheplicant.inference.loglinear.log_route_refusal`) are
+            applied HERE, and a latent they reject is filed to the gradient
+            block — the same verdict, the same
             constant, simply reached before a partition is handed out rather
             than at the first sweep. Omitted, no log-conjugate block is claimed
             at all and :class:`UncheckedLogRouteWarning` names any latent that
@@ -270,8 +273,9 @@ def auto_blocks(
         )
 
     # The noise settles the log question before any probe is worth running:
-    # an additive noise, or an f above the first-order ceiling, means there is
-    # no log route however affine `log(prediction)` turns out to be.
+    # an additive noise, an f above the first-order ceiling, or a declared
+    # floor means there is no log route however affine `log(prediction)` turns
+    # out to be.
     refusal = None if noise is None else log_route_refusal(noise)
     log_candidates = (
         ()

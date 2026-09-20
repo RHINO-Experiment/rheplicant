@@ -1,6 +1,11 @@
 """The neutral error boundary and the JAX-free shared records."""
 
 import dataclasses
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
 
 import pytest
 
@@ -135,3 +140,71 @@ def test_destination_child_and_nested_preserve_the_parent_contract():
         DestinationDescriptor("", "model_field", "noise")
     with pytest.raises(ValueError):
         DestinationDescriptor("model", "model_field", "")
+
+
+def test_the_assembly_refusal_is_a_neutral_class_too():
+    """The command line classifies ``AssemblyError`` as a refusal, and the
+    bootstrap may not import ``rheplicant`` to name it; so the class lives
+    beside ``ConfigError`` and ``rheplicant.core.errors`` re-exports it."""
+    from _rheplicant_bootstrap.errors import REFUSALS
+    from _rheplicant_bootstrap.errors import AssemblyError as NeutralAssemblyError
+    from rheplicant.core.errors import AmbiguousNodeError, AssemblyError
+
+    assert AssemblyError is NeutralAssemblyError
+    assert AssemblyError.__module__ == "rheplicant.core.errors"
+    assert issubclass(AssemblyError, DirtError)
+    assert issubclass(AssemblyError, ValueError)
+    assert issubclass(AmbiguousNodeError, AssemblyError)
+    assert REFUSALS == (ConfigError, AssemblyError)
+
+
+_PICKLE_PROBE = """
+import json, pickle, sys
+import _rheplicant_bootstrap.errors as neutral
+assert neutral.__file__.startswith({src!r}), neutral.__file__
+if sys.argv[1] == "dumps":
+    blob = pickle.dumps(getattr(neutral, sys.argv[2])("the message"))
+    sys.stdout.buffer.write(blob)
+else:
+    loaded = pickle.loads(sys.stdin.buffer.read())
+    print(json.dumps({{
+        "module": type(loaded).__module__,
+        "identical": type(loaded) is getattr(neutral, type(loaded).__name__),
+        "args": list(loaded.args),
+        "jax_imported": "jax" in sys.modules,
+    }}))
+"""
+
+
+def _pickle_round_trip(name: str) -> dict:
+    """Pickle ``name`` in one fresh process and unpickle it in another."""
+    src = str(Path(__file__).parents[2] / "src")
+    program = _PICKLE_PROBE.format(src=src)
+    env = {**os.environ,
+           "PYTHONPATH": os.pathsep.join(
+               [src, *filter(None, [os.environ.get("PYTHONPATH")])])}
+    dumped = subprocess.run([sys.executable, "-c", program, "dumps", name],
+                            capture_output=True, check=True, env=env)
+    loaded = subprocess.run([sys.executable, "-c", program, "loads"],
+                            input=dumped.stdout, capture_output=True,
+                            check=True, env=env)
+    return json.loads(loaded.stdout)
+
+
+def test_the_moved_assembly_error_pickles_as_dirt_error_does():
+    """Moving the class into the bootstrap must not change how it travels.
+
+    Its ``__module__`` is ``rheplicant.core.errors``, so pickle records that
+    path and unpickling imports ``rheplicant`` -- and with it JAX -- exactly
+    as it does for ``DirtError``, whose ``__module__`` is rewritten the same
+    way.  What must hold is that the class found there IS the bootstrap's
+    object (a second class of the same name would fail ``pickle.dumps``
+    outright) and that the message survives.
+    """
+    assembly = _pickle_round_trip("AssemblyError")
+    dirt = _pickle_round_trip("DirtError")
+    assert assembly == {"module": "rheplicant.core.errors", "identical": True,
+                        "args": ["the message"],
+                        "jax_imported": dirt["jax_imported"]}
+    assert dirt["module"] == "rheplicant.core.errors"
+    assert dirt["identical"] is True

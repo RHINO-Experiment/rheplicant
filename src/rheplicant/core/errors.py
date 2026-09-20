@@ -10,7 +10,10 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 
-from _rheplicant_bootstrap.errors import DirtError
+# `AssemblyError` is defined beside `DirtError` in the bootstrap, which
+# classifies it as a refusal without importing this package; its
+# `__module__` is this one, so it is documented and pickled from here.
+from _rheplicant_bootstrap.errors import AssemblyError, DirtError
 
 
 class StateValidationError(DirtError, ValueError):
@@ -138,10 +141,6 @@ class DataIngestionError(DirtError, ValueError):
     wrong with the shape of what was read, only with what it means. Both would
     otherwise propagate as a finite, correctly-shaped, wrong answer.
     """
-
-class AssemblyError(DirtError, ValueError):
-    """A provided operator set cannot be assembled on the signal graph."""
-
 
 class AmbiguousNodeError(AssemblyError):
     """A node id was used as an address, but it holds more than one operator.

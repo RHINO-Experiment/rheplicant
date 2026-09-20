@@ -185,3 +185,63 @@ def test_directory_manifest_rejects_unsafe_names(tmp_path, relative):
                 format="cst",
                 enumerate_manifest=lambda _root: (entry,),
             )
+
+
+@pytest.mark.parametrize(
+    "name, suffix",
+    [("horn.beamfits", ".beamfits"), ("cable.S2P", ".S2P"),
+     ("table.txt.gz", ".gz"), ("README", "")],
+)
+def test_a_file_slot_keeps_the_suffix_of_its_source(tmp_path, name, suffix):
+    """A reader that sniffs the extension sees the one the document named.
+
+    ``pyuvdata.UVBeam.from_file`` picks its parser from the last suffix,
+    ``radio/touchstone.py`` cross-checks ``.s1p``/``.s2p`` against the port
+    count, and ``np.loadtxt`` decompresses by extension. An extensionless
+    slot made the first refuse every file and silently disarmed the other
+    two. The LAST suffix is what all three read (``os.path.splitext``,
+    ``Path.suffix``), so it is the one kept, case and all.
+    """
+    source = tmp_path / name
+    source.write_bytes(b"x")
+    seen = []
+    rows = []
+    with CaptureService(
+        tmp_path / "captures", on_verified=lambda _layer, row: rows.append(row)
+    ) as service:
+        service.consume_file(
+            source,
+            layer=LAYER,
+            destination=DESTINATION,
+            format="txt",
+            reader=lambda path: seen.append(Path(path)),
+        )
+    (slot,) = seen
+    assert slot.suffix == suffix
+    assert slot.name.startswith("capture-")
+    assert slot.parent == tmp_path / "captures"
+    # The record names the SOURCE, never the slot, so the audit trail does not
+    # move with the slot's name.
+    assert rows[0].path == str(source)
+    assert slot.name not in repr(rows[0])
+
+
+def test_an_overlong_suffix_is_dropped_rather_than_failing_the_slot(tmp_path):
+    """A slot name must stay under the file system's name limit.
+
+    ``capture-NNNNNNNN`` is 16 bytes, and a source name of 255 bytes can
+    carry a suffix of 254. No reader here sniffs a suffix that long, so it is
+    dropped and the file is still captured.
+    """
+    source = tmp_path / ("b." + "x" * 240)
+    source.write_bytes(b"x")
+    seen = []
+    with CaptureService(tmp_path / "captures") as service:
+        service.consume_file(
+            source,
+            layer=LAYER,
+            destination=DESTINATION,
+            format="txt",
+            reader=lambda path: seen.append(Path(path)),
+        )
+    assert seen[0].suffix == ""

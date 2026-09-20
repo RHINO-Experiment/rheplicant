@@ -308,8 +308,9 @@ consumer that does arithmetic on the values then reads the rounded ones — ...
 ```
 
 The ingestion path no longer trips it, because it no longer produces that axis.
-For what the guard means for a *hand-built* axis — including that it is
-unit-agnostic, so MJD is not exempt, and roughly how many samples a relative
+For what the guard means for a *hand-built* axis — including that its
+resolution ratio is unit-agnostic, so MJD is not exempt, that an axis of one
+repeated value is judged in seconds, and roughly how many samples a relative
 float32 axis carries before you need `JAX_ENABLE_X64=1` — see
 [the operator guide](operators.md#coordstime-is-checked-where-it-is-stored-and-twice), which
 also states the tone's own, stricter check.

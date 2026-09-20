@@ -8,7 +8,7 @@ from collections.abc import Sequence
 from typing import BinaryIO, TextIO
 
 from _rheplicant_bootstrap.entry import _render_exception, dispatch_request
-from _rheplicant_bootstrap.errors import ConfigError
+from _rheplicant_bootstrap.errors import REFUSALS, ConfigError
 from _rheplicant_bootstrap.output.manager import parse_output_grammar, resolve_output_request
 from _rheplicant_bootstrap.prepare import prepare_config
 from _rheplicant_bootstrap.presets import read_installed_preset
@@ -116,7 +116,7 @@ def _main(
         else:
             publish_script(payload, arguments.output)
         return 0
-    except ConfigError as error:
+    except REFUSALS as error:
         return _render_exception(error, chosen_stderr, traceback_error=False)
     except Exception as error:
         return _render_exception(error, chosen_stderr, traceback_error=True)

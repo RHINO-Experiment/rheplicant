@@ -42,7 +42,9 @@ and you install it yourself.
 * - `rfi`
   - `MomentRFIFlaggingOperator`, the real flagger. The threshold-based
     `FlaggingOperator` needs none of it
-  - `pip install "MomentRFI @ git+https://github.com/zzhang0123/MomentRFI"`
+  - `pip install "MomentEmu @ git+https://github.com/zzhang0123/MomentEmu" "MomentRFI @ git+https://github.com/zzhang0123/MomentRFI"`
+    — both in one command: MomentRFI declares MomentEmu, neither is on PyPI,
+    and MomentRFI named alone does not resolve
 * - `rhino`
   - `read_rhino_observation()` — the RHINO HDF5 reader (h5py). The Touchstone
     reader needs none of it, being numpy only
@@ -69,10 +71,14 @@ rheplicant-gui                    # http://127.0.0.1:8000/
 ```
 
 The launcher binds to loopback by default. A non-loopback bind is refused
-unless `--allow-remote` is explicit, and that flag is only acknowledgement:
-the application has no authentication, tenant isolation or sandbox. YAML may
-load plugins and `python:` targets; resource/output fields are server paths;
-jobs use the server account's files and compute. Read the complete
+unless `--allow-remote` is given together with at least one
+`--allowed-host NAME`, and those flags are only acknowledgement: the
+application has no authentication, tenant isolation or sandbox. The server
+answers only to loopback host names and the listed names, and refuses a
+state-changing request whose `Origin` is not its own, which keeps out a
+DNS-rebinding page under any other name. YAML may load plugins and `python:`
+targets; resource/output fields are server paths; jobs use the server
+account's files and compute. Read the complete
 [workbench workflow and trust boundary](config-gui.md) before using remote
 access or running a document from another person.
 
@@ -82,12 +88,16 @@ access or running a document from another person.
 git clone https://github.com/RHINO-Experiment/rheplicant
 cd rheplicant
 uv venv
-uv pip install -e . --group dev --find-links ../bayesmith/runs/t002/unpublished-0.9.0
+uv pip install -e . --group dev --find-links ../bayesmith/runs/t004/dist
 ```
 
-The `--find-links` is there because rheplicant declares `bayesmith>=0.9,<0.10`
-and bayesmith 0.9.0 is, for now, a local release rather than a PyPI one. It
-expects a bayesmith checkout beside this one holding that release.
+The `--find-links` is there because rheplicant declares `bayesmith>=0.10,<0.11`
+and bayesmith 0.10.0 is, for now, a local release rather than a PyPI one. It
+expects a bayesmith checkout beside this one holding that release, and a
+`release-manifest.json` one directory above `dist/` giving each artefact's
+sha256. Check the wheel against that manifest before installing it; the
+fresh-environment tests in `tests/config/` do the same check and fail rather
+than skip when the directory disagrees with the manifest.
 
 :::{warning}
 **Neither `uv sync` nor `uv run` works in this project — with `--frozen` or

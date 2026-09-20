@@ -206,29 +206,83 @@ CI did not have it and nothing said so: its `httpx2` is what
 `tests/gui/test_session_api.py` skips on, and its absence cost 118 statements
 of GUI coverage without a single test failing.
 
-**bayesmith is declared `>=0.9,<0.10`, and the range holds two numbers.** The
-capability floor is 0.6, the highest release whose surface this package uses:
-0.2 `first_fit` and `exact.loglinear`; 0.3 `AffinityRefused`'s structured
-payload and `ComplexNormal`; 0.4 `observed_mask`; 0.5
-`local_block(..., priors=True)`; 0.6 `marginal.chain.smooth` assembled as a
-square root, whose 0.5 spelling returns `nan` on a stiff chain. An install
-below a level satisfies the import statements and fails at the call, so
-`tests/test_bayesmith_floor.py` asserts each level by capability, not by
-version. The range starts at 0.9 because the stable baseline relies on
-bayesmith 0.9's stability contract and is tested only against it, and it is
-closed at 0.10 because a pre-1.0 minor may move the deep module paths this
-package imports.
+It also means **`pyuvdata`** (the `uvbeam` extra) and **`pygdsm`**, both on
+PyPI, which `tests/config` importorskips; **`panel`** (the `gui-panel` extra),
+which the seven GUI spike tests in `tests/gui/test_panel_spike.py` and
+`tests/gui/test_candidate_parity.py` importorskip, and which leaves with the
+spike when it is removed as scheduled; **`MomentRFI`** with **`MomentEmu`**,
+below; **`matplotlib`**, which rhino-cal's `gcr.data_processing` imports; and
+the **Node toolchain**, `npm` on `PATH` and `npm ci` run in
+`tools/config_gui_spike/react`. Without `node_modules`,
+`tests/gui/test_typescript_gates.py` skips its three gates, and the closure
+case in each of `tests/gui/test_e2e_typecheck.py` and
+`tests/gui/test_react_test_typecheck.py` fails with `FileNotFoundError:
+'node_modules/.bin/tsc'` (measured 2026-09-19), so a missing toolchain shows
+as two red tests rather than as skips. Two sets of tests are opt-in by
+environment variable because their data is not redistributable:
+`RHEPLICANT_RHINO_BEAMS` names a directory of RHINO CST beam exports
+(`tests/radio/test_beams.py`), and `RHEPLICANT_RHINO_CAL` names a rhino-cal
+checkout (`tests/radio/test_ingestion_vs_reference.py`).
 
-**0.9.0 is a local release and not on PyPI** (2026-09-19; the index stops at
-0.8.0). Check the wheel's sha256 against
-`../bayesmith/runs/t002/release-manifest.json`, then
+**MomentRFI and MomentEmu install from git, together.** Neither is on PyPI,
+and MomentRFI declares MomentEmu, so naming MomentRFI alone does not resolve;
+one command with both does:
 
 ```bash
-uv pip install --python .venv/bin/python --no-deps ../bayesmith/runs/t002/unpublished-0.9.0/bayesmith-0.9.0-py3-none-any.whl
+uv pip install --python .venv/bin/python "MomentEmu @ git+https://github.com/zzhang0123/MomentEmu" "MomentRFI @ git+https://github.com/zzhang0123/MomentRFI"
+```
+
+With both installed, `tests/radio/test_flagging_momentrfi.py` runs all 13 of
+its tests; without MomentRFI ten of them skip.
+
+**What CI requires.** The Suite and Coverage jobs fail when any of seven
+import names is absent: `h5py`, `rhino_cal_jax`, `limtod_jax`,
+`numpyro`, `pyuvdata`, `pygdsm` and `MomentRFI`, the workflow-level
+`REQUIRED_IMPORTS` in `.github/workflows/test.yml`. They also install the
+`gui-react` extra and the Node toolchain without checking either by name.
+They install neither `panel` nor `matplotlib`, so on CI the seven spike tests
+skip, and neither opt-in variable is set.
+
+The three `DataHandler` comparisons in
+`tests/radio/test_ingestion_vs_reference.py` need both MomentRFI and
+matplotlib, because rhino-cal's `gcr` imports each, as well as
+`RHEPLICANT_RHINO_CAL`. Measured 2026-09-19 in a scratch venv holding all
+three: the file's five tests pass; with MomentRFI absent the three skip on
+`No module named 'MomentRFI'`.
+
+**bayesmith is declared `>=0.10,<0.11`, and the range holds two numbers.** The
+capability floor is 0.6, the highest release whose surface this package uses:
+0.2 `first_fit` and `exact.loglinear`; 0.3 `AffinityRefused`'s structured
+payload and `ComplexNormal`; 0.4 `observe(..., mask=)` and the node field
+`Probabilistic.observed_mask`; 0.5 `local_block(..., priors=True)`; 0.6
+`marginal.chain.smooth` assembled as a square root, whose 0.5 spelling returns
+`nan` on a stiff chain. Below 0.5, `rheplicant.inference` fails at import,
+because `bayesmith.marginal` first ships in 0.5. A 0.5 install imports and
+fails only in behaviour, and the 0.4 and 0.5 keyword arguments are each a
+`TypeError` at the call on the release below.
+`tests/test_bayesmith_floor.py` asserts each level by capability, not by
+version. The range starts at 0.10 because the stable baseline relies on
+bayesmith 0.10's stability contract and is tested only against it, and it is
+closed at 0.11 because a pre-1.0 minor may move the deep module paths this
+package imports. 0.10 moved one: `bayesmith.optimize` became a package, so
+`from bayesmith.optimize import minimize` still resolves while the module file
+that name used to live in is gone.
+
+**0.10.0 is a local release and not on PyPI** (built 2026-09-20; 0.9.0 was not
+published either, and the index stopped at 0.8.0 when it was checked on
+2026-09-19). Check both artefacts' sha256 against
+`../bayesmith/runs/t004/release-manifest.json`, which sits one level above the
+artefacts rather than beside them, then
+
+```bash
+uv pip install --python .venv/bin/python --no-deps ../bayesmith/runs/t004/dist/bayesmith-0.10.0-py3-none-any.whl
 ```
 
 Any install that resolves this package's dependencies needs
-`--find-links ../bayesmith/runs/t002/unpublished-0.9.0`. The wheel replaces
+`--find-links ../bayesmith/runs/t004/dist`. The wheel was built at bayesmith's
+`8aefb3e` and that repository's HEAD has moved on; the manifest's shas describe
+the build, so an install checked against them is reproducible even though the
+wheel is byte-stale against HEAD. The wheel replaces
 the editable install from `../bayesmith` this checkout used while the two
 repositories were developed against each other: an editable install runs
 whatever the sibling working tree holds and reports the version its metadata
@@ -259,29 +313,28 @@ fail_under` in `pyproject.toml` (currently **89**, raised from 82 with the
 fix above). That is the only place the floor lives; the `--cov-fail-under`
 flag it used to read is gone.
 
-**The floor is 89 and it gates at 88.5, and CI prints `FAIL` on every run
-while passing.** Both halves measured 2026-08-28. `coverage` compares the
-total **rounded to `[tool.coverage.report] precision`** digits, and `precision`
-is not set here, so it defaults to **0**: `should_fail_under(88.96, 89, 0)` is
-`False` because `round(88.96) == 89`. At `precision = 2` the same call is
-`True`. So the effective floor is half a point below the declared one.
-
-The confusing part is that **pytest-cov prints its own line from the
-UNROUNDED number**, so every Coverage job on CI ends with
+**The floor gates where it says it does, and that took a setting.** `coverage`
+compares the total **rounded to `[tool.coverage.report] precision`** digits.
+Unset, `precision` defaults to **0**, and an 89 floor then gated at 88.5:
+`should_fail_under(88.96, 89, 0)` is `False` because `round(88.96) == 89`.
+Worse, pytest-cov prints its own line from the UNROUNDED total, so every
+Coverage job ended with
 
     FAIL Required test coverage of 89.0% not reached. Total coverage: 88.96%
 
-and then exits **0** and is marked green — measured on three consecutive runs
-at 88.99 %, 88.97 % and 88.96 %, all `success`, going back before this
-programme. The line that prints is not the line that decides. Anyone reading
-that log will conclude the gate is broken; it is doing exactly what it was
-configured to do, and what is wrong is that two different numbers are
-displayed by two different components.
+and then exited **0** and was marked green — measured on three consecutive
+runs at 88.99 %, 88.97 % and 88.96 %, all `success`. The line that printed was
+not the line that decided.
+
+`precision = 2` has been set since `a7bbd4f` (2026-08-28), so the number that
+prints and the number that decides are now the same one, and the floor is the
+declared 89. The paragraph above is kept because the failure is invisible when
+it happens: a green job whose own log says FAIL.
 
 Note also that **CI's coverage was lower than a local run's** (88.96 % against
 89.39 %), and the reason first written here — that `MomentRFI` cannot install
-on the runner — was **wrong**. `MomentRFI` is absent in BOTH environments, so
-it explains no difference at all; that sentence was copied from the handover
+on the runner — was **wrong**. `MomentRFI` was absent in BOTH environments
+then, so it explained no difference at all; that sentence was copied from the handover
 rather than measured, which is exactly the tax this file keeps recording.
 
 **Measured 2026-08-28, per file.** The whole gap is 132 statements and it has

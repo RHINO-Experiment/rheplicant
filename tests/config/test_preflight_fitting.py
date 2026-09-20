@@ -205,7 +205,7 @@ class TestBlocks:
         # the partition costs a user with both faults a second round trip,
         # which is the whole content of collect-rather-than-raise.
         found = _found(_doc([{"names": ["d", "a"], "engine": "banana"}]))
-        assert [f.check for f in found] == ["A16", ""]
+        assert [f.check for f in found] == ["A16", "A19"]
         assert "does not cover ['w']" in found[0].message
         assert "'banana'" in found[1].message
         # ...and the DERIVED clauses stay suppressed on the same document:
@@ -304,7 +304,7 @@ class TestBlocks:
         # False, and this pass accepts a document the run refuses.
         found = _found(_doc([{"names": ["d", "a"], "engine": "banana"},
                              {"names": ["w"]}]))
-        assert [f.check for f in found] == [""]
+        assert [f.check for f in found] == ["A19"]
         assert "'banana'" in found[0].message
         assert "['conjugate', 'gradient', 'log_conjugate']" in found[0].message
 
@@ -320,7 +320,7 @@ class TestBlocks:
         # 'gradient']".
         found = _found(_doc([{"names": ["d", "a"], "engine": 5},
                              {"names": ["w"]}]))
-        assert [f.check for f in found] == [""]
+        assert [f.check for f in found] == ["A19"]
         assert "5" in found[0].message
         assert "mixes" not in found[0].message
 
@@ -751,9 +751,9 @@ class TestTheMessagesNameWhoMustEdit:
         # Enforced from Task 3 on.  Kills a clause that forgets the tail, or
         # carries another check's -- `Report.raise_if_refused` quotes the
         # message and the tag is what a reader greps for.  The enum clause
-        # carries NO id (schema §6 gives it no row), so it is the one that
-        # must NOT end in a tag, and asserting that is what stops a later
-        # edit giving it A17's.
+        # is A19's: it was id-less once, and the audit trace refuses a
+        # finding with no id, so asserting its own tag is what stops a later
+        # edit giving it A17's or none.
         documents = [
             _doc([{"names": ["d", "a"]}]),                       # A16
             _doc([{"names": ["d", "a", "w", "zzz"]}]),           # A16
@@ -774,8 +774,8 @@ class TestTheMessagesNameWhoMustEdit:
         assert seen == {"A16", "A17", "A18", "A19"}
         [enum] = _found(_doc([{"names": ["d", "a"], "engine": "banana"},
                               {"names": ["w"]}]))
-        assert enum.check == ""
-        assert not enum.message.endswith(").")
+        assert enum.check == "A19"
+        assert enum.message.endswith("(check A19).")
 
 
 class TestTheWarmStartIsTheSamePartition:
@@ -1280,12 +1280,12 @@ _VERBATIM = [
      "from inference.parameters (check A16)."),
     ('the-engine-enum',
      _doc([{"names": ["d", "a"], "engine": "banana"}, {"names": ["w"]}]),
-     '', 'runs[0].blocks[0]',
+     'A19', 'runs[0].blocks[0]',
      "runs['fit']: blocks[0] asks for engine: 'banana'; the engines are "
      "['conjugate', 'gradient', 'log_conjugate']. Leave engine: out and it is "
      "derived from "
      "linear: true on each member, which is the normal case -- an "
-     "explicit engine is an override."),
+     "explicit engine is an override (check A19)."),
     ('a18-a-mixed-block',
      _doc([{"names": ["d", "w"]}, {"names": ["a"]}]),
      'A18', 'runs[0].blocks[0]',
@@ -1356,11 +1356,12 @@ class TestTheRefusalsAreThePRODUCT:
         """ANTI-VACUITY: a table is only as good as its rows.
 
         Kills deleting a row -- which is how a pinned-message suite quietly
-        stops covering the clause someone is about to break.  Five ids and
-        both sites, counted from the table itself rather than written down
-        twice.
+        stops covering the clause someone is about to break.  Four ids (the
+        engine enum is A19's, not id-less: the audit trace refuses a finding
+        with no id) and both sites, counted from the table itself rather than
+        written down twice.
         """
-        assert {row[2] for row in _VERBATIM} == {"A16", "A17", "A18", "A19", ""}
+        assert {row[2] for row in _VERBATIM} == {"A16", "A17", "A18", "A19"}
         sites = {row[3].split(".", 1)[1].split("[")[0] for row in _VERBATIM}
         assert sites == {"blocks", "warm_start.blocks"}
         assert len(_VERBATIM) == 11
@@ -1574,8 +1575,8 @@ class TestPriorGates:
                        "blocks": blocks}])
             assert _gates(document) == [], blocks
             # ...and the block IS reported, by the check that owns it: A18
-            # for the mixed one, the id-less enum clause for the other two.
-            assert {f.check for f in _found(document)} <= {"A18", ""}, blocks
+            # for the mixed one, A19's enum clause for the other two.
+            assert {f.check for f in _found(document)} <= {"A18", "A19"}, blocks
 
     def test_a_space_that_is_not_a_BOOL_is_left_to_the_executors_own_check(
             self):

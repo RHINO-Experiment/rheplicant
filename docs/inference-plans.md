@@ -140,11 +140,13 @@ and routes it to a `log_conjugate` block.
 **Discovery needs the noise, and this is half the question rather than a
 detail.** A log-conjugate block is a claim about the *likelihood*: taking logs
 simplifies a multiplicative noise and merely restates an additive one as a
-different likelihood from the one declared, and the first-order equivalence
-holds only up to `FIRST_ORDER_MAX_FRACTIONAL`. So `auto_blocks` takes `noise=`
-and applies both refusals when it partitions. Without it, no `log_conjugate`
-block is claimed at all and an `UncheckedLogRouteWarning` names the latents
-that qualified on their prediction alone — conservative, because a gradient
+different likelihood from the one declared, the first-order equivalence
+holds only up to `FIRST_ORDER_MAX_FRACTIONAL`, and a declared
+`RadiometerNoise.floor` makes sigma constant wherever it binds, so any floor
+above zero has no log route. So `auto_blocks` takes `noise=` and applies all
+three refusals (`log_route_refusal`) when it partitions. Without it, no
+`log_conjugate` block is claimed at all and an `UncheckedLogRouteWarning`
+names the latents that qualified on their prediction alone — conservative, because a gradient
 block is always a sound verdict, and loud, because the alternative is a
 partition promising a route `to_log_space` will refuse.
 

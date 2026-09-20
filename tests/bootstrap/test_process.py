@@ -284,12 +284,30 @@ def test_plugin_sequence_budget_precedes_processing_the_limit_plus_one_item(
     assert HostileItem.class_calls == 0
 
 
-@pytest.mark.parametrize("bad", [True, 1.0, "1", None, 2])
-def test_schema_version_is_the_integer_one(bad):
-    with pytest.raises(ConfigError, match="schema_version: 1"):
+@pytest.mark.parametrize(("bad", "expected"), [
+    (True, "schema_version: 1 is required (got True)"),
+    (1.0, "schema_version: 1 is required (got 1.0)"),
+    ("1", "schema_version: 1 is required (got '1')"),
+    (None, "schema_version: 1 is required (got None)"),
+    (2, "schema_version: 2 is newer than this rheplicant reads"),
+    (0, "schema_version: 0 is older than any version this rheplicant reads"),
+])
+def test_schema_version_is_the_integer_one(bad, expected):
+    with pytest.raises(ConfigError) as caught:
         parse_raw_process_mapping(
             {"schema_version": bad}, parse_outputs=fake_parse_outputs
         )
+    assert str(caught.value).startswith(expected)
+
+
+def test_a_huge_schema_version_is_refused_without_rendering_it():
+    """An integer past Python's int-to-str limit must not turn a refusal into
+    a ``ValueError`` crash; the bounded renderer names its type instead."""
+    with pytest.raises(ConfigError) as caught:
+        parse_raw_process_mapping(
+            {"schema_version": 10**5000}, parse_outputs=fake_parse_outputs
+        )
+    assert str(caught.value).startswith("schema_version: int is newer")
 
 
 @pytest.mark.parametrize(

@@ -147,11 +147,11 @@ class RadiometerNoise(eqx.Module):
         channel_width: channel bandwidth ``delta_nu`` [Hz] (static — instrument
             metadata, known rather than fitted).
         integration_time: per-sample integration time ``tau`` [s] (static).
-        floor: lower bound applied to ``|prediction|`` before scaling [K].
-            Defaults to ``0.0``, i.e. the exact physics: a prediction that
-            passes through zero then has zero sigma and infinite weight, which
-            is a loud failure. A reweighting iterate can cross zero where the
-            physics cannot, and a floor is the remedy there.
+        floor: lower bound applied to ``|prediction|`` before scaling [K]. Defaults to ``0.0``,
+            the exact physics: a prediction through zero has zero sigma and infinite weight, a loud
+            failure. A reweighting iterate can cross zero where the physics cannot; a floor is the
+            remedy there. ANY floor above zero removes the log route: ``auto_blocks`` files the
+            latent to the gradient block without a warning, and ``log_conjugate`` is refused.
     """
 
     depends_on_prediction: ClassVar[bool] = True
