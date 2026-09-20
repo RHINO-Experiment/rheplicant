@@ -10,17 +10,29 @@ object it defines. ``tests/config/test_audit_schemas.py`` enforces it.
 So a field cannot be added here, and cannot be removed here, without a
 ``format_version`` bump.
 
-**Whether that bump is also a cross-repository change is UNVERIFIED from this
-checkout, and this paragraph used to assert that it is.** It said the shape is
-served verbatim by ``rheplicant-compute``'s schema RPC. That repository is not
-present on this machine (checked 2026-09-20), so the claim could not be
-measured here; the verbatim-serving case that IS pinned by a test is the
-configuration grammar, in ``tests/config/test_schema.py``, which is a different
-schema. Treat the cost of a bump as unknown until someone with that checkout
-answers it -- `grep` its schema RPC for ``provenance-v1`` -- and read an
-unverified dependency as a reason to look, not as a reason to assume either
-number. A cost written down as certain is how a cheap change gets deferred and
-an expensive one gets made.
+**That bump is NOT a cross-repository change for rheplicant-compute, measured
+2026-09-20.** This paragraph has now said three different things, which is
+worth keeping because the middle one is the instructive one.
+
+It first asserted that the shape is served verbatim by ``rheplicant-compute``'s
+schema RPC, with nothing behind the assertion. It was then corrected to
+UNVERIFIED on the grounds that the repository is not on this machine. That
+correction was right to withdraw the claim and wrong about the reason: the
+search was for a directory named ``rheplicant-compute``, and there is none,
+but the package lives inside ``rheplicant-agent`` as ``python/``, whose
+``pyproject.toml`` declares ``name = "rheplicant-compute"``. A "not present"
+that is really a naming mismatch reads exactly like an absence.
+
+The grep that settles it returns nothing: ``provenance-v1`` appears nowhere in
+that package. What its schema RPC serves verbatim is
+``rheplicant.config.schema.json_schema()``, the configuration grammar, which is
+a different schema and is the case ``tests/config/test_schema.py`` pins. So the
+cost of a ``format_version`` bump here is local to this repository.
+
+No test asserts that, deliberately. A guard whose greenness depends on a
+sibling checkout being present and on a particular branch is the failure this
+repository has already paid for once, and it fails open on every machine that
+does not have the checkout at all.
 
 Three separate review findings collided with this in one sitting, each filed as
 a small independent fix, none of them small:

@@ -920,11 +920,23 @@ def run_embedded_config(
     # and `True != 1` are both False in Python, so either would be read as
     # version 1 and the call below made against a shape nothing verified.
     if format_version is None:
+        # Two callers reach here and the message has to serve both. The first
+        # is a generated script written before script format versions existed.
+        # The second is a direct caller of this function, which is on
+        # `_rheplicant_bootstrap.__all__` and therefore a shape somebody may
+        # hold: measured 2026-09-20, rheplicant-compute calls it with keywords
+        # and no version, and got told its script was old when it has no
+        # script at all. A refusal that describes the wrong caller sends the
+        # reader looking for a file that does not exist.
         raise ConfigError(
-            "this generated script predates script format versions and this "
-            f"rheplicant reads format {SCRIPT_FORMAT_VERSION}. Regenerate it "
-            "with `rheplicant script` from the same document; the embedded "
-            "source bytes in the old file are still yours and unchanged."
+            "no script format version was passed. Either this generated "
+            "script predates script format versions, or a direct caller of "
+            "run_embedded_config has not been updated; this rheplicant reads "
+            f"format {SCRIPT_FORMAT_VERSION}. Regenerate the script with "
+            "`rheplicant script` from the same document -- the embedded "
+            "source bytes in the old file are still yours and unchanged -- "
+            f"or pass format_version={SCRIPT_FORMAT_VERSION} if you are "
+            "calling this function yourself."
         )
     if type(format_version) is not int or format_version != SCRIPT_FORMAT_VERSION:
         raise ConfigError(

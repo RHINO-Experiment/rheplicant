@@ -45,6 +45,27 @@ the four capability levels, every external contract version and the
 compatibility policy — and each claim is checked against the code rather than
 maintained beside it.
 
+### What a consumer of an earlier version has to change
+
+Measured against `rheplicant-compute`, the only consumer of this package on
+this machine, by running its suite against this release's wheel. Three of its
+390 tests fail, for two reasons, and both are deliberate changes rather than
+defects.
+
+`_rheplicant_bootstrap.run_embedded_config` requires `format_version`. It is
+on `_rheplicant_bootstrap.__all__` and generated scripts pass it, but a caller
+that invokes the function directly passes nothing and is refused. Pass
+`format_version=1`. Two of the three failures are this.
+
+Pre-flight check A53 emits one `report`-severity finding per document that
+places placeholder physics. A consumer asserting that a successful run yields
+an empty findings list now sees that finding. `report` does not stop a run;
+filter by severity, or by `check == "A53"`, rather than requiring emptiness.
+
+`rheplicant-compute` declares `rheplicant>=0.2` with no upper bound, so it
+resolves to this release and meets both changes without choosing to. A
+pre-1.0 dependency wants an upper bound.
+
 ### The browser editor is now a persistent scientific workbench
 
 Config Plans 6A–6C retain exact YAML as the sole scientific state while
