@@ -206,9 +206,7 @@ def fresh_install_factory(tmp_path: Path) -> InstallFactory:
     return install
 
 
-def wait_for_url(
-    url: str, process: subprocess.Popen[str], *, timeout: float
-) -> None:
+def wait_for_url(url: str, process: subprocess.Popen[str], *, timeout: float) -> None:
     deadline = time.monotonic() + timeout
     while True:
         returncode = process.poll()
@@ -310,8 +308,7 @@ def running_gui(install: Install) -> Iterator[str]:
             stdout.flush()
             stderr.flush()
             enriched_error = RuntimeError(
-                f"{error}\nstdout:\n{stdout_path.read_text()}"
-                f"\nstderr:\n{stderr_path.read_text()}"
+                f"{error}\nstdout:\n{stdout_path.read_text()}\nstderr:\n{stderr_path.read_text()}"
             )
             primary_error = enriched_error
             raise enriched_error from error

@@ -128,9 +128,9 @@ class TestAComplexPredictionIsRefusedAtTheConjugateSeam:
     def _complex_block(self) -> LinearBlock:
         # Offset entries all distinct in BOTH parts, so a guard that only
         # looked at the real part, or only at one entry, would be visible.
-        offset = jnp.arange(N_TIME * N_FREQ, dtype=jnp.float32).reshape(
-            N_TIME, N_FREQ
-        ) * (1.0 + 2.0j)
+        offset = jnp.arange(N_TIME * N_FREQ, dtype=jnp.float32).reshape(N_TIME, N_FREQ) * (
+            1.0 + 2.0j
+        )
         return LinearBlock(
             name="z",
             shape=(N_TIME,),

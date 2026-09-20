@@ -50,9 +50,7 @@ class SiderealFilter(AbstractLinearFilter):
     def project(self, data: jax.Array, state: State) -> jax.Array:
         n_time = data.shape[0]
         if n_time % self.n_days != 0:
-            raise StateValidationError(
-                f"n_time={n_time} is not divisible by n_days={self.n_days}."
-            )
+            raise StateValidationError(f"n_time={n_time} is not divisible by n_days={self.n_days}.")
         n_lst = n_time // self.n_days
         per_day = data.reshape(self.n_days, n_lst, *data.shape[1:])
         template = per_day.mean(axis=0)

@@ -78,6 +78,7 @@ def pytest_collection_modifyitems(config, items):
 # the failure that cost this programme a session: a graph fixture missing an
 # additive offset read exactly like a solver bug.
 
+
 @pytest.fixture
 def instrument():
     """Two additive sky terms through a per-time gain.

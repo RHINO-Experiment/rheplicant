@@ -76,12 +76,14 @@ class TestThePredicate:
         ``.combine`` file is NOT -- it is written after combining, so it is
         never in the list this counts.
         """
-        assert missing_worker_data(
-            combined=workers + EXPECTED_MASTER_FILES, numprocesses=workers
-        ) is None
-        assert missing_worker_data(
-            combined=workers + EXPECTED_MASTER_FILES - 1, numprocesses=workers
-        ) is not None
+        assert (
+            missing_worker_data(combined=workers + EXPECTED_MASTER_FILES, numprocesses=workers)
+            is None
+        )
+        assert (
+            missing_worker_data(combined=workers + EXPECTED_MASTER_FILES - 1, numprocesses=workers)
+            is not None
+        )
 
     def test_the_message_names_the_consequence_not_just_the_count(self):
         """A count alone reads as a curiosity; this has to read as a defect."""

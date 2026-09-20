@@ -211,9 +211,11 @@ class TestDeclarationValidation:
         space = ParameterSpace(
             latents=[Latent("x", init=1.0)],
             bindings=[
-                Bind("x",
-                     into=(lambda p: p["gain_a"].gain, lambda p: p["gain_b"].gain),
-                     fn=lambda x: (x, 2.0 * x, 3.0 * x)),   # 3 values, 2 selectors
+                Bind(
+                    "x",
+                    into=(lambda p: p["gain_a"].gain, lambda p: p["gain_b"].gain),
+                    fn=lambda x: (x, 2.0 * x, 3.0 * x),
+                ),  # 3 values, 2 selectors
             ],
         )
         with pytest.raises(ParameterSpaceError, match="returned 3 values"):
@@ -270,9 +272,7 @@ class TestFanOut:
         """t_physical = 0, so the efficiency is a pure multiply and the two
         leaves enter the prediction as a bare product."""
         return Pipeline(
-            AntennaLossOperator(
-                efficiency=jnp.array(1.0), t_physical=jnp.array(0.0)
-            ),
+            AntennaLossOperator(efficiency=jnp.array(1.0), t_physical=jnp.array(0.0)),
             GainOperator(gain=jnp.array(1.0)),
             names=("loss", "gain"),
         )
@@ -292,9 +292,7 @@ class TestFanOut:
 
     # ------------------------------------------------- the defect, restated --
 
-    def test_the_python_container_type_alone_decides_the_physics(
-        self, fan_twin, fan_state
-    ):
+    def test_the_python_container_type_alone_decides_the_physics(self, fan_twin, fan_state):
         """`v` and `list(v)` are the SAME DATA and mean opposite things.
 
         This is what `fan=` exists for, and it is still accepted with
@@ -307,18 +305,14 @@ class TestFanOut:
 
     # ------------------------------------------------- declared: broadcast --
 
-    def test_a_declared_broadcast_that_produced_a_container_is_refused(
-        self, fan_twin, fan_state
-    ):
+    def test_a_declared_broadcast_that_produced_a_container_is_refused(self, fan_twin, fan_state):
         """The motivating row: the user meant "this whole 2-vector into both
         leaves" and `list(v)` distributed it element-wise instead — finite,
         correctly shaped, and 10.0 where 4.0 was meant."""
         with pytest.raises(ParameterSpaceError, match="fan='broadcast'"):
             self._predict(fan_twin, fan_state, list, fan="broadcast")
 
-    def test_a_declared_broadcast_still_ties_when_it_produced_one_value(
-        self, fan_twin, fan_state
-    ):
+    def test_a_declared_broadcast_still_ties_when_it_produced_one_value(self, fan_twin, fan_state):
         """The guard's other branch: the declaration agrees, nothing is refused,
         and the answer is the tied one."""
         value = self._predict(fan_twin, fan_state, lambda v: v, fan="broadcast")
@@ -326,9 +320,7 @@ class TestFanOut:
 
     # ------------------------------------------------ declared: distribute --
 
-    def test_a_declared_distribute_that_produced_one_value_is_refused(
-        self, fan_twin, fan_state
-    ):
+    def test_a_declared_distribute_that_produced_one_value_is_refused(self, fan_twin, fan_state):
         """The mirror image: the user meant one value per leaf and got a tie."""
         with pytest.raises(ParameterSpaceError, match="fan='distribute'"):
             self._predict(fan_twin, fan_state, lambda v: v, fan="distribute")
@@ -339,19 +331,13 @@ class TestFanOut:
         value = self._predict(fan_twin, fan_state, list, fan="distribute")
         assert value == pytest.approx(10.0)
 
-    def test_a_declared_distribute_of_the_wrong_length_is_refused(
-        self, fan_twin, fan_state
-    ):
+    def test_a_declared_distribute_of_the_wrong_length_is_refused(self, fan_twin, fan_state):
         """The length check is not replaced by the declaration, it is sharpened
         by it — the refusal can now say which count was the declared one."""
         with pytest.raises(ParameterSpaceError, match="returned 3 values"):
-            self._predict(
-                fan_twin, fan_state, lambda v: [v[0], v[1], v[0]], fan="distribute"
-            )
+            self._predict(fan_twin, fan_state, lambda v: [v[0], v[1], v[0]], fan="distribute")
 
-    def test_the_length_check_still_holds_with_no_declaration(
-        self, fan_twin, fan_state
-    ):
+    def test_the_length_check_still_holds_with_no_declaration(self, fan_twin, fan_state):
         with pytest.raises(ParameterSpaceError, match="returned 3 values"):
             self._predict(fan_twin, fan_state, lambda v: [v[0], v[1], v[0]])
 
@@ -376,9 +362,7 @@ class TestFanOut:
             bound = space.bind(fan_twin, {"v": init})
         assert float(bound["gain"].gain) == pytest.approx(3.0)
 
-    def test_declaring_distribute_silences_the_lone_selector_warning(
-        self, fan_twin, recwarn
-    ):
+    def test_declaring_distribute_silences_the_lone_selector_warning(self, fan_twin, recwarn):
         into = (lambda p: p["gain"].gain,)
         init = jnp.array([3.0])
         space = self._space(lambda v: [v[0]], into, init, fan="distribute")
@@ -533,9 +517,7 @@ class TestForwardSeam:
         assert float(values0["g"]) == pytest.approx(1.5)
 
     def test_an_invalid_space_is_caught_at_build_time(self, twin, template_state):
-        space = ParameterSpace.direct(
-            "g", init=jnp.zeros(3), into=lambda p: p["gain_a"].gain
-        )
+        space = ParameterSpace.direct("g", init=jnp.zeros(3), into=lambda p: p["gain_a"].gain)
         with pytest.raises(ParameterSpaceError, match="shape"):
             space.forward_fn(twin, template_state)
 
@@ -613,8 +595,10 @@ class TestEscapeHatch:
         with pytest.raises(ParameterSpaceError, match="INSTEAD of bindings"):
             ParameterSpace(
                 latents=[Latent("a", init=1.0), Latent("b", init=1.0)],
-                bindings=[Bind("a", into=lambda p: p["gain_a"].gain),
-                          Bind("b", into=lambda p: p["gain_b"].gain)],
+                bindings=[
+                    Bind("a", into=lambda p: p["gain_a"].gain),
+                    Bind("b", into=lambda p: p["gain_b"].gain),
+                ],
                 raw_bind=lambda pipeline, values: eqx.tree_at(
                     lambda p: p["gain_a"].gain, pipeline, values["a"]
                 ),
@@ -640,7 +624,9 @@ class TestEscapeHatch:
         space = ParameterSpace.raw(
             latents=[Latent("g", init=1.0)],
             bind=lambda pipeline, values: eqx.tree_at(
-                lambda p: p["gain_a"].gain, pipeline, values["g"]  # scalar into (8,)
+                lambda p: p["gain_a"].gain,
+                pipeline,
+                values["g"],  # scalar into (8,)
             ),
         )
         with pytest.raises(ParameterSpaceError, match="shape"):
@@ -808,9 +794,7 @@ class TestBindingIntoAnAliasedNode:
         the selector it makes natural — so a guard that only looked at the top
         level would leave the same silent wrong answer one wrapper away.
         """
-        nested = Pipeline(
-            forked, _ForkScale(factor=jnp.array(2.0)), names=("asm", "post")
-        )
+        nested = Pipeline(forked, _ForkScale(factor=jnp.array(2.0)), names=("asm", "post"))
         space = ParameterSpace(
             latents=[Latent("V", init=0.0)],
             bindings=[Bind("V", into=lambda p: p["asm"]["x"].value)],
@@ -818,9 +802,7 @@ class TestBindingIntoAnAliasedNode:
         with pytest.raises(ParameterSpaceError, match="'x'"):
             space.validate(nested)
 
-    def test_an_ordinary_node_on_the_same_graph_still_binds(
-        self, forked, template_state
-    ):
+    def test_an_ordinary_node_on_the_same_graph_still_binds(self, forked, template_state):
         """The guard must not fire on the shape it is not about.
 
         ``out`` sits below the rejoin, so the fold embeds it once. Asserted on

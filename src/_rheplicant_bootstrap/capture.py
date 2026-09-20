@@ -77,9 +77,7 @@ def register_capture_route(name: str, *, owner: str) -> None:
         raise ConfigError("capture route names are non-empty strings")
     previous = _CAPTURE_ROUTES.get(name)
     if previous is not None and previous != owner:
-        raise ConfigError(
-            f"capture route {name!r} is registered by both {previous} and {owner}"
-        )
+        raise ConfigError(f"capture route {name!r} is registered by both {previous} and {owner}")
     _CAPTURE_ROUTES[name] = owner
 
 
@@ -282,18 +280,14 @@ class CaptureService:
                 or rel.is_absolute()
                 or any(part in ("", ".", "..") for part in rel.parts)
             ):
-                raise ConfigError(
-                    f"capture manifest has unsafe member {entry.relative_path!r}"
-                )
+                raise ConfigError(f"capture manifest has unsafe member {entry.relative_path!r}")
             name = rel.as_posix()
             if name in seen:
                 raise ConfigError(f"capture manifest repeats member {name!r}")
             seen.add(name)
             expected = root.joinpath(*rel.parts).absolute()
             if entry.source_path.absolute() != expected:
-                raise ConfigError(
-                    f"capture manifest member {name!r} does not name root/member"
-                )
+                raise ConfigError(f"capture manifest member {name!r} does not name root/member")
             if not stat.S_ISREG(entry.target_identity.mode):
                 raise ConfigError(f"capture manifest member is not regular: {name!r}")
             normalized.append(entry)
@@ -324,17 +318,13 @@ class CaptureService:
                     _identity(entry.source_path.lstat()) != entry.link_identity
                     or _identity(entry.source_path.stat()) != entry.target_identity
                 ):
-                    raise ConfigError(
-                        f"capture manifest member changed: {entry.relative_path}"
-                    )
+                    raise ConfigError(f"capture manifest member changed: {entry.relative_path}")
                 digest = self._stream(entry.source_path, target, entry.target_identity)
                 if (
                     _identity(entry.source_path.lstat()) != entry.link_identity
                     or _identity(entry.source_path.stat()) != entry.target_identity
                 ):
-                    raise ConfigError(
-                        f"capture manifest member changed: {entry.relative_path}"
-                    )
+                    raise ConfigError(f"capture manifest member changed: {entry.relative_path}")
                 members.append(
                     CapturedMember(
                         entry.relative_path,
@@ -380,9 +370,7 @@ class CaptureService:
                 if path.is_file()
             )
         )
-        expected_paths = tuple(
-            sorted(member.relative_path for member in captured.record.members)
-        )
+        expected_paths = tuple(sorted(member.relative_path for member in captured.record.members))
         if actual_paths != expected_paths:
             raise ConfigError("captured input tree members changed while being read")
         members = tuple(

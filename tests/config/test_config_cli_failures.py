@@ -128,17 +128,24 @@ def _with_campaign(value):
     return value
 
 
-@pytest.mark.parametrize(("edit", "expected"), [
-    (_misspelled_observation, _SECTIONS_SENTENCE),
-    (_without_model,
-     "This document is missing ['model']; schema_version, runtime, "
-     "observation, model and runs are required."),
-    (_with_campaign,
-     "campaign: is reserved with capability 4 (streaming evidence, "
-     "schema §8.2) and refused in v1."),
-], ids=["observations-typo", "missing-model", "campaign"])
-def test_a_malformed_base_is_refused_in_load_documents_own_words(
-        tmp_path, capsys, edit, expected):
+@pytest.mark.parametrize(
+    ("edit", "expected"),
+    [
+        (_misspelled_observation, _SECTIONS_SENTENCE),
+        (
+            _without_model,
+            "This document is missing ['model']; schema_version, runtime, "
+            "observation, model and runs are required.",
+        ),
+        (
+            _with_campaign,
+            "campaign: is reserved with capability 4 (streaming evidence, "
+            "schema §8.2) and refused in v1.",
+        ),
+    ],
+    ids=["observations-typo", "missing-model", "campaign"],
+)
+def test_a_malformed_base_is_refused_in_load_documents_own_words(tmp_path, capsys, edit, expected):
     """A3-1: the command line gates the BASE layer the way the mapping route
     does, before any check runs.
 
@@ -180,17 +187,17 @@ def _model(value, model):
 #: ``t_ant_sum`` with no source upstream, which the fold refuses.
 _UNSOURCED_BRANCH = {
     "atmosphere": {"t_atm": {"value": 3.0, "unit": "K"}},
-    "beam_spill": {"sky_fraction": {"value": 0.95, "unit": "dimensionless"},
-                   "t_ground": {"value": 290.0, "unit": "K"}},
+    "beam_spill": {
+        "sky_fraction": {"value": 0.95, "unit": "dimensionless"},
+        "t_ground": {"value": 290.0, "unit": "K"},
+    },
 }
 _UNSOURCED_MESSAGE = (
-    "Transform 'beam_spill' feeds junction 't_ant_sum' with no live source "
-    "upstream"
+    "Transform 'beam_spill' feeds junction 't_ant_sum' with no live source upstream"
 )
 
 
-def test_an_assembly_refused_while_building_is_a_refusal_on_validate(
-        tmp_path, capsys):
+def test_an_assembly_refused_while_building_is_a_refusal_on_validate(tmp_path, capsys):
     """N-1(b): exit 2 and the assembly's own sentence, never exit 1 with a
     traceback.  ``AssemblyError`` is how the fold refuses an operator set,
     and on this route every operator set is a user's document."""
@@ -204,16 +211,14 @@ def test_an_assembly_refused_while_building_is_a_refusal_on_validate(
     assert "Traceback" not in err
 
 
-def test_an_assembly_refused_while_building_publishes_a_refused_audit(
-        tmp_path, capsys):
+def test_an_assembly_refused_while_building_publishes_a_refused_audit(tmp_path, capsys):
     import json
 
     from _rheplicant_bootstrap.cli import main
 
     target = tmp_path / "result"
     config = tmp_path / "config.yaml"
-    write_document(config, _model(document(output=target),
-                                  dict(_UNSOURCED_BRANCH)))
+    write_document(config, _model(document(output=target), dict(_UNSOURCED_BRANCH)))
     assert main(["run", str(config)]) == 2
     err = capsys.readouterr().err
     assert _UNSOURCED_MESSAGE in err
@@ -239,21 +244,31 @@ def test_an_assembly_refused_while_running_is_a_refusal(tmp_path, capsys):
     make_file(tmp_path / "obs.hd5f")
     target = tmp_path / "result"
     config = tmp_path / "config.yaml"
-    write_document(config, {
-        "schema_version": 1,
-        "runtime": {"seed": 1},
-        "observation": {
-            "from_file": {"format": "rhino_hdf5", "path": "obs.hd5f",
-                          "freq_unit": "MHz", "settle_seconds": 0.0},
-            "switching": {"order": ["antenna", "internal_load",
-                                    "heated_load"]},
+    write_document(
+        config,
+        {
+            "schema_version": 1,
+            "runtime": {"seed": 1},
+            "observation": {
+                "from_file": {
+                    "format": "rhino_hdf5",
+                    "path": "obs.hd5f",
+                    "freq_unit": "MHz",
+                    "settle_seconds": 0.0,
+                },
+                "switching": {"order": ["antenna", "internal_load", "heated_load"]},
+            },
+            "model": {
+                "global_signal": {
+                    "depth": {"value": 0.5, "unit": "K"},
+                    "centre": {"value": 75.0, "unit": "MHz"},
+                    "width": {"value": 5.0, "unit": "MHz"},
+                }
+            },
+            "outputs": {"dir": str(target)},
+            "runs": [{"kind": "forward"}],
         },
-        "model": {"global_signal": {"depth": {"value": 0.5, "unit": "K"},
-                                    "centre": {"value": 75.0, "unit": "MHz"},
-                                    "width": {"value": 5.0, "unit": "MHz"}}},
-        "outputs": {"dir": str(target)},
-        "runs": [{"kind": "forward"}],
-    })
+    )
     assert main(["run", str(config)]) == 2
     err = capsys.readouterr().err
     assert "generates its own data" in err
@@ -273,16 +288,25 @@ def _plan_blocks(blocks):
     return value
 
 
-@pytest.mark.parametrize(("value", "expected"), [
-    (_plan_blocks([{"names": ["d", "a"], "engine": "banana"}, {"names": ["w"]}]),
-     "asks for engine: 'banana'; the engines are"),
-    (_plan_blocks([{"names": ["d", "a"], "engine": 5}, {"names": ["w"]}]),
-     "asks for engine: 5; the engines are"),
-    (_plan_blocks([{"names": ["d", "zzz"]}, {"names": ["a", "w"]}]),
-     "which inference.parameters does not declare"),
-], ids=["engine-banana", "engine-not-a-string", "a16-undeclared-name"])
-def test_a_preflight_refusal_reaches_validate_in_its_own_words(
-        tmp_path, capsys, value, expected):
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        (
+            _plan_blocks([{"names": ["d", "a"], "engine": "banana"}, {"names": ["w"]}]),
+            "asks for engine: 'banana'; the engines are",
+        ),
+        (
+            _plan_blocks([{"names": ["d", "a"], "engine": 5}, {"names": ["w"]}]),
+            "asks for engine: 5; the engines are",
+        ),
+        (
+            _plan_blocks([{"names": ["d", "zzz"]}, {"names": ["a", "w"]}]),
+            "which inference.parameters does not declare",
+        ),
+    ],
+    ids=["engine-banana", "engine-not-a-string", "a16-undeclared-name"],
+)
+def test_a_preflight_refusal_reaches_validate_in_its_own_words(tmp_path, capsys, value, expected):
     """N-4: the audit trace validates every finding's ``check`` as a
     non-empty string, so an id-less finding reached ``validate`` as
     "finding.check must be a non-empty string." and the user's sentence was

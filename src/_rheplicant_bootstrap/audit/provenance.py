@@ -312,8 +312,7 @@ def build_provenance(
         if type(row) is not SeedRecord:
             raise ConfigError(f"seeds[{index}] is not exact.")
     seeds = tuple(
-        {"layer": _layer(row.layer), "root": row.root, "named": row.named}
-        for row in snapshot.seeds
+        {"layer": _layer(row.layer), "root": row.root, "named": row.named} for row in snapshot.seeds
     )
     for index, row in enumerate(snapshot.variants):
         if type(row) is not VariantRecord:

@@ -16,7 +16,12 @@ from rheplicant.config.units import (
 
 def test_unit_compatibility_record_remains_exactly_six_fields():
     assert Unit._fields == (
-        "canonical", "factor", "offset", "numerator", "denominator", "dimension"
+        "canonical",
+        "factor",
+        "offset",
+        "numerator",
+        "denominator",
+        "dimension",
     )
 
 

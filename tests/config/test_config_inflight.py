@@ -133,8 +133,7 @@ class TestThePayloads:
         so its side is ``dataclasses.fields``.  The asymmetry is the reason
         this test exists rather than a comment.
         """
-        assert ConfiguredRun._fields == tuple(
-            field.name for field in dataclasses.fields(Built))
+        assert ConfiguredRun._fields == tuple(field.name for field in dataclasses.fields(Built))
 
     def test_configured_run_is_still_a_named_tuple(self):
         """ANTI-VACUITY for the test above.  If ``ConfiguredRun`` stopped being
@@ -195,9 +194,9 @@ class TestThePayloads:
         helper that constructs either positionally with no report then hands
         out ``None``, so ``run.report.findings`` is an ``AttributeError``.
         """
-        built_default = next(field.default
-                             for field in dataclasses.fields(Built)
-                             if field.name == "report")
+        built_default = next(
+            field.default for field in dataclasses.fields(Built) if field.name == "report"
+        )
         run_default = ConfiguredRun._field_defaults["report"]
         for default in (built_default, run_default):
             assert isinstance(default, Report)
@@ -220,8 +219,7 @@ class TestTheTwoRegistries:
 
         assert AXIS_CHECKS["C1"] is _one
 
-    def test_the_two_registries_are_separate_dicts(self, axis_registry,
-                                                   built_registry):
+    def test_the_two_registries_are_separate_dicts(self, axis_registry, built_registry):
         """**Two payload types, two registries.**  One registry would let a
         check be registered in the slot whose payload it cannot read, and the
         symptom would be an ``AttributeError`` wrapped as "in-flight check
@@ -233,8 +231,7 @@ class TestTheTwoRegistries:
         assert "C1" in AXIS_CHECKS and "C1" not in BUILT_CHECKS
         assert "C8" in BUILT_CHECKS and "C8" not in AXIS_CHECKS
 
-    def test_one_id_may_be_claimed_in_each_slot_independently(
-            self, axis_registry, built_registry):
+    def test_one_id_may_be_claimed_in_each_slot_independently(self, axis_registry, built_registry):
         """Separate registries mean separate namespaces.  Stated rather than
         discovered: this is a CONSEQUENCE of the split, and a reader who
         expected a global id space should find the answer here."""
@@ -249,13 +246,12 @@ class TestTheTwoRegistries:
         reverses exactly this."""
         for check in ("C3", "C2", "C1"):
             register_axes(check)(
-                lambda facts, check=check:
-                    (refuse(check, "observation.time", f"{check}!"),))
+                lambda facts, check=check: (refuse(check, "observation.time", f"{check}!"),)
+            )
         found = axes(axis_facts(preflight_document())).refusals()
         assert [one.check for one in found] == ["C3", "C2", "C1"]
 
-    def test_a_function_bound_to_several_ids_runs_exactly_once(
-            self, axis_registry):
+    def test_a_function_bound_to_several_ids_runs_exactly_once(self, axis_registry):
         """One function carries several ids and this plan does it twice: the
         time-axis function is C1 + C2.time, and Task 7's ``_divisible`` is
         C8's two clauses.  Kills a walk with no de-duplication by identity,
@@ -268,32 +264,28 @@ class TestTheTwoRegistries:
             return (refuse("C1", "observation.time", "one."),)
 
         assert {slot: fn is _both for slot, fn in AXIS_CHECKS.items()} == {
-            "C1": True, "C2.time": True}
+            "C1": True,
+            "C2.time": True,
+        }
         found = axes(axis_facts(preflight_document())).refusals()
         assert calls == [1]
         assert [one.check for one in found] == ["C1"]
 
-    def test_two_functions_sharing_a_name_are_not_one_function(
-            self, axis_registry):
+    def test_two_functions_sharing_a_name_are_not_one_function(self, axis_registry):
         """The de-duplication is by IDENTITY and not by ``__name__``.  Every
         lambda is ``<lambda>``; a walk keyed on the name drops the second in
         silence."""
-        register_axes("C1")(
-            lambda facts: (refuse("C1", "observation.time", "first."),))
-        register_axes("C2")(
-            lambda facts: (refuse("C2", "observation.time", "second."),))
+        register_axes("C1")(lambda facts: (refuse("C1", "observation.time", "first."),))
+        register_axes("C2")(lambda facts: (refuse("C2", "observation.time", "second."),))
         found = axes(axis_facts(preflight_document())).refusals()
         assert [one.message for one in found] == ["first.", "second."]
 
-    def test_a_dotted_slot_is_accepted_and_carries_the_bare_id(
-            self, axis_registry):
+    def test_a_dotted_slot_is_accepted_and_carries_the_bare_id(self, axis_registry):
         """``SLOT`` already admits B and C ids, which is why the two new passes
         need no widening of it.  The SLOT may be dotted; ``Finding.check``
         never is."""
-        register_axes("A13.grid")(
-            lambda facts: (refuse("A13", "model.cw_tone", "one."),))
-        assert axes(axis_facts(preflight_document())).checks() == frozenset(
-            {"A13"})
+        register_axes("A13.grid")(lambda facts: (refuse("A13", "model.cw_tone", "one."),))
+        assert axes(axis_facts(preflight_document())).checks() == frozenset({"A13"})
 
     def test_the_slot_pattern_admits_this_plans_ids_and_not_a_bare_suffix(self):
         """ANTI-VACUITY for the pattern itself, and it is the measured trap:
@@ -305,10 +297,10 @@ class TestTheTwoRegistries:
         for bad in ("A12a", "C0", "_mine", "A1.", "D1", "c1"):
             assert not SLOT.fullmatch(bad), bad
 
-    @pytest.mark.parametrize("pair", [("C3", "C1"), ("C1", "C3")],
-                             ids=["clash-last", "clash-first"])
-    def test_a_clash_on_any_id_refuses_and_binds_none_of_them(
-            self, axis_registry, pair):
+    @pytest.mark.parametrize(
+        "pair", [("C3", "C1"), ("C1", "C3")], ids=["clash-last", "clash-first"]
+    )
+    def test_a_clash_on_any_id_refuses_and_binds_none_of_them(self, axis_registry, pair):
         """Kills checking only ``checks[0]`` for a clash, kills checking only
         ``checks[-1]``, and kills a non-atomic bind.  **Both orders**, because
         one order closes one direction and leaves its twin open."""
@@ -318,8 +310,7 @@ class TestTheTwoRegistries:
         assert set(AXIS_CHECKS) == {"C1"}
         assert AXIS_CHECKS["C1"] is first
 
-    def test_every_id_of_a_variadic_registration_is_validated(
-            self, axis_registry):
+    def test_every_id_of_a_variadic_registration_is_validated(self, axis_registry):
         """Kills validating ``checks[0]`` alone, under which
         ``@register_axes("C1", "_mine")`` ships a finding tagged
         ``(check _mine).``  The second assertion kills validating as it binds:
@@ -330,8 +321,7 @@ class TestTheTwoRegistries:
             register_axes("C1", "_mine")(lambda facts: ())
         assert dict(AXIS_CHECKS) == {}
 
-    def test_the_double_registration_refusal_is_not_an_assert(
-            self, axis_registry):
+    def test_the_double_registration_refusal_is_not_an_assert(self, axis_registry):
         """``python -O`` strips ``assert``.  Measured on the OTHER registry
         before Plan 3A fixed it: under ``-O`` the second registration won, in
         silence.  This registry is a ``ConfigError`` from the start, and it is
@@ -430,6 +420,7 @@ class TestEveryRefusalOfTHESEPassesIsPinnedWHOLE:
         Which is the half a reader needs: "registered twice" is only
         actionable if it says where the first one is.
         """
+
         def _incumbent(facts):
             return ()
 
@@ -486,8 +477,7 @@ class TestEveryRefusalOfTHESEPassesIsPinnedWHOLE:
         pre-flight package's, borrowed rather than restated -- a second copy
         under ``inflight/`` is the divergence this plan exists to stop -- and
         quoting it here is what says the borrow happened."""
-        register_axes("C2")(
-            lambda facts: (refuse("C2", "beam", "reserved."),))
+        register_axes("C2")(lambda facts: (refuse("C2", "beam", "reserved."),))
         with pytest.raises(ConfigError) as caught:
             axes(axis_facts(preflight_document()))
         assert str(caught.value) == (
@@ -505,8 +495,7 @@ class TestEveryRefusalOfTHESEPassesIsPinnedWHOLE:
         variant pinned.  A built check may say ``model.averaging`` and may not
         say ``twin`` -- the payload carries ``document`` precisely so that the
         reader is sent somewhere they can type."""
-        register_built("C9")(
-            lambda run: (refuse("C9", "twin", "reserved."),))
+        register_built("C9")(lambda run: (refuse("C9", "twin", "reserved."),))
         with pytest.raises(ConfigError) as caught:
             built(built_run(preflight_document()))
         assert str(caught.value) == (
@@ -517,10 +506,8 @@ class TestEveryRefusalOfTHESEPassesIsPinnedWHOLE:
             "'runs', 'outputs', 'campaign']."
         )
 
-    @pytest.mark.parametrize("make", [refuse, warn, report],
-                             ids=["refuse", "warn", "report"])
-    def test_a_bad_where_is_refused_at_every_severity(self, axis_registry,
-                                                      make):
+    @pytest.mark.parametrize("make", [refuse, warn, report], ids=["refuse", "warn", "report"])
+    def test_a_bad_where_is_refused_at_every_severity(self, axis_registry, make):
         """Kills gating the ``where`` guard on ``severity == "refuse"``.  Task
         7's B9 is warning-shaped, so this is a twin the plan walks into rather
         than a hypothetical one."""
@@ -528,16 +515,17 @@ class TestEveryRefusalOfTHESEPassesIsPinnedWHOLE:
         with pytest.raises(ConfigError, match="is not a document section"):
             axes(axis_facts(preflight_document()))
 
-    def test_every_finding_is_checked_and_not_just_the_first(
-            self, axis_registry):
+    def test_every_finding_is_checked_and_not_just_the_first(self, axis_registry):
         """Kills ``check_where(..., found[0])`` and its twin ``found[-1]``.  A
         check that walks nodes returns one finding per node, so under either
         mutation every finding after the first can carry a source path in
         front of a user."""
-        register_axes("C2")(lambda facts: (
-            refuse("C2", "observation.time", "a."),
-            refuse("C2", "compose.py:262", "b."),
-        ))
+        register_axes("C2")(
+            lambda facts: (
+                refuse("C2", "observation.time", "a."),
+                refuse("C2", "compose.py:262", "b."),
+            )
+        )
         with pytest.raises(ConfigError, match="'C2' emitted where="):
             axes(axis_facts(preflight_document()))
 
@@ -546,24 +534,28 @@ class TestThePassesCollect:
     """Kills: raising on the first finding; a generator consumed twice or not
     at all; ``warnings`` reading as refusals."""
 
-    @pytest.mark.parametrize("make", [
-        lambda one: (one,),
-        lambda one: [one],
-        lambda one: iter((one,)),
-    ], ids=["tuple", "list", "generator"])
+    @pytest.mark.parametrize(
+        "make",
+        [
+            lambda one: (one,),
+            lambda one: [one],
+            lambda one: iter((one,)),
+        ],
+        ids=["tuple", "list", "generator"],
+    )
     def test_a_check_may_hand_back_any_iterable(self, axis_registry, make):
         """Kills ``findings.extend(fn(payload))`` followed by a second pass
         over the same exhausted generator."""
-        register_axes("C1")(
-            lambda facts: make(refuse("C1", "observation.time", "one.")))
+        register_axes("C1")(lambda facts: make(refuse("C1", "observation.time", "one.")))
         assert len(axes(axis_facts(preflight_document())).refusals()) == 1
 
-    def test_warnings_and_reports_are_collected_without_raising(
-            self, built_registry):
-        register_built("B9")(lambda run: (
-            warn("B9", "resources.projectors.drift", "shared."),
-            report("B9", "resources.projectors.drift", "noted."),
-        ))
+    def test_warnings_and_reports_are_collected_without_raising(self, built_registry):
+        register_built("B9")(
+            lambda run: (
+                warn("B9", "resources.projectors.drift", "shared."),
+                report("B9", "resources.projectors.drift", "noted."),
+            )
+        )
         held = built(built_run(preflight_document()))
         assert held.refusals() == ()
         assert len(held.warnings()) == 1
@@ -591,25 +583,23 @@ class TestTheOnlyHelpers:
         """§0.3 C.4, and it is not a detail: Task 7's B9 and Task 5's A46 leg 3
         are WARNs, and a ``only`` that filtered to refusals would make every
         test about them unwritable.  Kills exactly that filter."""
-        register_axes("C2")(
-            lambda facts: (warn("C2", "observation.pointing", "hmm."),))
+        register_axes("C2")(lambda facts: (warn("C2", "observation.pointing", "hmm."),))
         found = axis_only(preflight_document(), "C2")
         assert found.message == "hmm."
         assert found.severity == "warn"
 
     def test_a_report_counts_as_the_one(self, built_registry):
-        register_built("B9")(
-            lambda run: (report("B9", "model.gain", "noted."),))
+        register_built("B9")(lambda run: (report("B9", "model.gain", "noted."),))
         assert built_only(preflight_document(), "B9").severity == "report"
 
     @pytest.mark.parametrize("count", [0, 2], ids=["none", "twice"])
-    def test_more_or_fewer_than_one_is_an_assertion_failure(
-            self, axis_registry, count):
+    def test_more_or_fewer_than_one_is_an_assertion_failure(self, axis_registry, count):
         """Kills ``only`` becoming ``found[0]``: a check that fires TWICE on
         one document -- a loop over nodes that forgot to ``break`` -- is a real
         defect that no ``in`` assertion can see."""
-        register_axes("C1")(lambda facts: tuple(
-            refuse("C1", "observation.time", "x.") for _ in range(count)))
+        register_axes("C1")(
+            lambda facts: tuple(refuse("C1", "observation.time", "x.") for _ in range(count))
+        )
         with pytest.raises(AssertionError, match=f"produced {count} findings"):
             axis_only(preflight_document(), "C1")
 
@@ -622,10 +612,8 @@ class TestTheOnlyHelpers:
         axes hook, so an axes REFUSAL stops the document before the built
         payload exists at all.  That property has a test of its own below.
         """
-        register_axes("C1")(
-            lambda facts: (warn("C1", "observation.time", "axes."),))
-        register_built("C8")(
-            lambda run: (refuse("C8", "model.averaging", "built."),))
+        register_axes("C1")(lambda facts: (warn("C1", "observation.time", "axes."),))
+        register_built("C8")(lambda run: (refuse("C8", "model.averaging", "built."),))
         doc = preflight_document()
         assert axis_only(doc, "C1").message == "axes."
         assert built_only(doc, "C8").message == "built."
@@ -633,7 +621,8 @@ class TestTheOnlyHelpers:
         assert [one.check for one in built_findings(doc)] == ["C8"]
 
     def test_a_document_the_axes_pass_refuses_never_reaches_the_built_pass(
-            self, axis_registry, built_registry):
+        self, axis_registry, built_registry
+    ):
         """**The slot order, from the helper's side**, and it is a contract
         Task 7 has to know: ``built_run`` runs ``_assemble``, which runs the
         axes hook and raises there.  So a built-slot test may not reuse a
@@ -643,8 +632,7 @@ class TestTheOnlyHelpers:
         This is also the reason a built check need not restate an axes check's
         precondition: a refused axis cannot reach it.
         """
-        register_axes("C1")(
-            lambda facts: (refuse("C1", "observation.time", "axes first."),))
+        register_axes("C1")(lambda facts: (refuse("C1", "observation.time", "axes first."),))
         seen = []
         register_built("C8")(lambda run: (seen.append(1), ())[1])
         with pytest.raises(ConfigError, match="axes first."):
@@ -668,15 +656,18 @@ def _raise_then_warn() -> dict[str, tuple[int, int]]:
     """
     found: dict[str, dict[str, int]] = {}
     for node in ast.walk(ast.parse(_DOCUMENT_PY.read_text())):
-        if (isinstance(node, ast.Call)
-                and isinstance(node.func, ast.Attribute)
-                and isinstance(node.func.value, ast.Name)
-                and node.func.attr in ("raise_if_refused", "emit_warnings")):
-            found.setdefault(node.func.value.id, {})[
-                node.func.attr] = node.lineno
-    return {name: (calls["raise_if_refused"], calls["emit_warnings"])
-            for name, calls in found.items()
-            if len(calls) == 2}
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and isinstance(node.func.value, ast.Name)
+            and node.func.attr in ("raise_if_refused", "emit_warnings")
+        ):
+            found.setdefault(node.func.value.id, {})[node.func.attr] = node.lineno
+    return {
+        name: (calls["raise_if_refused"], calls["emit_warnings"])
+        for name, calls in found.items()
+        if len(calls) == 2
+    }
 
 
 def _unnamed_hook_calls() -> list[tuple[str, int]]:
@@ -702,12 +693,16 @@ def _unnamed_hook_calls() -> list[tuple[str, int]]:
     two chained calls on two separate temporaries are two different reports,
     so "raise before warn" would be a statement about nothing.
     """
-    return [(node.func.attr, node.lineno)
-            for node in ast.walk(ast.parse(_DOCUMENT_PY.read_text()))
-            if (isinstance(node, ast.Call)
-                and isinstance(node.func, ast.Attribute)
-                and not isinstance(node.func.value, ast.Name)
-                and node.func.attr in ("raise_if_refused", "emit_warnings"))]
+    return [
+        (node.func.attr, node.lineno)
+        for node in ast.walk(ast.parse(_DOCUMENT_PY.read_text()))
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and not isinstance(node.func.value, ast.Name)
+            and node.func.attr in ("raise_if_refused", "emit_warnings")
+        )
+    ]
 
 
 def _incomplete_hook_pairs() -> dict[str, list[str]]:
@@ -724,14 +719,14 @@ def _incomplete_hook_pairs() -> dict[str, list[str]]:
     """
     found: dict[str, dict[str, int]] = {}
     for node in ast.walk(ast.parse(_DOCUMENT_PY.read_text())):
-        if (isinstance(node, ast.Call)
-                and isinstance(node.func, ast.Attribute)
-                and isinstance(node.func.value, ast.Name)
-                and node.func.attr in ("raise_if_refused", "emit_warnings")):
-            found.setdefault(node.func.value.id, {})[
-                node.func.attr] = node.lineno
-    return {name: sorted(calls) for name, calls in found.items()
-            if len(calls) != 2}
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and isinstance(node.func.value, ast.Name)
+            and node.func.attr in ("raise_if_refused", "emit_warnings")
+        ):
+            found.setdefault(node.func.value.id, {})[node.func.attr] = node.lineno
+    return {name: sorted(calls) for name, calls in found.items() if len(calls) != 2}
 
 
 class TestEachSlotRaisesBeforeItWarns:
@@ -770,8 +765,7 @@ class TestEachSlotRaisesBeforeItWarns:
         it says the four hooks this repository already has are still four and
         still named these four things.
         """
-        assert set(_raise_then_warn()) == {"report", "axis_report",
-                                           "built_report", "priced_report"}
+        assert set(_raise_then_warn()) == {"report", "axis_report", "built_report", "priced_report"}
 
     def test_no_hook_is_half_a_pair(self):
         """The OTHER hole in the harvester, and the one a fifth pass falls in.
@@ -810,7 +804,8 @@ class TestEachSlotRaisesBeforeItWarns:
         )
 
     def test_a_warning_from_an_earlier_slot_is_already_out_when_a_later_slot_refuses(
-            self, axis_registry, built_registry):
+        self, axis_registry, built_registry
+    ):
         """§3.2(a)'s other half, **correct rather than tolerated**.
 
         Across slots the raise-before-warn rule cannot hold: the axes pass has
@@ -820,24 +815,22 @@ class TestEachSlotRaisesBeforeItWarns:
         an axes warning is about a line the built refusal does not touch.  No
         later task re-litigates this; it is pinned here.
         """
-        register_axes("C2")(
-            lambda facts: (warn("C2", "observation.pointing", "early."),))
-        register_built("C8")(
-            lambda run: (refuse("C8", "model.averaging", "late."),))
+        register_axes("C2")(lambda facts: (warn("C2", "observation.pointing", "early."),))
+        register_built("C8")(lambda run: (refuse("C8", "model.averaging", "late."),))
         with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter("always")
             with pytest.raises(ConfigError, match="late."):
                 load_document(preflight_document())
-        assert [str(one.message) for one in caught
-                if issubclass(one.category, ConfigWarning)] == ["early."]
+        assert [str(one.message) for one in caught if issubclass(one.category, ConfigWarning)] == [
+            "early."
+        ]
 
 
 class TestTheHooksArePositioned:
     """Kills: the axes hook sliding below ``build_resources``, which undoes the
     only saving this plan makes; the built hook never being called at all."""
 
-    def test_the_axes_hook_runs_before_build_resources(self, axis_registry,
-                                                       monkeypatch):
+    def test_the_axes_hook_runs_before_build_resources(self, axis_registry, monkeypatch):
         """**The one test no later task repeats.**  Tasks 1b and 7 each test
         that their check FIRES; none tests that it fires before the beam, and
         the hook is one call in ``load_document``.  If this is weak, moving
@@ -845,11 +838,12 @@ class TestTheHooksArePositioned:
         plan."""
         order = []
         real = document_module.build_resources
-        monkeypatch.setattr(document_module, "build_resources",
-                            lambda *a, **k: (order.append("resources"),
-                                             real(*a, **k))[1])
-        register_axes("C1")(
-            lambda facts: (order.append("axes"), ())[1])
+        monkeypatch.setattr(
+            document_module,
+            "build_resources",
+            lambda *a, **k: (order.append("resources"), real(*a, **k))[1],
+        )
+        register_axes("C1")(lambda facts: (order.append("axes"), ())[1])
         load_document(preflight_document())
         assert order == ["axes", "resources"]
 
@@ -863,15 +857,15 @@ class TestTheHooksArePositioned:
         HOOK's position and no real check's phase.  The real assertion, on a
         real check, is Task 1b's.
         """
-        register_axes("C1")(lambda facts: (
-            refuse("C1", "observation.time", "the time axis is wrong."),))
+        register_axes("C1")(
+            lambda facts: (refuse("C1", "observation.time", "the time axis is wrong."),)
+        )
         with pytest.raises(ConfigError) as caught:
             load_document(preflight_document(resources=UNREADABLE_BEAM))
         assert str(caught.value) == "the time axis is wrong."
         assert "no_such_beam" not in str(caught.value)
 
-    def test_both_payloads_carry_the_VARIANT_APPLIED_document(
-            self, axis_registry, built_registry):
+    def test_both_payloads_carry_the_VARIANT_APPLIED_document(self, axis_registry, built_registry):
         """§0.3 C.3 pins ``Axes.document`` / ``Built.document`` as the
         variant-applied mapping BY NAME, and measured, passing the raw
         ``document`` to either hook left the suite at exit 0.
@@ -884,10 +878,8 @@ class TestTheHooksArePositioned:
         with nothing saying so.
         """
         seen = {}
-        register_axes("C1")(
-            lambda facts: (seen.__setitem__("axes", facts.document), ())[1])
-        register_built("C9")(
-            lambda run: (seen.__setitem__("built", run.document), ())[1])
+        register_axes("C1")(lambda facts: (seen.__setitem__("axes", facts.document), ())[1])
+        register_built("C9")(lambda run: (seen.__setitem__("built", run.document), ())[1])
         base = preflight_document()
         assert base["model"]["gain"]["gain"]["value"] != 1.0
         load_document(base, variant="unity_gain")
@@ -895,15 +887,13 @@ class TestTheHooksArePositioned:
             assert seen[slot]["model"]["gain"]["gain"]["value"] == 1.0, slot
         assert base["model"]["gain"]["gain"]["value"] != 1.0
 
-    def test_the_built_hook_runs_and_the_beam_wins_against_it(
-            self, built_registry):
+    def test_the_built_hook_runs_and_the_beam_wins_against_it(self, built_registry):
         """**The ANTI-property, stated rather than implied.**  The built slot
         runs after the money, so a document carrying ``UNREADABLE_BEAM`` and a
         built violation refuses with **the beam**.  A plan claiming otherwise
         would be claiming schema §6's false preamble, and this is the test
         that stops it being claimed by accident."""
-        register_built("C8")(
-            lambda run: (refuse("C8", "model.averaging", "never reached."),))
+        register_built("C8")(lambda run: (refuse("C8", "model.averaging", "never reached."),))
         with pytest.raises(ConfigError) as caught:
             load_document(preflight_document(resources=UNREADABLE_BEAM))
         assert "no_such_beam" in str(caught.value)
@@ -911,8 +901,7 @@ class TestTheHooksArePositioned:
 
     def test_the_built_hook_stops_the_load(self, built_registry):
         """The seam ``_assemble`` exists for, from the hook's side."""
-        register_built("C8")(
-            lambda run: (refuse("C8", "model.averaging", "refused."),))
+        register_built("C8")(lambda run: (refuse("C8", "model.averaging", "refused."),))
         with pytest.raises(ConfigError, match="refused."):
             load_document(preflight_document())
 
@@ -924,9 +913,8 @@ class TestTheHooksArePositioned:
         the slot it exists to test.  Kills ``built_run`` being rewritten to
         call ``load_document``, which is the obvious simplification and which
         would disarm every Task 7 refusal test at once."""
-        register_built("C8")(
-            lambda run: (refuse("C8", "model.averaging", "refused."),))
-        payload = built_run(preflight_document())      # returns
+        register_built("C8")(lambda run: (refuse("C8", "model.averaging", "refused."),))
+        payload = built_run(preflight_document())  # returns
         assert isinstance(payload, Built)
         assert built(payload).refusals()[0].message == "refused."
 
@@ -952,8 +940,13 @@ class TestTheHooksArePositioned:
 # ---------------------------------------------------------------------------
 
 #: A beam entry that is well formed, for the cross-kind case.
-_BEAM = {"format": "npy", "path": "beam.npy", "nside": 4,
-         "normalize": "pixel_sum", "frame": "beam_local"}
+_BEAM = {
+    "format": "npy",
+    "path": "beam.npy",
+    "nside": 4,
+    "normalize": "pixel_sum",
+    "frame": "beam_local",
+}
 
 #: The six shapes ``_resolved_spec`` raises by name on, each with the literal
 #: ``build_resources`` still refuses it with.  Measured at ``e0e024a``.
@@ -961,30 +954,37 @@ _MALFORMED = {
     "an-extends-cycle": (
         {"arrays": {"a": {"extends": "b"}, "b": {"extends": "a"}}},
         "resources: these entries extend each other in a loop: "
-        "resources.arrays.a -> resources.arrays.b -> resources.arrays.a."),
+        "resources.arrays.a -> resources.arrays.b -> resources.arrays.a.",
+    ),
     "a-self-extend": (
         {"arrays": {"a": {"extends": "a"}}},
         "resources: these entries extend each other in a loop: "
-        "resources.arrays.a -> resources.arrays.a."),
+        "resources.arrays.a -> resources.arrays.a.",
+    ),
     "a-dangling-parent": (
         {"arrays": {"a": {"extends": "nope"}}},
-        "resources.arrays.a extends 'nope', which resources.arrays does not "
-        "declare."),
+        "resources.arrays.a extends 'nope', which resources.arrays does not declare.",
+    ),
     "a-cross-kind-parent": (
         {"arrays": {"a": {"extends": "horn"}}, "beams": {"horn": _BEAM}},
         "resources.arrays.a extends 'horn', which resources.arrays does not "
         "declare. It is declared as resources.beams.horn, and extends: merges "
-        "between siblings of the SAME kind only"),
+        "between siblings of the SAME kind only",
+    ),
     "a-non-string-extends": (
         {"arrays": {"a": {"extends": 5}}},
-        "resources.arrays.a extends 5, which resources.arrays does not "
-        "declare."),
+        "resources.arrays.a extends 5, which resources.arrays does not declare.",
+    ),
     "append-beside-a-sibling-key": (
-        {"arrays": {"base": {"value": [1.0, 2.0]},
-                    "a": {"extends": "base",
-                          "value": {"append": [3.0], "nope": 1}}}},
+        {
+            "arrays": {
+                "base": {"value": [1.0, 2.0]},
+                "a": {"extends": "base", "value": {"append": [3.0], "nope": 1}},
+            }
+        },
         "'value': append must be the only key when extending a list; got the "
-        "sibling keys ['nope']."),
+        "sibling keys ['nope'].",
+    ),
 }
 
 
@@ -1002,7 +1002,7 @@ class TestResolvedSpecsIsTotal:
     @pytest.mark.parametrize("case", sorted(_MALFORMED), ids=sorted(_MALFORMED))
     def test_the_malformed_entry_is_dropped_and_nothing_is_raised(self, case):
         section, _ = _MALFORMED[case]
-        got = resolved_specs(section)              # must not raise
+        got = resolved_specs(section)  # must not raise
         assert "resources.arrays.a" not in got, (
             "the malformed entry survived, so a check reading it would decide "
             "on a spec `extends:` never resolved"
@@ -1038,10 +1038,9 @@ class TestResolvedSpecsIsTotal:
         costs 11.7 s against 0.44 s here for the same verdict.
         """
         depth = 1100
-        arrays = {f"a{index}": {"extends": f"a{index + 1}"}
-                  for index in range(depth)}
+        arrays = {f"a{index}": {"extends": f"a{index + 1}"} for index in range(depth)}
         arrays[f"a{depth}"] = {"value": [1.0]}
-        got = resolved_specs({"arrays": arrays})       # must not raise
+        got = resolved_specs({"arrays": arrays})  # must not raise
         assert isinstance(got, dict)
         assert got[f"resources.arrays.a{depth}"] == {"value": [1.0]}
         assert len(got) < len(arrays), (
@@ -1068,8 +1067,8 @@ class TestResolvedSpecsIsTotal:
         with pytest.raises(ConfigError) as caught:
             load_document(preflight_document(resources=section))
         assert str(caught.value) == (
-            "initial_merge document: unsupported evidence mapping key type "
-            "int.")
+            "initial_merge document: unsupported evidence mapping key type int."
+        )
 
     def test_a_well_formed_sibling_survives_a_malformed_entry(self):
         """Only the malformed ENTRY is dropped, not the whole kind and not the
@@ -1082,21 +1081,35 @@ class TestResolvedSpecsIsTotal:
         cross, _ = _MALFORMED["a-cross-kind-parent"]
         assert "resources.beams.horn" in resolved_specs(cross)
 
-    @pytest.mark.parametrize("section", [
-        None, {}, [], "resources", 7,
-        {"arrays": "not a mapping"},
-        {"arrays": {"a": "not a mapping"}},
-        {"arrays": {"a": None}},
-    ], ids=["none", "empty", "list", "string", "int", "kind-not-a-mapping",
-            "entry-not-a-mapping", "entry-none"])
-    def test_a_shape_build_resources_refuses_is_answered_with_a_mapping(
-            self, section):
+    @pytest.mark.parametrize(
+        "section",
+        [
+            None,
+            {},
+            [],
+            "resources",
+            7,
+            {"arrays": "not a mapping"},
+            {"arrays": {"a": "not a mapping"}},
+            {"arrays": {"a": None}},
+        ],
+        ids=[
+            "none",
+            "empty",
+            "list",
+            "string",
+            "int",
+            "kind-not-a-mapping",
+            "entry-not-a-mapping",
+            "entry-none",
+        ],
+    )
+    def test_a_shape_build_resources_refuses_is_answered_with_a_mapping(self, section):
         """TOTAL means total.  These are shapes ``build_resources`` refuses by
         name, and a reader that has not built yet must not pre-empt that
         sentence -- so the answer is "I have nothing for you", not an
         exception and not a refusal."""
-        assert resolved_specs(section) == {} or isinstance(
-            resolved_specs(section), dict)
+        assert resolved_specs(section) == {} or isinstance(resolved_specs(section), dict)
         assert "resources.arrays.a" not in resolved_specs(section)
 
     def test_the_key_is_the_dotted_string_and_extends_is_applied(self):
@@ -1106,14 +1119,18 @@ class TestResolvedSpecsIsTotal:
         one AFTER ``extends:``, which is the measured TRAP this function
         exists to make unnecessary: a check reading the raw text refuses an
         entry whose ``normalize:`` came from its parent."""
-        got = resolved_specs({"beams": {
-            "parent": _BEAM,
-            "child": {"extends": "parent", "nside": 8},
-        }})
+        got = resolved_specs(
+            {
+                "beams": {
+                    "parent": _BEAM,
+                    "child": {"extends": "parent", "nside": 8},
+                }
+            }
+        )
         assert set(got) == {"resources.beams.parent", "resources.beams.child"}
         child = got["resources.beams.child"]
-        assert child["normalize"] == "pixel_sum"   # inherited
-        assert child["nside"] == 8                 # overridden
+        assert child["normalize"] == "pixel_sum"  # inherited
+        assert child["nside"] == 8  # overridden
         assert "extends" not in child
         assert [k for k in got if k.startswith("resources.beams.")]
 
@@ -1146,7 +1163,8 @@ class TestTheMessageBindingWalker:
         """A sentence this layer is known to hold in exactly one module."""
         assert_bound_once(
             "campaign: is reserved with capability 4 (streaming evidence, "
-            "schema §8.2) and refused in v1.")
+            "schema §8.2) and refused in v1."
+        )
 
     def test_a_message_bound_twice_fails(self):
         """ANTI-VACUITY, the direction that matters: the walker must be able
@@ -1178,8 +1196,7 @@ class TestTheMessageBindingWalker:
         actually produces: the sentence in the test no longer matches any
         source, so the test is checking nothing while looking rigorous."""
         with pytest.raises(AssertionError, match="bound 0 times"):
-            assert_bound_once(
-                "no sentence in this package reads anything like this one")
+            assert_bound_once("no sentence in this package reads anything like this one")
 
     def test_the_walker_folds_a_message_split_across_lines(self):
         """The reason this is ``ast`` and not ``grep``.  A message in ``src/``
@@ -1188,8 +1205,10 @@ class TestTheMessageBindingWalker:
         walker that found nothing for everything would fail every
         ``== 1`` test for the wrong reason and pass every ``>= 1`` one.
         """
-        literal = ("A check returns findings and raises nothing -- one that "
-                   "raises aborts the pass and hides every finding after it")
+        literal = (
+            "A check returns findings and raises nothing -- one that "
+            "raises aborts the pass and hides every finding after it"
+        )
         assert modules_carrying(literal) == ("config/passes.py",)
 
     def test_the_exemption_proves_itself(self):
@@ -1219,8 +1238,7 @@ class TestTheMessageBindingWalker:
         for literal in (
             "A check returns findings and raises nothing",
             "`where` is where the USER types, not where the code lives.",
-            "A check id has one function, and which of the two would run "
-            "depends on import order.",
+            "A check id has one function, and which of the two would run depends on import order.",
         ):
             assert modules_carrying(literal) == ("config/passes.py",), literal
 
@@ -1245,8 +1263,7 @@ def _modules_under(directory: pathlib.Path) -> set[str]:
     directory this file creates, so the claim is measured rather than asserted
     about the four modules that happen to be here today.
     """
-    return {path.stem for path in directory.glob("*.py")
-            if path.stem != "__init__"}
+    return {path.stem for path in directory.glob("*.py") if path.stem != "__init__"}
 
 
 def _unwired(directory: pathlib.Path, source: str) -> set[str]:
@@ -1338,8 +1355,7 @@ class TestTheImportBlockCannotRot:
         (``test_config_surface.py::TestTheCountsProseStatesAboutThisLayer.test_every_check_plan_3b_claims_is_registered``)
         was disarmed in a full session and went red only when run alone.
         """
-        unwired = _unwired(
-            _INFLIGHT_DIR, (_INFLIGHT_DIR / "__init__.py").read_text())
+        unwired = _unwired(_INFLIGHT_DIR, (_INFLIGHT_DIR / "__init__.py").read_text())
         assert unwired == set(), (
             f"{sorted(unwired)} live under inflight/ and are imported by "
             "nothing, so their @register_axes / @register_built decorators "
@@ -1354,12 +1370,10 @@ class TestTheImportBlockCannotRot:
         behind for a module somebody removed.  It would raise ``ImportError``
         at package import -- loudly -- so this is a guard against the *typo*,
         not against silence."""
-        declared = _foot_imports(
-            (_INFLIGHT_DIR / "__init__.py").read_text(), _INFLIGHT_PACKAGE)
+        declared = _foot_imports((_INFLIGHT_DIR / "__init__.py").read_text(), _INFLIGHT_PACKAGE)
         present = _modules_under(_INFLIGHT_DIR)
         assert declared <= present, (
-            f"{sorted(declared - present)} are imported by "
-            "inflight/__init__.py and do not exist."
+            f"{sorted(declared - present)} are imported by inflight/__init__.py and do not exist."
         )
 
     def test_every_module_under_inflight_contributes_a_slot(self):
@@ -1384,12 +1398,17 @@ class TestTheImportBlockCannotRot:
         """
         done = subprocess.run(
             [sys.executable, "-c", _WIRING_PROBE],
-            capture_output=True, text=True, cwd=str(_ROOT), check=False)
+            capture_output=True,
+            text=True,
+            cwd=str(_ROOT),
+            check=False,
+        )
         assert done.returncode == 0, (
             "importing rheplicant.config.inflight does not leave every module "
             "under inflight/ owning a slot. In THIS process the same question "
             "answers 'fine', because the test modules import them "
-            "directly.\n" + done.stdout + done.stderr)
+            "directly.\n" + done.stdout + done.stderr
+        )
 
     def test_the_subprocess_probe_can_fail(self):
         """ANTI-VACUITY for the child, and it is not ceremony.
@@ -1403,11 +1422,17 @@ class TestTheImportBlockCannotRot:
         """
         done = subprocess.run(
             [sys.executable, "-c", _WIRING_PROBE, "no_such_inflight_module"],
-            capture_output=True, text=True, cwd=str(_ROOT), check=False)
+            capture_output=True,
+            text=True,
+            cwd=str(_ROOT),
+            check=False,
+        )
         assert done.returncode != 0, (
             "the child accepted a module that owns no slot, so its assertions "
             "are not running and the wiring test above proves nothing.\n"
-            + done.stdout + done.stderr)
+            + done.stdout
+            + done.stderr
+        )
         assert "no_such_inflight_module" in done.stderr, done.stderr
 
     def test_a_module_added_after_this_test_was_written_is_seen(self, tmp_path):
@@ -1428,37 +1453,44 @@ class TestTheImportBlockCannotRot:
         package.mkdir()
         (package / "__init__.py").write_text(
             "from rheplicant.config.inflight import axes as _axis_checks\n"
-            "from rheplicant.config.inflight import grids as _grid_checks\n")
+            "from rheplicant.config.inflight import grids as _grid_checks\n"
+        )
         for stem in ("__init__", "axes", "grids", "newcomer"):
             (package / f"{stem}.py").touch()
 
         assert _modules_under(package) == {"axes", "grids", "newcomer"}
-        assert _unwired(
-            package, (package / "__init__.py").read_text()) == {"newcomer"}
+        assert _unwired(package, (package / "__init__.py").read_text()) == {"newcomer"}
 
-    @pytest.mark.parametrize(("source", "expected"), [
-        ("from rheplicant.config.inflight import grids as _grid_checks",
-         {"grids"}),
-        ("from rheplicant.config.inflight import axes as _axis_checks",
-         {"axes"}),
-        ("from rheplicant.config.inflight import grids, twin",
-         {"grids", "twin"}),
-        ("from . import grids", {"grids"}),
-        ("import rheplicant.config.inflight.grids", {"grids"}),
-        ("# from rheplicant.config.inflight import grids as _grid_checks",
-         set()),
-        ('"""from rheplicant.config.inflight import grids."""', set()),
-        ("from rheplicant.config.preflight import document as _d", set()),
-        ("from rheplicant.config.passes import binder, sweep", set()),
-        ("def axes(facts):\n"
-         "    from rheplicant.config.inflight import grids as _g\n", set()),
-        ("if True:\n"
-         "    from rheplicant.config.inflight import grids\n", set()),
-    ], ids=["the-shipped-alias", "the-colliding-name", "several", "relative",
-            "import-form", "commented", "in-a-docstring", "the-other-package",
-            "the-runner", "in-a-function", "in-a-branch"])
-    def test_the_matcher_reads_this_package_and_not_its_neighbours(
-            self, source, expected):
+    @pytest.mark.parametrize(
+        ("source", "expected"),
+        [
+            ("from rheplicant.config.inflight import grids as _grid_checks", {"grids"}),
+            ("from rheplicant.config.inflight import axes as _axis_checks", {"axes"}),
+            ("from rheplicant.config.inflight import grids, twin", {"grids", "twin"}),
+            ("from . import grids", {"grids"}),
+            ("import rheplicant.config.inflight.grids", {"grids"}),
+            ("# from rheplicant.config.inflight import grids as _grid_checks", set()),
+            ('"""from rheplicant.config.inflight import grids."""', set()),
+            ("from rheplicant.config.preflight import document as _d", set()),
+            ("from rheplicant.config.passes import binder, sweep", set()),
+            ("def axes(facts):\n    from rheplicant.config.inflight import grids as _g\n", set()),
+            ("if True:\n    from rheplicant.config.inflight import grids\n", set()),
+        ],
+        ids=[
+            "the-shipped-alias",
+            "the-colliding-name",
+            "several",
+            "relative",
+            "import-form",
+            "commented",
+            "in-a-docstring",
+            "the-other-package",
+            "the-runner",
+            "in-a-function",
+            "in-a-branch",
+        ],
+    )
+    def test_the_matcher_reads_this_package_and_not_its_neighbours(self, source, expected):
         """The matcher is ``test_config_preflight.py``'s, called with this
         package's name -- so what needs checking here is the spellings only
         THIS package produces.
@@ -1484,20 +1516,52 @@ class TestTheImportBlockCannotRot:
 
 #: Verbs that reach the filesystem.  An in-flight module MAY hold a built
 #: object -- that is the point of the slot -- and may NOT go back to disk.
-_FILESYSTEM = frozenset({
-    "open", "open_code", "read_text", "read_bytes", "iterdir", "exists",
-    "listdir", "fromfile", "load", "loadtxt", "connect", "lstat", "stat",
-    "getcwd", "rglob", "glob", "walk", "scandir", "mkdir", "unlink",
-})
+_FILESYSTEM = frozenset(
+    {
+        "open",
+        "open_code",
+        "read_text",
+        "read_bytes",
+        "iterdir",
+        "exists",
+        "listdir",
+        "fromfile",
+        "load",
+        "loadtxt",
+        "connect",
+        "lstat",
+        "stat",
+        "getcwd",
+        "rglob",
+        "glob",
+        "walk",
+        "scandir",
+        "mkdir",
+        "unlink",
+    }
+)
 
 #: Autodiff and decomposition entry points.  These are **Plan 3C's**, without
 #: exception; ``jax.eval_shape`` is deliberately absent, because it is in
 #: scope and banning it would forbid the one shape-only probe this slot is
 #: allowed.
-_DIFFERENTIATION = frozenset({
-    "jacfwd", "jacrev", "hessian", "jvp", "vjp", "linearize", "grad",
-    "value_and_grad", "jacobian", "svd", "eigh", "eig", "lstsq",
-})
+_DIFFERENTIATION = frozenset(
+    {
+        "jacfwd",
+        "jacrev",
+        "hessian",
+        "jvp",
+        "vjp",
+        "linearize",
+        "grad",
+        "value_and_grad",
+        "jacobian",
+        "svd",
+        "eigh",
+        "eig",
+        "lstsq",
+    }
+)
 
 _OUT_OF_BOUNDS = _FILESYSTEM | _DIFFERENTIATION
 
@@ -1516,8 +1580,13 @@ def _out_of_bounds_calls(source: str) -> set[str]:
         if not isinstance(node, ast.Call):
             continue
         func = node.func
-        name = (func.attr if isinstance(func, ast.Attribute)
-                else func.id if isinstance(func, ast.Name) else None)
+        name = (
+            func.attr
+            if isinstance(func, ast.Attribute)
+            else func.id
+            if isinstance(func, ast.Name)
+            else None
+        )
         if name in _OUT_OF_BOUNDS:
             found.add(name)
     return found
@@ -1587,8 +1656,7 @@ class TestTheInFlightBoundary:
             "on the list."
         )
 
-    def test_the_matcher_sees_an_offence_in_a_module_it_has_never_seen(
-            self, tmp_path):
+    def test_the_matcher_sees_an_offence_in_a_module_it_has_never_seen(self, tmp_path):
         """ANTI-VACUITY for the MATCHER over a discovered file, as opposed to
         over the inline snippets below."""
         (tmp_path / "later_task.py").write_text(
@@ -1601,8 +1669,7 @@ class TestTheInFlightBoundary:
         assert [p.name for p in discovered] == ["later_task.py"]
         assert _out_of_bounds_calls(discovered[0].read_text()) == {"open"}
 
-    def test_the_walk_itself_discovers_a_module_added_after_it_was_written(
-            self, tmp_path):
+    def test_the_walk_itself_discovers_a_module_added_after_it_was_written(self, tmp_path):
         """ANTI-VACUITY for the **DISCOVERY**, and it is the one a mutation
         campaign proved was missing.
 
@@ -1621,8 +1688,7 @@ class TestTheInFlightBoundary:
         ignores ``root`` entirely, so it fails this exactly as it did before.
         """
         probe = tmp_path / "_probe_discovered_by_the_walk.py"
-        probe.write_text('"""Written by a test to prove the walk is a '
-                         'discovery."""\n')
+        probe.write_text('"""Written by a test to prove the walk is a discovery."""\n')
         assert probe in _inflight_sources(root=tmp_path), (
             "a module added beside the in-flight package is not in the walk, "
             "so the boundary guard is a maintained list and a later task's "
@@ -1659,26 +1725,38 @@ class TestTheInFlightBoundary:
         )
         assert (_INFLIGHT_DIR / "__init__.py") in walked
 
-    @pytest.mark.parametrize(("source", "expected"), [
-        ("def f(p):\n    return p.read_bytes()", {"read_bytes"}),
-        ("def f(p):\n    return open(p).read()", {"open"}),
-        ("def f(p):\n    return np.load(p)", {"load"}),
-        ("def f(t):\n    return jax.jacfwd(t)(x)", {"jacfwd"}),
-        ("def f(t):\n    return jacrev(t)", {"jacrev"}),
-        ("def f(m):\n    return jnp.linalg.svd(m)", {"svd"}),
-        ("def f(d):\n    if False:\n        return open(d)\n    return ()",
-         {"open"}),
-        ("def f(t):\n    return jax.eval_shape(t, s)", set()),
-        ("# open(path)", set()),
-        ('"""p.read_bytes() is never called here."""', set()),
-        ("def f(r):\n    return r.context.shape_scope", set()),
-        ("def f(r):\n    return r.twin(r.state)", set()),
-    ], ids=["read-bytes", "open", "np-load", "jacfwd", "jacrev", "svd",
-            "on-a-branch-never-taken", "eval-shape-PERMITTED", "commented",
-            "in-a-docstring", "the-sanctioned-shape-reader",
-            "calling-the-twin-NOT-CAUGHT"])
-    def test_the_matcher_reads_calls_and_not_mentions_of_them(
-            self, source, expected):
+    @pytest.mark.parametrize(
+        ("source", "expected"),
+        [
+            ("def f(p):\n    return p.read_bytes()", {"read_bytes"}),
+            ("def f(p):\n    return open(p).read()", {"open"}),
+            ("def f(p):\n    return np.load(p)", {"load"}),
+            ("def f(t):\n    return jax.jacfwd(t)(x)", {"jacfwd"}),
+            ("def f(t):\n    return jacrev(t)", {"jacrev"}),
+            ("def f(m):\n    return jnp.linalg.svd(m)", {"svd"}),
+            ("def f(d):\n    if False:\n        return open(d)\n    return ()", {"open"}),
+            ("def f(t):\n    return jax.eval_shape(t, s)", set()),
+            ("# open(path)", set()),
+            ('"""p.read_bytes() is never called here."""', set()),
+            ("def f(r):\n    return r.context.shape_scope", set()),
+            ("def f(r):\n    return r.twin(r.state)", set()),
+        ],
+        ids=[
+            "read-bytes",
+            "open",
+            "np-load",
+            "jacfwd",
+            "jacrev",
+            "svd",
+            "on-a-branch-never-taken",
+            "eval-shape-PERMITTED",
+            "commented",
+            "in-a-docstring",
+            "the-sanctioned-shape-reader",
+            "calling-the-twin-NOT-CAUGHT",
+        ],
+    )
+    def test_the_matcher_reads_calls_and_not_mentions_of_them(self, source, expected):
         """ANTI-VACUITY for the MATCHER, both directions.
 
         ``on-a-branch-never-taken`` is the whole point of a static ban: the
@@ -1699,8 +1777,7 @@ class TestTheInFlightBoundary:
         ``limtod_jax`` at module scope would put it in every process that so
         much as reads a config.  Read statically, so it covers a module whose
         import this session happens not to have run."""
-        banned = {"numpyro", "limtod_jax", "healpy", "h5py", "pyuvdata",
-                  "rhino_cal_jax"}
+        banned = {"numpyro", "limtod_jax", "healpy", "h5py", "pyuvdata", "rhino_cal_jax"}
         for path in _inflight_sources():
             for node in ast.walk(ast.parse(path.read_text())):
                 if isinstance(node, ast.Import):
@@ -1724,8 +1801,6 @@ def _median_ms(call, repeats=200) -> float:
         call()
         samples.append((time.perf_counter() - started) * 1e3)
     return statistics.median(samples)
-
-
 
 
 class TestTheCostOfTheTwoSlots:
@@ -1776,7 +1851,7 @@ class TestTheCostOfTheTwoSlots:
         of the runner, which neither the old x3008 margin nor the x11 that
         replaced it did."""
         facts = axis_facts(preflight_document())
-        axes(facts)                                    # warm
+        axes(facts)  # warm
         assert best_ms(lambda: axes(facts)) < 0.09 * machine_factor()
 
     def test_the_built_pass_costs_a_small_fraction_of_a_millisecond(self):
@@ -1798,7 +1873,7 @@ class TestTheCostOfTheTwoSlots:
         surviving exactly that mutation.
         """
         run = built_run(preflight_document())
-        built(run)                                     # warm
+        built(run)  # warm
         assert best_ms(lambda: built(run)) < 0.02 * machine_factor()
 
     def test_the_axes_pass_is_under_a_hundredth_of_a_second(self):
@@ -1839,14 +1914,14 @@ class TestTheCostOfTheTwoSlots:
         decided by what else the machine is doing.
         """
         facts = axis_facts(preflight_document())
-        axes(facts)                                    # warm
+        axes(facts)  # warm
         # NOT multiplied by `machine_factor()`, and alone in this directory
         # in that. Every other absolute bound here is calibrated and scales;
         # this one is deliberately loose -- the docstring above says it is
         # implied by the 0.09 assertion and exists to carry §0.1's contract
         # number, not to add sensitivity. Scaling a bound that cannot fail
         # would only make it look like a measurement.
-        assert best_ms(lambda: axes(facts)) < 10.0     # §0.1's 0.01 s, in ms
+        assert best_ms(lambda: axes(facts)) < 10.0  # §0.1's 0.01 s, in ms
 
     def test_building_the_axes_payload_does_not_pay_for_the_beam(self):
         """The slot's REASON, in time.  ``build_resources`` is 90.9 % of
@@ -1889,8 +1964,7 @@ class TestTheHelpersDoNotRollTheirOwnDocument:
         from tests.config.inflight_helpers import projector_sections
 
         section = projector_sections(tmp_path)
-        assert section["projectors"]["drift"][
-            "acknowledge_float32_sky"] is True
+        assert section["projectors"]["drift"]["acknowledge_float32_sky"] is True
         assert not axis_facts(preflight_document()).runtime.jax_enable_x64
 
     def test_the_projector_patch_builds(self, tmp_path):
@@ -1903,5 +1977,4 @@ class TestTheHelpersDoNotRollTheirOwnDocument:
         doc = preflight_document(resources=projector_sections(tmp_path))
         run = built_run(doc, base_dir=str(tmp_path))
         assert run.resources.resources["resources.projectors.drift"] is not None
-        assert np.asarray(
-            run.resources.resources["resources.beams.horn"]).size
+        assert np.asarray(run.resources.resources["resources.beams.horn"]).size

@@ -68,8 +68,7 @@ def test_the_starter_document_declares_the_constant():
     """
     first = STARTER_YAML.splitlines()[0]
     assert first == f"schema_version: {SCHEMA_VERSION}", (
-        f"the starter document opens with {first!r} and the grammar is at "
-        f"{SCHEMA_VERSION}"
+        f"the starter document opens with {first!r} and the grammar is at {SCHEMA_VERSION}"
     )
     assert "{SCHEMA_VERSION}" not in STARTER_YAML, (
         "the starter still carries the substitution placeholder, so the "
@@ -97,9 +96,7 @@ def test_the_starter_document_actually_loads():
         parsed = safe_load_document(STARTER_YAML.encode(), source_name="starter")
         load_document(parsed.value)
     except ConfigError as refusal:
-        raise AssertionError(
-            f"the GUI's starter document does not load: {refusal}"
-        ) from refusal
+        raise AssertionError(f"the GUI's starter document does not load: {refusal}") from refusal
 
 
 def test_the_refusal_sentences_still_name_the_current_version():

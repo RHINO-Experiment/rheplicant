@@ -277,9 +277,7 @@ def _reject_shared_inputs(
         if product in modelled:
             continue
         clash = [
-            other.epoch_id
-            for other in held
-            if (product, digest) in getattr(other, "inputs", ())
+            other.epoch_id for other in held if (product, digest) in getattr(other, "inputs", ())
         ]
         if clash:
             raise StateValidationError(
@@ -341,9 +339,7 @@ class _Archive:
         ids: frozenset[str] | None = None,
     ):
         self.terms = tuple(terms)
-        self.ids = (
-            frozenset(term.epoch_id for term in self.terms) if ids is None else ids
-        )
+        self.ids = frozenset(term.epoch_id for term in self.terms) if ids is None else ids
 
     def appended(self, term: CompressedLikelihood) -> "_Archive":
         """A new archive holding ``term`` last. The original is unchanged."""
@@ -366,10 +362,7 @@ class _Archive:
             and len(self.terms) == len(other.terms)
             # `strict=` is safe rather than redundant: the length check above is
             # what makes it unreachable, and it stays honest if that ever moves.
-            and all(
-                mine is theirs
-                for mine, theirs in zip(self.terms, other.terms, strict=True)
-            )
+            and all(mine is theirs for mine, theirs in zip(self.terms, other.terms, strict=True))
         )
 
     def __hash__(self) -> int:
@@ -503,10 +496,7 @@ class BayesMemory(eqx.Module):
         would ever notice, because the numbers stay finite and the archive still
         lists both epochs.
         """
-        if (
-            self.basis is not None
-            and self.basis.fingerprint() != term.basis.fingerprint()
-        ):
+        if self.basis is not None and self.basis.fingerprint() != term.basis.fingerprint():
             raise StateValidationError(
                 f"Term {term.epoch_id!r} was compressed against a different "
                 "dictionary from the one this memory already holds. The stored "
@@ -553,11 +543,7 @@ class BayesMemory(eqx.Module):
         memory", which reads as a typo when what happened is that a Markov
         chain was about to be summed as though its epochs were independent.
         """
-        linked = [
-            name
-            for name in _stored_names(term)
-            if name in self.factorization.linked_names
-        ]
+        linked = [name for name in _stored_names(term) if name in self.factorization.linked_names]
         if linked:
             raise StateValidationError(
                 f"Term {term.epoch_id!r} carries the linked latent(s) {linked}. A "
@@ -607,9 +593,7 @@ class BayesMemory(eqx.Module):
         total = self.accumulated.log_prob(values)
         if self.coefficients is not None:
             shift = self.basis.coefficients(values) - self.basis.c_ref
-            total = total + self.coefficients.log_prob(
-                {self.coefficients.names[0]: shift}
-            )
+            total = total + self.coefficients.log_prob({self.coefficients.names[0]: shift})
         return total
 
     def log_posterior(self, values: dict[str, jax.Array]) -> jax.Array:
@@ -642,9 +626,7 @@ class BayesMemory(eqx.Module):
         """
         names = self.factorization.global_names
         shapes = self.factorization.global_shapes
-        template = {
-            name: jnp.zeros(shape) for name, shape in zip(names, shapes, strict=True)
-        }
+        template = {name: jnp.zeros(shape) for name, shape in zip(names, shapes, strict=True)}
         flat_names, flat_spans, flat_shapes = _named_spans(template)
         declared: dict[str, range] = {}
         offset = 0
@@ -652,9 +634,7 @@ class BayesMemory(eqx.Module):
             size = int(jnp.zeros(shape).size)
             declared[name] = range(offset, offset + size)
             offset += size
-        order = jnp.asarray(
-            [column for name in flat_names for column in declared[name]], dtype=int
-        )
+        order = jnp.asarray([column for name in flat_names for column in declared[name]], dtype=int)
         return template, flat_names, flat_spans, flat_shapes, order
 
     def _permuted(self, matrix: jax.Array) -> jax.Array:
@@ -805,9 +785,7 @@ class BayesMemory(eqx.Module):
         priors = self.factorization.global_priors
 
         def model():
-            values = {
-                name: numpyro.sample(name, prior) for name, prior in priors.items()
-            }
+            values = {name: numpyro.sample(name, prior) for name, prior in priors.items()}
             numpyro.factor("campaign", density(values))
 
         return model
@@ -856,9 +834,7 @@ class BayesMemory(eqx.Module):
             )
 
         covariance = jnp.linalg.pinv(self._permuted(self._theta_fisher(at)))
-        bias = covariance @ jnp.sum(
-            jnp.stack([gradient for _, gradient in gradients]), axis=0
-        )
+        bias = covariance @ jnp.sum(jnp.stack([gradient for _, gradient in gradients]), axis=0)
         width = jnp.sqrt(jnp.diag(covariance))
         ratios: dict[str, float] = {}
         unconstrained: list[str] = []
@@ -867,9 +843,7 @@ class BayesMemory(eqx.Module):
             if not np.all(widths > 0.0):
                 unconstrained.append(name)
                 continue
-            ratios[name] = float(
-                np.max(np.abs(np.asarray(bias[start:stop])) / widths)
-            )
+            ratios[name] = float(np.max(np.abs(np.asarray(bias[start:stop])) / widths))
         return ratios, tuple(unconstrained)
 
     def _represented(self, modelled: tuple[str, ...]) -> frozenset[str]:
@@ -891,9 +865,7 @@ class BayesMemory(eqx.Module):
                 "stands for it, so the declaration is where that claim lives -- "
                 "Factorization(represents={product: (latent, ...)})."
             )
-        return frozenset(
-            name for product in modelled for name in declared[product]
-        )
+        return frozenset(name for product in modelled for name in declared[product])
 
     def audit(
         self,
@@ -1029,9 +1001,7 @@ class BayesMemory(eqx.Module):
             "n_reduced": sum(1 for term in self.archive if _is_reduced(term)),
             "epoch_ids": tuple(term.epoch_id for term in self.archive),
             "estimator": self.archive[0].estimator if self.archive else None,
-            "prior_shares_sum": sum(
-                (getattr(term, "share", 0) for term in self.archive), start=0
-            ),
+            "prior_shares_sum": sum((getattr(term, "share", 0) for term in self.archive), start=0),
             "n_observed": sum(term.n_observed for term in self.archive),
             "all_exact": all(term.exact for term in self.archive),
             "fisher_lambda_min": smallest,

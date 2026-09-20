@@ -58,8 +58,7 @@ def _axis_matrix(name: str, axis: str, spec: Any, context: ResolutionContext):
             f"{axis}.grid), which is what makes a basis built for another grid "
             "impossible to declare. Remove it."
         )
-    check_unknown_keys(name, spec, frozenset({"kind", "n_basis"}),
-                       label=f"{axis} axis")
+    check_unknown_keys(name, spec, frozenset({"kind", "n_basis"}), label=f"{axis} axis")
     for required in ("kind", "n_basis"):
         if required not in spec:
             raise ConfigError(f"{name}: {axis} requires {required!r}.")

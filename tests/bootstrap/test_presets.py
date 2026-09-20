@@ -142,9 +142,7 @@ def test_explicit_editable_distribution_uses_the_unique_package_root(tmp_path, m
     assert snapshot.input_bytes == b"model: {}\n"
 
 
-def test_editable_metadata_text_is_canonicalized_before_truthiness(
-    tmp_path, monkeypatch
-):
+def test_editable_metadata_text_is_canonicalized_before_truthiness(tmp_path, monkeypatch):
     class HostileText(str):
         def __bool__(self):
             raise AssertionError("metadata text truthiness must not run")
@@ -159,9 +157,7 @@ def test_editable_metadata_text_is_canonicalized_before_truthiness(
             assert name == "direct_url.json"
             return HostileText('{"dir_info": {"editable": true}}')
 
-    monkeypatch.setattr(
-        presets.importlib.metadata, "distribution", lambda _: Distribution()
-    )
+    monkeypatch.setattr(presets.importlib.metadata, "distribution", lambda _: Distribution())
     monkeypatch.setattr(
         presets.importlib.util,
         "find_spec",
@@ -215,9 +211,7 @@ def test_distribution_protocol_failure_is_normalized_without_rendering(monkeypat
     def fail_distribution(_):
         raise HostileMetadataError
 
-    monkeypatch.setattr(
-        presets.importlib.metadata, "distribution", fail_distribution
-    )
+    monkeypatch.setattr(presets.importlib.metadata, "distribution", fail_distribution)
 
     with pytest.raises(ConfigError, match="cannot discover package preset"):
         read_installed_preset("rhino_v1")
@@ -230,9 +224,7 @@ def test_distribution_discovery_does_not_catch_baseexceptions(monkeypatch):
     def stop_distribution(_):
         raise StopNow
 
-    monkeypatch.setattr(
-        presets.importlib.metadata, "distribution", stop_distribution
-    )
+    monkeypatch.setattr(presets.importlib.metadata, "distribution", stop_distribution)
 
     with pytest.raises(StopNow):
         read_installed_preset("rhino_v1")
@@ -275,9 +267,7 @@ def test_editable_locations_truthiness_is_not_required(tmp_path, monkeypatch):
         def __iter__(self):
             return iter((str(root),))
 
-    distribution = _Distribution(
-        direct_url={"dir_info": {"editable": True}}
-    )
+    distribution = _Distribution(direct_url={"dir_info": {"editable": True}})
     monkeypatch.setattr(
         presets.importlib.metadata,
         "distribution",
@@ -478,9 +468,7 @@ def test_preset_records_canonicalize_every_scalar_field_to_exact_builtins():
 
 def test_preset_record_scalar_canonicalization_uses_only_base_operations():
     """Catches invoking hostile conversion, comparison, split, hash, or repr hooks."""
-    request = PresetRequest(
-        name=_HostileStr("one"), only=[_HostileStr("runtime")]
-    )
+    request = PresetRequest(name=_HostileStr("one"), only=[_HostileStr("runtime")])
     snapshot = PresetSnapshot(
         name=_HostileStr("one"),
         resource=_HostileStr("rheplicant/config/presets/one.yaml"),
@@ -586,20 +574,14 @@ def test_snapshot_enforces_exact_input_and_expansion_limits():
 def test_snapshot_rejects_oversized_mutable_buffers_before_copying(buffer_kind):
     observed = MAXIMUM_PRESET_BYTES + 2
     backing = bytearray(observed)
-    value = (
-        backing
-        if buffer_kind == "bytearray"
-        else memoryview(backing).cast("H")
-    )
+    value = backing if buffer_kind == "bytearray" else memoryview(backing).cast("H")
     if isinstance(value, memoryview):
         assert len(value) * value.itemsize == observed
         assert value.nbytes == observed
 
     tracemalloc.start()
     try:
-        with pytest.raises(
-            ConfigError, match=rf"input_bytes.*{observed}.*16777216"
-        ):
+        with pytest.raises(ConfigError, match=rf"input_bytes.*{observed}.*16777216"):
             PresetSnapshot(
                 name="one",
                 resource="rheplicant/config/presets/one.yaml",
@@ -731,9 +713,7 @@ def test_validate_preset_document_canonicalizes_keys_before_dict_operations():
 
 
 def test_validate_preset_document_refuses_canonical_key_collisions():
-    loaded = _ItemsMapping(
-        [(_HostileStr("runtime"), {}), (_HostileStr("runtime"), {})]
-    )
+    loaded = _ItemsMapping([(_HostileStr("runtime"), {}), (_HostileStr("runtime"), {})])
 
     with pytest.raises(ConfigError, match="keys collide"):
         presets.validate_preset_document("one", loaded)
@@ -745,9 +725,7 @@ def test_validate_preset_document_rejects_hostile_nonstring_key_without_repr():
             raise AssertionError("repr must not run")
 
     with pytest.raises(ConfigError, match="HostileKey"):
-        presets.validate_preset_document(
-            "one", _ItemsMapping([(HostileKey(), {})])
-        )
+        presets.validate_preset_document("one", _ItemsMapping([(HostileKey(), {})]))
 
 
 class _ForgedCallbackConfigError(ConfigError):
@@ -810,9 +788,7 @@ def test_validate_preset_document_replaces_callback_configerror(seam):
     marker = _ForgedCallbackConfigError("private marker")
 
     with pytest.raises(ConfigError) as caught:
-        presets.validate_preset_document(
-            "one", _ProtocolMapping(marker, seam)
-        )
+        presets.validate_preset_document("one", _ProtocolMapping(marker, seam))
 
     assert caught.value is not marker
     assert str(caught.value) == "preset:one: document mapping traversal failed."
@@ -908,9 +884,7 @@ def test_discovery_replaces_callback_configerror_at_every_protocol_seam(
         read_installed_preset("rhino_v1")
 
     assert caught.value is not marker
-    assert str(caught.value) == (
-        "defaults: cannot discover package preset 'rhino_v1'."
-    )
+    assert str(caught.value) == ("defaults: cannot discover package preset 'rhino_v1'.")
 
 
 def test_clean_bootstrap_preset_read_imports_neither_rheplicant_nor_jax():

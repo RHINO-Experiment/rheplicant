@@ -61,6 +61,8 @@ _PROCESSING_GRAPH = SignalGraph(
         if source in _PROCESSING_NODES and target in _PROCESSING_NODES
     ),
 )
+
+
 @dataclass(frozen=True, slots=True)
 class NodeInstance:
     """One ordered instance at a ``many`` node.
@@ -149,6 +151,8 @@ class NodeCard:
     fields: tuple[NodeField, ...]
     extra_keys: tuple[str, ...]
     removed_by_type: dict[str, tuple[str, ...]]
+
+
 @dataclass(frozen=True, slots=True)
 class GraphDiagram:
     """One base, backend, or resolved-variant graph projection."""
@@ -159,6 +163,8 @@ class GraphDiagram:
     walk_order: tuple[str, ...]
     counts: GraphCounts
     changed_nodes: tuple[str, ...] = ()
+
+
 @dataclass(frozen=True, slots=True)
 class EditorSnapshot:
     """The complete, serializable result of one document transition."""
@@ -440,9 +446,7 @@ def _node_cards(
             removed_by_type=typed.removed_by_type,
             instances=_instances(node_id, settings, catalog, resources),
             stages=_stages(node_id, settings, catalog, resources),
-            from_fields=from_route_fields(
-                node_id, settings, catalog, resources=resources
-            ),
+            from_fields=from_route_fields(node_id, settings, catalog, resources=resources),
             stage_names=tuple(
                 str(stage.get("name"))
                 for stage in model.get(node_id, {}).get("stages", ())
@@ -454,9 +458,7 @@ def _node_cards(
         for node_id in graph._topo
         for spec in (graph.nodes[node_id],)
         for settings in (_plain(model[node_id]) if node_id in model else None,)
-        for typed in (
-            project_node_fields(node_id, settings, catalog, resources=resources),
-        )
+        for typed in (project_node_fields(node_id, settings, catalog, resources=resources),)
     )
 
 
@@ -513,6 +515,8 @@ def _diagram(
         counts=_graph_counts(graph, nodes),
         changed_nodes=changed_nodes,
     )
+
+
 _MISSING = object()
 
 
@@ -561,9 +565,7 @@ def _project(yaml_text: str, document: Mapping[str, object]) -> EditorSnapshot:
     # resources of the layer it was resolved against rather than the base's.
     resources = _declared_resources(document)
     base = _diagram("base", model, RADIO_GRAPH, catalog=catalog, resources=resources)
-    backend = _diagram(
-        "backend", model, _PROCESSING_GRAPH, catalog=catalog, resources=resources
-    )
+    backend = _diagram("backend", model, _PROCESSING_GRAPH, catalog=catalog, resources=resources)
     forms = project_forms(document)
     return EditorSnapshot(
         yaml_text=yaml_text,

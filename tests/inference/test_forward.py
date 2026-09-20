@@ -46,9 +46,7 @@ class TestBuildForwardFn:
         assert len(leaves) == 2  # amplitude, gain
         assert all(jnp.issubdtype(leaf.dtype, jnp.inexact) for leaf in leaves)
 
-    def test_a_stochastic_stage_is_refused_by_name(
-        self, stochastic_pipeline, template_state
-    ):
+    def test_a_stochastic_stage_is_refused_by_name(self, stochastic_pipeline, template_state):
         """The closure would freeze one noise draw and fit against it forever."""
         with pytest.raises(ParameterSpaceError, match="NoiseOperator at 'noise'"):
             build_forward_fn(stochastic_pipeline, template_state)

@@ -39,15 +39,11 @@ def _overlay_keys(
     except Exception:
         raise ConfigError(f"overlay {where} traversal failed.") from None
     if any(not _is_exact_overlay_key(key) for key in keys):
-        raise ConfigError(
-            "overlay mapping keys must be exact string or integer values."
-        )
+        raise ConfigError("overlay mapping keys must be exact string or integer values.")
     return keys
 
 
-def _snapshot_overlay_proxy(
-    mapping: MappingProxyType, *, where: str
-) -> MappingProxyType:
+def _snapshot_overlay_proxy(mapping: MappingProxyType, *, where: str) -> MappingProxyType:
     """Copy one untrusted proxy traversal before validating its snapshot."""
     try:
         iterator = iter(mapping)
@@ -62,13 +58,9 @@ def _snapshot_overlay_proxy(
         except Exception:
             raise ConfigError(f"overlay {where} protocol failed.") from None
         if not _is_exact_overlay_key(key):
-            raise ConfigError(
-                "overlay mapping keys must be exact string or integer values."
-            )
+            raise ConfigError("overlay mapping keys must be exact string or integer values.")
         if key in snapshot:
-            raise ConfigError(
-                f"overlay {where} traversal emitted a duplicate key."
-            )
+            raise ConfigError(f"overlay {where} traversal emitted a duplicate key.")
         try:
             snapshot[key] = mapping[key]
         except Exception:
@@ -85,9 +77,7 @@ def _validate_overlay_parts(
     validate_base: bool,
 ) -> int:
     if type(base) is not MappingProxyType and type(base) is not _OverlayMapping:
-        raise ConfigError(
-            "overlay base must be an exact mapping proxy or overlay."
-        )
+        raise ConfigError("overlay base must be an exact mapping proxy or overlay.")
     if type(delta) is not MappingProxyType:
         raise ConfigError("overlay delta must be an exact mapping proxy.")
     if type(hidden) is not frozenset:
@@ -98,13 +88,9 @@ def _validate_overlay_parts(
         _overlay_keys(base, where="base")
     delta_keys = _overlay_keys(delta, where="delta")
     if any(not _is_exact_overlay_key(key) for key in hidden):
-        raise ConfigError(
-            "overlay mapping keys must be exact string or integer values."
-        )
+        raise ConfigError("overlay mapping keys must be exact string or integer values.")
     if any(not _is_exact_overlay_key(key) for key in end_keys):
-        raise ConfigError(
-            "overlay mapping keys must be exact string or integer values."
-        )
+        raise ConfigError("overlay mapping keys must be exact string or integer values.")
     try:
         if len(set(end_keys)) != len(end_keys):
             raise ConfigError("overlay end keys must be unique.")
@@ -115,16 +101,12 @@ def _validate_overlay_parts(
             raise ConfigError("overlay end keys must identify delta values.")
         for key in end_keys:
             if key in base and key not in hidden:
-                raise ConfigError(
-                    "overlay end keys must be new or re-added values."
-                )
+                raise ConfigError("overlay end keys must be new or re-added values.")
         for key in delta_keys:
             if key in end_set:
                 continue
             if key not in base or key in hidden:
-                raise ConfigError(
-                    "overlay delta replacements must retain a live base key."
-                )
+                raise ConfigError("overlay delta replacements must retain a live base key.")
         return len(base) - len(hidden) + len(end_keys)
     except ConfigError:
         raise
@@ -150,9 +132,7 @@ class _OverlayMapping(Mapping[OriginSegment, object]):
         end_keys: tuple[OriginSegment, ...],
     ) -> None:
         if type(base) is not MappingProxyType and type(base) is not _OverlayMapping:
-            raise ConfigError(
-                "overlay base must be an exact mapping proxy or overlay."
-            )
+            raise ConfigError("overlay base must be an exact mapping proxy or overlay.")
         if type(delta) is not MappingProxyType:
             raise ConfigError("overlay delta must be an exact mapping proxy.")
         if type(hidden) is not frozenset:
@@ -214,11 +194,7 @@ def _trusted_overlay(
     if type(end_keys) is not tuple:
         raise ConfigError("overlay end keys must be an exact tuple.")
     canonical_delta = _snapshot_overlay_proxy(delta, where="delta")
-    if (
-        len(canonical_delta) == 0
-        and len(hidden) == 0
-        and len(end_keys) == 0
-    ):
+    if len(canonical_delta) == 0 and len(hidden) == 0 and len(end_keys) == 0:
         return base
     length = _validate_overlay_parts(
         base,
@@ -240,9 +216,7 @@ def _trusted_overlay_root(
     base: Mapping[OriginSegment, object],
 ) -> _OverlayMapping:
     if type(base) is not MappingProxyType:
-        raise ConfigError(
-            "trusted overlay root must wrap an exact mapping proxy."
-        )
+        raise ConfigError("trusted overlay root must wrap an exact mapping proxy.")
     root = object.__new__(_OverlayMapping)
     object.__setattr__(root, "_base", base)
     object.__setattr__(root, "_delta", MappingProxyType({}))
@@ -256,13 +230,9 @@ def _trusted_overlay_omit(
     base: Mapping[OriginSegment, object], key: OriginSegment
 ) -> Mapping[OriginSegment, object]:
     if not _is_exact_overlay_key(key):
-        raise ConfigError(
-            "trusted overlay omission key must be an exact string or integer."
-        )
+        raise ConfigError("trusted overlay omission key must be an exact string or integer.")
     if type(base) is not _OverlayMapping:
-        raise ConfigError(
-            "trusted overlay omission base must be the exact private marker."
-        )
+        raise ConfigError("trusted overlay omission base must be the exact private marker.")
     if key not in base:
         return base
     return _trusted_overlay(
@@ -280,9 +250,7 @@ class _OverlayBuilder:
 
     def __init__(self, base: Mapping[OriginSegment, object]) -> None:
         if type(base) is not _OverlayMapping:
-            raise ConfigError(
-                "trusted overlay builder base must be the exact private marker."
-            )
+            raise ConfigError("trusted overlay builder base must be the exact private marker.")
         self._base = base
         self._delta: dict[OriginSegment, object] = {}
         self._hidden: set[OriginSegment] = set()
@@ -296,9 +264,7 @@ class _OverlayBuilder:
 
     def __getitem__(self, key: OriginSegment) -> object:
         if not _is_exact_overlay_key(key):
-            raise KeyError(
-                "trusted overlay keys must be exact strings or integers."
-            )
+            raise KeyError("trusted overlay keys must be exact strings or integers.")
         if key in self._delta:
             return self._delta[key]
         if key in self._hidden:
@@ -307,9 +273,7 @@ class _OverlayBuilder:
 
     def __setitem__(self, key: OriginSegment, value: object) -> None:
         if not _is_exact_overlay_key(key):
-            raise ConfigError(
-                "trusted overlay keys must be exact strings or integers."
-            )
+            raise ConfigError("trusted overlay keys must be exact strings or integers.")
         if key in self._delta:
             self._delta[key] = value
             return
@@ -357,9 +321,7 @@ def _canonical_origin(value: object, *, where: str) -> Origin:
     if not isinstance(value, Origin):
         raise ConfigError(f"{where} must be an Origin; got {type(value).__name__}.")
     if not isinstance(value.kind, str):
-        raise ConfigError(
-            f"{where} kind must be a string; got {type(value.kind).__name__}."
-        )
+        raise ConfigError(f"{where} kind must be a string; got {type(value.kind).__name__}.")
     kind = str.__str__(value.kind)
     if value.name is None:
         name = None
@@ -367,15 +329,16 @@ def _canonical_origin(value: object, *, where: str) -> Origin:
         name = str.__str__(value.name)
     else:
         raise ConfigError(
-            f"{where} name must be a string or null; got "
-            f"{type(value.name).__name__}."
+            f"{where} name must be a string or null; got {type(value.name).__name__}."
         )
     try:
         canonical = Origin(kind, name)
     except ValueError as exc:
         raise ConfigError(f"{where} is invalid: {exc}") from exc
-    if type(value) is Origin and type(value.kind) is str and (
-        value.name is None or type(value.name) is str
+    if (
+        type(value) is Origin
+        and type(value.kind) is str
+        and (value.name is None or type(value.name) is str)
     ):
         return value
     return canonical
@@ -437,9 +400,7 @@ def _trusted_origin_node(
     return node
 
 
-def _detach_origin_tree(
-    root: OriginNode, *, public_origin_node: bool
-) -> OriginNode:
+def _detach_origin_tree(root: OriginNode, *, public_origin_node: bool) -> OriginNode:
     completed: dict[int, list[tuple[object, OriginNode]]] = {}
     active: dict[int, list[object]] = {}
     traversal_failure = (
@@ -488,9 +449,7 @@ def _detach_origin_tree(
                     else "merge result origin tree children must be a mapping."
                 )
             canonical: dict[OriginSegment, OriginNode] = {}
-            for segment, child in _mapping_pairs(
-                node.children, failure=traversal_failure
-            ):
+            for segment, child in _mapping_pairs(node.children, failure=traversal_failure):
                 exact_segment = _canonical_segment(
                     segment,
                     where=(
@@ -503,13 +462,10 @@ def _detach_origin_tree(
                     raise ConfigError(
                         "origin child segments collide after canonicalization."
                         if public_origin_node
-                        else "merge result origin tree segments collide after "
-                        "canonicalization."
+                        else "merge result origin tree segments collide after canonicalization."
                     )
                 canonical[exact_segment] = rebuild(child)
-            result = _trusted_origin_node(
-                origin, MappingProxyType(canonical)
-            )
+            result = _trusted_origin_node(origin, MappingProxyType(canonical))
             completed.setdefault(identity, []).append((node, result))
             return result
         finally:
@@ -551,25 +507,19 @@ class DeletionRecord:
         if not given:
             raise ConfigError("deletion path must be non-empty.")
         canonical = tuple(
-            _canonical_segment(segment, where="deletion path segment")
-            for segment in given
+            _canonical_segment(segment, where="deletion path segment") for segment in given
         )
         origin = _canonical_origin(self.origin, where="deletion origin")
         object.__setattr__(self, "path", canonical)
         object.__setattr__(self, "origin", origin)
 
 
-def _validate_deletion_ledger_chunk(
-    rows: object, *, where: str
-) -> tuple[DeletionRecord, ...]:
+def _validate_deletion_ledger_chunk(rows: object, *, where: str) -> tuple[DeletionRecord, ...]:
     if type(rows) is not tuple:
-        raise ConfigError(
-            f"canonical deletion ledger {where} must be an exact tuple."
-        )
+        raise ConfigError(f"canonical deletion ledger {where} must be an exact tuple.")
     if any(type(row) is not DeletionRecord for row in rows):
         raise ConfigError(
-            f"canonical deletion ledger {where} must contain exact "
-            "DeletionRecord values."
+            f"canonical deletion ledger {where} must contain exact DeletionRecord values."
         )
     return rows
 
@@ -589,19 +539,12 @@ class _DeletionLedger(Sequence[DeletionRecord]):
     ) -> None:
         canonical_parent: tuple[DeletionRecord, ...] | _DeletionLedger
         if type(parent) is tuple:
-            canonical_parent = _validate_deletion_ledger_chunk(
-                parent, where="parent"
-            )
+            canonical_parent = _validate_deletion_ledger_chunk(parent, where="parent")
         elif type(parent) is _DeletionLedger:
             canonical_parent = parent
         else:
-            raise ConfigError(
-                "canonical deletion ledger parent must be an exact tuple "
-                "or ledger."
-            )
-        canonical_suffix = _validate_deletion_ledger_chunk(
-            suffix, where="suffix"
-        )
+            raise ConfigError("canonical deletion ledger parent must be an exact tuple or ledger.")
+        canonical_suffix = _validate_deletion_ledger_chunk(suffix, where="suffix")
         object.__setattr__(self, "_parent", canonical_parent)
         object.__setattr__(self, "_suffix", canonical_suffix)
         object.__setattr__(
@@ -610,9 +553,7 @@ class _DeletionLedger(Sequence[DeletionRecord]):
             len(canonical_parent) + len(canonical_suffix),
         )
 
-    def extend(
-        self, suffix: tuple[DeletionRecord, ...]
-    ) -> _DeletionLedger:
+    def extend(self, suffix: tuple[DeletionRecord, ...]) -> _DeletionLedger:
         if type(suffix) is tuple and not suffix:
             return self
         return _DeletionLedger(self, suffix)
@@ -621,9 +562,7 @@ class _DeletionLedger(Sequence[DeletionRecord]):
         return self._length
 
     def __iter__(self):
-        pending: list[
-            tuple[DeletionRecord, ...] | _DeletionLedger
-        ] = [self]
+        pending: list[tuple[DeletionRecord, ...] | _DeletionLedger] = [self]
         while pending:
             current = pending.pop()
             if type(current) is _DeletionLedger:
@@ -638,15 +577,10 @@ class _DeletionLedger(Sequence[DeletionRecord]):
                 bound is not None and type(bound) is not int
                 for bound in (index.start, index.stop, index.step)
             ):
-                raise TypeError(
-                    "canonical deletion ledger slice bounds must be exact "
-                    "int or null."
-                )
+                raise TypeError("canonical deletion ledger slice bounds must be exact int or null.")
             return tuple(self)[index]
         if type(index) is not int:
-            raise TypeError(
-                "canonical deletion ledger indices must be exact int or slice."
-            )
+            raise TypeError("canonical deletion ledger indices must be exact int or slice.")
         position = index
         if position < 0:
             position += self._length
@@ -659,9 +593,7 @@ class _DeletionLedger(Sequence[DeletionRecord]):
                 current = current._parent
                 continue
             return current._suffix[position - parent_length]
-        return tuple.__getitem__(
-            cast(tuple[DeletionRecord, ...], current), position
-        )
+        return tuple.__getitem__(cast(tuple[DeletionRecord, ...], current), position)
 
     def __eq__(self, other: object) -> bool:
         if type(other) is not tuple and type(other) is not _DeletionLedger:
@@ -688,21 +620,15 @@ class MergeResult:
             raise ConfigError("merge result document must be a mapping.")
         if not isinstance(self.origins, OriginNode):
             raise ConfigError("merge result origins must be an OriginNode.")
-        if isinstance(self.deletions, str | bytes) or not isinstance(
-            self.deletions, Sequence
-        ):
+        if isinstance(self.deletions, str | bytes) or not isinstance(self.deletions, Sequence):
             raise ConfigError("merge result deletions must be a sequence.")
         try:
             deletions = tuple(self.deletions)
         except Exception:
-            raise ConfigError(
-                "merge result deletions sequence traversal failed."
-            ) from None
+            raise ConfigError("merge result deletions sequence traversal failed.") from None
         if any(not isinstance(item, DeletionRecord) for item in deletions):
             raise ConfigError("merge result deletions must contain DeletionRecord values.")
-        deletions = tuple(
-            DeletionRecord(item.path, item.origin) for item in deletions
-        )
+        deletions = tuple(DeletionRecord(item.path, item.origin) for item in deletions)
         origins = _canonicalize_origin_tree(self.origins)
         document = freeze_evidence(self.document, where="merge result document")
         assert isinstance(document, Mapping)
@@ -724,17 +650,11 @@ class _CanonicalVariantDocument(Mapping[str, object]):
 
     __slots__ = ("_name", "_parent", "_patch", "_payload", "_state")
 
-    def __init__(
-        self, parent: MergeResult, name: str, patch: object
-    ) -> None:
+    def __init__(self, parent: MergeResult, name: str, patch: object) -> None:
         if type(parent) is not MergeResult:
-            raise ConfigError(
-                "canonical variant parent must be an exact MergeResult."
-            )
+            raise ConfigError("canonical variant parent must be an exact MergeResult.")
         if type(parent.deletions) is not _DeletionLedger:
-            raise ConfigError(
-                "canonical variant parent must carry the trusted deletion ledger."
-            )
+            raise ConfigError("canonical variant parent must carry the trusted deletion ledger.")
         if not isinstance(name, str):
             raise ConfigError("canonical variant name must be a string.")
         exact_name = str.__str__(name)
@@ -769,15 +689,10 @@ def _take_canonical_variant_result(
     returned: object,
 ) -> MergeResult:
     if type(document) is not _CanonicalVariantDocument:
-        raise ConfigError(
-            "canonical variant result requires the exact private document."
-        )
+        raise ConfigError("canonical variant result requires the exact private document.")
     if document._state is _CANONICAL_CONSUMED:
         raise ConfigError("canonical variant result was already taken.")
-    if (
-        document._state is not _CANONICAL_COMPLETED
-        or document._payload is None
-    ):
+    if document._state is not _CANONICAL_COMPLETED or document._payload is None:
         raise ConfigError("canonical variant result was not produced.")
     result, expected_return = document._payload
     if returned is not expected_return:
@@ -796,30 +711,17 @@ def _trusted_merge_result(
 ) -> MergeResult:
     """Build an internal result from lockstep COW fragments already validated."""
     if type(deletions) is not tuple and type(deletions) is not _DeletionLedger:
-        raise ConfigError(
-            "trusted merge deletions must be an exact tuple or ledger."
-        )
+        raise ConfigError("trusted merge deletions must be an exact tuple or ledger.")
     trusted = type(deletions) is _DeletionLedger
-    allowed_mapping_types = (
-        (_OverlayMapping,)
-        if trusted
-        else (MappingProxyType,)
-    )
+    allowed_mapping_types = (_OverlayMapping,) if trusted else (MappingProxyType,)
     if not any(type(document) is candidate for candidate in allowed_mapping_types):
         raise ConfigError("trusted merge document has an invalid exact type.")
     if type(origins) is not OriginNode or origins.origin is not None:
         raise ConfigError("trusted merge origins must be an exact root node.")
-    if not any(
-        type(origins.children) is candidate
-        for candidate in allowed_mapping_types
-    ):
-        raise ConfigError(
-            "trusted merge origin children have an invalid exact type."
-        )
+    if not any(type(origins.children) is candidate for candidate in allowed_mapping_types):
+        raise ConfigError("trusted merge origin children have an invalid exact type.")
     if len(document) != len(origins.children):
-        raise ConfigError(
-            "trusted merge document and origin roots must have equal length."
-        )
+        raise ConfigError("trusted merge document and origin roots must have equal length.")
     result = object.__new__(MergeResult)
     object.__setattr__(result, "document", document)
     object.__setattr__(result, "origins", origins)
@@ -829,9 +731,7 @@ def _trusted_merge_result(
 
 def _canonical_variant_parent(parent: MergeResult) -> MergeResult:
     if type(parent) is not MergeResult or type(parent.deletions) is not tuple:
-        raise ConfigError(
-            "canonical variant parent must have exact public merge evidence."
-        )
+        raise ConfigError("canonical variant parent must have exact public merge evidence.")
     document = _trusted_overlay_root(parent.document)
     origin_children = _trusted_overlay_root(parent.origins.children)
     return _trusted_merge_result(
@@ -841,31 +741,21 @@ def _canonical_variant_parent(parent: MergeResult) -> MergeResult:
     )
 
 
-def _validate_parallel_origin_tree(
-    document: Mapping[str, object], origins: OriginNode
-) -> None:
+def _validate_parallel_origin_tree(document: Mapping[str, object], origins: OriginNode) -> None:
     pending: list[tuple[object, OriginNode, bool]] = [(document, origins, True)]
-    seen_pairs: dict[
-        tuple[int, int], list[tuple[object, OriginNode]]
-    ] = {}
+    seen_pairs: dict[tuple[int, int], list[tuple[object, OriginNode]]] = {}
     document_origins: dict[int, list[tuple[object, OriginNode]]] = {}
     while pending:
         value, node, is_root = pending.pop()
         if not isinstance(node, OriginNode):
-            raise ConfigError(
-                "merge result origin tree children must be OriginNode values."
-            )
+            raise ConfigError("merge result origin tree children must be OriginNode values.")
         if is_root:
             if node.origin is not None:
                 raise ConfigError("merge result origin tree root origin must be null.")
         elif node.origin is None:
-            raise ConfigError(
-                "merge result origin tree descendants must have concrete origins."
-            )
+            raise ConfigError("merge result origin tree descendants must have concrete origins.")
         else:
-            _canonical_origin(
-                node.origin, where="merge result origin tree descendant origin"
-            )
+            _canonical_origin(node.origin, where="merge result origin tree descendant origin")
 
         is_alias_container = isinstance(value, Mapping) or (
             _is_frozen_sequence(value) and len(value) != 0
@@ -875,11 +765,7 @@ def _validate_parallel_origin_tree(
             origin_identity = id(node)
             origins_bucket = document_origins.setdefault(document_identity, [])
             prior = next(
-                (
-                    prior_node
-                    for prior_value, prior_node in origins_bucket
-                    if prior_value is value
-                ),
+                (prior_node for prior_value, prior_node in origins_bucket if prior_value is value),
                 None,
             )
             if prior is not None and prior is not node:
@@ -902,9 +788,7 @@ def _validate_parallel_origin_tree(
         try:
             given_segments = tuple(children)
         except Exception:
-            raise ConfigError(
-                "merge result origin tree children traversal failed."
-            ) from None
+            raise ConfigError("merge result origin tree children traversal failed.") from None
         if isinstance(value, Mapping):
             expected = tuple(value)
             child_values = value
@@ -915,13 +799,10 @@ def _validate_parallel_origin_tree(
             expected = ()
             child_values = None
         expected_type = str if isinstance(value, Mapping) else int
-        if (
-            len(given_segments) != len(expected)
-            or any(type(segment) is not expected_type for segment in given_segments)
+        if len(given_segments) != len(expected) or any(
+            type(segment) is not expected_type for segment in given_segments
         ):
-            raise ConfigError(
-                "merge result origin tree children must exactly match the document."
-            )
+            raise ConfigError("merge result origin tree children must exactly match the document.")
         for segment in expected:
             try:
                 child_node = children[segment]
@@ -930,14 +811,8 @@ def _validate_parallel_origin_tree(
                     "merge result origin tree children must exactly match the document."
                 ) from None
             except Exception:
-                raise ConfigError(
-                    "merge result origin tree child lookup failed."
-                ) from None
-            child_value = (
-                child_values[segment]
-                if child_values is not None
-                else value[segment]
-            )
+                raise ConfigError("merge result origin tree child lookup failed.") from None
+            child_value = child_values[segment] if child_values is not None else value[segment]
             pending.append((child_value, child_node, False))
 
 
@@ -955,27 +830,18 @@ def _origin_node(
     if memo is None:
         memo = {}
     identity = id(value)
-    memoized = isinstance(value, Mapping) or (
-        _is_frozen_sequence(value) and len(value) != 0
-    )
+    memoized = isinstance(value, Mapping) or (_is_frozen_sequence(value) and len(value) != 0)
     if memoized:
         for source, node in memo.get(identity, ()):
             if source is value:
                 return node
     if isinstance(value, Mapping):
-        children = {
-            key: _origin_node(item, origin, memo) for key, item in value.items()
-        }
+        children = {key: _origin_node(item, origin, memo) for key, item in value.items()}
     elif isinstance(value, list | tuple) or type(value) is _FrozenConcat:
-        children = {
-            index: _origin_node(item, origin, memo)
-            for index, item in enumerate(value)
-        }
+        children = {index: _origin_node(item, origin, memo) for index, item in enumerate(value)}
     else:
         children = {}
-    result = _trusted_origin_node(
-        origin=origin, children=_frozen_children(children)
-    )
+    result = _trusted_origin_node(origin=origin, children=_frozen_children(children))
     if memoized:
         memo.setdefault(identity, []).append((value, result))
     return result
@@ -986,20 +852,14 @@ def _root_node(document: Mapping[str, object], origin: Origin) -> OriginNode:
     return _trusted_origin_node(
         origin=None,
         children=_frozen_children(
-            {
-                key: _origin_node(value, origin, memo)
-                for key, value in document.items()
-            }
+            {key: _origin_node(value, origin, memo) for key, value in document.items()}
         ),
     )
 
 
 def initial_merge(document: Mapping[str, object], *, origin: Origin) -> MergeResult:
     if not isinstance(document, Mapping):
-        raise ConfigError(
-            "initial_merge: document is a mapping; got "
-            f"{type(document).__name__}."
-        )
+        raise ConfigError(f"initial_merge: document is a mapping; got {type(document).__name__}.")
     origin = _canonical_origin(origin, where="initial_merge origin")
     evidence = freeze_evidence(document, where="initial_merge document")
     assert isinstance(evidence, Mapping)
@@ -1041,8 +901,7 @@ def _append_value(
     appended = given["append"]
     if not isinstance(appended, tuple):
         raise ConfigError(
-            f"{key!r}: append is a sequence; got "
-            f"{type(appended).__name__} ({appended!r})."
+            f"{key!r}: append is a sequence; got {type(appended).__name__} ({appended!r})."
         )
     if not _is_frozen_sequence(inherited):
         raise ConfigError(
@@ -1061,19 +920,15 @@ def _append_value(
             values = _FrozenConcat(inherited, appended)
         else:
             values = cast(_FrozenConcat, inherited).extend(appended)
-        inherited_children: dict[OriginSegment, OriginNode] | _OverlayBuilder = (
-            _OverlayBuilder(
-                context.overlay_base(inherited_origin.children)
-            )
+        inherited_children: dict[OriginSegment, OriginNode] | _OverlayBuilder = _OverlayBuilder(
+            context.overlay_base(inherited_origin.children)
         )
     else:
         values = tuple([*inherited, *appended])
         inherited_children = dict(inherited_origin.children)
     offset = len(inherited)
     for index, item in enumerate(appended):
-        inherited_children[offset + index] = _origin_node(
-            item, origin, context.origin_nodes
-        )
+        inherited_children[offset + index] = _origin_node(item, origin, context.origin_nodes)
     origin_children = (
         inherited_children.publish()
         if type(inherited_children) is _OverlayBuilder
@@ -1086,9 +941,7 @@ def _append_value(
             children=origin_children,
         ),
     )
-    context.appends.setdefault(cache_key, []).append(
-        (inherited, inherited_origin, given, result)
-    )
+    context.appends.setdefault(cache_key, []).append((inherited, inherited_origin, given, result))
     return result
 
 
@@ -1136,26 +989,20 @@ class _MergeContext:
                 ]
             ],
         ] = {}
-        self.origin_nodes: dict[
-            int, list[tuple[object, OriginNode]]
-        ] = {}
+        self.origin_nodes: dict[int, list[tuple[object, OriginNode]]] = {}
 
     @property
     def trusted(self) -> bool:
         return self.storage is _TRUSTED_STORAGE
 
-    def overlay_base(
-        self, base: Mapping[OriginSegment, object]
-    ) -> _OverlayMapping:
+    def overlay_base(self, base: Mapping[OriginSegment, object]) -> _OverlayMapping:
         if not self.trusted:
             raise ConfigError("ordinary merge cannot request trusted storage.")
         if type(base) is _OverlayMapping:
             return base
         if type(base) is MappingProxyType:
             return _trusted_overlay_root(base)
-        raise ConfigError(
-            "trusted merge base must be an exact mapping proxy or overlay."
-        )
+        raise ConfigError("trusted merge base must be an exact mapping proxy or overlay.")
 
 
 def _merge_mapping(
@@ -1166,9 +1013,7 @@ def _merge_mapping(
     origin: Origin,
     context: _MergeContext,
     diagnostic_prefix: tuple[OriginSegment, ...],
-) -> tuple[
-    Mapping[str, object], OriginNode, tuple[tuple[OriginSegment, ...], ...]
-]:
+) -> tuple[Mapping[str, object], OriginNode, tuple[tuple[OriginSegment, ...], ...]]:
     cache_key = (id(base), id(base_origins), id(patch))
     for (
         cached_base,
@@ -1176,20 +1021,14 @@ def _merge_mapping(
         cached_patch,
         cached_result,
     ) in context.fragments.get(cache_key, ()):
-        if (
-            cached_base is base
-            and cached_origins is base_origins
-            and cached_patch is patch
-        ):
+        if cached_base is base and cached_origins is base_origins and cached_patch is patch:
             return cached_result
     if context.trusted:
         trusted_base = context.overlay_base(base)
         trusted_children = context.overlay_base(base_origins.children)
-        merged: dict[str, object] | _OverlayBuilder = _OverlayBuilder(
-            trusted_base
-        )
-        children: dict[OriginSegment, OriginNode] | _OverlayBuilder = (
-            _OverlayBuilder(trusted_children)
+        merged: dict[str, object] | _OverlayBuilder = _OverlayBuilder(trusted_base)
+        children: dict[OriginSegment, OriginNode] | _OverlayBuilder = _OverlayBuilder(
+            trusted_children
         )
     else:
         merged = dict(base)
@@ -1215,9 +1054,7 @@ def _merge_mapping(
         if isinstance(value, Mapping) and "append" in value:
             if inherited_origin is None:
                 inherited = ()
-                inherited_origin = _origin_node(
-                    inherited, origin, context.origin_nodes
-                )
+                inherited_origin = _origin_node(inherited, origin, context.origin_nodes)
             merged[key], children[key] = _append_value(
                 key=key,
                 inherited=inherited,
@@ -1264,9 +1101,7 @@ def _merge_mapping(
         ),
         tuple(deletions),
     )
-    context.fragments.setdefault(cache_key, []).append(
-        (base, base_origins, patch, result)
-    )
+    context.fragments.setdefault(cache_key, []).append((base, base_origins, patch, result))
     return result
 
 
@@ -1278,23 +1113,17 @@ def merge_with_origins(
 ) -> MergeResult:
     if not isinstance(parent, MergeResult):
         raise ConfigError(
-            "merge_with_origins: parent is a MergeResult; got "
-            f"{type(parent).__name__}."
+            f"merge_with_origins: parent is a MergeResult; got {type(parent).__name__}."
         )
     if not isinstance(patch, Mapping):
-        raise ConfigError(
-            "merge_with_origins: patch is a mapping; got "
-            f"{type(patch).__name__}."
-        )
+        raise ConfigError(f"merge_with_origins: patch is a mapping; got {type(patch).__name__}.")
     if type(parent.deletions) is _DeletionLedger and (
         type(parent.document) is not _OverlayMapping
         or type(parent.origins) is not OriginNode
         or parent.origins.origin is not None
         or type(parent.origins.children) is not _OverlayMapping
     ):
-        raise ConfigError(
-            "trusted merge parent must carry exact overlay roots."
-        )
+        raise ConfigError("trusted merge parent must carry exact overlay roots.")
     origin = _canonical_origin(origin, where="merge_with_origins origin")
     frozen_patch = freeze_evidence(patch, where="merge_with_origins patch")
     assert isinstance(frozen_patch, Mapping)
@@ -1305,16 +1134,12 @@ def merge_with_origins(
         origin=origin,
         context=_MergeContext(
             storage=(
-                _TRUSTED_STORAGE
-                if type(parent.deletions) is _DeletionLedger
-                else _ORDINARY_STORAGE
+                _TRUSTED_STORAGE if type(parent.deletions) is _DeletionLedger else _ORDINARY_STORAGE
             )
         ),
         diagnostic_prefix=(),
     )
-    suffix = tuple(
-        DeletionRecord(path, origin) for path in relative_deletions
-    )
+    suffix = tuple(DeletionRecord(path, origin) for path in relative_deletions)
     if type(parent.deletions) is _DeletionLedger:
         deletions: Sequence[DeletionRecord] = parent.deletions.extend(suffix)
     else:
@@ -1334,9 +1159,7 @@ def origins_at(origins: OriginNode, path: Sequence[OriginSegment]) -> Origin:
     except Exception:
         raise ConfigError("origin path sequence traversal failed.") from None
     for segment in segments:
-        exact_segment = _canonical_segment(
-            segment, where="origin path segment"
-        )
+        exact_segment = _canonical_segment(segment, where="origin path segment")
         traversed.append(exact_segment)
         try:
             node = node.children[exact_segment]
@@ -1384,9 +1207,7 @@ _COMPATIBILITY_OWNERSHIP_COPY_ATOMIC_TYPES = (
 )
 
 
-def _compatibility_has_exact_type(
-    value: object, candidates: tuple[type, ...]
-) -> bool:
+def _compatibility_has_exact_type(value: object, candidates: tuple[type, ...]) -> bool:
     value_type = type(value)
     return any(value_type is candidate for candidate in candidates)
 
@@ -1395,9 +1216,7 @@ _COMPATIBILITY_MISSING = object()
 _COMPATIBILITY_UNSAFE_LAZY_ANNOTATIONS = object()
 
 
-def _compatibility_raw_mro_descriptor(
-    value_type: type, name: str
-) -> object:
+def _compatibility_raw_mro_descriptor(value_type: type, name: str) -> object:
     bases = type.__getattribute__(value_type, "__mro__")
     for base in bases:
         namespace = type.__getattribute__(base, "__dict__")
@@ -1408,16 +1227,12 @@ def _compatibility_raw_mro_descriptor(
     return _COMPATIBILITY_MISSING
 
 
-def _compatibility_has_mro_identity(
-    value: object, candidates: tuple[type, ...]
-) -> bool:
+def _compatibility_has_mro_identity(value: object, candidates: tuple[type, ...]) -> bool:
     try:
         bases = type.__getattribute__(type(value), "__mro__")
     except Exception:
         raise ConfigError(_COMPATIBILITY_FAILURE) from None
-    return any(
-        base is candidate for base in bases for candidate in candidates
-    )
+    return any(base is candidate for base in bases for candidate in candidates)
 
 
 def _compatibility_type_name(value: object) -> str:
@@ -1430,9 +1245,7 @@ def _compatibility_type_name(value: object) -> str:
         raise ConfigError(_COMPATIBILITY_FAILURE) from None
 
 
-def _compatibility_has_mro_base(
-    value: object, candidates: tuple[type, ...]
-) -> bool:
+def _compatibility_has_mro_base(value: object, candidates: tuple[type, ...]) -> bool:
     value_type = type(value)
     if _compatibility_has_mro_identity(value, candidates):
         return True
@@ -1460,28 +1273,21 @@ def _compatibility_is_mapping(value: object) -> bool:
 
 
 def _compatibility_is_mutable_mapping(value: object) -> bool:
-    return _compatibility_has_mro_base(
-        value, (dict, MutableMapping)
-    )
+    return _compatibility_has_mro_base(value, (dict, MutableMapping))
 
 
 def _compatibility_pairs(
     mapping: Mapping,
 ) -> dict[str, object]:
     canonical: dict[str, object] = {}
-    for key, value in _mapping_pairs(
-        mapping, failure=_COMPATIBILITY_FAILURE
-    ):
+    for key, value in _mapping_pairs(mapping, failure=_COMPATIBILITY_FAILURE):
         if not _compatibility_has_mro_identity(key, (str,)):
             raise ConfigError(
-                "merge_extends: keys are strings; got "
-                f"{_compatibility_type_name(key)}."
+                f"merge_extends: keys are strings; got {_compatibility_type_name(key)}."
             )
         exact_key = str.__str__(key)
         if exact_key in canonical:
-            raise ConfigError(
-                "merge_extends: keys collide after canonicalization."
-            )
+            raise ConfigError("merge_extends: keys collide after canonicalization.")
         canonical[exact_key] = value
     return canonical
 
@@ -1523,9 +1329,7 @@ def _compatibility_deepcopy_roots(
                 discover(nested)
         elif is_mapping:
             try:
-                deepcopy_protocol = getattr(
-                    type(item), "__deepcopy__", None
-                )
+                deepcopy_protocol = getattr(type(item), "__deepcopy__", None)
             except Exception:
                 raise ConfigError(_COMPATIBILITY_FAILURE) from None
             if deepcopy_protocol is not None:
@@ -1533,9 +1337,7 @@ def _compatibility_deepcopy_roots(
             canonical = _compatibility_pairs(item)
             for nested in canonical.values():
                 discover(nested)
-        elif _compatibility_has_mro_identity(
-            item, (list, tuple, set, frozenset)
-        ):
+        elif _compatibility_has_mro_identity(item, (list, tuple, set, frozenset)):
             for nested in protocol_values(item):
                 discover(nested)
 
@@ -1558,9 +1360,9 @@ def _compatibility_deepcopy_roots(
     roots = detached((parent, child))
     assert type(roots) is tuple and len(roots) == 2
     detached_parent, detached_child = roots
-    if not _compatibility_is_mapping(
-        detached_parent
-    ) or not _compatibility_is_mapping(detached_child):
+    if not _compatibility_is_mapping(detached_parent) or not _compatibility_is_mapping(
+        detached_child
+    ):
         raise ConfigError(_COMPATIBILITY_FAILURE)
     return detached_parent, detached_child, original_mutables
 
@@ -1599,9 +1401,7 @@ def _compatibility_reaches_forbidden_mapping(
     try:
         pending = [(item, field_role, 0) for item in values]
         if state_mappings is not None:
-            pending.extend(
-                (item, field_role, 2) for item in state_mappings
-            )
+            pending.extend((item, field_role, 2) for item in state_mappings)
     except Exception:
         raise ConfigError(_COMPATIBILITY_FAILURE) from None
     public_identities: dict[int, list[object]] = {}
@@ -1614,9 +1414,7 @@ def _compatibility_reaches_forbidden_mapping(
     seen_by_mode: tuple[dict[int, list[object]], ...] = ({}, {}, {})
     while pending:
         item, role, state_mapping_kind = pending.pop()
-        if role == content_role and _compatibility_has_identity(
-            public_identities, item
-        ):
+        if role == content_role and _compatibility_has_identity(public_identities, item):
             role = public_role
         if role == public_role:
             continue
@@ -1629,19 +1427,13 @@ def _compatibility_reaches_forbidden_mapping(
         if ignored is not None and item is ignored:
             continue
         if item is target or (
-            forbidden is not None
-            and _compatibility_has_identity(forbidden, item)
+            forbidden is not None and _compatibility_has_identity(forbidden, item)
         ):
             return True
-        if _compatibility_has_exact_type(
-            item, _COMPATIBILITY_OWNERSHIP_SCALAR_TYPES
-        ):
+        if _compatibility_has_exact_type(item, _COMPATIBILITY_OWNERSHIP_SCALAR_TYPES):
             continue
-        is_known_container = (
-            _compatibility_is_mapping(item)
-            or _compatibility_has_mro_identity(
-                item, (list, tuple, set, frozenset)
-            )
+        is_known_container = _compatibility_is_mapping(item) or _compatibility_has_mro_identity(
+            item, (list, tuple, set, frozenset)
         )
         if not is_known_container and not inspect_object_state:
             if opaque_is_failure:
@@ -1661,42 +1453,29 @@ def _compatibility_reaches_forbidden_mapping(
                 nested_state_mappings,
                 _,
                 state_is_complete,
-            ) = (
-                _compatibility_ownership_state(item)
-            )
+            ) = _compatibility_ownership_state(item)
             if state_is_complete:
-                pending.extend(
-                    (state, field_role, 0) for state in state_values
-                )
-                pending.extend(
-                    (state, field_role, 1)
-                    for state in nested_state_mappings
-                )
+                pending.extend((state, field_role, 0) for state in state_values)
+                pending.extend((state, field_role, 1) for state in nested_state_mappings)
         if not is_known_container:
             continue
         if _compatibility_is_mapping(item):
             if inspect_object_state:
-                nested_values = (
-                    _compatibility_uncanonicalized_mapping_values(item)
-                )
+                nested_values = _compatibility_uncanonicalized_mapping_values(item)
             else:
                 nested_values = _compatibility_pairs(item).values()
             child_role = (
                 content_role
                 if state_mapping_kind == 2
                 and public_mapping is not None
-                and _compatibility_state_mapping_is_public_view(
-                    item, public_mapping
-                )
+                and _compatibility_state_mapping_is_public_view(item, public_mapping)
                 else field_role
                 if state_mapping_kind
                 else public_role
                 if role == public_role
                 else content_role
             )
-            pending.extend(
-                (nested, child_role, 0) for nested in nested_values
-            )
+            pending.extend((nested, child_role, 0) for nested in nested_values)
             continue
         try:
             iterator = iter(item)
@@ -1709,16 +1488,12 @@ def _compatibility_reaches_forbidden_mapping(
                 break
             except Exception:
                 raise ConfigError(_COMPATIBILITY_FAILURE) from None
-            child_role = (
-                public_role if role == public_role else content_role
-            )
+            child_role = public_role if role == public_role else content_role
             pending.append((nested, child_role, 0))
     return False
 
 
-def _compatibility_reset_mapping(
-    mapping: MutableMapping, values: Mapping[str, object]
-) -> None:
+def _compatibility_reset_mapping(mapping: MutableMapping, values: Mapping[str, object]) -> None:
     try:
         if _compatibility_has_mro_identity(mapping, (dict,)):
             dict.clear(mapping)
@@ -1730,9 +1505,7 @@ def _compatibility_reset_mapping(
         raise ConfigError(_COMPATIBILITY_FAILURE) from None
 
 
-def _compatibility_mapping_get(
-    mapping: Mapping, key: str, default: object = None
-) -> object:
+def _compatibility_mapping_get(mapping: Mapping, key: str, default: object = None) -> object:
     try:
         if _compatibility_has_mro_identity(mapping, (dict,)):
             return dict.get(mapping, key, default)
@@ -1741,9 +1514,7 @@ def _compatibility_mapping_get(
         raise ConfigError(_COMPATIBILITY_FAILURE) from None
 
 
-def _compatibility_mapping_pop(
-    mapping: MutableMapping, key: str
-) -> None:
+def _compatibility_mapping_pop(mapping: MutableMapping, key: str) -> None:
     try:
         if _compatibility_has_mro_identity(mapping, (dict,)):
             dict.pop(mapping, key, None)
@@ -1753,9 +1524,7 @@ def _compatibility_mapping_pop(
         raise ConfigError(_COMPATIBILITY_FAILURE) from None
 
 
-def _compatibility_mapping_set(
-    mapping: MutableMapping, key: str, value: object
-) -> None:
+def _compatibility_mapping_set(mapping: MutableMapping, key: str, value: object) -> None:
     try:
         if _compatibility_has_mro_identity(mapping, (dict,)):
             dict.__setitem__(mapping, key, value)
@@ -1765,9 +1534,7 @@ def _compatibility_mapping_set(
         raise ConfigError(_COMPATIBILITY_FAILURE) from None
 
 
-def _compatibility_add_identity(
-    buckets: dict[int, list[object]], item: object
-) -> bool:
+def _compatibility_add_identity(buckets: dict[int, list[object]], item: object) -> bool:
     identity = id(item)
     bucket = buckets.setdefault(identity, [])
     if any(source is item for source in bucket):
@@ -1776,12 +1543,8 @@ def _compatibility_add_identity(
     return True
 
 
-def _compatibility_has_identity(
-    buckets: dict[int, list[object]], item: object
-) -> bool:
-    return any(
-        source is item for source in buckets.get(id(item), ())
-    )
+def _compatibility_has_identity(buckets: dict[int, list[object]], item: object) -> bool:
+    return any(source is item for source in buckets.get(id(item), ()))
 
 
 def _compatibility_increment_occurrence(
@@ -1843,9 +1606,7 @@ def _compatibility_mapping_occurrences(
             _compatibility_increment_occurrence(occurrences, item)
         if not (
             _compatibility_is_mapping(item)
-            or _compatibility_has_mro_identity(
-                item, (list, tuple, set, frozenset)
-            )
+            or _compatibility_has_mro_identity(item, (list, tuple, set, frozenset))
         ):
             continue
         if not _compatibility_add_identity(expanded, item):
@@ -1874,9 +1635,7 @@ def _compatibility_mark_mapping_descendants(
         item = pending.pop()
         if not (
             _compatibility_is_mapping(item)
-            or _compatibility_has_mro_identity(
-                item, (list, tuple, set, frozenset)
-            )
+            or _compatibility_has_mro_identity(item, (list, tuple, set, frozenset))
         ):
             continue
         if not _compatibility_add_identity(expanded, item):
@@ -1886,9 +1645,7 @@ def _compatibility_mark_mapping_descendants(
         pending.extend(_compatibility_iter_values(item))
 
 
-def _compatibility_builtin_descriptor_value(
-    value: object, owner: type, name: str
-) -> object:
+def _compatibility_builtin_descriptor_value(value: object, owner: type, name: str) -> object:
     try:
         descriptor = type.__getattribute__(owner, "__dict__")[name]
         descriptor_type = type(descriptor)
@@ -1930,16 +1687,12 @@ def _compatibility_function_state(
 
     state_values: list[object] = []
     state_mappings: list[dict] = []
-    function_state = _compatibility_builtin_descriptor_value(
-        value, FunctionType, "__dict__"
-    )
+    function_state = _compatibility_builtin_descriptor_value(value, FunctionType, "__dict__")
     if type(function_state) is not dict:
         raise ConfigError(_COMPATIBILITY_FAILURE)
     state_mappings.append(function_state)
 
-    closure = _compatibility_builtin_descriptor_value(
-        value, FunctionType, "__closure__"
-    )
+    closure = _compatibility_builtin_descriptor_value(value, FunctionType, "__closure__")
     if closure is not None:
         if type(closure) is not tuple:
             raise ConfigError(_COMPATIBILITY_FAILURE)
@@ -1947,15 +1700,11 @@ def _compatibility_function_state(
             if type(cell) is not CellType:
                 raise ConfigError(_COMPATIBILITY_FAILURE)
             state_values.append(cell)
-            contents = _compatibility_builtin_descriptor_value(
-                cell, CellType, "cell_contents"
-            )
+            contents = _compatibility_builtin_descriptor_value(cell, CellType, "cell_contents")
             if contents is not _COMPATIBILITY_MISSING:
                 state_values.append(contents)
 
-    defaults = _compatibility_builtin_descriptor_value(
-        value, FunctionType, "__defaults__"
-    )
+    defaults = _compatibility_builtin_descriptor_value(value, FunctionType, "__defaults__")
     if defaults is not None:
         if type(defaults) is not tuple:
             raise ConfigError(_COMPATIBILITY_FAILURE)
@@ -1969,9 +1718,7 @@ def _compatibility_function_state(
             raise ConfigError(_COMPATIBILITY_FAILURE)
         state_mappings.append(keyword_defaults)
 
-    annotate = _compatibility_builtin_descriptor_value(
-        value, FunctionType, "__annotate__"
-    )
+    annotate = _compatibility_builtin_descriptor_value(value, FunctionType, "__annotate__")
     if annotate is _COMPATIBILITY_MISSING or annotate is None:
         annotations = _compatibility_builtin_descriptor_value(
             value, FunctionType, "__annotations__"
@@ -1984,19 +1731,14 @@ def _compatibility_function_state(
         state_values.append(_COMPATIBILITY_UNSAFE_LAZY_ANNOTATIONS)
 
     for name in ("__doc__", "__module__"):
-        metadata = _compatibility_builtin_descriptor_value(
-            value, FunctionType, name
-        )
+        metadata = _compatibility_builtin_descriptor_value(value, FunctionType, name)
         if metadata is not _COMPATIBILITY_MISSING and metadata is not None:
             state_values.append(metadata)
 
     type_parameters = _compatibility_builtin_descriptor_value(
         value, FunctionType, "__type_params__"
     )
-    if (
-        type_parameters is not _COMPATIBILITY_MISSING
-        and type_parameters is not None
-    ):
+    if type_parameters is not _COMPATIBILITY_MISSING and type_parameters is not None:
         if type(type_parameters) is not tuple:
             raise ConfigError(_COMPATIBILITY_FAILURE)
         state_values.append(type_parameters)
@@ -2015,9 +1757,7 @@ def _compatibility_referential_atomic_state(value: object) -> list[object]:
         referent = ReferenceType.__call__(value)
     except Exception:
         raise ConfigError(_COMPATIBILITY_FAILURE) from None
-    callback = _compatibility_builtin_descriptor_value(
-        value, ReferenceType, "__callback__"
-    )
+    callback = _compatibility_builtin_descriptor_value(value, ReferenceType, "__callback__")
     state_values = []
     if referent is not None:
         state_values.append(referent)
@@ -2029,13 +1769,9 @@ def _compatibility_referential_atomic_state(value: object) -> list[object]:
 def _compatibility_ownership_state(
     value: object,
 ) -> tuple[list[object], list[dict], bool, bool]:
-    if _compatibility_has_exact_type(
-        value, _COMPATIBILITY_OWNERSHIP_SCALAR_TYPES
-    ):
+    if _compatibility_has_exact_type(value, _COMPATIBILITY_OWNERSHIP_SCALAR_TYPES):
         return [], [], False, True
-    if _compatibility_has_exact_type(
-        value, (FunctionType, BuiltinFunctionType)
-    ):
+    if _compatibility_has_exact_type(value, (FunctionType, BuiltinFunctionType)):
         state_values, state_mappings = _compatibility_function_state(value)
         return state_values, state_mappings, True, True
     if _compatibility_has_exact_type(value, (ReferenceType, property)):
@@ -2046,9 +1782,7 @@ def _compatibility_ownership_state(
             True,
         )
     if type(value) is CellType:
-        contents = _compatibility_builtin_descriptor_value(
-            value, CellType, "cell_contents"
-        )
+        contents = _compatibility_builtin_descriptor_value(value, CellType, "cell_contents")
         if contents is _COMPATIBILITY_MISSING:
             return [], [], True, True
         return [contents], [], True, True
@@ -2065,21 +1799,16 @@ def _compatibility_ownership_state(
         raise ConfigError(_COMPATIBILITY_FAILURE) from None
 
     try:
-        dict_descriptor = _compatibility_raw_mro_descriptor(
-            value_type, "__dict__"
-        )
+        dict_descriptor = _compatibility_raw_mro_descriptor(value_type, "__dict__")
     except Exception:
         raise ConfigError(_COMPATIBILITY_FAILURE) from None
     descriptor_type = type(dict_descriptor)
     if any(
-        descriptor_type is candidate
-        for candidate in (GetSetDescriptorType, MemberDescriptorType)
+        descriptor_type is candidate for candidate in (GetSetDescriptorType, MemberDescriptorType)
     ):
         state_bearing = True
         try:
-            instance_state = descriptor_type.__get__(
-                dict_descriptor, value, value_type
-            )
+            instance_state = descriptor_type.__get__(dict_descriptor, value, value_type)
         except AttributeError:
             pass
         except Exception:
@@ -2104,9 +1833,7 @@ def _compatibility_ownership_state(
                 continue
             state_bearing = True
             try:
-                state = MemberDescriptorType.__get__(
-                    descriptor, value, value_type
-                )
+                state = MemberDescriptorType.__get__(descriptor, value, value_type)
             except AttributeError:
                 continue
             except Exception:
@@ -2114,12 +1841,8 @@ def _compatibility_ownership_state(
             state_values.append(state)
     if _compatibility_has_mro_identity(value, (memoryview,)):
         try:
-            descriptor = type.__getattribute__(memoryview, "__dict__")[
-                "obj"
-            ]
-            backing = GetSetDescriptorType.__get__(
-                descriptor, value, value_type
-            )
+            descriptor = type.__getattribute__(memoryview, "__dict__")["obj"]
+            backing = GetSetDescriptorType.__get__(descriptor, value, value_type)
         except Exception:
             raise ConfigError(_COMPATIBILITY_FAILURE) from None
         state_bearing = True
@@ -2138,17 +1861,13 @@ def _compatibility_ownership_state(
                 raise ConfigError(_COMPATIBILITY_FAILURE) from None
         state_bearing = True
     if _compatibility_has_mro_identity(value, (ReferenceType,)):
-        state_values.extend(
-            _compatibility_referential_atomic_state(value)
-        )
+        state_values.extend(_compatibility_referential_atomic_state(value))
         state_bearing = True
     return state_values, state_mappings, state_bearing, state_is_complete
 
 
 def _compatibility_instance_state_values(value: object) -> list[object]:
-    state_values, state_mappings, _, state_is_complete = (
-        _compatibility_ownership_state(value)
-    )
+    state_values, state_mappings, _, state_is_complete = _compatibility_ownership_state(value)
     if not state_is_complete:
         raise ConfigError(_COMPATIBILITY_FAILURE)
     return [*state_values, *state_mappings]
@@ -2157,12 +1876,7 @@ def _compatibility_instance_state_values(value: object) -> list[object]:
 def _compatibility_uncanonicalized_mapping_values(
     mapping: Mapping,
 ) -> list[object]:
-    return [
-        value
-        for _, value in _mapping_pairs(
-            mapping, failure=_COMPATIBILITY_FAILURE
-        )
-    ]
+    return [value for _, value in _mapping_pairs(mapping, failure=_COMPATIBILITY_FAILURE)]
 
 
 def _compatibility_state_mapping_is_public_view(
@@ -2193,9 +1907,7 @@ def _compatibility_original_mutables(
     pending: list[object] = [*roots]
     while pending:
         item = pending.pop()
-        if _compatibility_has_exact_type(
-            item, _COMPATIBILITY_OWNERSHIP_SCALAR_TYPES
-        ):
+        if _compatibility_has_exact_type(item, _COMPATIBILITY_OWNERSHIP_SCALAR_TYPES):
             continue
         if not _compatibility_add_identity(seen, item):
             continue
@@ -2203,31 +1915,17 @@ def _compatibility_original_mutables(
         is_copy_atomic = _compatibility_has_exact_type(
             item, _COMPATIBILITY_OWNERSHIP_COPY_ATOMIC_TYPES
         )
-        is_immutable_container = _compatibility_has_mro_identity(
-            item, (tuple, frozenset)
-        )
-        is_static_namespace = _compatibility_has_mro_identity(
-            item, (type, ModuleType)
-        )
-        state_values, state_mappings, _, state_is_complete = (
-            _compatibility_ownership_state(item)
-        )
-        if not (
-            is_copy_atomic
-            or is_immutable_container
-            or is_static_namespace
-        ):
+        is_immutable_container = _compatibility_has_mro_identity(item, (tuple, frozenset))
+        is_static_namespace = _compatibility_has_mro_identity(item, (type, ModuleType))
+        state_values, state_mappings, _, state_is_complete = _compatibility_ownership_state(item)
+        if not (is_copy_atomic or is_immutable_container or is_static_namespace):
             _compatibility_add_identity(mutables, item)
         if state_is_complete:
             pending.extend(state_values)
             pending.extend(state_mappings)
         if is_mapping:
-            pending.extend(
-                _compatibility_uncanonicalized_mapping_values(item)
-            )
-        elif _compatibility_has_mro_identity(
-            item, (list, tuple, set, frozenset)
-        ):
+            pending.extend(_compatibility_uncanonicalized_mapping_values(item))
+        elif _compatibility_has_mro_identity(item, (list, tuple, set, frozenset)):
             pending.extend(_compatibility_iter_values(item))
     return mutables
 
@@ -2253,9 +1951,7 @@ def _compatibility_validate_split_state(
             raise ConfigError(_COMPATIBILITY_FAILURE)
     state_values = _compatibility_instance_state_values(copied)
     if copied_data is not None:
-        state_values = [
-            state for state in state_values if state is not copied_data
-        ]
+        state_values = [state for state in state_values if state is not copied_data]
     if _compatibility_reaches_forbidden_mapping(
         state_values,
         target=parent,
@@ -2285,16 +1981,11 @@ def _compatibility_validate_mapping_mutation_target(
             copied_data = object.__getattribute__(mapping, "data")
         except Exception:
             raise ConfigError(_COMPATIBILITY_FAILURE) from None
-        if (
-            type(copied_data) is not dict
-            or _compatibility_has_identity(
-                context.original_mutables, copied_data
-            )
+        if type(copied_data) is not dict or _compatibility_has_identity(
+            context.original_mutables, copied_data
         ):
             raise ConfigError(_COMPATIBILITY_FAILURE)
-    state_values, state_mappings, _, state_is_complete = (
-        _compatibility_ownership_state(mapping)
-    )
+    state_values, state_mappings, _, state_is_complete = _compatibility_ownership_state(mapping)
     if not state_is_complete:
         raise ConfigError(_COMPATIBILITY_FAILURE)
     if _compatibility_reaches_forbidden_mapping(
@@ -2322,8 +2013,7 @@ def _compatibility_validate_dict_read_protocols(parent: dict) -> None:
         bases = type.__getattribute__(type(parent), "__mro__")
         for name, expected_owners in protocols:
             expected = tuple(
-                type.__getattribute__(owner, "__dict__")[name]
-                for owner in expected_owners
+                type.__getattribute__(owner, "__dict__")[name] for owner in expected_owners
             )
             resolved = None
             for base in bases:
@@ -2349,9 +2039,7 @@ def _compatibility_split_mapping(
 ) -> MutableMapping:
     if type(parent) is dict:
         return dict(parent_values)
-    if not _compatibility_has_mro_identity(
-        parent, (dict,)
-    ) and type(parent) is not UserDict:
+    if not _compatibility_has_mro_identity(parent, (dict,)) and type(parent) is not UserDict:
         raise ConfigError(_COMPATIBILITY_FAILURE)
     try:
         merged = copy.copy(parent)
@@ -2363,9 +2051,7 @@ def _compatibility_split_mapping(
         or not _compatibility_is_mutable_mapping(merged)
     ):
         raise ConfigError(_COMPATIBILITY_FAILURE)
-    _compatibility_validate_split_state(
-        merged, parent, context=context
-    )
+    _compatibility_validate_split_state(merged, parent, context=context)
     return merged
 
 
@@ -2379,45 +2065,26 @@ def _merge_extends_compat(
     child_identity = id(child)
     active_bucket = context.active_children.setdefault(child_identity, [])
     if any(source is child for source in active_bucket):
-        raise ConfigError(
-            "merge_extends: overlapping cyclic mappings cannot be merged."
-        )
+        raise ConfigError("merge_extends: overlapping cyclic mappings cannot be merged.")
     active_bucket.append(child)
     try:
         parent_values = _compatibility_pairs(parent)
-        if type(parent) is not dict and _compatibility_has_mro_identity(
-            parent, (dict,)
-        ):
+        if type(parent) is not dict and _compatibility_has_mro_identity(parent, (dict,)):
             _compatibility_validate_dict_read_protocols(parent)
         requires_split = not reuse_parent and (
-            _compatibility_occurrence_count(
-                context.mapping_occurrences, parent
-            )
-            > 1
-            or _compatibility_has_identity(
-                context.must_split_mappings, parent
-            )
+            _compatibility_occurrence_count(context.mapping_occurrences, parent) > 1
+            or _compatibility_has_identity(context.must_split_mappings, parent)
         )
         if requires_split:
-            if _compatibility_reaches_mapping(
-                parent_values.values(), parent
-            ):
-                raise ConfigError(
-                    "merge_extends: overlapping cyclic mappings cannot be merged."
-                )
-            _compatibility_mark_mapping_descendants(
-                parent_values.values(), context=context
-            )
-        if reuse_parent and _compatibility_has_mro_identity(
-            parent, (dict,)
-        ):
+            if _compatibility_reaches_mapping(parent_values.values(), parent):
+                raise ConfigError("merge_extends: overlapping cyclic mappings cannot be merged.")
+            _compatibility_mark_mapping_descendants(parent_values.values(), context=context)
+        if reuse_parent and _compatibility_has_mro_identity(parent, (dict,)):
             merged = parent
         elif reuse_parent:
             merged = dict(parent_values)
         elif requires_split:
-            merged = _compatibility_split_mapping(
-                parent, parent_values, context=context
-            )
+            merged = _compatibility_split_mapping(parent, parent_values, context=context)
         elif _compatibility_is_mutable_mapping(parent):
             merged = parent
         else:
@@ -2437,9 +2104,7 @@ def _merge_extends_compat(
                 _compatibility_mapping_pop(merged, target)
                 continue
             value_mapping = (
-                _compatibility_pairs(value)
-                if _compatibility_is_mapping(value)
-                else None
+                _compatibility_pairs(value) if _compatibility_is_mapping(value) else None
             )
             if value_mapping is not None and "append" in value_mapping:
                 if set(value_mapping) != {"append"}:
@@ -2449,24 +2114,17 @@ def _merge_extends_compat(
                         f"got the sibling keys {siblings}."
                     )
                 appended = value_mapping["append"]
-                if not _compatibility_has_mro_identity(
-                    appended, (list, tuple)
-                ):
+                if not _compatibility_has_mro_identity(appended, (list, tuple)):
                     raise ConfigError(
-                        f"{key!r}: append is a sequence; got "
-                        f"{_compatibility_type_name(appended)}."
+                        f"{key!r}: append is a sequence; got {_compatibility_type_name(appended)}."
                     )
                 inherited = _compatibility_mapping_get(merged, key, [])
-                if not _compatibility_has_mro_identity(
-                    inherited, (list,)
-                ):
+                if not _compatibility_has_mro_identity(inherited, (list,)):
                     raise ConfigError(
                         f"{key!r} is extended with {{append: ...}} but the inherited "
                         f"value is {_compatibility_type_name(inherited)}, not a list."
                     )
-                if _compatibility_has_identity(
-                    context.original_mutables, inherited
-                ):
+                if _compatibility_has_identity(context.original_mutables, inherited):
                     raise ConfigError(_COMPATIBILITY_FAILURE)
                 try:
                     list.extend(inherited, appended)
@@ -2475,9 +2133,7 @@ def _merge_extends_compat(
                 _compatibility_mapping_set(merged, key, inherited)
                 continue
             inherited = _compatibility_mapping_get(merged, key)
-            if _compatibility_is_mapping(
-                value
-            ) and _compatibility_is_mapping(inherited):
+            if _compatibility_is_mapping(value) and _compatibility_is_mapping(inherited):
                 _compatibility_mapping_set(
                     merged,
                     key,
@@ -2503,8 +2159,7 @@ def merge_extends(child: dict, parent: dict) -> dict:
     for label, given in (("child", child), ("parent", parent)):
         if not _compatibility_is_mapping(given):
             raise ConfigError(
-                f"merge_extends: {label} is a mapping; got "
-                f"{_compatibility_type_name(given)}."
+                f"merge_extends: {label} is a mapping; got {_compatibility_type_name(given)}."
             )
     try:
         (
@@ -2539,8 +2194,7 @@ def recursive_update(base: Mapping, patch: Mapping) -> dict:
     for label, given in (("base", base), ("patch", patch)):
         if not _compatibility_is_mapping(given):
             raise ConfigError(
-                f"recursive_update: {label} is a mapping; got "
-                f"{_compatibility_type_name(given)}."
+                f"recursive_update: {label} is a mapping; got {_compatibility_type_name(given)}."
             )
     return merge_extends(patch, base)
 
@@ -2549,19 +2203,12 @@ def _apply_variant_mapping_values(
     mapping: Mapping,
 ) -> dict[str, object]:
     canonical: dict[str, object] = {}
-    for key, value in _mapping_pairs(
-        mapping, failure="apply_variant: mapping traversal failed."
-    ):
+    for key, value in _mapping_pairs(mapping, failure="apply_variant: mapping traversal failed."):
         if not isinstance(key, str):
-            raise ConfigError(
-                "apply_variant: mapping keys are strings; got "
-                f"{type(key).__name__}."
-            )
+            raise ConfigError(f"apply_variant: mapping keys are strings; got {type(key).__name__}.")
         exact_key = str.__str__(key)
         if exact_key in canonical:
-            raise ConfigError(
-                "apply_variant: mapping keys collide after canonicalization."
-            )
+            raise ConfigError("apply_variant: mapping keys collide after canonicalization.")
         canonical[exact_key] = value
     return canonical
 
@@ -2569,8 +2216,7 @@ def _apply_variant_mapping_values(
 def _validated_variant_patch(name: str, patch: object) -> Mapping:
     if not isinstance(patch, Mapping):
         raise ConfigError(
-            f"variant {name!r}: the patch is a mapping of sections; got "
-            f"{type(patch).__name__}."
+            f"variant {name!r}: the patch is a mapping of sections; got {type(patch).__name__}."
         )
     patch_values = _apply_variant_mapping_values(patch)
     for key in ("variants", "~variants"):
@@ -2596,26 +2242,20 @@ def _apply_variant_values(document: Mapping, name: str) -> dict:
     variants = document_values.get("variants", {})
     if not isinstance(variants, Mapping):
         raise ConfigError(
-            f"variants: is a mapping of name -> patch; got "
-            f"{type(variants).__name__}."
+            f"variants: is a mapping of name -> patch; got {type(variants).__name__}."
         )
     variant_values = _apply_variant_mapping_values(variants)
     if not variant_values:
-        raise ConfigError(
-            f"variant {name!r} was requested but this document declares no variants."
-        )
+        raise ConfigError(f"variant {name!r} was requested but this document declares no variants.")
     if name not in variant_values:
         raise ConfigError(
-            f"variant {name!r} is not declared; this document declares "
-            f"{sorted(variant_values)}."
+            f"variant {name!r} is not declared; this document declares {sorted(variant_values)}."
         )
     patch = _validated_variant_patch(name, variant_values[name])
     return recursive_update(document, patch)
 
 
-def _apply_canonical_variant(
-    canonical: _CanonicalVariantDocument, name: str
-) -> dict:
+def _apply_canonical_variant(canonical: _CanonicalVariantDocument, name: str) -> dict:
     if canonical._state is not _CANONICAL_FRESH:
         raise ConfigError("canonical variant document was already used.")
     canonical._state = _CANONICAL_RUNNING
@@ -2641,14 +2281,9 @@ def _apply_canonical_variant(
 def apply_variant(document: Mapping, name: str) -> dict:
     """Return the document with one named one-level variant patch applied."""
     if not isinstance(document, Mapping):
-        raise ConfigError(
-            "variant document is a mapping; got "
-            f"{type(document).__name__}."
-        )
+        raise ConfigError(f"variant document is a mapping; got {type(document).__name__}.")
     if not isinstance(name, str):
-        raise ConfigError(
-            "variant name is a string; got " f"{type(name).__name__}."
-        )
+        raise ConfigError(f"variant name is a string; got {type(name).__name__}.")
     name = str.__str__(name)
     if type(document) is _CanonicalVariantDocument:
         return _apply_canonical_variant(document, name)
@@ -2659,23 +2294,16 @@ def parse_default(raw: object) -> PresetRequest:
     if isinstance(raw, str):
         return PresetRequest(name=raw, only=None)
     if not isinstance(raw, Mapping):
-        raise ConfigError(
-            "defaults: each entry is a preset name or a {from:, only:} mapping."
-        )
+        raise ConfigError("defaults: each entry is a preset name or a {from:, only:} mapping.")
     canonical: dict[str, object] = {}
     for key, value in _mapping_pairs(
         raw, failure="defaults: preset entry mapping traversal failed."
     ):
         if not isinstance(key, str):
-            raise ConfigError(
-                "defaults: preset entry keys are strings; got "
-                f"{type(key).__name__}."
-            )
+            raise ConfigError(f"defaults: preset entry keys are strings; got {type(key).__name__}.")
         exact_key = str.__str__(key)
         if exact_key in canonical:
-            raise ConfigError(
-                "defaults: preset entry keys collide after canonicalization."
-            )
+            raise ConfigError("defaults: preset entry keys collide after canonicalization.")
         canonical[exact_key] = value
     unknown = sorted(set(canonical) - {"from", "only"})
     if unknown:
@@ -2691,9 +2319,7 @@ def parse_default(raw: object) -> PresetRequest:
     return PresetRequest(name=name, only=only)  # type: ignore[arg-type]
 
 
-def _select_only(
-    request: PresetRequest, document: Mapping[str, object]
-) -> dict[str, object]:
+def _select_only(request: PresetRequest, document: Mapping[str, object]) -> dict[str, object]:
     if request.only is None:
         return dict(document)
     paths = [tuple(str.split(path, ".")) for path in request.only]
@@ -2727,17 +2353,12 @@ def _select_only(
         if node:
             descendant = node
             while terminal not in descendant:
-                descendant = next(
-                    child
-                    for key, child in descendant.items()
-                    if key is not terminal
-                )
+                descendant = next(child for key, child in descendant.items() if key is not terminal)
                 assert isinstance(descendant, dict)
             prior = descendant[terminal]
             assert isinstance(prior, str)
             raise ConfigError(
-                f"defaults preset {request.name!r}: only paths "
-                f"{rendered!r} and {prior!r} overlap."
+                f"defaults preset {request.name!r}: only paths {rendered!r} and {prior!r} overlap."
             )
         node[terminal] = rendered
 
@@ -2777,9 +2398,7 @@ def _replace_key(
     *,
     origin: Origin,
 ) -> MergeResult:
-    return merge_with_origins(
-        _without_key(result, key), {key: value}, origin=origin
-    )
+    return merge_with_origins(_without_key(result, key), {key: value}, origin=origin)
 
 
 def _replace_key_with_node(
@@ -2797,9 +2416,7 @@ def _replace_key_with_node(
     )
 
 
-def _apply_user_model(
-    result: MergeResult, user_model: object, *, origin: Origin
-) -> MergeResult:
+def _apply_user_model(result: MergeResult, user_model: object, *, origin: Origin) -> MergeResult:
     if user_model is None:
         return _replace_key(result, "model", None, origin=origin)
     if not isinstance(user_model, Mapping):
@@ -2813,9 +2430,7 @@ def _apply_user_model(
     candidate_node = result.origins.children.get("model")
     if not isinstance(candidate, Mapping) or candidate_node is None:
         candidate = {}
-        candidate_node = _trusted_origin_node(
-            origin=None, children=_frozen_children({})
-        )
+        candidate_node = _trusted_origin_node(origin=None, children=_frozen_children({}))
     inherited: dict[str, object] = {}
     inherited_children: dict[str, OriginNode] = {}
     seen: set[str] = set()
@@ -2853,9 +2468,7 @@ def layer_presets(
     try:
         requests = tuple(requests)
     except Exception:
-        raise ConfigError(
-            "defaults: request sequence traversal failed."
-        ) from None
+        raise ConfigError("defaults: request sequence traversal failed.") from None
     result = initial_merge({}, origin=Origin("rheplicant-default"))
     selected: list[tuple[PresetRequest, PresetSnapshot]] = []
     names: set[str] = set()
@@ -2866,18 +2479,14 @@ def layer_presets(
                 f"{type(request).__name__}."
             )
         if request.name in names:
-            raise ConfigError(
-                f"defaults: package preset {request.name!r} appears more than once."
-            )
+            raise ConfigError(f"defaults: package preset {request.name!r} appears more than once.")
         names.add(request.name)
         try:
             provided = preset_provider(request.name)
         except ConfigError:
             raise
         except Exception:
-            raise ConfigError(
-                f"defaults: preset provider failed for {request.name!r}."
-            ) from None
+            raise ConfigError(f"defaults: preset provider failed for {request.name!r}.") from None
         if type(provided) is not PresetSnapshot:
             raise ConfigError(
                 "defaults: preset provider returned "
@@ -2896,8 +2505,7 @@ def layer_presets(
             raise
         except Exception:
             raise ConfigError(
-                f"defaults: preset provider snapshot for {request.name!r} "
-                "could not be validated."
+                f"defaults: preset provider snapshot for {request.name!r} could not be validated."
             ) from None
         if snapshot.name != request.name:
             raise ConfigError(

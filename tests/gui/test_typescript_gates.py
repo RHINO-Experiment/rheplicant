@@ -74,9 +74,7 @@ def test_the_gate_passes(command: list[str]) -> None:
     """
     _toolchain_or_skip()
 
-    completed = subprocess.run(
-        command, cwd=_REACT, check=False, capture_output=True, text=True
-    )
+    completed = subprocess.run(command, cwd=_REACT, check=False, capture_output=True, text=True)
 
     assert completed.returncode == 0, (
         f"{' '.join(command)} failed with {completed.returncode}. This is one of "
@@ -98,9 +96,7 @@ def test_this_module_runs_every_gate_agents_md_lists() -> None:
     assert marker, "AGENTS.md no longer introduces the gates in the phrasing read here"
     block, _, _ = after.partition("```\n\n")
     listed = {
-        line.split("#")[0].strip()
-        for line in block.splitlines()
-        if line.strip().startswith("npm ")
+        line.split("#")[0].strip() for line in block.splitlines() if line.strip().startswith("npm ")
     }
     assert listed, f"no npm gate parsed out of AGENTS.md's block: {block!r}"
 
@@ -109,6 +105,4 @@ def test_this_module_runs_every_gate_agents_md_lists() -> None:
     listed = {" ".join(entry.split()) for entry in listed}
     run = {" ".join(command.values[0]) for command in _GATES}
 
-    assert listed == run, (
-        f"AGENTS.md lists {sorted(listed)}; this module runs {sorted(run)}."
-    )
+    assert listed == run, f"AGENTS.md lists {sorted(listed)}; this module runs {sorted(run)}."

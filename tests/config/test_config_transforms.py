@@ -18,12 +18,16 @@ from rheplicant.config.sections.transforms import (
 from tests.config.inference_helpers import context, twin
 
 
-def space_for(parameters, bindings=None, joint_prior=None, replaced=(),
-              model=None):
+def space_for(parameters, bindings=None, joint_prior=None, replaced=(), model=None):
     fit = twin(model)
-    return build_space(parse_latents(parameters, context()), bindings,
-                       joint_prior, fit_twin=fit, replaced=replaced,
-                       context=context()), fit
+    return build_space(
+        parse_latents(parameters, context()),
+        bindings,
+        joint_prior,
+        fit_twin=fit,
+        replaced=replaced,
+        context=context(),
+    ), fit
 
 
 class TestRegistry:
@@ -52,23 +56,18 @@ class TestRegistry:
         assert jnp.allclose(fn(free), unit_mean_bandpass(free))
 
     def test_affine_takes_scale_and_offset(self):
-        fn, _ = parse_transform({"affine": {"scale": 2.0, "offset": 1.0}},
-                                context(), where="t")
+        fn, _ = parse_transform({"affine": {"scale": 2.0, "offset": 1.0}}, context(), where="t")
         assert float(fn(jnp.asarray(3.0))) == pytest.approx(7.0)
 
     def test_affine_defaults_to_unit_scale_and_zero_offset(self):
-        fn, _ = parse_transform({"affine": {"offset": 1.0}}, context(),
-                                where="t")
+        fn, _ = parse_transform({"affine": {"offset": 1.0}}, context(), where="t")
         assert float(fn(jnp.asarray(3.0))) == pytest.approx(4.0)
-        fn, _ = parse_transform({"affine": {"scale": 2.0}}, context(),
-                                where="t")
+        fn, _ = parse_transform({"affine": {"scale": 2.0}}, context(), where="t")
         assert float(fn(jnp.asarray(3.0))) == pytest.approx(6.0)
 
     def test_affine_offset_inherits_the_latent_dimension(self):
         ctx = context(
-            dimensions=DimensionEnvironment(
-                latent_dimensions={"temperature": signature("K")}
-            )
+            dimensions=DimensionEnvironment(latent_dimensions={"temperature": signature("K")})
         )
         with pytest.raises(ConfigError, match="affine.offset"):
             parse_transform(
@@ -79,9 +78,7 @@ class TestRegistry:
 
     def test_affine_parent_keeps_a_concrete_path_and_patterned_selector(self):
         ctx = context(
-            dimensions=DimensionEnvironment(
-                latent_dimensions={"temperature": signature("K")}
-            )
+            dimensions=DimensionEnvironment(latent_dimensions={"temperature": signature("K")})
         )
         parent = _formula_parent(
             "inference.parameters.temperature.transform.affine.offset",
@@ -104,9 +101,7 @@ class TestRegistry:
 
         trace = Trace()
         ctx = context(
-            dimensions=DimensionEnvironment(
-                latent_dimensions={"temperature": signature("K")}
-            ),
+            dimensions=DimensionEnvironment(latent_dimensions={"temperature": signature("K")}),
             trace=trace,
             origin_lookup=lambda path: pytest.fail(
                 f"defaulted affine operand unexpectedly looked up: {path}"
@@ -117,42 +112,36 @@ class TestRegistry:
             ctx,
             where="inference.parameters.temperature.transform",
         )
-        by_path = {
-            destination.document_path: facts
-            for _, destination, facts in trace.deliveries
-        }
-        assert by_path[
-            "inference.parameters.temperature.transform.affine.scale"
-        ] == {
+        by_path = {destination.document_path: facts for _, destination, facts in trace.deliveries}
+        assert by_path["inference.parameters.temperature.transform.affine.scale"] == {
             "dtype": "float32",
             "origin": Origin("rheplicant-default"),
             "unit": "dimensionless",
         }
-        assert by_path[
-            "inference.parameters.temperature.transform.affine.offset"
-        ]["unit"] == "K"
+        assert by_path["inference.parameters.temperature.transform.affine.offset"]["unit"] == "K"
 
     def test_matmul_applies_a_declared_design(self):
         fn, _ = parse_transform(
-            {"matmul": {"design": {"ones": ["n_freq", 2]}}},
-            context(), where="t")
+            {"matmul": {"design": {"ones": ["n_freq", 2]}}}, context(), where="t"
+        )
         out = fn(jnp.asarray([1.0, 2.0]))
         assert out.shape == (8,)
         assert float(out[0]) == pytest.approx(3.0)
 
     def test_log_link_basis_is_exp_of_a_basis_expansion(self):
         fn, _ = parse_transform(
-            {"log_link_basis": {"kind": "legendre", "n_basis": 3}},
-            context(), where="t")
+            {"log_link_basis": {"kind": "legendre", "n_basis": 3}}, context(), where="t"
+        )
         out = fn(jnp.zeros(3))
         assert out.shape == (8,)
         assert jnp.allclose(out, 1.0)
 
     def test_log_link_basis_axis_time_reads_the_time_grid(self):
         fn, _ = parse_transform(
-            {"log_link_basis": {"kind": "legendre", "n_basis": 3,
-                                "axis": "time"}},
-            context(), where="t")
+            {"log_link_basis": {"kind": "legendre", "n_basis": 3, "axis": "time"}},
+            context(),
+            where="t",
+        )
         assert fn(jnp.zeros(3)).shape == (16,)
 
     def test_basis_expand_reads_a_declared_basis_resource(self):
@@ -160,21 +149,28 @@ class TestRegistry:
 
         ctx = context()
         built = build_resources(
-            {"bases": {"smooth": {"time": {"kind": "legendre", "n_basis": 2},
-                                  "freq": {"kind": "legendre",
-                                           "n_basis": 3}}}}, ctx)
+            {
+                "bases": {
+                    "smooth": {
+                        "time": {"kind": "legendre", "n_basis": 2},
+                        "freq": {"kind": "legendre", "n_basis": 3},
+                    }
+                }
+            },
+            ctx,
+        )
         ctx = context(resources=dict(built.resources))
         fn, _ = parse_transform(
-            {"basis_expand": {"basis": {"ref": "resources.bases.smooth"}}},
-            ctx, where="t")
+            {"basis_expand": {"basis": {"ref": "resources.bases.smooth"}}}, ctx, where="t"
+        )
         assert fn(jnp.zeros((2, 3))).shape == (16, 8)
 
     def test_basis_expand_refuses_a_ref_that_is_not_a_basis(self):
         ctx = context(resources={"resources.bases.flat": jnp.zeros(3)})
         with pytest.raises(ConfigError, match="not SeparableBasis"):
             parse_transform(
-                {"basis_expand": {"basis": {"ref": "resources.bases.flat"}}},
-                ctx, where="t")
+                {"basis_expand": {"basis": {"ref": "resources.bases.flat"}}}, ctx, where="t"
+            )
 
     def test_python_requires_a_declared_fan(self):
         with pytest.raises(ConfigError, match="fan"):
@@ -207,12 +203,11 @@ class TestBeamAnalysis:
 
     NSIDE = 4
     LMAX = 7
-    N_PIX = 12 * 4 ** 2               # 192
-    N_ALM = (7 + 1) * (7 + 2) // 2    # 36, the healpy packing
+    N_PIX = 12 * 4**2  # 192
+    N_ALM = (7 + 1) * (7 + 2) // 2  # 36, the healpy packing
 
     def _spec(self, **extra):
-        return {"beam_analysis": {"nside": self.NSIDE, "lmax": self.LMAX,
-                                  **extra}}
+        return {"beam_analysis": {"nside": self.NSIDE, "lmax": self.LMAX, **extra}}
 
     def _maps(self):
         return jax.random.normal(jax.random.key(0), (3, self.N_PIX))
@@ -226,8 +221,7 @@ class TestBeamAnalysis:
         assert alms.shape == (3, self.N_ALM)
         assert jnp.iscomplexobj(alms)
         for index in range(3):
-            reference = ltj.map2alm_iter(maps[index], nside=self.NSIDE,
-                                         lmax=self.LMAX)
+            reference = ltj.map2alm_iter(maps[index], nside=self.NSIDE, lmax=self.LMAX)
             assert jnp.allclose(alms[index], reference, atol=1e-6)
 
     def test_a_gradient_flows_through_to_the_beam_maps(self):
@@ -273,8 +267,7 @@ class TestBeamAnalysis:
         _ltj()
         fn, _ = parse_transform(self._spec(), context(), where="t")
         maps = self._maps()
-        gradient = jax.grad(
-            lambda sample: jnp.sum(jnp.abs(fn(sample)[1]) ** 2))(maps)
+        gradient = jax.grad(lambda sample: jnp.sum(jnp.abs(fn(sample)[1]) ** 2))(maps)
         assert jnp.all(gradient[0] == 0.0)
         assert jnp.all(gradient[2] == 0.0)
         assert jnp.any(gradient[1] != 0.0)
@@ -339,19 +332,17 @@ class TestBeamAnalysis:
         the key up and drops it fails here rather than passing on shape alone.
         """
         ltj = _ltj()
-        fn, _ = parse_transform(self._spec(iterations=1), context(),
-                                where="t")
+        fn, _ = parse_transform(self._spec(iterations=1), context(), where="t")
         maps = self._maps()
         once = fn(maps)[0]
         assert jnp.allclose(
             once,
-            ltj.map2alm_iter(maps[0], nside=self.NSIDE, lmax=self.LMAX,
-                             iterations=1),
-            atol=1e-6)
+            ltj.map2alm_iter(maps[0], nside=self.NSIDE, lmax=self.LMAX, iterations=1),
+            atol=1e-6,
+        )
         assert not jnp.allclose(
-            once,
-            ltj.map2alm_iter(maps[0], nside=self.NSIDE, lmax=self.LMAX),
-            atol=1e-4)
+            once, ltj.map2alm_iter(maps[0], nside=self.NSIDE, lmax=self.LMAX), atol=1e-4
+        )
 
     def test_a_declared_zero_iterations_is_not_read_as_absent(self):
         """0 is a legal refinement count, and falsy.
@@ -363,19 +354,17 @@ class TestBeamAnalysis:
         three orders of magnitude of headroom.
         """
         ltj = _ltj()
-        fn, _ = parse_transform(self._spec(iterations=0), context(),
-                                where="t")
+        fn, _ = parse_transform(self._spec(iterations=0), context(), where="t")
         never = fn(self._maps())[0]
         maps = self._maps()
         assert jnp.allclose(
             never,
-            ltj.map2alm_iter(maps[0], nside=self.NSIDE, lmax=self.LMAX,
-                             iterations=0),
-            atol=1e-6)
+            ltj.map2alm_iter(maps[0], nside=self.NSIDE, lmax=self.LMAX, iterations=0),
+            atol=1e-6,
+        )
         assert not jnp.allclose(
-            never,
-            ltj.map2alm_iter(maps[0], nside=self.NSIDE, lmax=self.LMAX),
-            atol=1e-4)
+            never, ltj.map2alm_iter(maps[0], nside=self.NSIDE, lmax=self.LMAX), atol=1e-4
+        )
 
     def test_an_undeclared_iterations_leaves_the_packages_own(self):
         """Config keys never restate a package default (plan §0)."""
@@ -383,9 +372,8 @@ class TestBeamAnalysis:
         fn, _ = parse_transform(self._spec(), context(), where="t")
         maps = self._maps()
         assert jnp.allclose(
-            fn(maps)[0],
-            ltj.map2alm_iter(maps[0], nside=self.NSIDE, lmax=self.LMAX),
-            atol=1e-6)
+            fn(maps)[0], ltj.map2alm_iter(maps[0], nside=self.NSIDE, lmax=self.LMAX), atol=1e-6
+        )
 
     def test_beam_analysis_is_a_mapping_head_the_gate_can_see(self):
         """It must be in _MAPPING, or the head gate swallows it.
@@ -398,68 +386,66 @@ class TestBeamAnalysis:
         head too, which the head gate's own message never does.
         """
         with pytest.raises(ConfigError) as excinfo:
-            parse_transform({"beam_analysis": {"nside": self.NSIDE,
-                                               "lmax": self.LMAX},
-                             "fan": "broadcast"}, context(), where="t")
+            parse_transform(
+                {"beam_analysis": {"nside": self.NSIDE, "lmax": self.LMAX}, "fan": "broadcast"},
+                context(),
+                where="t",
+            )
         message = str(excinfo.value)
         assert "beam_analysis: stands alone" in message
         assert "names exactly one of" not in message
 
     def test_a_non_mapping_body_is_refused_by_the_shared_preamble(self):
-        with pytest.raises(ConfigError, match=r"t\.beam_analysis: is a "
-                                              r"mapping"):
+        with pytest.raises(
+            ConfigError,
+            match=r"t\.beam_analysis: is a "
+            r"mapping",
+        ):
             parse_transform({"beam_analysis": 4}, context(), where="t")
 
     def test_nside_and_lmax_are_required(self):
         with pytest.raises(ConfigError, match="requires nside: and lmax:"):
-            parse_transform({"beam_analysis": {"nside": self.NSIDE}},
-                            context(), where="t")
+            parse_transform({"beam_analysis": {"nside": self.NSIDE}}, context(), where="t")
 
     def test_a_missing_nside_is_refused_too(self):
         """The twin of the test above; a guard closed on one key only is the
         recurring shape this suite keeps catching."""
         with pytest.raises(ConfigError, match="requires nside: and lmax:"):
-            parse_transform({"beam_analysis": {"lmax": self.LMAX}},
-                            context(), where="t")
+            parse_transform({"beam_analysis": {"lmax": self.LMAX}}, context(), where="t")
 
     def test_a_non_integer_nside_is_refused(self):
         with pytest.raises(ConfigError, match=r"nside: is an integer >= 1"):
-            parse_transform({"beam_analysis": {"nside": 4.5,
-                                               "lmax": self.LMAX}},
-                            context(), where="t")
+            parse_transform(
+                {"beam_analysis": {"nside": 4.5, "lmax": self.LMAX}}, context(), where="t"
+            )
 
     def test_a_bool_is_not_an_integer_here(self):
         with pytest.raises(ConfigError, match=r"nside: is an integer >= 1"):
-            parse_transform({"beam_analysis": {"nside": True,
-                                               "lmax": self.LMAX}},
-                            context(), where="t")
+            parse_transform(
+                {"beam_analysis": {"nside": True, "lmax": self.LMAX}}, context(), where="t"
+            )
 
     def test_a_zero_nside_is_refused_by_the_grammar(self):
         with pytest.raises(ConfigError, match=r"nside: is an integer >= 1"):
-            parse_transform({"beam_analysis": {"nside": 0, "lmax": 7}},
-                            context(), where="t")
+            parse_transform({"beam_analysis": {"nside": 0, "lmax": 7}}, context(), where="t")
 
     def test_a_negative_lmax_is_refused_by_its_own_leg(self):
         """The lmax leg of the compound number check, which nside's tests
         leave untouched -- and it must be lmax: that is named, not nside:."""
         with pytest.raises(ConfigError, match=r"lmax: is an integer >= 0"):
-            parse_transform({"beam_analysis": {"nside": 4, "lmax": -1}},
-                            context(), where="t")
+            parse_transform({"beam_analysis": {"nside": 4, "lmax": -1}}, context(), where="t")
 
     def test_a_non_integer_lmax_is_refused(self):
         with pytest.raises(ConfigError, match=r"lmax: is an integer >= 0"):
-            parse_transform({"beam_analysis": {"nside": 4, "lmax": 7.0}},
-                            context(), where="t")
+            parse_transform({"beam_analysis": {"nside": 4, "lmax": 7.0}}, context(), where="t")
 
     def test_a_negative_iterations_is_refused_by_its_own_leg(self):
         """The third leg, which neither of the other two exercises."""
-        with pytest.raises(ConfigError,
-                           match=r"iterations: is an integer >= 0"):
+        with pytest.raises(ConfigError, match=r"iterations: is an integer >= 0"):
             parse_transform(self._spec(iterations=-1), context(), where="t")
 
     def test_a_non_integer_iterations_is_refused(self):
-        with pytest.raises(ConfigError,
-                           match=r"iterations: is an integer >= 0"):
+        with pytest.raises(ConfigError, match=r"iterations: is an integer >= 0"):
             parse_transform(self._spec(iterations=1.5), context(), where="t")
 
     def test_an_unknown_key_inside_beam_analysis_is_refused(self):
@@ -467,12 +453,10 @@ class TestBeamAnalysis:
         an unknown-key sweep that only refuses nonsense would miss it.  The
         label is pinned too: ``does not take`` is the shared helper's wording
         and every mapping head raises it."""
-        with pytest.raises(ConfigError,
-                           match=r"beam_analysis: does not take \['npol'\]"):
+        with pytest.raises(ConfigError, match=r"beam_analysis: does not take \['npol'\]"):
             parse_transform(self._spec(npol=2), context(), where="t")
 
-    def test_a_malformed_spec_is_refused_without_reaching_limtod(
-            self, monkeypatch):
+    def test_a_malformed_spec_is_refused_without_reaching_limtod(self, monkeypatch):
         """The grammar is checked before ``import limtod_jax``, deliberately.
 
         The plan's Step 9.4 imports limTOD as the helper's first statement,
@@ -488,17 +472,13 @@ class TestBeamAnalysis:
         """
         monkeypatch.setitem(sys.modules, "limtod_jax", None)
         with pytest.raises(ConfigError, match="requires nside: and lmax:"):
-            parse_transform({"beam_analysis": {"nside": self.NSIDE}},
-                            context(), where="t")
+            parse_transform({"beam_analysis": {"nside": self.NSIDE}}, context(), where="t")
         with pytest.raises(ConfigError, match=r"nside: is an integer >= 1"):
-            parse_transform({"beam_analysis": {"nside": 4.5, "lmax": 7}},
-                            context(), where="t")
+            parse_transform({"beam_analysis": {"nside": 4.5, "lmax": 7}}, context(), where="t")
         with pytest.raises(ConfigError, match=r"lmax >= 7"):
-            parse_transform({"beam_analysis": {"nside": 4, "lmax": 6}},
-                            context(), where="t")
+            parse_transform({"beam_analysis": {"nside": 4, "lmax": 6}}, context(), where="t")
         with pytest.raises(ConfigError, match="nside >= 2"):
-            parse_transform({"beam_analysis": {"nside": 1, "lmax": 4}},
-                            context(), where="t")
+            parse_transform({"beam_analysis": {"nside": 1, "lmax": 4}}, context(), where="t")
         with pytest.raises(ImportError):
             parse_transform(self._spec(), context(), where="t")
 
@@ -538,7 +518,7 @@ class TestBeamAnalysisBandLimit:
         """
         ltj = _ltj()
         floor = 2 * nside - 1
-        maps = jax.random.normal(jax.random.key(2), (12 * nside ** 2,))
+        maps = jax.random.normal(jax.random.key(2), (12 * nside**2,))
         with pytest.raises(TypeError, match="Cannot concatenate arrays with shapes that differ"):
             ltj.map2alm_iter(maps, nside=nside, lmax=floor - 1)
         at_floor = ltj.map2alm_iter(maps, nside=nside, lmax=floor)
@@ -559,8 +539,7 @@ class TestBeamAnalysisBandLimit:
         """
         floor = 2 * nside - 1
         with pytest.raises(ConfigError) as excinfo:
-            parse_transform(self._spec(nside, floor - 1), context(),
-                            where="t")
+            parse_transform(self._spec(nside, floor - 1), context(), where="t")
         message = str(excinfo.value)
         assert "nside" in message
         assert "lmax" in message
@@ -586,8 +565,7 @@ class TestBeamAnalysisBandLimit:
         An ``lmax <= floor`` mutation and an off-by-one floor both die here.
         """
         _ltj()
-        fn, fan = parse_transform(self._spec(nside, 2 * nside - 1), context(),
-                                  where="t")
+        fn, fan = parse_transform(self._spec(nside, 2 * nside - 1), context(), where="t")
         assert fan == "broadcast" and fn is not None
 
     @pytest.mark.parametrize("nside", NSIDES)
@@ -605,21 +583,20 @@ class TestBeamAnalysisBandLimit:
         ltj = _ltj()
         floor = 2 * nside - 1
         for lmax in (floor + 1, floor + 9):
-            fn, fan = parse_transform(self._spec(nside, lmax), context(),
-                                      where="t")
+            fn, fan = parse_transform(self._spec(nside, lmax), context(), where="t")
             assert fan == "broadcast"
-            maps = jax.random.normal(jax.random.key(1), (2, 12 * nside ** 2))
+            maps = jax.random.normal(jax.random.key(1), (2, 12 * nside**2))
             alms = fn(maps)
             assert alms.shape == (2, (lmax + 1) * (lmax + 2) // 2)
             assert jnp.allclose(
-                alms[0], ltj.map2alm_iter(maps[0], nside=nside, lmax=lmax),
-                atol=1e-6)
+                alms[0], ltj.map2alm_iter(maps[0], nside=nside, lmax=lmax), atol=1e-6
+            )
 
     def test_the_documented_pair_from_the_executors_note(self):
         """nside=8/lmax=20 -> a (231,) alm vector, the note's own example."""
         _ltj()
         fn, _ = parse_transform(self._spec(8, 20), context(), where="t")
-        maps = jax.random.normal(jax.random.key(1), (2, 12 * 8 ** 2))
+        maps = jax.random.normal(jax.random.key(1), (2, 12 * 8**2))
         assert fn(maps).shape == (2, 231)
 
     def test_nside_one_has_no_legal_lmax_in_the_package(self):
@@ -654,48 +631,57 @@ class TestBeamAnalysisBandLimit:
 
 class TestBuildSpace:
     def test_the_into_sugar_builds_a_working_space(self):
-        space, fit = space_for(
-            {"g": {"init": 1.0, "linear": True, "into": "gain.gain"}})
+        space, fit = space_for({"g": {"init": 1.0, "linear": True, "into": "gain.gain"}})
         bound = space.bind(fit, {"g": jnp.asarray(2.0)})
         assert float(bound["gain"].gain) == pytest.approx(2.0)
 
     def test_a_transform_travels_into_the_bind(self):
-        space, fit = space_for(
-            {"log_g": {"init": 0.0, "into": "gain.gain",
-                       "transform": "exp"}})
+        space, fit = space_for({"log_g": {"init": 0.0, "into": "gain.gain", "transform": "exp"}})
         bound = space.bind(fit, {"log_g": jnp.asarray(0.0)})
         assert float(bound["gain"].gain) == pytest.approx(1.0)
 
     def test_split_rows_distributes_over_two_leaves(self):
         space, fit = space_for(
-            {"pair": {"init": {"list": [0.25, 2.0]},
-                      "into": ["global_signal.depth", "gain.gain"],
-                      "transform": "split_rows"}})
+            {
+                "pair": {
+                    "init": {"list": [0.25, 2.0]},
+                    "into": ["global_signal.depth", "gain.gain"],
+                    "transform": "split_rows",
+                }
+            }
+        )
         bound = space.bind(fit, {"pair": jnp.asarray([0.25, 2.0])})
         assert float(bound["global_signal"].depth) == pytest.approx(0.25)
         assert float(bound["gain"].gain) == pytest.approx(2.0)
 
     def test_a_bindings_entry_spells_the_same_thing_longhand(self):
         space, fit = space_for(
-            {"g": {"init": 1.0}},
-            bindings=[{"latents": ["g"], "into": "gain.gain"}])
+            {"g": {"init": 1.0}}, bindings=[{"latents": ["g"], "into": "gain.gain"}]
+        )
         bound = space.bind(fit, {"g": jnp.asarray(3.0)})
         assert float(bound["gain"].gain) == pytest.approx(3.0)
 
     def test_a_bindings_entry_joins_two_latents_through_python(self):
         space, fit = space_for(
             {"a": {"init": 1.0}, "b": {"init": 2.0}},
-            bindings=[{"latents": ["a", "b"], "into": "gain.gain",
-                       "transform": {"python": "jax.numpy:add",
-                                     "fan": "broadcast"}}])
-        bound = space.bind(fit, {"a": jnp.asarray(2.0),
-                                 "b": jnp.asarray(3.0)})
+            bindings=[
+                {
+                    "latents": ["a", "b"],
+                    "into": "gain.gain",
+                    "transform": {"python": "jax.numpy:add", "fan": "broadcast"},
+                }
+            ],
+        )
+        bound = space.bind(fit, {"a": jnp.asarray(2.0), "b": jnp.asarray(3.0)})
         assert float(bound["gain"].gain) == pytest.approx(5.0)
 
     def test_latents_keep_declaration_order_not_sorted_order(self):
         space, _ = space_for(
-            {"z": {"init": 1.0, "into": "gain.gain"},
-             "a": {"init": 1.0, "into": "global_signal.depth"}})
+            {
+                "z": {"init": 1.0, "into": "gain.gain"},
+                "a": {"init": 1.0, "into": "global_signal.depth"},
+            }
+        )
         assert space.names == ("z", "a")
 
     def test_a_binding_into_an_aliased_node_is_refused_up_front(self):
@@ -703,40 +689,51 @@ class TestBuildSpace:
             aliased = ("gain",)
 
         with pytest.raises(ConfigError, match="more than one place"):
-            build_space(parse_latents({"g": {"init": 1.0,
-                                             "into": "gain.gain"}},
-                                      context()),
-                        None, None, fit_twin=_Forked(), replaced=(),
-                        context=context())
+            build_space(
+                parse_latents({"g": {"init": 1.0, "into": "gain.gain"}}, context()),
+                None,
+                None,
+                fit_twin=_Forked(),
+                replaced=(),
+                context=context(),
+            )
 
     def test_into_sugar_and_a_bindings_entry_are_mutually_exclusive(self):
         with pytest.raises(ConfigError, match="mutually exclusive"):
-            space_for({"g": {"init": 1.0, "into": "gain.gain"}},
-                      bindings=[{"latents": ["g"],
-                                 "into": "global_signal.depth"}])
+            space_for(
+                {"g": {"init": 1.0, "into": "gain.gain"}},
+                bindings=[{"latents": ["g"], "into": "global_signal.depth"}],
+            )
 
     def test_two_bindings_into_one_leaf_are_refused(self):
         with pytest.raises(ConfigError, match="gain"):
-            space_for({"a": {"init": 1.0, "into": "gain.gain"},
-                       "b": {"init": 1.0, "into": "gain.gain"}})
+            space_for(
+                {"a": {"init": 1.0, "into": "gain.gain"}, "b": {"init": 1.0, "into": "gain.gain"}}
+            )
 
     def test_a_binding_into_a_replaced_node_is_check_b8(self):
         with pytest.raises(ConfigError, match="replace"):
-            space_for({"g": {"init": 1.0, "into": "gain.gain"}},
-                      replaced=("gain",))
+            space_for({"g": {"init": 1.0, "into": "gain.gain"}}, replaced=("gain",))
 
     def test_a_bindings_entry_naming_an_undeclared_latent_is_refused(self):
         with pytest.raises(ConfigError, match="ghost"):
-            space_for({"g": {"init": 1.0, "into": "gain.gain"}},
-                      bindings=[{"latents": ["ghost"],
-                                 "into": "global_signal.depth"}])
+            space_for(
+                {"g": {"init": 1.0, "into": "gain.gain"}},
+                bindings=[{"latents": ["ghost"], "into": "global_signal.depth"}],
+            )
 
     def test_a_declared_fan_conflicting_with_the_registry_is_refused(self):
         with pytest.raises(ConfigError, match="distribute"):
-            space_for({"pair": {"init": {"list": [1.0, 2.0]},
-                                "into": ["global_signal.depth", "gain.gain"],
-                                "transform": "split_rows",
-                                "fan": "broadcast"}})
+            space_for(
+                {
+                    "pair": {
+                        "init": {"list": [1.0, 2.0]},
+                        "into": ["global_signal.depth", "gain.gain"],
+                        "transform": "split_rows",
+                        "fan": "broadcast",
+                    }
+                }
+            )
 
     def test_a_transform_without_into_is_refused(self):
         with pytest.raises(ConfigError, match="into"):
@@ -744,14 +741,18 @@ class TestBuildSpace:
 
     def test_no_parameters_means_no_space(self):
         fit = twin()
-        assert build_space(None, None, None, fit_twin=fit, replaced=(),
-                           context=context()) is None
+        assert build_space(None, None, None, fit_twin=fit, replaced=(), context=context()) is None
 
     def test_bindings_without_parameters_are_refused(self):
         with pytest.raises(ConfigError, match="parameters"):
-            build_space(None, [{"latents": ["g"], "into": "gain.gain"}],
-                        None, fit_twin=twin(), replaced=(),
-                        context=context())
+            build_space(
+                None,
+                [{"latents": ["g"], "into": "gain.gain"}],
+                None,
+                fit_twin=twin(),
+                replaced=(),
+                context=context(),
+            )
 
 
 class TestAnUnboundLatentIsRefusedByItsKey:
@@ -776,8 +777,7 @@ class TestAnUnboundLatentIsRefusedByItsKey:
 
     def test_a_latent_with_no_into_and_no_binding_names_its_own_key(self):
         with pytest.raises(ConfigError) as caught:
-            space_for({"g": {"init": 1.0, "into": "gain.gain"},
-                       "lonely": {"init": 1.0}})
+            space_for({"g": {"init": 1.0, "into": "gain.gain"}, "lonely": {"init": 1.0}})
         assert str(caught.value) == (
             "inference.parameters.lonely: declared and bound to nothing, so "
             "the fit would sample it without it ever reaching the model and "
@@ -795,8 +795,10 @@ class TestAnUnboundLatentIsRefusedByItsKey:
         reader can act on.
         """
         with pytest.raises(ConfigError) as caught:
-            space_for({"g": {"init": 1.0}, "lonely": {"init": 1.0}},
-                      bindings=[{"latents": ["g"], "into": "gain.gain"}])
+            space_for(
+                {"g": {"init": 1.0}, "lonely": {"init": 1.0}},
+                bindings=[{"latents": ["g"], "into": "gain.gain"}],
+            )
         assert str(caught.value) == (
             "inference.parameters.lonely: declared and bound to nothing, so "
             "the fit would sample it without it ever reaching the model and "
@@ -817,9 +819,9 @@ class TestAnUnboundLatentIsRefusedByItsKey:
         document is reachable.
         """
         with pytest.raises(ConfigError) as caught:
-            space_for({"g": {"init": 1.0, "into": "gain.gain"},
-                       "lonely": {"init": 1.0}},
-                      bindings=[])
+            space_for(
+                {"g": {"init": 1.0, "into": "gain.gain"}, "lonely": {"init": 1.0}}, bindings=[]
+            )
         assert str(caught.value).endswith(
             "or name it in an inference.bindings entry -- this document "
             "declares none yet (check B4)."
@@ -832,17 +834,19 @@ class TestAnUnboundLatentIsRefusedByItsKey:
         ``declared - {every bind's latents}`` refuses this document, and it
         is the naive implementation to make that mistake.
         """
-        space, _ = space_for({"g": {"init": 1.0}},
-                             bindings=[{"latents": ["g"], "into": "gain.gain"}])
+        space, _ = space_for(
+            {"g": {"init": 1.0}}, bindings=[{"latents": ["g"], "into": "gain.gain"}]
+        )
         assert space.names == ("g",)
 
     def test_every_dead_latent_is_named_not_only_the_first(self):
         with pytest.raises(ConfigError) as caught:
-            space_for({"g": {"init": 1.0, "into": "gain.gain"},
-                       "b": {"init": 1.0}, "a": {"init": 1.0}})
+            space_for(
+                {"g": {"init": 1.0, "into": "gain.gain"}, "b": {"init": 1.0}, "a": {"init": 1.0}}
+            )
         assert str(caught.value).startswith(
-            "inference.parameters.a, inference.parameters.b: declared and "
-            "bound to nothing,")
+            "inference.parameters.a, inference.parameters.b: declared and bound to nothing,"
+        )
 
     def test_a_document_wrong_more_specifically_hears_that_instead(self):
         """S4's stand-down: B4 runs AFTER ``refuse_duplicate_targets``.
@@ -853,9 +857,13 @@ class TestAnUnboundLatentIsRefusedByItsKey:
         order is what makes that true rather than a second rule inside B4.
         """
         with pytest.raises(ConfigError) as caught:
-            space_for({"a": {"init": 1.0, "into": "gain.gain"},
-                       "b": {"init": 1.0, "into": "gain.gain"},
-                       "lonely": {"init": 1.0}})
+            space_for(
+                {
+                    "a": {"init": 1.0, "into": "gain.gain"},
+                    "b": {"init": 1.0, "into": "gain.gain"},
+                    "lonely": {"init": 1.0},
+                }
+            )
         assert "check B4" not in str(caught.value)
         assert "gain" in str(caught.value)
 
@@ -865,19 +873,21 @@ class TestAnUnboundLatentIsRefusedByItsKey:
         Both remedies, because the message offers two and an advice loop
         hides in whichever one is untested.
         """
-        with_into, _ = space_for({"g": {"init": 1.0, "into": "gain.gain"},
-                                  "lonely": {"init": 1.0,
-                                             "into": "global_signal.depth"}})
+        with_into, _ = space_for(
+            {
+                "g": {"init": 1.0, "into": "gain.gain"},
+                "lonely": {"init": 1.0, "into": "global_signal.depth"},
+            }
+        )
         assert set(with_into.names) == {"g", "lonely"}
 
         with_binding, _ = space_for(
-            {"g": {"init": 1.0, "into": "gain.gain"},
-             "lonely": {"init": 1.0}},
-            bindings=[{"latents": ["lonely"], "into": "global_signal.depth"}])
+            {"g": {"init": 1.0, "into": "gain.gain"}, "lonely": {"init": 1.0}},
+            bindings=[{"latents": ["lonely"], "into": "global_signal.depth"}],
+        )
         assert set(with_binding.names) == {"g", "lonely"}
 
-    def test_the_package_still_refuses_it_for_a_caller_that_skips_this_layer(
-            self):
+    def test_the_package_still_refuses_it_for_a_caller_that_skips_this_layer(self):
         """The re-voicing is a re-voicing, not a replacement.
 
         ``build_space`` is the only route this sentence guards; a caller that
@@ -889,11 +899,11 @@ class TestAnUnboundLatentIsRefusedByItsKey:
         from rheplicant.core.errors import ParameterSpaceError
         from rheplicant.inference import Bind, Latent, ParameterSpace
 
-        with pytest.raises(ParameterSpaceError,
-                           match="the posterior would just return the prior"):
+        with pytest.raises(ParameterSpaceError, match="the posterior would just return the prior"):
             ParameterSpace(
                 latents=[Latent("g", init=1.0), Latent("lonely", init=1.0)],
-                bindings=[Bind("g", into=lambda p: p["gain"].gain)])
+                bindings=[Bind("g", into=lambda p: p["gain"].gain)],
+            )
 
 
 class TestJointPrior:
@@ -901,24 +911,36 @@ class TestJointPrior:
         from rheplicant.inference import JeffreysPrior
 
         space, _ = space_for(
-            {"a": {"init": 1.0, "into": "gain.gain"},
-             "b": {"init": 1.0, "into": "global_signal.depth"}},
-            joint_prior={"jeffreys": {"over": ["a", "b"]}})
+            {
+                "a": {"init": 1.0, "into": "gain.gain"},
+                "b": {"init": 1.0, "into": "global_signal.depth"},
+            },
+            joint_prior={"jeffreys": {"over": ["a", "b"]}},
+        )
         assert isinstance(space.joint_prior, JeffreysPrior)
         assert space.joint_prior.over == ("a", "b")
 
     def test_rank_rtol_travels_onto_the_prior(self):
         space, _ = space_for(
             {"a": {"init": 1.0, "into": "gain.gain"}},
-            joint_prior={"jeffreys": {"over": ["a"], "rank_rtol": 0.25}})
+            joint_prior={"jeffreys": {"over": ["a"], "rank_rtol": 0.25}},
+        )
         assert space.joint_prior.rank_rtol == pytest.approx(0.25)
 
     def test_only_jeffreys_exists(self):
         with pytest.raises(ConfigError, match="jeffreys"):
-            space_for({"a": {"init": 1.0, "into": "gain.gain"}},
-                      joint_prior={"reference": {"over": ["a"]}})
+            space_for(
+                {"a": {"init": 1.0, "into": "gain.gain"}},
+                joint_prior={"reference": {"over": ["a"]}},
+            )
 
     def test_joint_prior_without_parameters_is_refused(self):
         with pytest.raises(ConfigError, match="parameters"):
-            build_space(None, None, {"jeffreys": {"over": ["a"]}},
-                        fit_twin=twin(), replaced=(), context=context())
+            build_space(
+                None,
+                None,
+                {"jeffreys": {"over": ["a"]}},
+                fit_twin=twin(),
+                replaced=(),
+                context=context(),
+            )

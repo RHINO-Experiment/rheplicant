@@ -44,8 +44,7 @@ from tests.config.message_binding import assert_bound_once
 
 #: A running gate on the one check that is on by default.  ``state`` and
 #: ``record`` are overridden per cell; the rest is scenery.
-LINEARITY = Gate(name="linearity", state="refuse", record=False, reason=None,
-                 rtol=None)
+LINEARITY = Gate(name="linearity", state="refuse", record=False, reason=None, rtol=None)
 
 
 def _only(section):
@@ -88,9 +87,11 @@ class TestTheVocabulary:
         cost table load-bearing rather than decorative: identifiability is a
         ``jacfwd`` plus a dense SVD and prior sensitivity is that plus two
         Newton solves, on every document that never asked."""
-        assert DEFAULT_MODE == {"linearity": "refuse",
-                                "identifiability": OFF,
-                                "prior_sensitivity": OFF}
+        assert DEFAULT_MODE == {
+            "linearity": "refuse",
+            "identifiability": OFF,
+            "prior_sensitivity": OFF,
+        }
 
     def test_every_check_name_has_an_id_and_the_auto_skip_id_is_not_one(self):
         """Kills C14 being reused as a gate's own id -- see
@@ -99,8 +100,11 @@ class TestTheVocabulary:
         schema §6's C19 row would be dead and D-14's ``C1..C19`` widening
         would be decoration rather than something any test exercises."""
         assert set(CHECK_ID) == CHECK_NAMES
-        assert CHECK_ID == {"linearity": "C12", "identifiability": "C13",
-                            "prior_sensitivity": "C19"}
+        assert CHECK_ID == {
+            "linearity": "C12",
+            "identifiability": "C13",
+            "prior_sensitivity": "C19",
+        }
         assert len(set(CHECK_ID.values())) == 3
         assert AUTO_SKIP_ID == "C14"
         assert AUTO_SKIP_ID not in set(CHECK_ID.values())
@@ -114,8 +118,10 @@ class TestGate:
         :func:`verdict` leans on ``runs()`` for the whole bottom of §2.3's
         table."""
         expected = state in ("refuse", "warn", "report")
-        assert Gate(name="linearity", state=state, record=False, reason=None,
-                    rtol=None).runs() is expected
+        assert (
+            Gate(name="linearity", state=state, record=False, reason=None, rtol=None).runs()
+            is expected
+        )
 
     def test_where_is_the_line_the_user_edits(self):
         assert LINEARITY.where() == "inference.checks.linearity"
@@ -133,11 +139,14 @@ class TestGate:
         shared by every check in the pass."""
         asked = LINEARITY._replace(record=True)
         skipped = auto_skipped(asked, "no floating latent to differentiate")
-        assert skipped == Gate(name="linearity", state=AUTO_SKIP, record=False,
-                               reason="no floating latent to differentiate",
-                               rtol=None)
-        assert asked == Gate(name="linearity", state="refuse", record=True,
-                             reason=None, rtol=None)
+        assert skipped == Gate(
+            name="linearity",
+            state=AUTO_SKIP,
+            record=False,
+            reason="no floating latent to differentiate",
+            rtol=None,
+        )
+        assert asked == Gate(name="linearity", state="refuse", record=True, reason=None, rtol=None)
         assert skipped is not asked
 
     @pytest.mark.parametrize("empty_reason", ["", None])
@@ -158,11 +167,14 @@ class TestGate:
 
 
 class TestGatesAlwaysReturnsThree:
-    @pytest.mark.parametrize("section", [
-        None,
-        {},
-        {"linearity": {"mode": "warn"}},
-    ])
+    @pytest.mark.parametrize(
+        "section",
+        [
+            None,
+            {},
+            {"linearity": {"mode": "warn"}},
+        ],
+    )
     def test_gates_always_returns_three(self, section):
         """Kills the ``{}``-shaped return.  A caller that has to write
         ``gates.get("linearity")`` writes ``.get("linearity", <its own
@@ -178,11 +190,10 @@ class TestGatesAlwaysReturnsThree:
         assert resolved["prior_sensitivity"].state == OFF
 
     def test_a_declaration_wins_over_the_default(self):
-        resolved = gates({"identifiability": {"mode": "warn", "rtol": 1e-6,
-                                              "report": True}})
+        resolved = gates({"identifiability": {"mode": "warn", "rtol": 1e-6, "report": True}})
         assert resolved["identifiability"] == Gate(
-            name="identifiability", state="warn", record=True, reason=None,
-            rtol=1e-6)
+            name="identifiability", state="warn", record=True, reason=None, rtol=1e-6
+        )
         assert resolved["linearity"].state == "refuse"
 
     def test_rtol_is_identifiability_alone(self):
@@ -199,8 +210,7 @@ class TestGatesAlwaysReturnsThree:
         ``spec.get("rtol")`` unconditionally would return ``1e-8``, not
         ``None``.
         """
-        assert gates({"linearity": {"mode": "warn",
-                                    "rtol": 1e-8}})["linearity"].rtol is None
+        assert gates({"linearity": {"mode": "warn", "rtol": 1e-8}})["linearity"].rtol is None
         assert gates(None)["identifiability"].rtol is None
 
     def test_a_non_running_state_never_carries_record(self):
@@ -208,8 +218,7 @@ class TestGatesAlwaysReturnsThree:
         resolver that hands ``record=True`` to a skipped gate, after which a
         caller reading ``gate.record`` has to ask ``gate.runs()`` first and one
         caller will forget."""
-        resolved = gates({"linearity": {"mode": "skip", "reason": "campaign",
-                                        "report": True}})
+        resolved = gates({"linearity": {"mode": "skip", "reason": "campaign", "report": True}})
         assert resolved["linearity"].record is False
         assert resolved["linearity"].reason == "campaign"
 
@@ -221,8 +230,7 @@ class TestGatesAlwaysReturnsThree:
         DISCRIMINATES: a resolver that dropped the guard and read
         ``spec.get("reason")`` unconditionally would return ``"x"``, not
         ``None``."""
-        assert gates({"linearity": {"mode": "warn",
-                                    "reason": "x"}})["linearity"].reason is None
+        assert gates({"linearity": {"mode": "warn", "reason": "x"}})["linearity"].reason is None
 
 
 #: §2.3's table, expanded.  ``(state, failed, record)`` -> ``(severity, check)``
@@ -268,12 +276,19 @@ class TestTheCrossProduct:
         """Kills every one-cell mistake, and it is the test the whole plan
         leans on: a severity chosen inside each check is six chances to
         disagree about what ``mode: warn`` means."""
-        gate = Gate(name="linearity", state=state, record=record,
-                    reason="undefined here" if state == AUTO_SKIP else None,
-                    rtol=None)
-        found = verdict(gate, failed=failed,
-                        where="inference.parameters.g",
-                        message="the margin is 3.2e-01 (check C12).")
+        gate = Gate(
+            name="linearity",
+            state=state,
+            record=record,
+            reason="undefined here" if state == AUTO_SKIP else None,
+            rtol=None,
+        )
+        found = verdict(
+            gate,
+            failed=failed,
+            where="inference.parameters.g",
+            message="the margin is 3.2e-01 (check C12).",
+        )
         if expected is None:
             assert found is None
         else:
@@ -289,17 +304,23 @@ class TestTheCrossProduct:
         """Kills returning a refusal AND a report, which would double-count in
         ``Report.checks()`` and make ``raise_if_refused``'s "N more refusals"
         tail wrong.  The message carried is the FAILURE sentence."""
-        found = verdict(LINEARITY._replace(record=True), failed=True,
-                        where="inference.parameters.g",
-                        message="the margin is 3.2e-01 (check C12).")
+        found = verdict(
+            LINEARITY._replace(record=True),
+            failed=True,
+            where="inference.parameters.g",
+            message="the margin is 3.2e-01 (check C12).",
+        )
         assert isinstance(found, Finding)
         assert found.severity == REFUSE
         assert found.message == "the margin is 3.2e-01 (check C12)."
 
     def test_a_pass_with_report_true_carries_the_numbers(self):
-        found = verdict(LINEARITY._replace(record=True), failed=False,
-                        where="inference.parameters.g",
-                        message="margin 3.2e-01 over scales (1e-3, 1, 1e3).")
+        found = verdict(
+            LINEARITY._replace(record=True),
+            failed=False,
+            where="inference.parameters.g",
+            message="margin 3.2e-01 over scales (1e-3, 1, 1e3).",
+        )
         assert isinstance(found, Finding)
         assert found.severity == REPORT
         assert found.message == "margin 3.2e-01 over scales (1e-3, 1, 1e3)."
@@ -307,11 +328,9 @@ class TestTheCrossProduct:
     def test_an_auto_skip_reports_even_when_report_is_false(self):
         """Kills ``record`` gating the auto-skip path -- the silent-loss
         direction.  A check the user asked for and did not get must say so."""
-        gate = auto_skipped(LINEARITY._replace(name="identifiability"),
-                            "the latent 'a' is complex")
+        gate = auto_skipped(LINEARITY._replace(name="identifiability"), "the latent 'a' is complex")
         assert gate.record is False
-        found = verdict(gate, failed=False, where="inference.parameters.a",
-                        message="unused")
+        found = verdict(gate, failed=False, where="inference.parameters.a", message="unused")
         assert isinstance(found, Finding)
         assert found.severity == REPORT
         assert found.message == "the latent 'a' is complex"
@@ -324,18 +343,15 @@ class TestTheCrossProduct:
         # must not change this branch's answer at all.  The mutant's own
         # failure mode is silent loss: a caller that happened to pass
         # `failed=True` would get `None` back instead of the C14 report.
-        also_found = verdict(gate, failed=True, where="inference.parameters.a",
-                             message="unused")
+        also_found = verdict(gate, failed=True, where="inference.parameters.a", message="unused")
         assert also_found == found
 
     def test_an_auto_skip_carries_C14_and_not_the_gate_s_own_id(self):
         """Kills ``check=CHECK_ID[gate.name]`` on that branch, under which a
         user grepping the record for C14 finds nothing and ``Report.checks()``
         claims C13 fired when it did not."""
-        gate = auto_skipped(LINEARITY._replace(name="identifiability"),
-                            "the latent 'a' is complex")
-        found = verdict(gate, failed=False, where="inference.parameters.a",
-                        message="unused")
+        gate = auto_skipped(LINEARITY._replace(name="identifiability"), "the latent 'a' is complex")
+        found = verdict(gate, failed=False, where="inference.parameters.a", message="unused")
         assert found.check == "C14"
         assert found.check != CHECK_ID["identifiability"]
 
@@ -345,18 +361,25 @@ class TestTheCrossProduct:
         bug into the document's refusal is the substitution this layer
         exists to prevent."""
         for state in ("skip", OFF):
-            gate = Gate(name="linearity", state=state, record=True,
-                        reason="campaign" if state == "skip" else None,
-                        rtol=None)
-            assert verdict(gate, failed=True, where="inference.parameters.g",
-                           message="boom") is None
+            gate = Gate(
+                name="linearity",
+                state=state,
+                record=True,
+                reason="campaign" if state == "skip" else None,
+                rtol=None,
+            )
+            assert (
+                verdict(gate, failed=True, where="inference.parameters.g", message="boom") is None
+            )
 
     def test_each_check_reports_under_its_own_id(self):
         for name, check in CHECK_ID.items():
-            found = verdict(Gate(name=name, state="report", record=True,
-                                 reason=None, rtol=None),
-                            failed=True, where="inference.parameters.g",
-                            message="x")
+            found = verdict(
+                Gate(name=name, state="report", record=True, reason=None, rtol=None),
+                failed=True,
+                where="inference.parameters.g",
+                message="x",
+            )
             assert found.check == check
 
 
@@ -421,13 +444,16 @@ class TestEveryGrammarMessageIsPinnedWHOLE:
         the mode-enum sentence satisfies with the bare word."""
         assert _only(section).message == expected
 
-    @pytest.mark.parametrize("literal", [
-        "mode: skip carries its own reason: (check A37) -- three unrelated "
-        "skips sharing one sentence was v0's mistake.",
-        "together ask to record the numbers of a check that will not run. "
-        "Drop report:, or drop reason: and change mode: skip to mode: "
-        "report so the check runs and has numbers to record (check A1).",
-    ])
+    @pytest.mark.parametrize(
+        "literal",
+        [
+            "mode: skip carries its own reason: (check A37) -- three unrelated "
+            "skips sharing one sentence was v0's mistake.",
+            "together ask to record the numbers of a check that will not run. "
+            "Drop report:, or drop reason: and change mode: skip to mode: "
+            "report so the check runs and has numbers to record (check A1).",
+        ],
+    )
     def test_the_message_is_bound_in_one_module(self, literal):
         """Kills a hoist that copied rather than moved.
 
@@ -442,13 +468,16 @@ class TestEveryGrammarMessageIsPinnedWHOLE:
 
 
 class TestCheckGatesReturnsAndNeverRaises:
-    @pytest.mark.parametrize("section", [
-        {"linearity": {"mode": "warn"}},
-        ["linearity"],
-        None,
-        {"linearity": "banana"},
-        {"linearity": {"mode": "refuse", "rtol": 1e-8}},
-    ])
+    @pytest.mark.parametrize(
+        "section",
+        [
+            {"linearity": {"mode": "warn"}},
+            ["linearity"],
+            None,
+            {"linearity": "banana"},
+            {"linearity": {"mode": "refuse", "rtol": 1e-8}},
+        ],
+    )
     def test_check_gates_returns_and_never_raises(self, section):
         """Kills the section's ``raise`` being carried across, which would
         abort the pre-flight pass and hide every finding after it.
@@ -465,9 +494,9 @@ class TestCheckGatesReturnsAndNeverRaises:
     def test_a_legal_section_says_nothing(self):
         assert check_gates(None) == ()
         assert check_gates({}) == ()
-        assert check_gates({"identifiability": {"mode": "refuse",
-                                                "rtol": 1e-8,
-                                                "report": True}}) == ()
+        assert (
+            check_gates({"identifiability": {"mode": "refuse", "rtol": 1e-8, "report": True}}) == ()
+        )
 
     #: One case per adjacent pair of ``decide()``'s decisions that a single
     #: input can actually tell apart -- i.e. a reorder of that pair would
@@ -523,10 +552,8 @@ class TestCheckGatesReturnsAndNeverRaises:
         ),
     ]
 
-    @pytest.mark.parametrize("section, check, message",
-                             _ADJACENT_DECISION_PAIRS)
-    def test_check_gates_yields_at_most_one_finding_per_entry(self, section,
-                                                              check, message):
+    @pytest.mark.parametrize("section, check, message", _ADJACENT_DECISION_PAIRS)
+    def test_check_gates_yields_at_most_one_finding_per_entry(self, section, check, message):
         """Kills a ``check_gates`` that collects every violation of an entry,
         AND a reorder of any co-triggerable pair of its decisions.
 
@@ -547,10 +574,11 @@ class TestCheckGatesReturnsAndNeverRaises:
         """The other half: "one per entry" is not "one per document".  A user
         with two broken entries sees both, which is the whole reason a check
         collects rather than raises."""
-        found = check_gates({"linearty": {"mode": "warn"},
-                             "linearity": "banana"})
-        assert [one.where for one in found] == ["inference.checks.linearty",
-                                                "inference.checks.linearity"]
+        found = check_gates({"linearty": {"mode": "warn"}, "linearity": "banana"})
+        assert [one.where for one in found] == [
+            "inference.checks.linearty",
+            "inference.checks.linearity",
+        ]
 
     def test_the_grammar_findings_carry_A1_and_A37(self):
         """The slots ``preflight/gated.py`` claims for this grammar.  A37 is
@@ -570,8 +598,7 @@ class TestTheAdviceThisRefusalGives:
     assert the document then passes.  Plan 3A shipped three advice loops, one
     of which produced a clean report with the fault still present."""
 
-    REFUSED = {"linearity": {"mode": "skip", "reason": "campaign",
-                             "report": True}}
+    REFUSED = {"linearity": {"mode": "skip", "reason": "campaign", "report": True}}
 
     def test_the_refusal_is_reached_at_all(self):
         assert _only(self.REFUSED).message.endswith("(check A1).")
@@ -580,8 +607,8 @@ class TestTheAdviceThisRefusalGives:
         advised = {"linearity": {"mode": "skip", "reason": "campaign"}}
         assert check_gates(advised) == ()
         assert gates(advised)["linearity"] == Gate(
-            name="linearity", state="skip", record=False, reason="campaign",
-            rtol=None)
+            name="linearity", state="skip", record=False, reason="campaign", rtol=None
+        )
         assert gates(advised)["linearity"].runs() is False
 
     def test_the_other_way_out_also_works(self):
@@ -601,8 +628,8 @@ class TestTheAdviceThisRefusalGives:
         advised = {"linearity": entry}
         assert check_gates(advised) == ()
         assert gates(advised)["linearity"] == Gate(
-            name="linearity", state="report", record=True, reason=None,
-            rtol=None)
+            name="linearity", state="report", record=True, reason=None, rtol=None
+        )
 
 
 #: What :func:`_imported_modules` reports for an ``import_module()`` /
@@ -640,12 +667,10 @@ def _imported_modules(source: str) -> set[str]:
             found.update(f"{stem}.{alias.name}" for alias in node.names)
         elif isinstance(node, ast.Call):
             call = node.func
-            name = call.attr if isinstance(call, ast.Attribute) else getattr(
-                call, "id", "")
+            name = call.attr if isinstance(call, ast.Attribute) else getattr(call, "id", "")
             if name in ("import_module", "__import__"):
                 for arg in node.args:
-                    if isinstance(arg, ast.Constant) and isinstance(
-                            arg.value, str):
+                    if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
                         found.add(arg.value)
                     else:
                         found.add(_UNRESOLVABLE_IMPORT)
@@ -659,12 +684,14 @@ class TestTheImportBoundary:
     #: listed and the comparison is EXACT.  Any new package import fails here,
     #: which is the point: this module sits in front of the pre-flight scope
     #: guard and one convenience import would put the builders behind it.
-    ALLOWED = {"rheplicant.config",
-               "rheplicant.config.findings",
-               "rheplicant.config.errors",
-               "rheplicant.config.errors.ConfigError",
-               "rheplicant.config.resources",
-               "rheplicant.config.resources.check_unknown_keys"}
+    ALLOWED = {
+        "rheplicant.config",
+        "rheplicant.config.findings",
+        "rheplicant.config.errors",
+        "rheplicant.config.errors.ConfigError",
+        "rheplicant.config.resources",
+        "rheplicant.config.resources.check_unknown_keys",
+    }
 
     def source(self) -> str:
         import pathlib
@@ -678,31 +705,32 @@ class TestTheImportBoundary:
         ``sections/inference.py`` imports ``jax.numpy`` and the builders, and
         the pre-flight pass runs in front of all of that on purpose."""
         reached = _imported_modules(self.source())
-        offenders = [name for name in reached
-                     if "sections" in name.split(".")]
+        offenders = [name for name in reached if "sections" in name.split(".")]
         assert not offenders, offenders
         assert _UNRESOLVABLE_IMPORT not in reached, (
             "gating.py calls import_module()/__import__() with an argument "
             "this walk cannot resolve to a literal module name -- it may or "
             "may not reach sections/inference.py, and this guard refuses to "
-            "guess.")
+            "guess."
+        )
 
-    @pytest.mark.parametrize("spelling", [
-        "import rheplicant.config.sections.inference",
-        "from rheplicant.config.sections import inference",
-        "from rheplicant.config.sections.inference import _MODES",
-        "from .sections import inference",
-        "from ..config.sections.inference import _MODES",
-        "import importlib\nx = importlib.import_module("
-        "'rheplicant.config.sections.inference')",
-        # The evasion: a BUILT argument, not a literal string.  A matcher
-        # that only resolves `ast.Constant` arguments sees nothing here and
-        # reports a clean module.
-        "import importlib\nx = importlib.import_module("
-        "'rheplicant.config' + '.sections.inference')",
-    ])
-    def test_the_matcher_sees_a_section_import_when_there_is_one(self,
-                                                                spelling):
+    @pytest.mark.parametrize(
+        "spelling",
+        [
+            "import rheplicant.config.sections.inference",
+            "from rheplicant.config.sections import inference",
+            "from rheplicant.config.sections.inference import _MODES",
+            "from .sections import inference",
+            "from ..config.sections.inference import _MODES",
+            "import importlib\nx = importlib.import_module('rheplicant.config.sections.inference')",
+            # The evasion: a BUILT argument, not a literal string.  A matcher
+            # that only resolves `ast.Constant` arguments sees nothing here and
+            # reports a clean module.
+            "import importlib\nx = importlib.import_module("
+            "'rheplicant.config' + '.sections.inference')",
+        ],
+    )
+    def test_the_matcher_sees_a_section_import_when_there_is_one(self, spelling):
         """The anti-vacuity partner.  A matcher that saw nothing would pass the
         test above against a module that imports the whole builder stack.
 
@@ -712,16 +740,21 @@ class TestTheImportBoundary:
         call is safe, so it must not read as invisible.
         """
         reached = _imported_modules(spelling)
-        assert (any("sections" in name.split(".") for name in reached)
-                or _UNRESOLVABLE_IMPORT in reached), reached
+        assert (
+            any("sections" in name.split(".") for name in reached)
+            or _UNRESOLVABLE_IMPORT in reached
+        ), reached
 
     def test_gating_reaches_only_errors_findings_and_resources(self):
         """The positive form, which also kills a reach into ``passes``,
         ``document`` or ``preflight``.  ``resources`` is on the list for
         ``check_unknown_keys`` alone: §2.5 forbids a fourth hand-rolled
         unknown-key sweep, and that helper lives there."""
-        reached = {name for name in _imported_modules(self.source())
-                   if name.split(".")[:1] == ["rheplicant"]}
+        reached = {
+            name
+            for name in _imported_modules(self.source())
+            if name.split(".")[:1] == ["rheplicant"]
+        }
         assert reached <= self.ALLOWED, reached - self.ALLOWED
 
 
@@ -752,15 +785,18 @@ class TestTheSectionCallsTheExtraction:
             section.check_gates = original
         assert str(caught.value) == "the spy spoke."
 
-    @pytest.mark.parametrize("clause", [
-        "inference.checks: is a mapping",
-        "is not a check; v1 knows",
-        "is a mapping with mode:",
-        ".mode: is one of ",
-        "mode: skip carries its own reason",
-        "reason: belongs to mode: skip",
-        "ask to record the numbers of a check",
-    ])
+    @pytest.mark.parametrize(
+        "clause",
+        [
+            "inference.checks: is a mapping",
+            "is not a check; v1 knows",
+            "is a mapping with mode:",
+            ".mode: is one of ",
+            "mode: skip carries its own reason",
+            "reason: belongs to mode: skip",
+            "ask to record the numbers of a check",
+        ],
+    )
     def test_no_grammar_clause_survives_in_the_section(self, clause):
         """The anti-copy half for the six sentences ``message_binding``'s
         40-character floor cannot see."""
@@ -777,8 +813,7 @@ class TestTheSectionCallsTheExtraction:
         be a lie about the document, and Plan 4 needs both."""
         from rheplicant.config.sections.inference import _checks
 
-        parsed = _checks({"identifiability": {"mode": "warn", "rtol": 1e-8,
-                                              "report": True}})
+        parsed = _checks({"identifiability": {"mode": "warn", "rtol": 1e-8, "report": True}})
         assert set(parsed) == {"identifiability"}
         assert parsed["identifiability"].mode == "warn"
         assert parsed["identifiability"].report is True
@@ -787,8 +822,7 @@ class TestTheSectionCallsTheExtraction:
         assert set(gates({"identifiability": {"mode": "warn"}})) == CHECK_NAMES
 
     @pytest.mark.parametrize("section, expected", MESSAGES)
-    def test_the_section_and_the_extraction_say_the_same_thing(self, section,
-                                                              expected):
+    def test_the_section_and_the_extraction_say_the_same_thing(self, section, expected):
         """The twin, closed by measurement rather than by reading: whatever
         ``check_gates`` refuses, ``_checks`` raises, character for
         character."""

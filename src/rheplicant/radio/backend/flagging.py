@@ -49,7 +49,6 @@ from rheplicant.radio.protection import unflag_protected
 FLAGS_KEY = "flags"
 
 
-
 class FlaggingOperator(AbstractOperator):
     """Store a threshold-based flag mask in ``state.aux["flags"]`` (placeholder).
 
@@ -138,9 +137,7 @@ class MomentRFIFlaggingOperator(AbstractOperator):
             prior = jnp.zeros(state.data.shape, dtype=bool)
         out_spec = jax.ShapeDtypeStruct(state.data.shape, jnp.bool_)
         flags = jax.pure_callback(self._host_fit, out_spec, state.data, prior)
-        return state.replace(
-            aux={**state.aux, "flags": unflag_protected(flags, state.aux)}
-        )
+        return state.replace(aux={**state.aux, "flags": unflag_protected(flags, state.aux)})
 
     def _host_fit(self, waterfall, prior_mask):  # numpy land
         import numpy as np
@@ -159,7 +156,5 @@ class MomentRFIFlaggingOperator(AbstractOperator):
 
         fitter = IterativeSurfaceFitter(verbose=False, **dict(self.config))
         kernels = [np.ones(shape) for shape in self.kernel_shapes] or None
-        mask = fitter.fit(
-            np.asarray(waterfall), kernels=kernels, prior_mask=np.asarray(prior_mask)
-        )
+        mask = fitter.fit(np.asarray(waterfall), kernels=kernels, prior_mask=np.asarray(prior_mask))
         return np.asarray(mask, dtype=bool)

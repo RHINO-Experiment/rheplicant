@@ -68,10 +68,24 @@ def test_the_run_kinds_are_eighteen():
     """
     assert len(_KINDS) == 18, sorted(_KINDS)
     assert set(_KINDS) == {
-        "forward", "fisher", "optimize", "plan.estimate", "plan.sample",
-        "conjugate.wiener", "conjugate.gcr", "conjugate.gls", "condition",
-        "identifiability", "score_directions", "gradient", "mmodes",
-        "predict", "nuts", "npe", "compare", "benchmark",
+        "forward",
+        "fisher",
+        "optimize",
+        "plan.estimate",
+        "plan.sample",
+        "conjugate.wiener",
+        "conjugate.gcr",
+        "conjugate.gls",
+        "condition",
+        "identifiability",
+        "score_directions",
+        "gradient",
+        "mmodes",
+        "predict",
+        "nuts",
+        "npe",
+        "compare",
+        "benchmark",
     }
 
 
@@ -113,9 +127,7 @@ def test_the_scan_can_still_fail():
     synthetic file rather than by mutating a real one.
     """
     probe = ast.parse(
-        "def f():\n"
-        "    from rheplicant.inference.sqrtinfo import SqrtInfo\n"
-        "    return SqrtInfo\n"
+        "def f():\n    from rheplicant.inference.sqrtinfo import SqrtInfo\n    return SqrtInfo\n"
     )
     found: set[str] = set()
     for node in ast.walk(probe):
@@ -179,18 +191,16 @@ class TestB12sPremiseIsFalse:
         """Driven, not read off a constant -- a table can be right and unused."""
         from rheplicant.config.gating import gates
 
-        gate = gates({"prior_sensitivity": {"mode": mode, "report": True}})[
-            "prior_sensitivity"
-        ]
+        gate = gates({"prior_sensitivity": {"mode": mode, "report": True}})["prior_sensitivity"]
         assert gate.state == mode
         assert gate.record is True
 
     def test_skip_carries_its_reason_and_does_not_record(self):
         from rheplicant.config.gating import gates
 
-        gate = gates(
-            {"prior_sensitivity": {"mode": "skip", "reason": "not wanted"}}
-        )["prior_sensitivity"]
+        gate = gates({"prior_sensitivity": {"mode": "skip", "reason": "not wanted"}})[
+            "prior_sensitivity"
+        ]
         assert gate.state == "skip"
         assert gate.reason == "not wanted"
 

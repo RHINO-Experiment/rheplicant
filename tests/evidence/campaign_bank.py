@@ -65,9 +65,7 @@ class _Normal:
         self.loc, self.scale = loc, scale
 
     def log_prob(self, x):
-        return -0.5 * (
-            ((x - self.loc) / self.scale) ** 2 + jnp.log(2 * jnp.pi * self.scale**2)
-        )
+        return -0.5 * (((x - self.loc) / self.scale) ** 2 + jnp.log(2 * jnp.pi * self.scale**2))
 
 
 def space():
@@ -100,11 +98,7 @@ def terms(n_epochs, biased, seed=11, templates=None):
     rng = np.random.default_rng(seed)
     out = []
     for e in range(n_epochs):
-        data = (
-            DESIGN @ TRUTH
-            + SIGMA * rng.normal(size=N_SAMPLES)
-            + (COMMON if biased else 0.0)
-        )
+        data = DESIGN @ TRUTH + SIGMA * rng.normal(size=N_SAMPLES) + (COMMON if biased else 0.0)
         out.append(
             compress_linear(
                 design={"x": jnp.asarray(DESIGN)},
@@ -144,6 +138,4 @@ def whitened_split():
     """
     whitened = COMMON / SIGMA
     parallel = whitened_projector() @ whitened
-    return float(np.linalg.norm(parallel)), float(
-        np.linalg.norm(whitened - parallel)
-    )
+    return float(np.linalg.norm(parallel)), float(np.linalg.norm(whitened - parallel))

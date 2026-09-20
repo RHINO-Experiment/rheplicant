@@ -473,8 +473,7 @@ FORMULA_REGISTRATIONS = tuple(
             (
                 "rheplicant.config.inflight.grids._static_number"
                 if registration.name == "cw_centre"
-                and class_name
-                == "rheplicant.radio.instrument.calibration.CWCalibrationOperator"
+                and class_name == "rheplicant.radio.instrument.calibration.CWCalibrationOperator"
                 else class_name
             )
             for class_name, binding in MODEL_FORMULA_BINDINGS.items()

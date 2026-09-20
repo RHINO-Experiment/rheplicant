@@ -131,6 +131,6 @@ def test_a_non_zero_prior_mean_reaches_the_scores():
         assert row.z == pytest.approx(z, rel=1e-9)
 
     without = held_out_z(terms, prior)
-    assert [r.chi2 for r in rows] != pytest.approx(
-        [r.chi2 for r in without], rel=1e-6
-    ), "the prior mean moved nothing, so this test cannot see it being dropped"
+    assert [r.chi2 for r in rows] != pytest.approx([r.chi2 for r in without], rel=1e-6), (
+        "the prior mean moved nothing, so this test cannot see it being dropped"
+    )

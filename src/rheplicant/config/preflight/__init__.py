@@ -85,9 +85,20 @@ _DECORATOR = "register"
 # of them (`grep -rn "_SECTIONS\|_NOT_YET\|_REQUIRED" src/ tests/` -> only
 # document.py), so the move is closed.  They cannot be imported back from
 # `document.py` either: that module imports this one for the hook.
-_SECTIONS = ("schema_version", "defaults", "plugins", "runtime", "observation",
-             "resources", "model", "variants", "inference", "runs", "outputs",
-             "campaign")
+_SECTIONS = (
+    "schema_version",
+    "defaults",
+    "plugins",
+    "runtime",
+    "observation",
+    "resources",
+    "model",
+    "variants",
+    "inference",
+    "runs",
+    "outputs",
+    "campaign",
+)
 #: Sections this layer does not read, and WHERE THEY ARE READ INSTEAD.
 #:
 #: These used to name an internal plan number. That was development history in
@@ -96,12 +107,11 @@ _SECTIONS = ("schema_version", "defaults", "plugins", "runtime", "observation",
 #: values now say where to go, because a refusal a reader can act on is the
 #: whole point of refusing loudly.
 _NOT_YET = {
-    "outputs": "the command line, which owns the output tree, its provenance "
-               "and its audit trail",
+    "outputs": "the command line, which owns the output tree, its provenance and its audit trail",
     "defaults": "the command line -- presets are YAML files, and that is where "
-                "YAML first comes off disk",
+    "YAML first comes off disk",
     "plugins": "the command line -- importing a plugin belongs to the process "
-               "entry point, not to a mapping",
+    "entry point, not to a mapping",
 }
 _REQUIRED = ("runtime", "observation", "model", "runs")
 
@@ -124,7 +134,7 @@ _REQUIRED = ("runtime", "observation", "model", "runs")
 #: against this constant.
 _RESERVED = {
     "campaign": "is reserved with capability 4 (streaming evidence, "
-                "schema §8.2) and refused in v1.",
+    "schema §8.2) and refused in v1.",
 }
 
 
@@ -188,10 +198,7 @@ def _structural(document: Mapping[str, Any]) -> None:
     """
     unknown = sorted(set(document) - set(_SECTIONS))
     if unknown:
-        raise ConfigError(
-            f"This document declares {unknown}; the sections are "
-            f"{list(_SECTIONS)}."
-        )
+        raise ConfigError(f"This document declares {unknown}; the sections are {list(_SECTIONS)}.")
     if "campaign" in document:
         # The literal, NOT `reserved_clause`, and deliberately so.  Three
         # guards pin this sentence AS A LITERAL, one of them
@@ -257,9 +264,7 @@ def preflight(document: Mapping[str, Any]) -> Report:
 def _preflight_with_registry_snapshot(document: Mapping[str, Any]) -> Report:
     _structural(document)
     merged = initial_merge(document, origin=Origin("user"))
-    enumeration = enumerate_layers_once(
-        merged.document, merged.origins, merged.deletions
-    )
+    enumeration = enumerate_layers_once(merged.document, merged.origins, merged.deletions)
     attributor = LayerAttributor()
     collected: list[Finding] = []
     for layer in enumeration.layers:
@@ -271,9 +276,7 @@ def _preflight_with_registry_snapshot(document: Mapping[str, Any]) -> Report:
                 raw = tuple(_document_checks._variant_text(layer_document))
                 collected.extend(attributor.attribute(layer, raw))
                 continue
-        report = sweep(
-            CHECKS, layer_document, label=_LABEL, sections=_SECTIONS
-        )
+        report = sweep(CHECKS, layer_document, label=_LABEL, sections=_SECTIONS)
         collected.extend(attributor.attribute(layer, report.findings))
     return Report(findings=tuple(collected))
 

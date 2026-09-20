@@ -65,8 +65,12 @@ class NeuralOperator(AbstractOperator):
     ) -> "NeuralOperator":
         """Build a fresh surrogate (near-identity response) for a frequency window."""
         mlp = eqx.nn.MLP(
-            in_size=1, out_size=1, width_size=width, depth=depth,
-            activation=jax.nn.tanh, key=key,
+            in_size=1,
+            out_size=1,
+            width_size=width,
+            depth=depth,
+            activation=jax.nn.tanh,
+            key=key,
         )
         return cls(mlp=mlp, f_min=f_min, f_max=f_max)
 

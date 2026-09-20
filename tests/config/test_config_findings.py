@@ -111,7 +111,11 @@ class TestTheThreeSeverities:
         in a failure message and ``dataclasses.astuple`` all read.
         """
         assert [one.name for one in dataclasses.fields(Finding)] == [
-            "check", "severity", "where", "message", "departure",
+            "check",
+            "severity",
+            "where",
+            "message",
+            "departure",
         ]
 
     def test_departure_is_last_and_defaulted_so_the_four_stay_positional(self):
@@ -139,8 +143,7 @@ class TestTheThreeSeverities:
         table = (("g", ((0.001, 1.32e-4), (1.0, 4.89e-1), (1000.0, 9.95e-1))),)
         one = refuse("C12", "inference.parameters.g", "x.", departure=table)
         assert one.departure == table
-        assert hash(one) == hash(
-            refuse("C12", "inference.parameters.g", "x.", departure=table))
+        assert hash(one) == hash(refuse("C12", "inference.parameters.g", "x.", departure=table))
         assert hash(one) != hash(refuse("C12", "inference.parameters.g", "x."))
 
     @pytest.mark.parametrize(
@@ -197,8 +200,7 @@ class TestTheThreeSeverities:
         [("refuse", REFUSE), ("warn", WARN), ("report", REPORT)],
         ids=["refuse", "warn", "report"],
     )
-    def test_every_severity_route_matches_by_VALUE_and_not_by_identity(
-            self, token, severity):
+    def test_every_severity_route_matches_by_VALUE_and_not_by_identity(self, token, severity):
         """Kills ``one.severity is severity`` on any of the routes.
 
         Every ``Finding`` the rest of this file builds goes through
@@ -222,8 +224,12 @@ class TestTheThreeSeverities:
             "this interpreter interned the parsed token, so this test can no "
             "longer tell `==` from `is` -- build the string another way"
         )
-        one = Finding(check="A1", severity=parsed, where="model.x",
-                      message="model.x: a parsed severity (check A1).")
+        one = Finding(
+            check="A1",
+            severity=parsed,
+            where="model.x",
+            message="model.x: a parsed severity (check A1).",
+        )
         held = Report(findings=(one,))
         assert held.of(severity) == (one,)
         assert held.refusals() == ((one,) if severity == REFUSE else ())
@@ -237,8 +243,12 @@ class TestTheThreeSeverities:
         runs anyway.
         """
         parsed = json.loads('{"severity": "refuse"}')["severity"]
-        one = Finding(check="A1", severity=parsed, where="model.x",
-                      message="model.x: a parsed severity (check A1).")
+        one = Finding(
+            check="A1",
+            severity=parsed,
+            where="model.x",
+            message="model.x: a parsed severity (check A1).",
+        )
         with pytest.raises(ConfigError, match="a parsed severity"):
             Report(findings=(one,)).raise_if_refused()
 
@@ -262,8 +272,7 @@ class TestTheAuditRecord:
     TABLE = (("g", ((0.001, 1.32e-4), (1.0, 4.89e-1))),)
 
     def test_the_record_is_exactly_the_declared_keys(self):
-        one = refuse("C12", "inference.parameters.g", "It is not affine.",
-                     departure=self.TABLE)
+        one = refuse("C12", "inference.parameters.g", "It is not affine.", departure=self.TABLE)
         assert audit_record(one) == {
             "check": "C12",
             "severity": REFUSE,
@@ -302,8 +311,7 @@ class TestTheAuditRecord:
         AuditTrace().record_findings("postflight", base, [audit_record(one)])
 
         with pytest.raises(BootstrapConfigError, match="exactly keys"):
-            AuditTrace().record_findings(
-                "postflight", base, [dataclasses.asdict(one)])
+            AuditTrace().record_findings("postflight", base, [dataclasses.asdict(one)])
 
     def test_a_finding_with_no_departure_records_the_same_four(self):
         """The keys do not depend on whether the optional field is set: an
@@ -428,23 +436,27 @@ class TestRaiseIfRefused:
             "\n(This document has 1 more refusal, at model.noise.)"
         )
 
-    @pytest.mark.parametrize("pattern", [
-        # Three patterns lifted verbatim from assertions that exist today, so
-        # the claim "a moved check keeps its pin" is tested against real pins
-        # rather than against a pin written to pass.  Verified at the commit
-        # that added this file, by `grep -n 'pytest.raises(ConfigError,
-        # match=' tests/config/<module>`:
-        # from test_config_section_model.py::TestTypeSelection.test_type_picks_the_class
-        # -- and a regex, so `re.search` rather than `str.__contains__` is
-        # what the tail has to survive.
-        r"\{ref:",
-        # from test_config_document.py::TestLoadDocument
-        # .test_not_yet_owned_sections_name_where_they_are_handled
-        "capability 4",
-        # from test_config_document.py::TestLoadDocument
-        # .test_the_synthetic_document_loads
-        "schema_version",
-    ], ids=["ref", "capability", "version"])
+    @pytest.mark.parametrize(
+        "pattern",
+        [
+            # Three patterns lifted verbatim from assertions that exist today, so
+            # the claim "a moved check keeps its pin" is tested against real pins
+            # rather than against a pin written to pass.  Verified at the commit
+            # that added this file, by `grep -n 'pytest.raises(ConfigError,
+            # match=' tests/config/<module>`:
+            # from test_config_section_model.py::TestTypeSelection.test_type_picks_the_class
+            # -- and a regex, so `re.search` rather than `str.__contains__` is
+            # what the tail has to survive.
+            r"\{ref:",
+            # from test_config_document.py::TestLoadDocument
+            # .test_not_yet_owned_sections_name_where_they_are_handled
+            "capability 4",
+            # from test_config_document.py::TestLoadDocument
+            # .test_the_synthetic_document_loads
+            "schema_version",
+        ],
+        ids=["ref", "capability", "version"],
+    )
     def test_a_pinned_pattern_still_matches_through_the_tail(self, pattern):
         """§2.3's "a moved check keeps its pin", tested against real pins.
 
@@ -465,9 +477,9 @@ class TestRaiseIfRefused:
         strings.  Those four are why the tail may not move the user's first
         line; this one is why the tail is SAFE to append at all.
         """
-        first = refuse("A2", "model.x",
-                       "model.x: a {ref: ...} needs capability 4 and "
-                       "schema_version 1.")
+        first = refuse(
+            "A2", "model.x", "model.x: a {ref: ...} needs capability 4 and schema_version 1."
+        )
         with pytest.raises(ConfigError, match=pattern):
             Report(findings=(first, C, E)).raise_if_refused()
 
@@ -514,6 +526,7 @@ class TestEmitWarnings:
         test in the file cannot break it.  The ``M13``/``M14`` mutants
         (``stacklevel=2`` and ``stacklevel=4``) are both red here.
         """
+
         def stands_for_load_document(held):
             held.emit_warnings()
 
@@ -565,6 +578,7 @@ class TestTheExecutorRegistryNoLongerAsserts:
         and *then* refused would leave the table holding the loser of the
         argument, and every assertion about the refusal itself stays green.
         """
+
         def other(run, built, *, results=None):
             return None
 
@@ -596,6 +610,7 @@ class TestTheExecutorRegistryNoLongerAsserts:
         second -- because a reader chasing a collision needs to know which
         registration is already there and which one just lost.
         """
+
         def other(run, built, *, results=None):
             return None
 
@@ -633,8 +648,9 @@ class TestTheExecutorRegistryNoLongerAsserts:
             "except Exception as error:\n"
             "    print(type(error).__name__)\n"
         )
-        done = subprocess.run([sys.executable, "-O", "-c", source],
-                              capture_output=True, text=True, check=True)
+        done = subprocess.run(
+            [sys.executable, "-O", "-c", source], capture_output=True, text=True, check=True
+        )
         assert done.stdout.strip() == "ConfigError", done.stdout
 
 
@@ -658,8 +674,10 @@ class TestNoFindingInThisLayerIsIdLess:
 
     #: (module, the expression) for every finding built with a computed id.
     COMPUTED = {
-        ("gating.py", "AUTO_SKIP_ID"), ("gating.py", "check"),
-        ("inflight/axes.py", "check"), ("preflight/model.py", "check"),
+        ("gating.py", "AUTO_SKIP_ID"),
+        ("gating.py", "check"),
+        ("inflight/axes.py", "check"),
+        ("preflight/model.py", "check"),
         ("findings.py", "check"),
     }
 
@@ -680,11 +698,12 @@ class TestNoFindingInThisLayerIsIdLess:
         root = pathlib.Path(__file__).parents[2] / "src" / "rheplicant" / "config"
         for path in sorted(root.rglob("*.py")):
             tree = ast.parse(path.read_text())
-            bare = {alias.asname or alias.name
-                    for node in ast.walk(tree)
-                    if isinstance(node, ast.ImportFrom)
-                    and node.module == "rheplicant.config.findings"
-                    for alias in node.names} & cls.BUILDERS
+            bare = {
+                alias.asname or alias.name
+                for node in ast.walk(tree)
+                if isinstance(node, ast.ImportFrom) and node.module == "rheplicant.config.findings"
+                for alias in node.names
+            } & cls.BUILDERS
             if path.name == "findings.py":
                 bare = set(cls.BUILDERS)
             for node in ast.walk(tree):
@@ -695,12 +714,14 @@ class TestNoFindingInThisLayerIsIdLess:
                     isinstance(func, ast.Attribute)
                     and isinstance(func.value, ast.Name)
                     and func.value.id == "findings"
-                    and func.attr in cls.BUILDERS)
+                    and func.attr in cls.BUILDERS
+                )
                 if not named:
                     continue
-                check = next((kw.value for kw in node.keywords
-                              if kw.arg == "check"),
-                             node.args[0] if node.args else None)
+                check = next(
+                    (kw.value for kw in node.keywords if kw.arg == "check"),
+                    node.args[0] if node.args else None,
+                )
                 yield (path.relative_to(root).as_posix(), node.lineno, check)
 
     def test_no_finding_is_built_with_an_empty_or_missing_id(self):
@@ -709,15 +730,19 @@ class TestNoFindingInThisLayerIsIdLess:
         calls = list(self._calls())
         # Measured: 109 calls. A floor, so the scan going blind is loud.
         assert len(calls) >= 100, "the scan stopped seeing finding calls"
-        empty = [(module, line) for module, line, check in calls
-                 if check is None or (isinstance(check, ast.Constant)
-                                      and check.value in ("", None))]
+        empty = [
+            (module, line)
+            for module, line, check in calls
+            if check is None or (isinstance(check, ast.Constant) and check.value in ("", None))
+        ]
         assert empty == []
 
     def test_every_computed_id_is_one_of_the_known_tables(self):
         import ast
 
-        computed = {(module, ast.unparse(check))
-                    for module, _line, check in self._calls()
-                    if check is not None and not isinstance(check, ast.Constant)}
+        computed = {
+            (module, ast.unparse(check))
+            for module, _line, check in self._calls()
+            if check is not None and not isinstance(check, ast.Constant)
+        }
         assert computed == self.COMPUTED

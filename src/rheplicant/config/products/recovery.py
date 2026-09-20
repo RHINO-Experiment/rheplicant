@@ -37,7 +37,7 @@ def _moments(kind: str, product: object) -> tuple[Mapping[str, object], Mapping[
         for name, value in centre.items():
             shape = np.asarray(value).shape
             size = int(np.asarray(value).size)
-            sigma[name] = flat_sigma[offset:offset + size].reshape(shape)
+            sigma[name] = flat_sigma[offset : offset + size].reshape(shape)
             offset += size
         if offset != flat_sigma.size:
             raise ConfigError("conjugate.wiener covariance does not match its mean.")

@@ -75,12 +75,10 @@ def _sky_source():
         sky_model=PowerLawSkyModel(
             amplitude=jnp.arange(1.0, 13.0),
             spectral_index=jnp.array(-2.6),  # scalar: the model is per-pixel
-            ref_freq=70e6,                   # in amplitude only
+            ref_freq=70e6,  # in amplitude only
             n_pix=12,
         ),
-        projector=MatrixProjector(
-            matrix=jnp.linspace(0.5, 1.5, 48).reshape(4, 12) / 12.0
-        ),
+        projector=MatrixProjector(matrix=jnp.linspace(0.5, 1.5, 48).reshape(4, 12) / 12.0),
     )
 
 
@@ -113,12 +111,8 @@ def test_the_table_is_the_family_and_the_family_is_the_table():
     message naming itself, rather than joining the six that had no test.
     """
     assert _carrying_the_guard() == set(COORDS_GUARDED), {
-        "carry the guard but are untested": sorted(
-            _carrying_the_guard() - set(COORDS_GUARDED)
-        ),
-        "listed but no longer carry it": sorted(
-            set(COORDS_GUARDED) - _carrying_the_guard()
-        ),
+        "carry the guard but are untested": sorted(_carrying_the_guard() - set(COORDS_GUARDED)),
+        "listed but no longer carry it": sorted(set(COORDS_GUARDED) - _carrying_the_guard()),
     }
 
 
@@ -162,9 +156,7 @@ def test_a_state_with_coords_gets_past_this_guard(name):
     # to be untested in the first place.
     state = State(
         data=jnp.zeros((4, 8)),
-        coords=Coordinates(
-            time=jnp.arange(4.0), freq=jnp.linspace(60e6, 80e6, 8)
-        ),
+        coords=Coordinates(time=jnp.arange(4.0), freq=jnp.linspace(60e6, 80e6, 8)),
         key=jax.random.key(0),
     )
     out = _operator(name)(state)

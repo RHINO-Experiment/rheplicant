@@ -220,9 +220,7 @@ def observed(pair):
 
 
 class TestGroupedOperator:
-    def test_offset_is_the_model_with_the_WHOLE_group_at_zero(
-        self, space, three_linear, state
-    ):
+    def test_offset_is_the_model_with_the_WHOLE_group_at_zero(self, space, three_linear, state):
         block = linear_operator(space, three_linear, state, names=("t_nw", "t_ant"))
         # both members zeroed leaves nothing on the signal path
         assert jnp.allclose(block.offset, 0.0, atol=1e-3)
@@ -230,14 +228,10 @@ class TestGroupedOperator:
         alone = linear_operator(space, three_linear, state, "t_nw")
         assert not jnp.allclose(alone.offset, 0.0, atol=1e-3)
 
-    def test_offset_plus_forward_reproduces_the_model(
-        self, pair, space, three_linear, state
-    ):
+    def test_offset_plus_forward_reproduces_the_model(self, pair, space, three_linear, state):
         forward, values0 = space.forward_fn(three_linear, state)
         x = {"t_nw": TRUE_NW, "t_ant": TRUE_ANT}
-        assert jnp.allclose(
-            pair.offset + pair.forward(x), forward({**values0, **x}), rtol=1e-5
-        )
+        assert jnp.allclose(pair.offset + pair.forward(x), forward({**values0, **x}), rtol=1e-5)
 
     def test_shape_and_dtype_are_keyed_by_name(self, pair):
         assert pair.grouped
@@ -252,15 +246,15 @@ class TestGroupedOperator:
         assert block.names == ("t_nw",)
         assert block.shape == (2,)
 
-    def test_a_group_of_ONE_is_legal_and_answers_in_a_dict(
-        self, space, three_linear, state
-    ):
+    def test_a_group_of_ONE_is_legal_and_answers_in_a_dict(self, space, three_linear, state):
         """How a partition holds one-latent and many-latent blocks uniformly."""
         block = linear_operator(space, three_linear, state, names=("t_nw",))
         assert block.grouped and block.names == ("t_nw",)
         solved, _ = wiener_solve(
-            block, block.offset + block.forward({"t_nw": TRUE_NW}),
-            noise_std=1e-2, prior_std={"t_nw": 1e3},
+            block,
+            block.offset + block.forward({"t_nw": TRUE_NW}),
+            noise_std=1e-2,
+            prior_std={"t_nw": 1e3},
         )
         assert set(solved) == {"t_nw"}
         assert jnp.allclose(solved["t_nw"], TRUE_NW, rtol=1e-3)
@@ -284,14 +278,13 @@ class TestGroupedOperator:
 
     def test_a_repeated_name_is_refused(self, space, three_linear, state):
         with pytest.raises(ParameterSpaceError, match="more than once"):
-            linear_operator(space, three_linear, state,
-                            names=("t_nw", "t_ant", "t_nw"))
+            linear_operator(space, three_linear, state, names=("t_nw", "t_ant", "t_nw"))
 
     def test_a_member_not_declared_linear_is_refused(self, three_linear, state):
         undeclared = ParameterSpace(
             latents=[
                 Latent("t_ant", init=TRUE_ANT, linear=True),
-                Latent("t_nw", init=TRUE_NW),          # not declared
+                Latent("t_nw", init=TRUE_NW),  # not declared
                 Latent("gain", init=GAIN0, linear=True),
             ],
             bindings=[
@@ -304,16 +297,18 @@ class TestGroupedOperator:
             linear_operator(undeclared, three_linear, state, names=("t_nw", "t_ant"))
 
     def test_at_rebuilds_the_group_at_another_gain(self, space, three_linear, state):
-        doubled = linear_operator(space, three_linear, state, names=("t_nw", "t_ant"),
-                                  at={"gain": 2.0 * GAIN0})
+        doubled = linear_operator(
+            space, three_linear, state, names=("t_nw", "t_ant"), at={"gain": 2.0 * GAIN0}
+        )
         base = linear_operator(space, three_linear, state, names=("t_nw", "t_ant"))
         x = {"t_nw": TRUE_NW, "t_ant": TRUE_ANT}
         assert jnp.allclose(doubled.forward(x), 2.0 * base.forward(x), rtol=1e-4)
 
     def test_at_rejects_an_unknown_name(self, space, three_linear, state):
         with pytest.raises(ParameterSpaceError, match="not a latent"):
-            linear_operator(space, three_linear, state, names=("t_nw", "t_ant"),
-                            at={"nope": jnp.array(1.0)})
+            linear_operator(
+                space, three_linear, state, names=("t_nw", "t_ant"), at={"nope": jnp.array(1.0)}
+            )
 
 
 # --------------------------------------------------------------- adjoints ---
@@ -381,17 +376,14 @@ class TestGroupedAdjoint:
             + 1j * jax.random.normal(jax.random.fold_in(key, 2), (3,)),
         }
 
-    def test_the_real_pairing_holds_and_the_sesquilinear_one_does_not(
-        self, mixed_block, probe
-    ):
+    def test_the_real_pairing_holds_and_the_sesquilinear_one_does_not(self, mixed_block, probe):
         y = jax.random.normal(jax.random.key(11), mixed_block.offset.shape)
         cotangent = mixed_block.adjoint(y)
         paired = float(jnp.sum(mixed_block.forward(probe) * y))
 
         real_form = float(
             sum(
-                jnp.real(jnp.sum(probe[member] * cotangent[member]))
-                for member in ("amp", "coeffs")
+                jnp.real(jnp.sum(probe[member] * cotangent[member])) for member in ("amp", "coeffs")
             )
         )
         assert real_form == pytest.approx(paired, rel=1e-4)
@@ -464,10 +456,12 @@ def _dense_group(block, order):
 
 def _dense_normal(block, noise_std, prior_std, order):
     A, spans = _dense_group(block, order)
-    inverse_variance = jnp.concatenate([
-        jnp.full(stop - start, 1.0 / jnp.asarray(prior_std[member]) ** 2)
-        for member, (start, stop) in spans.items()
-    ])
+    inverse_variance = jnp.concatenate(
+        [
+            jnp.full(stop - start, 1.0 / jnp.asarray(prior_std[member]) ** 2)
+            for member, (start, stop) in spans.items()
+        ]
+    )
     weight = 1.0 / jnp.asarray(noise_std) ** 2
     return A, spans, A.T @ (weight * A) + jnp.diag(inverse_variance)
 
@@ -493,8 +487,9 @@ class TestGroupedSolve:
             assert jnp.allclose(solved[member], expected[member], rtol=1e-3, atol=1e-2)
 
     def test_recovers_a_noiseless_signal_under_a_weak_prior(self, pair, observed):
-        solved, _ = wiener_solve(pair, observed, noise_std=1e-2,
-                                 prior_std={"t_nw": 1e5, "t_ant": 1e5})
+        solved, _ = wiener_solve(
+            pair, observed, noise_std=1e-2, prior_std={"t_nw": 1e5, "t_ant": 1e5}
+        )
         assert jnp.allclose(solved["t_nw"], TRUE_NW, rtol=2e-3)
         assert jnp.allclose(solved["t_ant"], TRUE_ANT, rtol=2e-3)
 
@@ -514,21 +509,16 @@ class TestGroupedSolve:
         implementation that concatenated in caller order and happened to be
         close.
         """
-        forward_order = linear_operator(space, three_linear, state,
-                                        names=("t_nw", "t_ant"))
-        reverse_order = linear_operator(space, three_linear, state,
-                                        names=("t_ant", "t_nw"))
+        forward_order = linear_operator(space, three_linear, state, names=("t_nw", "t_ant"))
+        reverse_order = linear_operator(space, three_linear, state, names=("t_ant", "t_nw"))
         assert reverse_order.names == ("t_ant", "t_nw")
-        data = forward_order.offset + forward_order.forward(
-            {"t_nw": TRUE_NW, "t_ant": TRUE_ANT}
-        )
+        data = forward_order.offset + forward_order.forward({"t_nw": TRUE_NW, "t_ant": TRUE_ANT})
         first, _ = wiener_solve(forward_order, data, noise_std=0.5, prior_std=PRIOR)
         second, _ = wiener_solve(reverse_order, data, noise_std=0.5, prior_std=PRIOR)
         for member in ("t_nw", "t_ant"):
             assert jnp.array_equal(first[member], second[member]), member
 
-    def test_the_per_member_prior_std_reaches_the_member_that_names_it(self, pair,
-                                                                       observed):
+    def test_the_per_member_prior_std_reaches_the_member_that_names_it(self, pair, observed):
         """A prior tight on one member must shrink THAT member and leave the
         other where it was.
 
@@ -539,10 +529,10 @@ class TestGroupedSolve:
         """
         wide = {"t_nw": 1e2, "t_ant": 1e2}
         loose, _ = wiener_solve(pair, observed, noise_std=1.0, prior_std=wide)
-        tight_nw, _ = wiener_solve(pair, observed, noise_std=1.0,
-                                   prior_std={**wide, "t_nw": 1e-2})
-        tight_ant, _ = wiener_solve(pair, observed, noise_std=1.0,
-                                    prior_std={**wide, "t_ant": 1e-2})
+        tight_nw, _ = wiener_solve(pair, observed, noise_std=1.0, prior_std={**wide, "t_nw": 1e-2})
+        tight_ant, _ = wiener_solve(
+            pair, observed, noise_std=1.0, prior_std={**wide, "t_ant": 1e-2}
+        )
 
         def size(values, member):
             return float(jnp.linalg.norm(values[member]))
@@ -555,7 +545,9 @@ class TestGroupedSolve:
     def test_the_per_member_prior_mean_reaches_the_member_that_names_it(self, pair):
         """With uninformative data the mean IS the prior mean — per member."""
         mean, _ = wiener_solve(
-            pair, pair.offset, noise_std=1e8,
+            pair,
+            pair.offset,
+            noise_std=1e8,
             prior_std={"t_nw": 1.0, "t_ant": 1.0},
             prior_mean={"t_nw": 3.0, "t_ant": -7.0},
         )
@@ -564,8 +556,11 @@ class TestGroupedSolve:
 
     def test_an_omitted_prior_mean_is_zero_for_that_member_only(self, pair):
         mean, _ = wiener_solve(
-            pair, pair.offset, noise_std=1e8,
-            prior_std={"t_nw": 1.0, "t_ant": 1.0}, prior_mean={"t_ant": -7.0},
+            pair,
+            pair.offset,
+            noise_std=1e8,
+            prior_std={"t_nw": 1.0, "t_ant": 1.0},
+            prior_mean={"t_ant": -7.0},
         )
         assert jnp.allclose(mean["t_nw"], 0.0, atol=1e-5)
         assert jnp.allclose(mean["t_ant"], -7.0, rtol=1e-3)
@@ -576,9 +571,14 @@ class TestGroupedSolve:
         across the group cannot pass this."""
         keys = jax.random.split(jax.random.key(4), 4000)
         draws = jax.vmap(
-            lambda k: gcr_sample(pair, pair.offset, noise_std=1e8,
-                                 prior_std={"t_nw": 0.4, "t_ant": 2.0},
-                                 prior_mean={"t_nw": 1.0, "t_ant": -5.0}, key=k)[0]
+            lambda k: gcr_sample(
+                pair,
+                pair.offset,
+                noise_std=1e8,
+                prior_std={"t_nw": 0.4, "t_ant": 2.0},
+                prior_mean={"t_nw": 1.0, "t_ant": -5.0},
+                key=k,
+            )[0]
         )(keys)
         assert float(draws["t_nw"].std()) == pytest.approx(0.4, rel=0.06)
         assert float(draws["t_ant"].std()) == pytest.approx(2.0, rel=0.06)
@@ -606,8 +606,7 @@ class TestGroupedSolve:
         assert jnp.allclose(solved["amp"], expected["amp"], rtol=1e-3, atol=1e-3)
         assert jnp.allclose(solved["coeffs"], expected["coeffs"], rtol=1e-3, atol=1e-3)
         # the imaginary half is what the R-linear/C-linear split exists for
-        assert jnp.allclose(jnp.imag(solved["coeffs"]), jnp.imag(truth["coeffs"]),
-                            atol=1e-1)
+        assert jnp.allclose(jnp.imag(solved["coeffs"]), jnp.imag(truth["coeffs"]), atol=1e-1)
 
     def test_solving_a_group_is_jittable(self, pair, observed):
         run = jax.jit(lambda d: wiener_solve(pair, d, noise_std=1.0, prior_std=PRIOR)[0])
@@ -617,8 +616,7 @@ class TestGroupedSolve:
 
     def test_a_mismatched_observation_is_still_refused(self, pair):
         with pytest.raises(ParameterSpaceError, match="different"):
-            wiener_solve(pair, jnp.zeros(pair.offset.shape[0]), noise_std=1.0,
-                         prior_std=PRIOR)
+            wiener_solve(pair, jnp.zeros(pair.offset.shape[0]), noise_std=1.0, prior_std=PRIOR)
 
 
 # ------------------------------------------------------------- the priors ---
@@ -641,24 +639,18 @@ class TestGroupedPrior:
 
     def test_a_prior_std_naming_a_non_member_is_refused(self, pair, observed):
         with pytest.raises(ParameterSpaceError, match="does not group"):
-            wiener_solve(pair, observed, noise_std=1.0,
-                         prior_std={**PRIOR, "gain": 0.1})
+            wiener_solve(pair, observed, noise_std=1.0, prior_std={**PRIOR, "gain": 0.1})
 
     def test_a_member_left_with_no_prior_at_all_is_NAMED(self, pair, observed):
         with pytest.raises(ParameterSpaceError, match=r"prior_std for \['t_ant'\]"):
             wiener_solve(pair, observed, noise_std=1.0, prior_std={"t_nw": 1e3})
 
-    def test_a_declaration_fills_the_member_the_keyword_omits(
-        self, three_linear, state, observed
-    ):
+    def test_a_declaration_fills_the_member_the_keyword_omits(self, three_linear, state, observed):
         """A group mixing a declared latent with a prior-free one is honoured,
         not refused: the resolution is per member and independent."""
-        declared = three_linear_space(
-            {"t_ant": dist.Normal(jnp.zeros(3), jnp.full((3,), 1e4))}
-        )
+        declared = three_linear_space({"t_ant": dist.Normal(jnp.zeros(3), jnp.full((3,), 1e4))})
         block = linear_operator(declared, three_linear, state, names=("t_nw", "t_ant"))
-        solved, _ = wiener_solve(block, observed, noise_std=1e-2,
-                                 prior_std={"t_nw": 1e5})
+        solved, _ = wiener_solve(block, observed, noise_std=1e-2, prior_std={"t_nw": 1e5})
         assert jnp.allclose(solved["t_ant"], TRUE_ANT, rtol=5e-3)
         assert jnp.allclose(solved["t_nw"], TRUE_NW, rtol=5e-3)
 
@@ -674,36 +666,44 @@ class TestGroupedPrior:
         """Both members declare and only ONE keyword contradicts, so the message
         has to name that one. Measured against the other member's declaration it
         would raise on the agreeing keyword and pass the contradicting one."""
-        declared = three_linear_space({
-            "t_nw": dist.Normal(jnp.zeros(2), jnp.full((2,), 0.5)),
-            "t_ant": dist.Normal(jnp.zeros(3), jnp.full((3,), 7.0)),
-        })
+        declared = three_linear_space(
+            {
+                "t_nw": dist.Normal(jnp.zeros(2), jnp.full((2,), 0.5)),
+                "t_ant": dist.Normal(jnp.zeros(3), jnp.full((3,), 7.0)),
+            }
+        )
         block = linear_operator(declared, three_linear, state, names=("t_nw", "t_ant"))
         with pytest.raises(ParameterSpaceError, match="latent 't_ant' declares"):
-            wiener_solve(block, observed, noise_std=1.0,
-                         prior_std={"t_nw": jnp.full((2,), 0.5),
-                                    "t_ant": jnp.full((3,), 99.0)})
+            wiener_solve(
+                block,
+                observed,
+                noise_std=1.0,
+                prior_std={"t_nw": jnp.full((2,), 0.5), "t_ant": jnp.full((3,), 99.0)},
+            )
 
-    def test_an_agreeing_keyword_is_accepted_for_both_members(
-        self, three_linear, state, observed
-    ):
-        declared = three_linear_space({
-            "t_nw": dist.Normal(jnp.zeros(2), jnp.full((2,), 1e3)),
-            "t_ant": dist.Normal(jnp.zeros(3), jnp.full((3,), 1e4)),
-        })
+    def test_an_agreeing_keyword_is_accepted_for_both_members(self, three_linear, state, observed):
+        declared = three_linear_space(
+            {
+                "t_nw": dist.Normal(jnp.zeros(2), jnp.full((2,), 1e3)),
+                "t_ant": dist.Normal(jnp.zeros(3), jnp.full((3,), 1e4)),
+            }
+        )
         block = linear_operator(declared, three_linear, state, names=("t_nw", "t_ant"))
-        solved, _ = wiener_solve(block, observed, noise_std=1.0,
-                                 prior_std={"t_nw": jnp.full((2,), 1e3),
-                                            "t_ant": jnp.full((3,), 1e4)})
+        solved, _ = wiener_solve(
+            block,
+            observed,
+            noise_std=1.0,
+            prior_std={"t_nw": jnp.full((2,), 1e3), "t_ant": jnp.full((3,), 1e4)},
+        )
         assert jnp.all(jnp.isfinite(solved["t_nw"]))
 
-    def test_a_declared_group_solves_with_no_keywords_at_all(
-        self, three_linear, state, observed
-    ):
-        declared = three_linear_space({
-            "t_nw": dist.Normal(jnp.zeros(2), jnp.full((2,), 1e4)),
-            "t_ant": dist.Normal(jnp.zeros(3), jnp.full((3,), 1e4)),
-        })
+    def test_a_declared_group_solves_with_no_keywords_at_all(self, three_linear, state, observed):
+        declared = three_linear_space(
+            {
+                "t_nw": dist.Normal(jnp.zeros(2), jnp.full((2,), 1e4)),
+                "t_ant": dist.Normal(jnp.zeros(3), jnp.full((3,), 1e4)),
+            }
+        )
         block = linear_operator(declared, three_linear, state, names=("t_nw", "t_ant"))
         solved, _ = wiener_solve(block, observed, noise_std=1e-2)
         assert jnp.allclose(solved["t_ant"], TRUE_ANT, rtol=5e-3)
@@ -715,16 +715,14 @@ class TestGroupedPrior:
         with pytest.raises(ParameterSpaceError, match="one entry per member"):
             wiener_solve(smuggled, observed, noise_std=1.0, prior_std=PRIOR)
 
-    def test_a_hand_built_group_with_prior_None_solves_from_keywords(self, pair,
-                                                                     observed):
+    def test_a_hand_built_group_with_prior_None_solves_from_keywords(self, pair, observed):
         plain = dataclasses.replace(pair, prior=None)
-        solved, _ = wiener_solve(plain, observed, noise_std=1e-2,
-                                 prior_std={"t_nw": 1e5, "t_ant": 1e5})
+        solved, _ = wiener_solve(
+            plain, observed, noise_std=1e-2, prior_std={"t_nw": 1e5, "t_ant": 1e5}
+        )
         assert jnp.allclose(solved["t_ant"], TRUE_ANT, rtol=2e-3)
 
-    def test_a_hand_built_group_whose_prior_dict_misses_a_member_is_refused(
-        self, pair, observed
-    ):
+    def test_a_hand_built_group_whose_prior_dict_misses_a_member_is_refused(self, pair, observed):
         partial = dataclasses.replace(pair, prior={"t_nw": None})
         with pytest.raises(ParameterSpaceError, match="one entry per member"):
             wiener_solve(partial, observed, noise_std=1.0, prior_std=PRIOR)
@@ -738,9 +736,7 @@ class TestGroupedLinearityCheck:
         errors = check_linearity(space, three_linear, state, names=("t_nw", "t_ant"))
         assert all(err < 1e-4 for err in errors.values())
 
-    def test_a_BILINEAR_pair_is_refused_although_each_half_passes(
-        self, space, three_linear, state
-    ):
+    def test_a_BILINEAR_pair_is_refused_although_each_half_passes(self, space, three_linear, state):
         """The guard grouping makes possible.
 
         ``gain`` and ``t_ant`` are each affine given the other — both pass the
@@ -753,22 +749,17 @@ class TestGroupedLinearityCheck:
         with pytest.raises(ParameterSpaceError, match="not affine in them JOINTLY"):
             check_linearity(space, three_linear, state, names=("gain", "t_ant"))
 
-    def test_linear_operator_refuses_the_bilinear_group_at_export(
-        self, space, three_linear, state
-    ):
+    def test_linear_operator_refuses_the_bilinear_group_at_export(self, space, three_linear, state):
         with pytest.raises(ParameterSpaceError, match="not affine"):
             linear_operator(space, three_linear, state, names=("gain", "t_ant"))
 
-    def test_check_false_lets_the_bilinear_group_through(self, space, three_linear,
-                                                         state):
+    def test_check_false_lets_the_bilinear_group_through(self, space, three_linear, state):
         """The documented bargain, so the refusal above is the CHECK's doing and
         not an accident of the export path."""
-        block = linear_operator(space, three_linear, state, names=("gain", "t_ant"),
-                                check=False)
+        block = linear_operator(space, three_linear, state, names=("gain", "t_ant"), check=False)
         assert block.names == ("gain", "t_ant")
 
-    def test_permuting_names_gives_the_same_linearity_errors(self, space, three_linear,
-                                                             state):
+    def test_permuting_names_gives_the_same_linearity_errors(self, space, three_linear, state):
         assert check_linearity(
             space, three_linear, state, names=("t_nw", "t_ant")
         ) == check_linearity(space, three_linear, state, names=("t_ant", "t_nw"))
@@ -793,20 +784,23 @@ class TestGroupedLinearityCheck:
         """The same helper serves the one-latent path, which had no test of its
         own — so the group's version would have been the only thing holding it."""
         integral = ParameterSpace.direct(
-            "t_nw", init=jnp.array([2, 3]), into=lambda p: p["t_nw"].coeff,
-            fn=lambda c: c * 1.0, linear=True,
+            "t_nw",
+            init=jnp.array([2, 3]),
+            into=lambda p: p["t_nw"].coeff,
+            fn=lambda c: c * 1.0,
+            linear=True,
         )
         with pytest.raises(ParameterSpaceError, match="floating-point or complex"):
             check_linearity(integral, three_linear, state, "t_nw")
 
     def test_name_and_names_together_are_refused(self, space, three_linear, state):
         with pytest.raises(ParameterSpaceError, match="name= OR names="):
-            check_linearity(space, three_linear, state, "t_nw",
-                            names=("t_nw", "t_ant"))
+            check_linearity(space, three_linear, state, "t_nw", names=("t_nw", "t_ant"))
 
     def test_check_linearity_honours_at_for_a_group(self, space, three_linear, state):
-        errors = check_linearity(space, three_linear, state, names=("t_nw", "t_ant"),
-                                 at={"gain": 3.0 * GAIN0})
+        errors = check_linearity(
+            space, three_linear, state, names=("t_nw", "t_ant"), at={"gain": 3.0 * GAIN0}
+        )
         assert all(err < 1e-4 for err in errors.values())
 
 
@@ -853,8 +847,9 @@ class TestGroupedConditioning:
         above 1e5 could not have come from the wrong floor, and the analytic κ
         is an upper bound the estimate cannot exceed.
         """
-        kappa = float(condition_estimate(seen_and_blind, noise_std=0.1,
-                                         prior_std={"seen": 0.5, "blind": 1e3}))
+        kappa = float(
+            condition_estimate(seen_and_blind, noise_std=0.1, prior_std={"seen": 0.5, "blind": 1e3})
+        )
         largest = (N_TIME * N_FREQ) / 0.1**2 + 1.0 / 0.5**2
         assert 1e5 < kappa <= 1.01 * largest * 1e3**2, kappa
 
@@ -894,33 +889,38 @@ class TestGroupedVsAlternating:
         )
         return space, pipeline
 
-    def test_one_grouped_solve_beats_many_alternating_ones(self, near_degenerate,
-                                                           state):
+    def test_one_grouped_solve_beats_many_alternating_ones(self, near_degenerate, state):
         space, pipeline = near_degenerate
         group = linear_operator(space, pipeline, state, names=("t_nw", "t_ant"))
         data = group.offset + group.forward(self.TRUTH)
 
         joint, _ = wiener_solve(
-            group, data, noise_std=1e-2, prior_std=self.WIDE,
-            tol=1e-10, maxiter=2000, require_convergence=None,
+            group,
+            data,
+            noise_std=1e-2,
+            prior_std=self.WIDE,
+            tol=1e-10,
+            maxiter=2000,
+            require_convergence=None,
         )
-        joint_error = max(
-            float(jnp.max(jnp.abs(joint[m] - self.TRUTH[m]))) for m in self.TRUTH
-        )
+        joint_error = max(float(jnp.max(jnp.abs(joint[m] - self.TRUTH[m]))) for m in self.TRUTH)
 
         values = {"t_ant": jnp.zeros(2), "t_nw": jnp.zeros(2)}
         kappas, residuals = {}, {}
         for _ in range(20):
             for member in ("t_nw", "t_ant"):
-                block = linear_operator(space, pipeline, state, member, at=values,
-                                        check=False)
+                block = linear_operator(space, pipeline, state, member, at=values, check=False)
                 kappas[member] = float(
-                    condition_estimate(block, noise_std=1e-2,
-                                       prior_std=self.WIDE[member])
+                    condition_estimate(block, noise_std=1e-2, prior_std=self.WIDE[member])
                 )
                 solved, residual = wiener_solve(
-                    block, data, noise_std=1e-2, prior_std=self.WIDE[member],
-                    tol=1e-10, maxiter=2000, require_convergence=None,
+                    block,
+                    data,
+                    noise_std=1e-2,
+                    prior_std=self.WIDE[member],
+                    tol=1e-10,
+                    maxiter=2000,
+                    require_convergence=None,
                 )
                 residuals[member] = float(residual)
                 values = {**values, member: solved}
@@ -943,10 +943,13 @@ class TestGroupedVsAlternating:
         group = linear_operator(space, pipeline, state, names=("t_nw", "t_ant"))
         joint = float(condition_estimate(group, noise_std=1e-2, prior_std=self.WIDE))
         singles = [
-            float(condition_estimate(
-                linear_operator(space, pipeline, state, member),
-                noise_std=1e-2, prior_std=self.WIDE[member],
-            ))
+            float(
+                condition_estimate(
+                    linear_operator(space, pipeline, state, member),
+                    noise_std=1e-2,
+                    prior_std=self.WIDE[member],
+                )
+            )
             for member in ("t_nw", "t_ant")
         ]
         assert max(singles) < 10.0, singles
@@ -993,7 +996,6 @@ def test_a_hand_assembled_group_needs_no_ParameterSpace():
         adjoint=lambda y: jax.vjp(forward, zero)[1](y)[0],
     )
     truth = {"a": jnp.array([4.0, -1.5]), "b": jnp.array(9.0)}
-    solved, _ = wiener_solve(block, forward(truth), noise_std=1e-3,
-                             prior_std={"a": 1e4, "b": 1e4})
+    solved, _ = wiener_solve(block, forward(truth), noise_std=1e-3, prior_std={"a": 1e4, "b": 1e4})
     assert jnp.allclose(solved["a"], truth["a"], rtol=1e-2)
     assert jnp.allclose(solved["b"], truth["b"], rtol=1e-2)

@@ -63,8 +63,8 @@ NOISE_WAVE_TEMPERATURES: tuple[str, ...] = ("t_unc", "t_cos", "t_sin", "t_rx")
 #: its own subjects, which is the R4 loop this table exists to avoid.
 _LEGAL_SHAPES: dict[str, str] = {
     "t_load": "scalar, (n_freq,) and (n_time, 1) -- and NOT (n_time, n_freq), "
-              "which CalLoadOperator refuses by name because a load whose "
-              "spectrum also moves is a different model than this one has",
+    "which CalLoadOperator refuses by name because a load whose "
+    "spectrum also moves is a different model than this one has",
     "temperature": "scalar, (n_freq,), (n_time, 1) and (n_time, n_freq)",
 }
 
@@ -168,12 +168,15 @@ def _b5_switch(twin: Any) -> tuple[int, str] | None:
             "from graph node ids rather than the document's own, and names[0] "
             "moves with the model (it becomes 'astro_sum' the moment a second "
             "antenna-side node is lit), so a positional comparison cannot be "
-            "written and a LENGTH comparison is the only one that exists")
+            "written and a LENGTH comparison is the only one that exists"
+        )
     if "receiver_input" in (getattr(twin, "skipped", None) or ()):
-        return 1, ("only one branch reaches receiver_input, so the fold "
-                   "traversed the selector as identity: there is no switch at "
-                   "all and every sample takes that one branch, whatever "
-                   "coords.extra['receiver_input'] holds")
+        return 1, (
+            "only one branch reaches receiver_input, so the fold "
+            "traversed the selector as identity: there is no switch at "
+            "all and every sample takes that one branch, whatever "
+            "coords.extra['receiver_input'] holds"
+        )
     return None
 
 
@@ -246,13 +249,19 @@ def _switch_positions(run: Built) -> Iterable[Finding]:
         # The aside carries the fit twin's OWN edit, because on that route
         # `model:` is already right and the line to change is the one taking
         # the source back out again.
-        aside = "" if raw else (
-            " That is the twin inference.twin's without:/replace: rebuilt, "
-            "and it is the one the fit evaluates -- so the edit is there: "
-            "inference.twin.without: is taking the last antenna-side source "
-            "out of it while model: keeps one.")
+        aside = (
+            ""
+            if raw
+            else (
+                " That is the twin inference.twin's without:/replace: rebuilt, "
+                "and it is the one the fit evaluates -- so the edit is there: "
+                "inference.twin.without: is taking the last antenna-side source "
+                "out of it while model: keeps one."
+            )
+        )
         yield refuse(
-            "B5", where,
+            "B5",
+            where,
             f"observation.switching.order declares {len(order)} switch "
             f"positions {list(order)} and the receiver_input switch {which} "
             f"built has {positions}.{aside} "
@@ -273,7 +282,8 @@ def _switch_positions(run: Built) -> Iterable[Finding]:
             "transform chain with nothing to transform, which check A31 "
             "refuses; it is a fix only for a run that has a source elsewhere. "
             "This check runs after build_resources, so it saves no beam: what "
-            "it buys is the refusal instead of a plausible answer (check B5).")
+            "it buys is the refusal instead of a plausible answer (check B5).",
+        )
         # ONE finding, not two. The fit twin inherits the raw twin's dark
         # branch, so reporting both would say the same thing twice about one
         # cause -- and `built_only` exists to catch exactly that.
@@ -293,8 +303,7 @@ def _square(run: Built) -> int | None:
     ``_check_temperature`` both refuse a mismatch by name, and demanding
     ``column:`` there would refuse documents the package builds.
     """
-    shapes = [getattr(getattr(run.context, axis, None), "shape", None)
-              for axis in ("time", "freq")]
+    shapes = [getattr(getattr(run.context, axis, None), "shape", None) for axis in ("time", "freq")]
     if not all(isinstance(shape, tuple) and shape for shape in shapes):
         return None
     n_time, n_freq = int(shapes[0][0]), int(shapes[1][0])
@@ -315,8 +324,9 @@ def _ambiguous(operator: Any, field: str, n: int) -> tuple[int, ...] | None:
     return shape
 
 
-def _cal_load_key(document: Mapping[str, Any], where: str, address: str,
-                  addresses: list[str]) -> str:
+def _cal_load_key(
+    document: Mapping[str, Any], where: str, address: str, addresses: list[str]
+) -> str:
     """``model.cal_loads.<label>`` when the label can be read, else the node.
 
     The twin's addresses are ``cal_loads_1``/``cal_loads_2`` -- minted ids, not
@@ -381,14 +391,15 @@ def _square_grid_column(run: Built) -> Iterable[Finding]:
                     seen.add(id(leaf))
                     where = _where(replaced, node_id)
                     if node_id == "cal_loads":
-                        where = _cal_load_key(run.document, where, address,
-                                              addresses)
+                        where = _cal_load_key(run.document, where, address, addresses)
                     yield refuse(
-                        "C9", where,
+                        "C9",
+                        where,
                         f"{where}.{field}: this run's time and frequency axes "
                         f"are both {n} long, and this value is a bare "
                         f"({n},) array -- so nothing says whether it is one "
                         "temperature per SAMPLE or one per CHANNEL, and the "
                         "package reads a bare 1-D value as per-channel "
                         "whatever was meant. The legal shapes here are "
-                        f"{_LEGAL_SHAPES[subject]}. {_C9_TAIL} (check C9).")
+                        f"{_LEGAL_SHAPES[subject]}. {_C9_TAIL} (check C9).",
+                    )

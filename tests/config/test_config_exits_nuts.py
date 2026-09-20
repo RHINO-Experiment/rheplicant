@@ -42,9 +42,12 @@ def _drive(spec, built):
         parse_run,
     )
 
-    parsed = parse_run(spec, built, index=0,
-                       layer=LayerRef(kind="base", name=None, prefix="",
-                                      document={}, declared_runs=None))
+    parsed = parse_run(
+        spec,
+        built,
+        index=0,
+        layer=LayerRef(kind="base", name=None, prefix="", document={}, declared_runs=None),
+    )
     handler = handler_for(spec.kind)
     handler.pre_execute(parsed, built, {})
     return handler.execute(parsed, built, {})
@@ -64,8 +67,7 @@ def needle(run=None):
     simulated data alike, and the declared start finds the line under it just
     as well (mean 7.99978e7 against 7.99955e7 here).
     """
-    return _drive(nuts_spec(**(run or {})),
-                  nuts_built(model=WIENER_MODEL, inference=NEEDLE))
+    return _drive(nuts_spec(**(run or {})), nuts_built(model=WIENER_MODEL, inference=NEEDLE))
 
 
 class TestTheChainComesBack:
@@ -149,8 +151,7 @@ class TestTheNoiseModelGoesInWhole:
         instead.  Measured: g mean 1.500005.
         """
         drawn = product(noise=RADIOMETER)
-        assert float(drawn.samples["g"].mean()) == pytest.approx(1.500005,
-                                                                 abs=1e-4)
+        assert float(drawn.samples["g"].mean()) == pytest.approx(1.500005, abs=1e-4)
 
     def test_a_frozen_sigma_array_runs_too(self):
         """The other half of `decided_noise`'s two return shapes.
@@ -160,8 +161,7 @@ class TestTheNoiseModelGoesInWhole:
         would leave the array half of the same accessor untested.
         """
         drawn = product(noise=FROZEN)
-        assert float(drawn.samples["g"].mean()) == pytest.approx(1.5,
-                                                                 abs=1e-4)
+        assert float(drawn.samples["g"].mean()) == pytest.approx(1.5, abs=1e-4)
 
 
 class TestTheRequiredKeys:
@@ -189,9 +189,12 @@ class TestTheRequiredKeys:
         from rheplicant.config.sections.exit_support import parse_run
 
         with pytest.raises(ConfigError) as caught:
-            parse_run(nuts_spec(drop=("seed",)), nuts_built(), index=0,
-                      layer=LayerRef(kind="base", name=None, prefix="",
-                                     document={}, declared_runs=None))
+            parse_run(
+                nuts_spec(drop=("seed",)),
+                nuts_built(),
+                index=0,
+                layer=LayerRef(kind="base", name=None, prefix="", document={}, declared_runs=None),
+            )
         assert str(caught.value).startswith("runs['chain']:")
         assert "runtime.seeds" in str(caught.value)
 
@@ -243,8 +246,7 @@ class TestTheStartMoves:
 
     def test_declared_finds_the_line(self):
         drawn = needle({"init": "declared"})
-        assert float(drawn.samples["c"].mean()) == pytest.approx(8.0e7,
-                                                                 rel=1e-3)
+        assert float(drawn.samples["c"].mean()) == pytest.approx(8.0e7, rel=1e-3)
 
     def test_declared_is_the_default(self):
         """Silence and ``init: declared`` are the same chain, bit for bit.
@@ -255,7 +257,8 @@ class TestTheStartMoves:
         another approximate mean, which ``init_to_uniform`` would also pass.
         """
         assert float(needle().samples["c"].mean()) == float(
-            needle({"init": "declared"}).samples["c"].mean())
+            needle({"init": "declared"}).samples["c"].mean()
+        )
 
     def test_ref_starts_somewhere_else_and_the_chain_shows_it(self):
         """The claim is that the START moved the CHAIN, so it is asserted as a
@@ -340,8 +343,7 @@ class TestTheStartMoves:
         monkeypatch.setattr(numpyro.infer, "NUTS", spy)
         _drive(nuts_spec(init="ref"), nuts_built(inference=TWO_REFS))
         values = captured["init_strategy"].keywords["values"]
-        assert {name: float(value) for name, value in values.items()} == {
-            "d": 0.25, "a": 40.0}
+        assert {name: float(value) for name, value in values.items()} == {"d": 0.25, "a": 40.0}
 
     def test_ref_without_a_ref_is_refused_by_name(self):
         """ONE_LATENT declares no ref:, and silence is not a fallback."""
@@ -396,8 +398,7 @@ class TestTheKindIsReachableFromADocument:
 
     def test_run_document_runs_it(self):
         drawn = nuts_product()
-        assert float(drawn.samples["g"].mean()) == pytest.approx(1.5,
-                                                                 abs=1e-3)
+        assert float(drawn.samples["g"].mean()) == pytest.approx(1.5, abs=1e-3)
 
     def test_the_run_is_named_and_not_the_kind(self):
         results = run_document(nuts_document())
@@ -405,8 +406,7 @@ class TestTheKindIsReachableFromADocument:
         assert results["chain"].kind == "nuts"
 
     def test_a_refusal_can_be_expected(self):
-        results = run_document(nuts_document({"expect": "refuse",
-                                              "init": "uniform"}))
+        results = run_document(nuts_document({"expect": "refuse", "init": "uniform"}))
         assert isinstance(results["chain"].error, ConfigError)
 
 
@@ -459,11 +459,10 @@ class TestTheKnobs:
         a thinning that divides the count) cannot show this at all, which is
         why the numbers below are 2/200/3 and not the module's usual pair.
         """
-        drawn = product({"num_chains": 2, "thinning": 3,
-                         "chain_method": "sequential"})
+        drawn = product({"num_chains": 2, "thinning": 3, "chain_method": "sequential"})
         assert drawn.n_draw == 132
         assert drawn.n_draw == drawn.samples["g"].shape[0]
-        assert (2 * 200) // 3 == 133      # what the options alone would say
+        assert (2 * 200) // 3 == 133  # what the options alone would say
 
     def test_target_accept_prob_reaches_NUTS(self):
         """Forward coverage without a spy: a sloppy target DIVERGES.
@@ -487,11 +486,9 @@ class TestTheKnobs:
         assert "target_accept_prob" not in _MCMC_KEYS
         assert "target_accept_prob" in _NUTS_KEYS
         with pytest.raises(TypeError, match="target_accept_prob"):
-            numpyro.infer.MCMC(object(), num_warmup=1, num_samples=1,
-                               target_accept_prob=0.8)
+            numpyro.infer.MCMC(object(), num_warmup=1, num_samples=1, target_accept_prob=0.8)
         with pytest.raises(TypeError, match="init_strategy"):
-            numpyro.infer.MCMC(object(), num_warmup=1, num_samples=1,
-                               init_strategy=None)
+            numpyro.infer.MCMC(object(), num_warmup=1, num_samples=1, init_strategy=None)
 
     def test_no_default_is_restated(self, monkeypatch):
         """A silent document SENDS numpyro the parsed defaults -- its own.
@@ -520,9 +517,14 @@ class TestTheKnobs:
 
         monkeypatch.setattr(numpyro.infer, "MCMC", spy)
         drawn = product({"drop": ("progress_bar",)})
-        assert captured == {"num_warmup": 200, "num_samples": 200,
-                            "num_chains": 1, "chain_method": "parallel",
-                            "thinning": 1, "progress_bar": True}, captured
+        assert captured == {
+            "num_warmup": 200,
+            "num_samples": 200,
+            "num_chains": 1,
+            "chain_method": "parallel",
+            "thinning": 1,
+            "progress_bar": True,
+        }, captured
         assert drawn.n_chain == 1
         assert drawn.n_draw == 200
 
@@ -546,8 +548,9 @@ class TestTheKnobs:
             return real(kernel, **kwargs)
 
         monkeypatch.setattr(numpyro.infer, "MCMC", spy)
-        product({"num_chains": 2, "chain_method": "sequential",
-                 "thinning": 2, "progress_bar": False})
+        product(
+            {"num_chains": 2, "chain_method": "sequential", "thinning": 2, "progress_bar": False}
+        )
         assert captured["num_chains"] == 2
         assert captured["chain_method"] == "sequential"
         assert captured["thinning"] == 2
@@ -617,7 +620,7 @@ class TestTheKnobsAreCHECKED:
             product({"target_accept_prob": "hi"})
         with pytest.raises(ConfigError, match="target_accept_prob"):
             product({"target_accept_prob": -0.5})
-        product({"target_accept_prob": 2.0})      # no raise, by decision
+        product({"target_accept_prob": 2.0})  # no raise, by decision
 
     def test_chain_method_must_be_one_of_the_three_numpyro_takes(self):
         """The three words are numpyro's, not this layer's invention, and the
@@ -631,7 +634,7 @@ class TestTheKnobsAreCHECKED:
         assert "vectorized" in message
         assert message.startswith("runs['chain']:")
         for legal in ("parallel", "sequential", "vectorized"):
-            product({"chain_method": legal})     # no raise
+            product({"chain_method": legal})  # no raise
 
     def test_a_null_knob_is_refused_by_name_on_every_one_of_them(self):
         """The gap between "declared" and "present", which cost a real bug.
@@ -652,8 +655,14 @@ class TestTheKnobsAreCHECKED:
         the commit that closed it for the rest.  ``null`` is not
         hypothetical here; this suite already declares one deliberately.
         """
-        for key in ("chain_method", "num_chains", "thinning",
-                    "target_accept_prob", "progress_bar", "init"):
+        for key in (
+            "chain_method",
+            "num_chains",
+            "thinning",
+            "target_accept_prob",
+            "progress_bar",
+            "init",
+        ):
             with pytest.raises(ConfigError, match=key) as caught:
                 product({key: None})
             assert str(caught.value).startswith("runs['chain']:")
@@ -757,7 +766,8 @@ class TestTheDiagnostics:
         assert drawn.divergences == 0
         assert isinstance(drawn.divergences, int)
         assert not [w for w in caught if "divergent" in str(w.message)], (
-            "a healthy run must be silent")
+            "a healthy run must be silent"
+        )
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             assert needle({"init": "ref"}).divergences > 0
@@ -802,12 +812,18 @@ class TestTheParserInjectedDefaultsAreThePackagesOwn:
 
     def test_explicit_defaults_draw_the_same_chain(self):
         implicit = product()
-        explicit = product({"init": "declared", "num_chains": 1,
-                            "chain_method": "parallel", "thinning": 1,
-                            "progress_bar": True, "target_accept_prob": 0.8})
+        explicit = product(
+            {
+                "init": "declared",
+                "num_chains": 1,
+                "chain_method": "parallel",
+                "thinning": 1,
+                "progress_bar": True,
+                "target_accept_prob": 0.8,
+            }
+        )
         assert set(implicit.samples) == set(explicit.samples)
         import numpy as np
 
         for name, stack in implicit.samples.items():
-            assert np.array_equal(np.asarray(stack),
-                                  np.asarray(explicit.samples[name])), name
+            assert np.array_equal(np.asarray(stack), np.asarray(explicit.samples[name])), name

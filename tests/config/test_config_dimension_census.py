@@ -142,15 +142,46 @@ _RESOURCE_SELECTORS = frozenset(
 
 _FORMULAS = frozenset(
     {
-        "channel_spacing", "sample_cadence", "basis_matrix", "unit_mean_free",
-        "horizon_fraction", "interpolate_onto", "normal", "uniform", "stack",
-        "ref", "file", "python", "basis_fit", "modifier_affine",
-        "transform_affine", "matmul", "basis_expand", "exp_log",
-        "beam_analysis", "part_same", "part_angle", "normalize", "adc", "gain",
-        "apply_cal", "cw_centre", "cw_level", "foreground", "global_signal",
-        "uniform_sky", "ionosphere", "ground_pickup", "beam_spill",
-        "antenna_loss", "additive_noise_emi", "noise_wave", "sky_projection",
-        "basis_temperature", "filters_averaging", "sky_space",
+        "channel_spacing",
+        "sample_cadence",
+        "basis_matrix",
+        "unit_mean_free",
+        "horizon_fraction",
+        "interpolate_onto",
+        "normal",
+        "uniform",
+        "stack",
+        "ref",
+        "file",
+        "python",
+        "basis_fit",
+        "modifier_affine",
+        "transform_affine",
+        "matmul",
+        "basis_expand",
+        "exp_log",
+        "beam_analysis",
+        "part_same",
+        "part_angle",
+        "normalize",
+        "adc",
+        "gain",
+        "apply_cal",
+        "cw_centre",
+        "cw_level",
+        "foreground",
+        "global_signal",
+        "uniform_sky",
+        "ionosphere",
+        "ground_pickup",
+        "beam_spill",
+        "antenna_loss",
+        "additive_noise_emi",
+        "noise_wave",
+        "sky_projection",
+        "basis_temperature",
+        "filters_averaging",
+        "sky_space",
         "radiometer_fraction",
     }
 )
@@ -180,12 +211,16 @@ def test_model_catalog_covers_all_28_classes_and_67_fields():
 def test_every_catalog_row_is_registered_and_reachable():
     rows = dimension_module.registered_dimension_rows()
     actual = {(row.domain, row.selector) for row, _ in rows}
-    model = {("model_field", _qualified(cls, field.name))
-             for choices in operator_table().values() for cls in choices
-             for field in dataclasses.fields(cls) if field.init}
+    model = {
+        ("model_field", _qualified(cls, field.name))
+        for choices in operator_table().values()
+        for cls in choices
+        for field in dataclasses.fields(cls)
+        if field.init
+    }
     expected = model | {
-        *(('resource_field', selector) for selector in _RESOURCE_SELECTORS),
-        *(('config_path', selector) for selector in _CONFIG_SELECTORS),
+        *(("resource_field", selector) for selector in _RESOURCE_SELECTORS),
+        *(("config_path", selector) for selector in _CONFIG_SELECTORS),
     }
     assert actual == expected
     for domain, selector in expected:
@@ -194,15 +229,24 @@ def test_every_catalog_row_is_registered_and_reachable():
 
 def test_six_resource_parsers_and_outputs_are_independently_censused():
     assert set(RESOURCE_KINDS) == {
-        "arrays", "bases", "beams", "projectors", "s_params", "sky_models"
+        "arrays",
+        "bases",
+        "beams",
+        "projectors",
+        "s_params",
+        "sky_models",
     }
     assert len(_RESOURCE_SELECTORS) == 51  # 49 + driftscan's beam_alms and nside (A8.6)
-    assert {selector for selector, _ in RESOURCE_DIMENSIONS} | set(RESOURCE_SPECIAL) == \
-        _RESOURCE_SELECTORS
+    assert {selector for selector, _ in RESOURCE_DIMENSIONS} | set(
+        RESOURCE_SPECIAL
+    ) == _RESOURCE_SELECTORS
     assert set(RESOURCE_OUTPUTS) == {
-        "resources.bases.*.time", "resources.bases.*.freq",
-        "resources.beams.*.maps", "resources.beams.*.sky_fraction",
-        "resources.s_params.*", "resources.sky_models.*.maps",
+        "resources.bases.*.time",
+        "resources.bases.*.freq",
+        "resources.beams.*.maps",
+        "resources.beams.*.sky_fraction",
+        "resources.s_params.*",
+        "resources.sky_models.*.maps",
         "resources.sky_models.*.freq",
     }
 
@@ -219,16 +263,41 @@ def test_config_patterns_are_independent_of_the_catalog_constants():
 
 def test_nested_value_forms_and_six_derivations_are_independently_censused():
     assert set(VALUE_FORMS) == {
-        "value", "zeros", "ones", "full", "list", "linspace", "arange",
-        "modulo", "from_grid", "basis_fit", "normal", "uniform", "file",
-        "ref", "from", "stack", "from_switch_order", "python",
+        "value",
+        "zeros",
+        "ones",
+        "full",
+        "list",
+        "linspace",
+        "arange",
+        "modulo",
+        "from_grid",
+        "basis_fit",
+        "normal",
+        "uniform",
+        "file",
+        "ref",
+        "from",
+        "stack",
+        "from_switch_order",
+        "python",
     }
     assert set(DERIVATIONS) == {
-        "channel_spacing", "sample_cadence", "basis_matrix", "unit_mean_free",
-        "horizon_fraction", "interpolate_onto",
+        "channel_spacing",
+        "sample_cadence",
+        "basis_matrix",
+        "unit_mean_free",
+        "horizon_fraction",
+        "interpolate_onto",
     }
     assert {
-        "basis_fit", "normal", "uniform", "file", "ref", "stack", "python",
+        "basis_fit",
+        "normal",
+        "uniform",
+        "file",
+        "ref",
+        "stack",
+        "python",
         *set(DERIVATIONS),
     } <= _FORMULAS
 

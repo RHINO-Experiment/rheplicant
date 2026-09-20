@@ -159,10 +159,7 @@ def _axis_values(node: object) -> _AxisValues | None:
             for left, right in zip(numeric, numeric[1:], strict=False)
         ):
             spacing = None
-        gaps = tuple(
-            abs(right - left)
-            for left, right in zip(numeric, numeric[1:], strict=False)
-        )
+        gaps = tuple(abs(right - left) for left, right in zip(numeric, numeric[1:], strict=False))
         distinct = tuple(value for value in gaps if value > 0.0)
         return _AxisValues(
             numeric[:3],
@@ -346,10 +343,7 @@ def _cost(document: Mapping[str, object], n_freq: int | None) -> ForwardCost:
         0.01,
         114.0 * (n_freq / 32.0) * (effective_nside / 64.0) ** 2 * band_scale,
     )
-    label = (
-        f"estimated {milliseconds:.2f} ms / {peak_megabytes:.2f} MB "
-        f"for {n_freq} channels"
-    )
+    label = f"estimated {milliseconds:.2f} ms / {peak_megabytes:.2f} MB for {n_freq} channels"
     return ForwardCost(
         label,
         milliseconds,
@@ -378,9 +372,7 @@ def _run_kinds(document: Mapping[str, object]) -> tuple[str, ...]:
 
 def project_previews(document: Mapping[str, object]) -> PreviewProjection:
     """Project every free preview and the price label for explicit work."""
-    axes = tuple(
-        found for name in ("time", "freq") if (found := _axis(document, name)) is not None
-    )
+    axes = tuple(found for name in ("time", "freq") if (found := _axis(document, name)) is not None)
     lengths = {row.axis: row.count for row in axes}
     shapes: list[ShapePreview] = []
     if "time" in lengths:

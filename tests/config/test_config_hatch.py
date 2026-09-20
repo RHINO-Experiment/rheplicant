@@ -19,9 +19,7 @@ def context():
 
 class TestTheHatch:
     def test_it_imports_and_calls(self, context):
-        got = resolve_value(
-            {"python": "jax.numpy:zeros", "literal": {"shape": [3]}}, context
-        )
+        got = resolve_value({"python": "jax.numpy:zeros", "literal": {"shape": [3]}}, context)
         assert got.value.shape == (3,)
         assert got.source == "python"
 
@@ -74,9 +72,7 @@ class TestTheHatch:
         )
         assert dict(got.value) == {"a": [1, 2], "b": "left as written"}
 
-    def test_every_argument_target_is_validated_before_import(
-        self, context, monkeypatch
-    ):
+    def test_every_argument_target_is_validated_before_import(self, context, monkeypatch):
         imported = []
         monkeypatch.setattr(
             hatch_module,
@@ -190,8 +186,11 @@ class TestTheRefusals:
     def test_args_and_literal_may_not_name_the_same_argument(self, context):
         with pytest.raises(ConfigError) as excinfo:
             resolve_value(
-                {"python": "jax.numpy:zeros", "args": {"shape": {"list": [2]}},
-                 "literal": {"shape": [2]}},
+                {
+                    "python": "jax.numpy:zeros",
+                    "args": {"shape": {"list": [2]}},
+                    "literal": {"shape": [2]},
+                },
                 context,
             )
         assert "shape" in str(excinfo.value)

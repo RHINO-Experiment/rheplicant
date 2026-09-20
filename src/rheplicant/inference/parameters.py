@@ -260,8 +260,7 @@ class Latent(eqx.Module):
             raise ParameterSpaceError(f"Latent name must be a non-empty string, got {self.name!r}.")
         if self.scope not in _SCOPES:
             raise ParameterSpaceError(
-                f"Latent {self.name!r}: scope must be one of {sorted(_SCOPES)}, got "
-                f"{self.scope!r}."
+                f"Latent {self.name!r}: scope must be one of {sorted(_SCOPES)}, got {self.scope!r}."
             )
         # Duck-typed so that declaring a space costs no numpyro import.
         prior_shape = getattr(self.prior, "shape", None) if self.prior is not None else None
@@ -652,9 +651,7 @@ class ParameterSpace(eqx.Module):
             for binding in self.bindings:
                 produced = jax.eval_shape(binding.evaluate, abstract)
                 for slot, value in enumerate(produced):
-                    target = next(
-                        leaf for b, s, _, leaf in resolved if b is binding and s == slot
-                    )
+                    target = next(leaf for b, s, _, leaf in resolved if b is binding and s == slot)
                     if value.shape != target.shape:
                         raise ParameterSpaceError(
                             f"Bind for {binding.latents} produces shape {value.shape} for "
@@ -768,9 +765,7 @@ class ParameterSpace(eqx.Module):
                     "function passed to ParameterSpace.raw."
                 )
 
-    def bind(
-        self, pipeline: AbstractOperator, values: dict[str, jax.Array]
-    ) -> AbstractOperator:
+    def bind(self, pipeline: AbstractOperator, values: dict[str, jax.Array]) -> AbstractOperator:
         """Return a copy of ``pipeline`` carrying ``values``.
 
         Pure: ``pipeline`` is untouched. All bindings are applied in a single

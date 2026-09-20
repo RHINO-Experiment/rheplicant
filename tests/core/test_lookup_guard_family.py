@@ -265,7 +265,7 @@ def test_the_five_refusals_differ_pairwise():
     collisions = [
         (a, b)
         for i, a in enumerate(SITE_IDS)
-        for b in SITE_IDS[i + 1:]
+        for b in SITE_IDS[i + 1 :]
         if messages[a] == messages[b]
     ]
     assert not collisions, {"identical messages": collisions, "messages": messages}

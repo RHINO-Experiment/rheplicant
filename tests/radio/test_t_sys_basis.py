@@ -125,9 +125,7 @@ def twin(basis: SeparableBasis, coeff, tone_kelvin: float = TONE_KELVIN):
     """``data[t, f] = gain[t] * (T_ant[t, f] + tone[f])`` on the real graph."""
     return assemble(
         BasisTemperatureOperator.from_basis(basis, coeff),
-        CWCalibrationOperator(
-            amplitude=tone_kelvin, tone_freq=TONE_FREQ, line_width=CHANNEL_WIDTH
-        ),
+        CWCalibrationOperator(amplitude=tone_kelvin, tone_freq=TONE_FREQ, line_width=CHANNEL_WIDTH),
         GainOperator(gain=GAIN0),
     )
 
@@ -227,12 +225,8 @@ class TestTheOperator:
         "coords",
         [
             pytest.param(None, id="no_coords_at_all"),
-            pytest.param(
-                Coordinates(time=jnp.arange(N_TIME, dtype=float)), id="freq_missing"
-            ),
-            pytest.param(
-                Coordinates(freq=jnp.arange(N_FREQ, dtype=float)), id="time_missing"
-            ),
+            pytest.param(Coordinates(time=jnp.arange(N_TIME, dtype=float)), id="freq_missing"),
+            pytest.param(Coordinates(freq=jnp.arange(N_FREQ, dtype=float)), id="time_missing"),
         ],
     )
     def test_a_state_without_a_time_or_frequency_axis_is_refused(self, basis, coords):
@@ -327,9 +321,7 @@ class TestASecondContribution:
         assert "t_sys_extra_1" in str(caught.value)
         assert isinstance(assembly["t_sys_extra_1"], BasisTemperatureOperator)
 
-    def test_a_space_binds_to_the_per_instance_id_and_reaches_only_that_one(
-        self, basis, state
-    ):
+    def test_a_space_binds_to_the_per_instance_id_and_reaches_only_that_one(self, basis, state):
         """The id is what makes a sibling contribution survivable: a binding
         written for the first instance keeps reaching the first instance."""
         second = SeparableBasis(
@@ -361,10 +353,12 @@ class TestWhatTheToneBuys:
 
     def test_the_free_per_cell_model_is_blind_in_n_time_directions_either_way(self):
         cells = cell_basis()
-        truth = cells.expand(SeparableBasis(
-            time=basis_matrix("legendre", n=N_TIME, n_basis=N_K),
-            freq=basis_matrix("legendre", n=N_FREQ, n_basis=N_J),
-        ).expand(COEFF0))
+        truth = cells.expand(
+            SeparableBasis(
+                time=basis_matrix("legendre", n=N_TIME, n_basis=N_K),
+                freq=basis_matrix("legendre", n=N_FREQ, n_basis=N_J),
+            ).expand(COEFF0)
+        )
         on = _report(cells, truth, TONE_KELVIN)
         off = _report(cells, truth, 0.0)
 
@@ -447,17 +441,13 @@ class TestTheGainAndTheTemperatureCannotShareABlock:
         assert "JOINTLY" in message
         assert "Split them into separate blocks" in message
 
-    def test_each_one_alone_IS_affine_which_is_why_the_joint_check_is_needed(
-        self, basis, state
-    ):
+    def test_each_one_alone_IS_affine_which_is_why_the_joint_check_is_needed(self, basis, state):
         space, pipeline = space_over(COEFF_GUESS, COEFF_PRIOR), twin(basis, COEFF0)
         assert max(check_linearity(space, pipeline, state, "gain").values()) < 1e-4
         assert max(check_linearity(space, pipeline, state, "t_coeff").values()) < 1e-4
 
     def test_two_blocks_both_derive_the_conjugate_engine(self, basis):
-        plan = SamplingPlan(
-            space_over(COEFF_GUESS, COEFF_PRIOR), Block("gain"), Block("t_coeff")
-        )
+        plan = SamplingPlan(space_over(COEFF_GUESS, COEFF_PRIOR), Block("gain"), Block("t_coeff"))
         assert plan.engines == {("gain",): "conjugate", ("t_coeff",): "conjugate"}
 
 
@@ -482,24 +472,30 @@ class TestBothExitsOfOnePlan:
 
         with pytest.raises(ParameterSpaceError, match=f"nullity {N_TIME}"):
             plan.sample(
-                pipeline, state, observed, noise=NOISE,
-                key=jax.random.key(0), n_sweeps=8,
+                pipeline,
+                state,
+                observed,
+                noise=NOISE,
+                key=jax.random.key(0),
+                n_sweeps=8,
             )
 
-    def test_the_basis_model_runs_and_both_exits_agree_with_the_truth(
-        self, basis, state
-    ):
+    def test_the_basis_model_runs_and_both_exits_agree_with_the_truth(self, basis, state):
         space, pipeline = space_over(COEFF_GUESS, COEFF_PRIOR), twin(basis, COEFF0)
         forward, _ = space.forward_fn(pipeline, STATE)
         observed = forward({"gain": GAIN0, "t_coeff": COEFF0})
         plan = SamplingPlan(space, Block("gain"), Block("t_coeff"))
 
-        est = plan.estimate(
-            pipeline, state, observed, noise=NOISE, max_iter=300, solve_guard=None
-        )
+        est = plan.estimate(pipeline, state, observed, noise=NOISE, max_iter=300, solve_guard=None)
         draws = plan.sample(
-            pipeline, state, observed, noise=NOISE, key=jax.random.key(0),
-            n_sweeps=300, warmup=150, solve_guard=None,
+            pipeline,
+            state,
+            observed,
+            noise=NOISE,
+            key=jax.random.key(0),
+            n_sweeps=300,
+            warmup=150,
+            solve_guard=None,
         )
 
         assert est.diagnostics.converged is True
@@ -516,8 +512,7 @@ class TestBothExitsOfOnePlan:
             gap = jnp.abs(draws.mean[name] - truth[name])
             assert jnp.all(gap < 5.0 * draws.std[name] + 1e-6), (name, gap)
             assert jnp.all(
-                jnp.abs(draws.mean[name] - est.values[name])
-                < 5.0 * draws.std[name] + 1e-6
+                jnp.abs(draws.mean[name] - est.values[name]) < 5.0 * draws.std[name] + 1e-6
             ), name
 
         # the posterior has real width — a draw that came back as the mean

@@ -49,9 +49,7 @@ SKY, TRUTH, SIGMA_MEAS, SIGMA_TWIN = 100.0, 1.1, 2.0, 20.0
 @pytest.fixture(scope="module")
 def state():
     return State(
-        coords=Coordinates(
-            time=jnp.linspace(0.0, 7.0, N), freq=jnp.linspace(60e6, 85e6, N)
-        ),
+        coords=Coordinates(time=jnp.linspace(0.0, 7.0, N), freq=jnp.linspace(60e6, 85e6, N)),
         env=Environment(temperature=jnp.array(280.0)),
         key=jax.random.key(0),
     )
@@ -60,25 +58,24 @@ def state():
 @pytest.fixture(scope="module")
 def observed(state):
     """Data from the HONEST model at g = 1.1, plus independent 2 K scatter."""
-    honest = Pipeline(
-        SkyOperator(amplitude=jnp.array(SKY)), GainOperator(gain=jnp.array(TRUTH))
-    )
+    honest = Pipeline(SkyOperator(amplitude=jnp.array(SKY)), GainOperator(gain=jnp.array(TRUTH)))
     return honest(state).data + SIGMA_MEAS * jax.random.normal(jax.random.key(7), (N, N))
 
 
 @pytest.fixture
 def space():
     return ParameterSpace.direct(
-        "g", init=jnp.array(1.0), into=lambda p: p["gain"].gain,
-        prior=dist.Normal(1.0, 10.0), linear=True,
+        "g",
+        init=jnp.array(1.0),
+        into=lambda p: p["gain"].gain,
+        prior=dist.Normal(1.0, 10.0),
+        linear=True,
     )
 
 
 @pytest.fixture
 def clean():
-    return assemble(
-        SkyOperator(amplitude=jnp.array(SKY)), GainOperator(gain=jnp.array(1.0))
-    )
+    return assemble(SkyOperator(amplitude=jnp.array(SKY)), GainOperator(gain=jnp.array(1.0)))
 
 
 @pytest.fixture
@@ -100,7 +97,9 @@ def exits(space, twin, state, observed):
         "to_numpyro_model": lambda: to_numpyro_model(twin, state, space, SIGMA_MEAS),
         "wiener_solve": lambda: wiener_solve(
             linear_operator(space, twin, state, "g"),
-            observed, noise_std=SIGMA_MEAS, prior_std=10.0,
+            observed,
+            noise_std=SIGMA_MEAS,
+            prior_std=10.0,
         ),
         "plan.estimate": lambda: plan.estimate(twin, state, observed, noise=SIGMA_MEAS),
         "plan.sample": lambda: plan.sample(
@@ -113,13 +112,16 @@ class TestEveryExitRefuses:
     @pytest.mark.parametrize(
         "exit_name",
         [
-            "check_linearity", "linear_operator", "identifiability", "to_numpyro_model",
-            "wiener_solve", "plan.estimate", "plan.sample",
+            "check_linearity",
+            "linear_operator",
+            "identifiability",
+            "to_numpyro_model",
+            "wiener_solve",
+            "plan.estimate",
+            "plan.sample",
         ],
     )
-    def test_exit_refuses_and_names_the_stage(
-        self, space, stochastic, state, observed, exit_name
-    ):
+    def test_exit_refuses_and_names_the_stage(self, space, stochastic, state, observed, exit_name):
         with pytest.raises(ParameterSpaceError, match="NoiseOperator at 'noise'"):
             exits(space, stochastic, state, observed)[exit_name]()
 
@@ -147,8 +149,13 @@ class TestTheCleanTwinIsUntouched:
     @pytest.mark.parametrize(
         "exit_name",
         [
-            "check_linearity", "linear_operator", "identifiability", "to_numpyro_model",
-            "wiener_solve", "plan.estimate", "plan.sample",
+            "check_linearity",
+            "linear_operator",
+            "identifiability",
+            "to_numpyro_model",
+            "wiener_solve",
+            "plan.estimate",
+            "plan.sample",
         ],
     )
     def test_exit_still_runs(self, space, clean, state, observed, exit_name):
@@ -236,9 +243,7 @@ class TestTheMagnitudeTheDocstringQuotes:
         """One exit, with the refusal lifted so the bias is measurable at all."""
         import rheplicant.inference.parameters as parameters_module
 
-        monkeypatch.setattr(
-            parameters_module, "refuse_stochastic_stages", lambda *a, **k: None
-        )
+        monkeypatch.setattr(parameters_module, "refuse_stochastic_stages", lambda *a, **k: None)
         block = linear_operator(space, twin, state, names=("g",))
         value, _ = wiener_solve(block, observed, noise_std=SIGMA_MEAS)
         forward, _ = space.forward_fn(twin, state)
@@ -247,9 +252,7 @@ class TestTheMagnitudeTheDocstringQuotes:
         )
         return float(value["g"]), float(jnp.sqrt(covariance.matrix[0, 0]))
 
-    def test_the_clean_twin_recovers_the_truth(
-        self, space, clean, state, observed, monkeypatch
-    ):
+    def test_the_clean_twin_recovers_the_truth(self, space, clean, state, observed, monkeypatch):
         estimate, sigma = self._solve(space, clean, state, observed, monkeypatch)
         assert estimate == pytest.approx(1.100162, abs=5e-6)
         assert sigma == pytest.approx(0.0025000, abs=5e-8)
@@ -281,4 +284,3 @@ class TestTheMagnitudeTheDocstringQuotes:
         doc = parameters_module.refuse_stochastic_stages.__doc__ or ""
         for digits in ("1.100162", "1.073513", "0.0025000", "10.6 sigma"):
             assert digits in doc, digits
-

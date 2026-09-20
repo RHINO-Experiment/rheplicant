@@ -48,9 +48,7 @@ def design():
 
 def make_forward(design):
     def forward(values):
-        return design @ jnp.concatenate(
-            [values["a_vec"], jnp.atleast_1d(values["z_scalar"])]
-        )
+        return design @ jnp.concatenate([values["a_vec"], jnp.atleast_1d(values["z_scalar"])])
 
     return forward
 
@@ -105,9 +103,7 @@ def test_a_refused_prior_never_reaches_graph_construction(design, monkeypatch):
     # a `fisher_information` that refused everything, or one this patch never
     # reached at all.
     with pytest.raises(GraphWasBuilt):
-        fisher_information(
-            forward, VALUES, noise_std=NOISE, space=space_with(good)
-        )
+        fisher_information(forward, VALUES, noise_std=NOISE, space=space_with(good))
 
     # And a refused one stops before it.
     with pytest.raises(ParameterSpaceError, match="z_scalar"):
@@ -135,9 +131,7 @@ def test_the_seam_still_files_not_gaussian_as_a_blameless_verdict():
     errors = pytest.importorskip("bayesmith.errors")
     reached_the_end = False
     with translate("probe") as seam:
-        raise errors.NotGaussian(
-            "node 'x' returns Uniform", reason="not_normal", node="x"
-        )
+        raise errors.NotGaussian("node 'x' returns Uniform", reason="not_normal", node="x")
         reached_the_end = True  # noqa: F841 - unreachable by construction
 
     assert not reached_the_end, "the block must NOT continue past the raise"
@@ -174,9 +168,7 @@ class TestTheDeclarationIsCanonicalised:
             dist.Normal(jnp.zeros(2), scale).to_event(1),
         ]
         matrices = [
-            fisher_information(
-                forward, VALUES, noise_std=NOISE, space=space_with(prior)
-            ).matrix
+            fisher_information(forward, VALUES, noise_std=NOISE, space=space_with(prior)).matrix
             for prior in spellings
         ]
         for other in matrices[1:]:
@@ -196,9 +188,7 @@ class TestTheDeclarationIsCanonicalised:
         assert not isinstance(declared["a_vec"], dist.ExpandedDistribution)
 
 
-def test_the_kind_is_the_far_sides_own_tag_and_not_a_second_rule(
-    design, monkeypatch
-):
+def test_the_kind_is_the_far_sides_own_tag_and_not_a_second_rule(design, monkeypatch):
     """``kind`` is read off the returned matrix, not re-decided here.
 
     The far side tags the quantity from the same flag that decided it. A local
@@ -221,7 +211,5 @@ def test_the_kind_is_the_far_sides_own_tag_and_not_a_second_rule(
 
     monkeypatch.setattr(uncertainty, "_bayesmith_fisher", tagged)
     space = space_with(dist.Normal(jnp.zeros(2), jnp.full(2, 0.5)))
-    got = fisher_information(
-        make_forward(design), VALUES, noise_std=NOISE, space=space
-    )
+    got = fisher_information(make_forward(design), VALUES, noise_std=NOISE, space=space)
     assert got.kind == "a_tag_no_local_rule_would_invent"

@@ -9,8 +9,11 @@ from rheplicant.inference.sqrtinfo import SqrtInfo
 def _term(**overrides):
     kwargs = dict(
         info=SqrtInfo(
-            factor=jnp.eye(2), target=jnp.zeros(2), offset=jnp.array(0.0),
-            names=("a", "b"), shapes=((), ()),
+            factor=jnp.eye(2),
+            target=jnp.zeros(2),
+            offset=jnp.array(0.0),
+            names=("a", "b"),
+            shapes=((), ()),
         ),
         epoch_id="night-001",
         n_observed=1024,
@@ -52,7 +55,8 @@ def test_a_float32_term_is_refused_at_construction():
                 factor=jnp.eye(2, dtype=jnp.float32),
                 target=jnp.zeros(2, dtype=jnp.float32),
                 offset=jnp.array(0.0, dtype=jnp.float32),
-                names=("a", "b"), shapes=((), ()),
+                names=("a", "b"),
+                shapes=((), ()),
             )
         )
 

@@ -47,9 +47,7 @@ def configured(observed=None, truth=None):
 def test_registry_covers_every_declared_predecessor_kind_and_selector():
     assert tuple(RUN_KIND_SELECTORS) == RUN_KINDS
     assert set(EXTRACTOR_REGISTRY) == {
-        (kind, selector)
-        for kind, selectors in RUN_KIND_SELECTORS.items()
-        for selector in selectors
+        (kind, selector) for kind, selectors in RUN_KIND_SELECTORS.items() for selector in selectors
     }
     assert all(selectors for selectors in RUN_KIND_SELECTORS.values())
 
@@ -80,18 +78,14 @@ def test_forward_arrays_aux_and_taps_use_the_recorded_state_only():
     arrays = extract_run_payload("forward", "arrays", state, built)
     assert arrays.encoding == "npz"
     assert set(arrays.value) == {"predicted", "observed/n-7072696d617279"}
-    aux = extract_run_payload(
-        "forward", "aux", state, built, options=(("keys", ("weights",)),)
-    )
+    aux = extract_run_payload("forward", "aux", state, built, options=(("keys", ("weights",)),))
     assert set(aux.value) == {"n-77656967687473"}
     taps = extract_run_payload(
         "forward", "taps", state, built, options=(("keys", ("early", "late")),)
     )
     assert set(taps.value) == {"n-6561726c79", "n-6c617465"}
     with pytest.raises(ConfigError, match="missing"):
-        extract_run_payload(
-            "forward", "taps", state, built, options=(("keys", ("never",)),)
-        )
+        extract_run_payload("forward", "taps", state, built, options=(("keys", ("never",)),))
 
 
 def test_semantic_extractors_do_not_guess_mapping_keys():
@@ -166,9 +160,7 @@ def test_identifiability_record_is_json_and_arrays_are_explicit_lists():
         threshold=2e-8,
         weakest_identified=1.0,
     )
-    extracted = extract_run_payload(
-        "identifiability", "identifiability", report, configured()
-    )
+    extracted = extract_run_payload("identifiability", "identifiability", report, configured())
     assert extracted.encoding == "json"
     assert extracted.value["singular_values"] == [2.0]
     assert extracted.value["rank"] == 1
@@ -181,9 +173,7 @@ def test_every_kind_declaring_run_diagnostics_has_an_extractor():
     # One generic extractor serves the family, so this guard is what catches a
     # kind added to the selector table with no row behind it.
     declared = {
-        kind
-        for kind, selectors in RUN_KIND_SELECTORS.items()
-        if "run_diagnostics" in selectors
+        kind for kind, selectors in RUN_KIND_SELECTORS.items() if "run_diagnostics" in selectors
     }
     assert declared
     for kind in declared:
@@ -243,9 +233,7 @@ def test_a_product_with_no_quality_signals_refuses_so_the_run_is_omitted():
 
 def test_condition_publishes_its_conditioning_number():
     # `condition`'s product IS the number, not a record carrying one.
-    extracted = EXTRACTOR_REGISTRY[("condition", "run_diagnostics")](
-        np.float32(1234.5), None, {}
-    )
+    extracted = EXTRACTOR_REGISTRY[("condition", "run_diagnostics")](np.float32(1234.5), None, {})
     assert extracted.encoding == "json"
     assert extracted.value["kappa"] == pytest.approx(1234.5)
 

@@ -39,9 +39,7 @@ def test_omitted_only_and_explicit_empty_only_are_distinct():
 
 
 def test_parse_default_constructs_sequence_fields_as_tuples():
-    request = parse_default(
-        {"from": "rhino_v1", "only": ["runtime", "observation.site"]}
-    )
+    request = parse_default({"from": "rhino_v1", "only": ["runtime", "observation.site"]})
     assert request.name == "rhino_v1"
     assert request.only == ("runtime", "observation.site")
     assert isinstance(request.only, tuple)
@@ -72,9 +70,7 @@ def test_parse_default_does_not_invoke_scalar_subclass_hooks():
         def __repr__(self):
             raise AssertionError("repr must not run")
 
-    request = parse_default(
-        {"from": HostileText("one"), "only": [HostileText("runtime")]}
-    )
+    request = parse_default({"from": HostileText("one"), "only": [HostileText("runtime")]})
 
     assert request == PresetRequest("one", ("runtime",))
 
@@ -188,11 +184,7 @@ def test_only_overlap_work_is_bounded_by_total_selector_segments():
     """Catches restoring a pairwise-quadratic overlap scan."""
     count = 2_000
     selectors = [f"resources.section_{index}.leaf" for index in range(count)]
-    document = {
-        "resources": {
-            f"section_{index}": {"leaf": index} for index in range(count)
-        }
-    }
+    document = {"resources": {f"section_{index}": {"leaf": index} for index in range(count)}}
     request = parse_default({"from": "one", "only": selectors})
     target_code = layering_module._select_only.__code__
     line_events = 0
@@ -211,9 +203,7 @@ def test_only_overlap_work_is_bounded_by_total_selector_segments():
     previous = sys.gettrace()
     sys.settrace(count_lines)
     try:
-        result, _ = layer_presets(
-            {}, (request,), preset_provider=_provider({"one": document})
-        )
+        result, _ = layer_presets({}, (request,), preset_provider=_provider({"one": document}))
     finally:
         sys.settrace(previous)
 
@@ -241,9 +231,7 @@ def test_invalid_only_selections_are_refused(only, needle):
 
 
 def test_only_selects_exact_subtrees_and_preserves_request_snapshot_order():
-    request = parse_default(
-        {"from": "one", "only": ["runtime", "observation.site"]}
-    )
+    request = parse_default({"from": "one", "only": ["runtime", "observation.site"]})
     result, selected = layer_presets(
         {"schema_version": 1},
         (request,),
@@ -326,9 +314,7 @@ def test_user_document_is_strictly_frozen_before_the_provider_runs():
         user_document["runtime"]["value"] = "after"
         return snapshot
 
-    result, _ = layer_presets(
-        user_document, (parse_default("one"),), preset_provider=provider
-    )
+    result, _ = layer_presets(user_document, (parse_default("one"),), preset_provider=provider)
 
     assert result.document["runtime"]["value"] == "before"
 
@@ -427,18 +413,14 @@ def test_request_sequence_protocol_failure_is_normalized_statically():
 def test_preset_provider_revalidates_an_exact_but_forged_snapshot():
     forged = object.__new__(PresetSnapshot)
     object.__setattr__(forged, "name", "one")
-    object.__setattr__(
-        forged, "resource", "rheplicant/config/presets/one.yaml"
-    )
+    object.__setattr__(forged, "resource", "rheplicant/config/presets/one.yaml")
     object.__setattr__(forged, "input_bytes", _FIXTURE_BYTES)
     object.__setattr__(forged, "sha256", "0" * 64)
     object.__setattr__(forged, "document", {})
     object.__setattr__(forged, "expanded_nodes", 0)
 
     with pytest.raises(ConfigError, match=r"sha256.*does not match"):
-        layer_presets(
-            {}, (parse_default("one"),), preset_provider=lambda _: forged
-        )
+        layer_presets({}, (parse_default("one"),), preset_provider=lambda _: forged)
 
 
 @pytest.mark.parametrize(
@@ -457,36 +439,28 @@ def test_preset_provider_revalidates_an_exact_but_forged_snapshot():
 def test_preset_provider_cannot_introduce_a_forbidden_section(section):
     forged = object.__new__(PresetSnapshot)
     object.__setattr__(forged, "name", "one")
-    object.__setattr__(
-        forged, "resource", "rheplicant/config/presets/one.yaml"
-    )
+    object.__setattr__(forged, "resource", "rheplicant/config/presets/one.yaml")
     object.__setattr__(forged, "input_bytes", _FIXTURE_BYTES)
     object.__setattr__(forged, "sha256", _FIXTURE_SHA256)
     object.__setattr__(forged, "document", {section: {}})
     object.__setattr__(forged, "expanded_nodes", 1)
 
     with pytest.raises(ConfigError, match=section):
-        layer_presets(
-            {}, (parse_default("one"),), preset_provider=lambda _: forged
-        )
+        layer_presets({}, (parse_default("one"),), preset_provider=lambda _: forged)
 
 
 def test_provider_snapshot_validation_replaces_callback_configerror():
     marker = _ForgedCallbackConfigError("private snapshot marker")
     forged = object.__new__(PresetSnapshot)
     object.__setattr__(forged, "name", "one")
-    object.__setattr__(
-        forged, "resource", "rheplicant/config/presets/one.yaml"
-    )
+    object.__setattr__(forged, "resource", "rheplicant/config/presets/one.yaml")
     object.__setattr__(forged, "input_bytes", _FIXTURE_BYTES)
     object.__setattr__(forged, "sha256", _FIXTURE_SHA256)
     object.__setattr__(forged, "document", _ProtocolMapping(marker, "items"))
     object.__setattr__(forged, "expanded_nodes", 1)
 
     with pytest.raises(ConfigError) as caught:
-        layer_presets(
-            {}, (parse_default("one"),), preset_provider=lambda _: forged
-        )
+        layer_presets({}, (parse_default("one"),), preset_provider=lambda _: forged)
 
     assert caught.value is not marker
     assert "preset:one" in str(caught.value)
@@ -506,9 +480,7 @@ def test_preset_provider_requires_the_exact_snapshot_class():
     )
 
     with pytest.raises(ConfigError, match=r"SnapshotSubclass.*PresetSnapshot"):
-        layer_presets(
-            {}, (parse_default("one"),), preset_provider=lambda _: snapshot
-        )
+        layer_presets({}, (parse_default("one"),), preset_provider=lambda _: snapshot)
 
 
 def test_only_selection_preserves_shared_preset_subtree_topology():
@@ -516,18 +488,13 @@ def test_only_selection_preserves_shared_preset_subtree_topology():
     result, _ = layer_presets(
         {},
         (parse_default({"from": "one", "only": ["runtime"]}),),
-        preset_provider=_provider(
-            {"one": {"runtime": {"first": shared, "second": shared}}}
-        ),
+        preset_provider=_provider({"one": {"runtime": {"first": shared, "second": shared}}}),
     )
 
     runtime = result.document["runtime"]
     runtime_origins = result.origins.children["runtime"]
     assert runtime["first"] is runtime["second"]
-    assert (
-        runtime_origins.children["first"]
-        is runtime_origins.children["second"]
-    )
+    assert runtime_origins.children["first"] is runtime_origins.children["second"]
 
 
 def test_user_model_without_inherit_replaces_the_preset_candidate():
@@ -543,9 +510,7 @@ def test_explicit_user_null_model_replaces_the_preset_candidate():
     result, _ = layer_presets(
         {"model": None},
         (parse_default("one"),),
-        preset_provider=_provider(
-            {"one": {"model": {"preset_node": {"x": 1}}}}
-        ),
+        preset_provider=_provider({"one": {"model": {"preset_node": {"x": 1}}}}),
     )
 
     assert "model" in result.document
@@ -564,9 +529,7 @@ def test_model_inherit_copies_named_candidate_nodes_and_is_consumed():
             }
         },
         (parse_default("one"),),
-        preset_provider=_provider(
-            {"one": {"model": {"kept": {"preset": 1}, "dropped": {"x": 0}}}}
-        ),
+        preset_provider=_provider({"one": {"model": {"kept": {"preset": 1}, "dropped": {"x": 0}}}}),
     )
     assert thaw(result.document)["model"] == {
         "kept": {"preset": 1, "user": 2},

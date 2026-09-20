@@ -49,24 +49,18 @@ CLOSE = 1e-5
 def block():
     """A gain the data identifies well: this fixture is about plumbing, not κ."""
     state = State(
-        coords=Coordinates(
-            time=jnp.arange(float(N_TIME)), freq=jnp.linspace(60e6, 85e6, N_FREQ)
-        ),
+        coords=Coordinates(time=jnp.arange(float(N_TIME)), freq=jnp.linspace(60e6, 85e6, N_FREQ)),
         key=jax.random.key(0),
         meta={"telescope": "conjugate-transition"},
     )
     twin = assemble(
-        ForegroundOperator(
-            amplitude=jnp.array(1e3), spectral_index=jnp.array(2.5), ref_freq=70e6
-        ),
+        ForegroundOperator(amplitude=jnp.array(1e3), spectral_index=jnp.array(2.5), ref_freq=70e6),
         GainOperator(gain=jnp.array(1.1)),
         NoiseOperator(sigma=jnp.array(0.5)),
     )
     observed = twin(state).data
     space = ParameterSpace(
-        latents=[
-            Latent("gain", init=jnp.array(1.0), linear=True, prior=dist.Normal(1.0, 0.3))
-        ],
+        latents=[Latent("gain", init=jnp.array(1.0), linear=True, prior=dist.Normal(1.0, 0.3))],
         bindings=[Bind("gain", into=lambda p: p["gain"].gain)],
     )
     fit = twin.without("noise")
@@ -100,14 +94,23 @@ REACHABLE = 20.0
 def _reference(cond, names, values, *, key):
     """The update as it read before the jit, rebuilt so the test owns the baseline."""
     operator = linear_operator(
-        cond.space, cond.pipeline, cond.state_template,
-        names=names, at=values, check=False,
+        cond.space,
+        cond.pipeline,
+        cond.state_template,
+        names=names,
+        at=values,
+        check=False,
     )
     solve = wiener_solve if key is None else gcr_sample
     extra = {} if key is None else {"key": key}
     solved, _ = solve(
-        operator, cond.observed, noise_std=cond.sigma(values),
-        tol=1e-8, maxiter=None, require_convergence=REACHABLE, **extra,
+        operator,
+        cond.observed,
+        noise_std=cond.sigma(values),
+        tol=1e-8,
+        maxiter=None,
+        require_convergence=REACHABLE,
+        **extra,
     )
     return solved
 
@@ -115,7 +118,11 @@ def _reference(cond, names, values, *, key):
 def test_the_mean_matches_the_unjitted_solve(block) -> None:
     cond, values = block
     got, _ = conjugate_estimate(
-        cond, ("gain",), values, tol=1e-8, maxiter=None,
+        cond,
+        ("gain",),
+        values,
+        tol=1e-8,
+        maxiter=None,
         require_convergence=REACHABLE,
     )
     want = _reference(cond, ("gain",), values, key=None)
@@ -127,7 +134,12 @@ def test_the_draw_matches_the_unjitted_draw(block) -> None:
     cond, values = block
     key = jax.random.key(7)
     got, _ = conjugate_draw(
-        cond, ("gain",), values, key=key, tol=1e-8, maxiter=None,
+        cond,
+        ("gain",),
+        values,
+        key=key,
+        tol=1e-8,
+        maxiter=None,
         require_convergence=REACHABLE,
     )
     want = _reference(cond, ("gain",), values, key=key)
@@ -160,8 +172,13 @@ def test_the_conjugate_convergence_guard_still_raises_equinox(block) -> None:
     for seed in range(20):
         try:
             conjugate_draw(
-                cond, ("gain",), values, key=jax.random.key(seed), tol=1e-14,
-                maxiter=1, require_convergence=1e-8,
+                cond,
+                ("gain",),
+                values,
+                key=jax.random.key(seed),
+                tol=1e-14,
+                maxiter=1,
+                require_convergence=1e-8,
             )
         except EquinoxRuntimeError as refused:
             caught = refused
@@ -213,7 +230,12 @@ def test_a_reachable_target_does_not_trip_the_guard(block) -> None:
     """
     cond, values = block
     got, _ = conjugate_draw(
-        cond, ("gain",), values, key=jax.random.key(1), tol=1e-8, maxiter=None,
+        cond,
+        ("gain",),
+        values,
+        key=jax.random.key(1),
+        tol=1e-8,
+        maxiter=None,
         require_convergence=REACHABLE,
     )
     assert jnp.isfinite(got["gain"])
@@ -237,12 +259,23 @@ def test_the_cache_holds_one_program_per_branch(block) -> None:
     programs: dict = {}
     for sweep in range(4):
         conjugate_estimate(
-            cond, ("gain",), values, tol=1e-8, maxiter=None,
-            require_convergence=REACHABLE, programs=programs,
+            cond,
+            ("gain",),
+            values,
+            tol=1e-8,
+            maxiter=None,
+            require_convergence=REACHABLE,
+            programs=programs,
         )
         conjugate_draw(
-            cond, ("gain",), values, key=jax.random.key(sweep), tol=1e-8,
-            maxiter=None, require_convergence=REACHABLE, programs=programs,
+            cond,
+            ("gain",),
+            values,
+            key=jax.random.key(sweep),
+            tol=1e-8,
+            maxiter=None,
+            require_convergence=REACHABLE,
+            programs=programs,
         )
     assert sorted(programs) == sorted(
         [

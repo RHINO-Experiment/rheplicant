@@ -180,10 +180,7 @@ def _bounded_preview_result(
         raise ConfigError("forward preview produced no waterfall data.")
     aux = getattr(result, "aux", {})
     taps = (
-        {
-            str(name): _array_summary(value, include_values=False)
-            for name, value in aux.items()
-        }
+        {str(name): _array_summary(value, include_values=False) for name, value in aux.items()}
         if isinstance(aux, Mapping)
         else {}
     )
@@ -226,8 +223,6 @@ def _run_forward_preview(yaml_text: str) -> dict[str, object]:
         )
     finally:
         execution.close()
-
-
 
 
 def _published_audit(stderr_text: str) -> str | None:

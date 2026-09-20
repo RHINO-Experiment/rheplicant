@@ -60,9 +60,7 @@ TRANSACTION_BOUNDARIES = (
 )
 _PUBLICATIONS = ("success", "refused", "error")
 _TRANSACTION_ID = re.compile(r"[0-9a-f]{32}")
-_MARKER_ID = re.compile(
-    r"[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}"
-)
+_MARKER_ID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}")
 _OPEN_DIRECTORY = (
     os.O_RDONLY
     | getattr(os, "O_DIRECTORY", 0)
@@ -433,10 +431,7 @@ def _bundle_rows(bundle: AuditBundle) -> tuple[tuple[str, bytes], ...]:
     tail = ["provenance.json", "diagnostics.json"]
     if names[-3:-2] == [INTEGRITY_NAME]:
         tail = [INTEGRITY_NAME, *tail]
-    if (
-        names[: len(prefix)] != prefix
-        or names[-len(tail) :] != tail
-    ):
+    if names[: len(prefix)] != prefix or names[-len(tail) :] != tail:
         raise ConfigError("audit bundle file order or paths are inconsistent.")
     if any(type(name) is not str or type(payload) is not bytes for name, payload in rows):
         raise ConfigError("audit bundle files must be exact text/bytes pairs.")
@@ -683,9 +678,7 @@ def stage_bundle(
     revalidate_output_ancestry(lease, platform)
     rows = _bundle_rows(candidate)
     original = (
-        verified.original
-        if verified is not None
-        else TargetIdentity(False, None, None, None)
+        verified.original if verified is not None else TargetIdentity(False, None, None, None)
     )
     try:
         os.lstat(lease.journal_name, dir_fd=lease.parent_fd)
@@ -775,9 +768,7 @@ def stage_bundle(
             platform,
             journal,
             on_published=lambda: materialized.append(
-                ArtefactMaterialization(
-                    "journal", None, lease.journal_name, None, None
-                )
+                ArtefactMaterialization("journal", None, lease.journal_name, None, None)
             ),
         )
         _mkdir(lease.parent_fd, staged)
@@ -792,6 +783,7 @@ def stage_bundle(
             row = _materialization_for_file(candidate, relative, payload)
             on_complete = None
             if row is not None:
+
                 def record_materialization(row=row) -> None:
                     materialized.append(row)
 
@@ -807,9 +799,7 @@ def stage_bundle(
             _MARKER_NAME,
             _marker_bytes(marker),
             on_complete=lambda: materialized.append(
-                ArtefactMaterialization(
-                    "marker", None, _MARKER_NAME, None, None
-                )
+                ArtefactMaterialization("marker", None, _MARKER_NAME, None, None)
             ),
         )
         _fsync_directory(staging_fd)
@@ -818,9 +808,7 @@ def stage_bundle(
     except TransactionInterrupted:
         raise
     except Exception as error:
-        raise _interrupted(
-            "stage_bundle", transaction_id, handle, materialized, error
-        ) from error
+        raise _interrupted("stage_bundle", transaction_id, handle, materialized, error) from error
     finally:
         if staging_fd >= 0:
             os.close(staging_fd)
@@ -868,9 +856,7 @@ def replace_staged_metadata(
             if relative in replaceable:
                 continue
             if _read_relative_file(staging_fd, relative) != payload:
-                raise ConfigError(
-                    f"final bundle changes already-staged content {relative!r}."
-                )
+                raise ConfigError(f"final bundle changes already-staged content {relative!r}.")
         _replace_file(staging_fd, "provenance.json", final.provenance)
         _replace_file(staging_fd, "diagnostics.json", final.diagnostics)
         if INTEGRITY_NAME in dict(rows):
@@ -885,16 +871,10 @@ def replace_staged_metadata(
             # carrying a list of paths it agrees not to look at -- which is the
             # shape that quietly grows until it covers the thing you needed.
             covered = [
-                (relative, payload)
-                for relative, payload in rows
-                if relative != INTEGRITY_NAME
+                (relative, payload) for relative, payload in rows if relative != INTEGRITY_NAME
             ]
-            covered.append(
-                (_MARKER_NAME, _read_exact_file(staging_fd, _MARKER_NAME))
-            )
-            _replace_file(
-                staging_fd, INTEGRITY_NAME, integrity_bytes(tuple(covered))
-            )
+            covered.append((_MARKER_NAME, _read_exact_file(staging_fd, _MARKER_NAME)))
+            _replace_file(staging_fd, INTEGRITY_NAME, integrity_bytes(tuple(covered)))
         if _read_exact_file(staging_fd, "provenance.json") != final.provenance:
             raise ConfigError("staged provenance verification failed.")
         if _read_exact_file(staging_fd, "diagnostics.json") != final.diagnostics:
@@ -989,9 +969,7 @@ def _safe_remove_directory(
             or opened.st_ino != expected.inode
             or opened.st_uid != os.geteuid()
         ):
-            raise ConfigError(
-                f"refusing to remove changed transaction directory {name!r}."
-            )
+            raise ConfigError(f"refusing to remove changed transaction directory {name!r}.")
         _remove_directory_contents(root_fd)
         _fsync_directory(root_fd)
     finally:
@@ -1017,14 +995,10 @@ def _remove_directory_contents(directory_fd: int) -> None:
                     or observed.st_nlink != 1
                     or observed.st_uid != os.geteuid()
                 ):
-                    raise ConfigError(
-                        f"transaction entry {name!r} changed before cleanup."
-                    )
+                    raise ConfigError(f"transaction entry {name!r} changed before cleanup.")
                 final = os.lstat(name, dir_fd=directory_fd)
                 if not _same_identity(final, observed):
-                    raise ConfigError(
-                        f"transaction entry {name!r} changed before cleanup."
-                    )
+                    raise ConfigError(f"transaction entry {name!r} changed before cleanup.")
                 _unlink(directory_fd, name)
                 _fsync_directory(directory_fd)
             finally:
@@ -1125,9 +1099,7 @@ def publish_success(handle: TransactionHandle, platform: OutputPlatform) -> str:
     except TransactionInterrupted:
         raise
     except Exception as error:
-        raise _interrupted(
-            "publish_success", handle.transaction_id, handle, (), error
-        ) from error
+        raise _interrupted("publish_success", handle.transaction_id, handle, (), error) from error
 
 
 def publish_failure(handle: TransactionHandle, platform: OutputPlatform) -> str:
@@ -1170,9 +1142,7 @@ def publish_failure(handle: TransactionHandle, platform: OutputPlatform) -> str:
     except TransactionInterrupted:
         raise
     except Exception as error:
-        raise _interrupted(
-            "publish_failure", handle.transaction_id, handle, (), error
-        ) from error
+        raise _interrupted("publish_failure", handle.transaction_id, handle, (), error) from error
 
 
 def discard_staging(
@@ -1193,9 +1163,7 @@ def discard_staging(
     except TransactionInterrupted:
         raise
     except Exception as error:
-        raise _interrupted(
-            "discard_staging", handle.transaction_id, handle, (), error
-        ) from error
+        raise _interrupted("discard_staging", handle.transaction_id, handle, (), error) from error
 
 
 def _ambiguous(lease: OutputLease, journal: TransactionJournal, detail: str) -> ConfigError:
@@ -1207,8 +1175,7 @@ def _ambiguous(lease: OutputLease, journal: TransactionJournal, detail: str) -> 
         journal.journal_name,
     )
     return ConfigError(
-        f"ambiguous output recovery ({detail}); no path was removed; preserved: "
-        + ", ".join(names)
+        f"ambiguous output recovery ({detail}); no path was removed; preserved: " + ", ".join(names)
     )
 
 
@@ -1229,9 +1196,7 @@ def _journal_for_recovery(
         )
     temp_name = candidates[0] if candidates else None
     decoded_temp = (
-        None
-        if temp_name is None
-        else decode_journal_temp(lease.request.target_path, temp_name)
+        None if temp_name is None else decode_journal_temp(lease.request.target_path, temp_name)
     )
     if temp_name is not None and decoded_temp is None:
         raise ConfigError(
@@ -1289,13 +1254,9 @@ def _journal_for_recovery(
             raise _ambiguous(lease, canonical, "same-phase update changes non-identity facts")
         enriched = dataclasses.replace(
             canonical,
-            staging_identity=(
-                temporary.staging_identity or canonical.staging_identity
-            ),
+            staging_identity=(temporary.staging_identity or canonical.staging_identity),
             backup_identity=temporary.backup_identity or canonical.backup_identity,
-            published_identity=(
-                temporary.published_identity or canonical.published_identity
-            ),
+            published_identity=(temporary.published_identity or canonical.published_identity),
         )
     return enriched, temp_name
 
@@ -1324,10 +1285,7 @@ def _recover_success(
         if not target.exists:
             return False
         try:
-            return (
-                _read_marker_id(lease.parent_fd, journal.publish_name)
-                == journal.new_marker_id
-            )
+            return _read_marker_id(lease.parent_fd, journal.publish_name) == journal.new_marker_id
         except ConfigError:
             return False
 
@@ -1338,6 +1296,7 @@ def _recover_success(
         if backup.exists and expected is not None and _identity_matches(backup, expected):
             return backup
         return None
+
     if journal.phase == "preparing":
         if not _identity_matches(target, journal.original) or backup.exists:
             raise _ambiguous(lease, journal, "preparing identities conflict")
@@ -1367,19 +1326,17 @@ def _recover_success(
                 True,
                 (),
             )
-        if not staging.exists or journal.staging_identity is None or not _identity_matches(
-            staging, journal.staging_identity
+        if (
+            not staging.exists
+            or journal.staging_identity is None
+            or not _identity_matches(staging, journal.staging_identity)
         ):
             raise _ambiguous(lease, journal, "prepared staging is missing or changed")
         if _identity_matches(target, journal.original) and not backup.exists:
             _safe_remove_directory(lease.parent_fd, journal.staging_name, staging)
             _finish_journal(lease, journal.transaction_id)
             return RecoveryOutcome("cleaned_preparing", target.exists, ())
-        if (
-            not target.exists
-            and journal.backup_name is not None
-            and proved_backup() is not None
-        ):
+        if not target.exists and journal.backup_name is not None and proved_backup() is not None:
             _rename_noreplace(
                 lease,
                 platform,
@@ -1462,9 +1419,7 @@ def _recover_failure(
         if staging.exists:
             raise _ambiguous(lease, journal, "published failure still has staging")
         marker_id = _read_marker_id(lease.parent_fd, journal.publish_name)
-        current_published = _node_identity(
-            lease.parent_fd, journal.publish_name, marker_id
-        )
+        current_published = _node_identity(lease.parent_fd, journal.publish_name, marker_id)
         if marker_id != journal.new_marker_id or (
             journal.published_identity is not None
             and not _identity_matches(current_published, journal.published_identity)

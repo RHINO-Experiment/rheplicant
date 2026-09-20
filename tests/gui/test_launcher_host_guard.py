@@ -87,9 +87,7 @@ def test_a_rebound_host_is_refused_for_every_kind_of_request(client) -> None:
     rebound = {"Host": "attacker.example:8000", "Origin": FOREIGN_ORIGIN}
     assert client.get("/", headers=rebound).status_code == 400
     assert client.head("/api/starter", headers=rebound).status_code == 400
-    created = client.post(
-        "/api/sessions", json={"yaml_text": STARTER_YAML}, headers=rebound
-    )
+    created = client.post("/api/sessions", json={"yaml_text": STARTER_YAML}, headers=rebound)
     assert created.status_code == 400
     assert created.text == "Invalid Host header."
     session_id, revision = new_session(client)
@@ -123,9 +121,7 @@ def test_a_rebound_host_is_refused_for_every_kind_of_request(client) -> None:
 )
 def test_loopback_hosts_are_accepted_with_any_port(client, host) -> None:
     assert client.get("/api/starter", headers={"Host": host}).status_code == 200
-    created = client.post(
-        "/api/sessions", json={"yaml_text": STARTER_YAML}, headers={"Host": host}
-    )
+    created = client.post("/api/sessions", json={"yaml_text": STARTER_YAML}, headers={"Host": host})
     assert created.status_code == 201
 
 
@@ -143,9 +139,7 @@ def test_loopback_hosts_are_accepted_with_any_port(client, host) -> None:
     ],
 )
 @pytest.mark.parametrize("method", ["POST", "PUT", "PATCH", "DELETE"])
-def test_a_foreign_origin_is_refused_on_state_changing_methods(
-    client, method, origin
-) -> None:
+def test_a_foreign_origin_is_refused_on_state_changing_methods(client, method, origin) -> None:
     session_id, revision = new_session(client)
     request = {
         "POST": ("/api/sessions", {"yaml_text": STARTER_YAML}),
@@ -187,13 +181,9 @@ def test_a_foreign_origin_does_not_block_safe_methods(client) -> None:
         ("127.0.0.1:8000", None),
     ],
 )
-def test_the_request_s_own_or_a_missing_origin_is_accepted_on_writes(
-    client, host, origin
-) -> None:
+def test_the_request_s_own_or_a_missing_origin_is_accepted_on_writes(client, host, origin) -> None:
     headers = {"Host": host} if origin is None else {"Host": host, "Origin": origin}
-    created = client.post(
-        "/api/sessions", json={"yaml_text": STARTER_YAML}, headers=headers
-    )
+    created = client.post("/api/sessions", json={"yaml_text": STARTER_YAML}, headers=headers)
     assert created.status_code == 201
     body = created.json()
     replaced = client.put(
@@ -438,9 +428,7 @@ def test_more_than_one_host_header_is_refused(kind, hosts) -> None:
     """Which copy a server or proxy reads is not fixed, so two Host headers
     are refused even when both are allowed."""
     extra = {"method": "GET"} if kind == "http" else {}
-    sent, reached = _drive_guard(
-        _raw_scope(kind, [("host", host) for host in hosts], **extra)
-    )
+    sent, reached = _drive_guard(_raw_scope(kind, [("host", host) for host in hosts], **extra))
     assert reached == []
     if kind == "http":
         assert sent[0]["status"] == 400

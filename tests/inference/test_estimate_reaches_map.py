@@ -106,9 +106,7 @@ SKY_SIGMA = 1.0
 
 def _grid_state(n_time: int, n_freq: int) -> State:
     return State(
-        coords=Coordinates(
-            time=jnp.arange(float(n_time)), freq=jnp.linspace(60e6, 85e6, n_freq)
-        )
+        coords=Coordinates(time=jnp.arange(float(n_time)), freq=jnp.linspace(60e6, 85e6, n_freq))
     )
 
 
@@ -142,7 +140,10 @@ def test_one_gradient_block_reaches_the_analytic_map(ratio, start):
     plan = SamplingPlan(space, Block("a"))
     pipeline = Pipeline(SkyOperator(amplitude=jnp.array(0.0)), names=("sky",))
     estimate = _estimate_or_refusal(
-        plan, pipeline, _grid_state(*SKY_SHAPE), jnp.asarray(observed),
+        plan,
+        pipeline,
+        _grid_state(*SKY_SHAPE),
+        jnp.asarray(observed),
         HomoscedasticNoise(sigma=jnp.array(SKY_SIGMA)),
     )
     got = [float(estimate.values["a"])] if estimate is not None else None
@@ -164,7 +165,9 @@ def test_a_quadratic_gradient_block_stops_at_exactly_min_sweeps():
     )
     pipeline = Pipeline(SkyOperator(amplitude=jnp.array(0.0)), names=("sky",))
     estimate = SamplingPlan(space, Block("a")).estimate(
-        pipeline, _grid_state(*SKY_SHAPE), jnp.asarray(observed),
+        pipeline,
+        _grid_state(*SKY_SHAPE),
+        jnp.asarray(observed),
         noise=HomoscedasticNoise(sigma=jnp.array(SKY_SIGMA)),
     )
     assert estimate.diagnostics.converged is True
@@ -208,8 +211,7 @@ def _template_map(observed, eps: float, tau: float):
     fisher = design.T @ design / TEMPLATE_SIGMA**2
     projected = design.T @ np.asarray(observed, np.float64).ravel() / TEMPLATE_SIGMA**2
     precision = fisher + np.eye(2) / tau**2
-    return (np.linalg.solve(fisher, projected), np.linalg.solve(precision, projected),
-            precision)
+    return (np.linalg.solve(fisher, projected), np.linalg.solve(precision, projected), precision)
 
 
 def _template_case(eps: float, tau: float, seed: int, shape=TEMPLATE_SHAPE):
@@ -252,19 +254,16 @@ def test_two_collinear_conjugate_blocks(eps, tau, seed, start):
             Bind("b", into=lambda p: p["tt"].b),
         ],
     )
-    pipeline = Pipeline(
-        _TwoTemplates(a=jnp.array(0.0), b=jnp.array(0.0), eps=eps), names=("tt",)
-    )
+    pipeline = Pipeline(_TwoTemplates(a=jnp.array(0.0), b=jnp.array(0.0), eps=eps), names=("tt",))
     estimate = _estimate_or_refusal(
-        SamplingPlan(space, Block("a"), Block("b")), pipeline,
-        _grid_state(*TEMPLATE_SHAPE), jnp.asarray(observed),
+        SamplingPlan(space, Block("a"), Block("b")),
+        pipeline,
+        _grid_state(*TEMPLATE_SHAPE),
+        jnp.asarray(observed),
         HomoscedasticNoise(sigma=jnp.array(TEMPLATE_SIGMA)),
         max_iter=TEMPLATE_MAX_ITER,
     )
-    got = (
-        None if estimate is None
-        else [float(estimate.values["a"]), float(estimate.values["b"])]
-    )
+    got = None if estimate is None else [float(estimate.values["a"]), float(estimate.values["b"])]
     label = f"eps {eps}, tau {tau}, seed {seed}, start {start}"
     _check(estimate, got, exact, precision, start == "map" or not slowest, label)
     if start == "map":
@@ -273,6 +272,7 @@ def test_two_collinear_conjugate_blocks(eps, tau, seed, start):
 
 def _template_plan(eps, tau, init, dtype=None):
     """Two one-latent conjugate blocks over :class:`_TwoTemplates`."""
+
     def array(value):
         return jnp.array(value) if dtype is None else jnp.array(value, dtype)
 
@@ -286,9 +286,7 @@ def _template_plan(eps, tau, init, dtype=None):
             Bind("b", into=lambda p: p["tt"].b),
         ],
     )
-    pipeline = Pipeline(
-        _TwoTemplates(a=array(0.0), b=array(0.0), eps=eps), names=("tt",)
-    )
+    pipeline = Pipeline(_TwoTemplates(a=array(0.0), b=array(0.0), eps=eps), names=("tt",))
     return SamplingPlan(space, Block("a"), Block("b")), pipeline
 
 
@@ -307,8 +305,7 @@ def test_the_earliest_stop_is_sweep_three_whatever_min_sweeps_says():
     """
     observed, _, exact, _ = _template_case(0.2, 3.0, 11)
     plan, pipeline = _template_plan(0.2, 3.0, exact)
-    common = {"noise": HomoscedasticNoise(sigma=jnp.array(TEMPLATE_SIGMA)),
-              "max_iter": 30}
+    common = {"noise": HomoscedasticNoise(sigma=jnp.array(TEMPLATE_SIGMA)), "max_iter": 30}
     state, data = _grid_state(*TEMPLATE_SHAPE), jnp.asarray(observed)
     for min_sweeps in (1, 2, 3):
         early = plan.estimate(pipeline, state, data, min_sweeps=min_sweeps, **common)
@@ -317,8 +314,7 @@ def test_the_earliest_stop_is_sweep_three_whatever_min_sweeps_says():
     floored = plan.estimate(pipeline, state, data, min_sweeps=8, **common)
     assert floored.diagnostics.sweeps == 8
     with pytest.raises(ParameterSpaceError) as capped:
-        plan.estimate(pipeline, state, data, min_sweeps=1,
-                      **{**common, "max_iter": 2})
+        plan.estimate(pipeline, state, data, min_sweeps=1, **{**common, "max_iter": 2})
     assert "did not converge" in str(capped.value)
 
 
@@ -348,8 +344,11 @@ def test_a_large_n_collinear_pair_is_certified_within_a_tenth_of_a_sigma(shape, 
     sd = np.sqrt(np.diag(np.linalg.inv(precision)))
     plan, pipeline = _template_plan(eps, 3.0, exact + 20.0 * sd)
     estimate = plan.estimate(
-        pipeline, _grid_state(*shape), jnp.asarray(observed),
-        noise=HomoscedasticNoise(sigma=jnp.array(TEMPLATE_SIGMA)), max_iter=1000,
+        pipeline,
+        _grid_state(*shape),
+        jnp.asarray(observed),
+        noise=HomoscedasticNoise(sigma=jnp.array(TEMPLATE_SIGMA)),
+        max_iter=1000,
     )
     got = [float(estimate.values["a"]), float(estimate.values["b"])]
     distance = _mahalanobis(got, exact, precision)
@@ -372,13 +371,19 @@ def test_the_monitor_terms_sum_to_the_objective():
     plan, pipeline = _template_plan(0.5, 3.0, exact)
     forward, values = plan.space.forward_fn(pipeline, _grid_state(*TEMPLATE_SHAPE))
     flags = jnp.zeros(TEMPLATE_SHAPE, bool).at[1, 2].set(True)
-    for noise in (HomoscedasticNoise(sigma=jnp.array(0.7)),
-                  RadiometerNoise(1e3, 1.0, 0.5),
-                  FlaggedNoise(RadiometerNoise(1e3, 1.0), flags)):
-        cond = Conditioning(space=plan.space, pipeline=pipeline,
-                            state_template=_grid_state(*TEMPLATE_SHAPE),
-                            observed=jnp.asarray(observed), noise=noise,
-                            forward=forward)
+    for noise in (
+        HomoscedasticNoise(sigma=jnp.array(0.7)),
+        RadiometerNoise(1e3, 1.0, 0.5),
+        FlaggedNoise(RadiometerNoise(1e3, 1.0), flags),
+    ):
+        cond = Conditioning(
+            space=plan.space,
+            pipeline=pipeline,
+            state_template=_grid_state(*TEMPLATE_SHAPE),
+            observed=jnp.asarray(observed),
+            noise=noise,
+            forward=forward,
+        )
         chi2, terms, _ = _objective_terms(cond, values)
         total = sum(float(jnp.sum(term)) for term in terms.values())
         assert total == pytest.approx(float(cond.neg_log_posterior(values)), rel=1e-12)
@@ -408,9 +413,7 @@ def _power_law_case(n_freq: int, sigma: float):
     x = freq / REF_FREQ
     rng = np.random.default_rng(2026)
     observed = A_TRUE * x ** (-BETA_TRUE) + sigma * rng.standard_normal(n_freq)
-    objective = jax.jit(
-        lambda p: _power_law_nlp(p, jnp.asarray(x), jnp.asarray(observed), sigma)
-    )
+    objective = jax.jit(lambda p: _power_law_nlp(p, jnp.asarray(x), jnp.asarray(observed), sigma))
     gradient, hessian = jax.jit(jax.grad(objective)), jax.jit(jax.hessian(objective))
     params = jnp.array([A_TRUE, BETA_TRUE])
     for _ in range(50):
@@ -433,7 +436,8 @@ def test_a_power_law_reaches_the_joint_map(n_freq, sigma, learning_rate, steps):
     state = State(coords=Coordinates(time=jnp.arange(1.0), freq=jnp.asarray(freq)))
     pipeline = Pipeline(
         ForegroundOperator(
-            amplitude=jnp.array(A_TRUE), spectral_index=jnp.array(BETA_TRUE),
+            amplitude=jnp.array(A_TRUE),
+            spectral_index=jnp.array(BETA_TRUE),
             ref_freq=REF_FREQ,
         ),
         names=("fg",),
@@ -455,12 +459,14 @@ def test_a_power_law_reaches_the_joint_map(n_freq, sigma, learning_rate, steps):
     }
     plan = SamplingPlan(space, Block("A"), Block("beta", **options))
     estimate = _estimate_or_refusal(
-        plan, pipeline, state, jnp.asarray(observed),
+        plan,
+        pipeline,
+        state,
+        jnp.asarray(observed),
         HomoscedasticNoise(sigma=jnp.array(sigma)),
     )
     got = (
-        None if estimate is None
-        else [float(estimate.values["A"]), float(estimate.values["beta"])]
+        None if estimate is None else [float(estimate.values["A"]), float(estimate.values["beta"])]
     )
     label = f"n_freq {n_freq}, sigma {sigma}, lr {learning_rate}, steps {steps}"
     _check(estimate, got, exact, precision, True, label)
@@ -511,22 +517,24 @@ def _dense_run(design, observed, init, **options):
     names = DENSE_LATENTS[: design.shape[1]]
     space = ParameterSpace(
         latents=[
-            Latent(name, init=jnp.array(value), prior=dist.Normal(0.0, DENSE_TAU),
-                   linear=True)
+            Latent(name, init=jnp.array(value), prior=dist.Normal(0.0, DENSE_TAU), linear=True)
             for name, value in zip(names, init, strict=True)
         ],
-        bindings=[Bind(name, into=lambda p, name=name: getattr(p["dense"], name))
-                  for name in names],
+        bindings=[
+            Bind(name, into=lambda p, name=name: getattr(p["dense"], name)) for name in names
+        ],
     )
     pipeline = Pipeline(
-        _Dense(design=jnp.asarray(design),
-               **{name: jnp.array(0.0) for name in DENSE_LATENTS}),
+        _Dense(design=jnp.asarray(design), **{name: jnp.array(0.0) for name in DENSE_LATENTS}),
         names=("dense",),
     )
     plan = SamplingPlan(space, *(Block(name) for name in names))
     estimate = plan.estimate(
-        pipeline, _grid_state(*DENSE_SHAPE), jnp.asarray(observed.reshape(DENSE_SHAPE)),
-        noise=HomoscedasticNoise(sigma=jnp.array(1.0)), **options,
+        pipeline,
+        _grid_state(*DENSE_SHAPE),
+        jnp.asarray(observed.reshape(DENSE_SHAPE)),
+        noise=HomoscedasticNoise(sigma=jnp.array(1.0)),
+        **options,
     )
     return estimate, [float(estimate.values[name]) for name in names]
 
@@ -592,9 +600,7 @@ def _gauss_seidel_precision(seed: int, kind: str) -> np.ndarray:
         precision = factor @ factor.T + 1e-3 * np.eye(n)
         root = np.sqrt(np.diag(precision))
         precision = precision / np.outer(root, root)
-        spectrum = np.linalg.eigvals(
-            -np.linalg.solve(np.tril(precision), np.triu(precision, 1))
-        )
+        spectrum = np.linalg.eigvals(-np.linalg.solve(np.tril(precision), np.triu(precision, 1)))
         lead = spectrum[np.argmax(np.abs(spectrum))]
         found = "complex" if abs(lead.imag) > 1e-9 else "real"
         if found == kind and low <= abs(lead) <= high:
@@ -615,12 +621,17 @@ def test_a_random_dense_precision_converges_within_a_tenth_of_a_sigma(seed, kind
     start = np.random.default_rng(seed).standard_normal(len(exact))
     estimate = None
     try:
-        estimate, got = _dense_run(design, observed, exact + 30.0 * start,
-                                   max_iter=20000)
+        estimate, got = _dense_run(design, observed, exact + 30.0 * start, max_iter=20000)
     except ParameterSpaceError as refusal:
         assert "did not converge" in str(refusal)
-    _check(estimate, None if estimate is None else got, exact, precision, True,
-           f"seed {seed}, {kind} leading eigenvalue")
+    _check(
+        estimate,
+        None if estimate is None else got,
+        exact,
+        precision,
+        True,
+        f"seed {seed}, {kind} leading eigenvalue",
+    )
 
 
 def _float64_basis_model():
@@ -655,7 +666,11 @@ def test_an_inexact_inner_solve_is_tightened_until_the_decrement_certifies(noise
     observed = basis.observed_of(space, pipeline, basis.TRUTH)
     exact, precision = basis._basis_map(observed, sigma=noise)
     estimate = SamplingPlan(space, Block("gain"), Block("t_coeff")).estimate(
-        pipeline, basis.make_state(), observed, noise=noise, max_iter=3000,
+        pipeline,
+        basis.make_state(),
+        observed,
+        noise=noise,
+        max_iter=3000,
         solve_guard=None,
     )
     assert estimate.values["gain"].dtype == jnp.float64
@@ -745,38 +760,55 @@ def _wide_plan(seed=3, blocks=1, scales=None):
 
     def declared(start, stop):
         return WIDE_TAU if scales is None else jnp.asarray(width[start:stop])
+
     if blocks == 1:
-        latents = [Latent("theta", init=jnp.zeros(WIDE_COEFFICIENTS),
-                          prior=dist.Normal(jnp.zeros(WIDE_COEFFICIENTS),
-                                            declared(0, WIDE_COEFFICIENTS)),
-                          linear=True)]
+        latents = [
+            Latent(
+                "theta",
+                init=jnp.zeros(WIDE_COEFFICIENTS),
+                prior=dist.Normal(jnp.zeros(WIDE_COEFFICIENTS), declared(0, WIDE_COEFFICIENTS)),
+                linear=True,
+            )
+        ]
         bindings = [Bind("theta", into=lambda p: p["wide"].theta)]
         pipeline = Pipeline(
             _Wide(design=jnp.asarray(design), theta=jnp.zeros(WIDE_COEFFICIENTS)),
             names=("wide",),
         )
-        plan = SamplingPlan(ParameterSpace(latents=latents, bindings=bindings),
-                            Block("theta"))
+        plan = SamplingPlan(ParameterSpace(latents=latents, bindings=bindings), Block("theta"))
     else:
         latents = [
-            Latent("theta", init=jnp.zeros(half),
-                   prior=dist.Normal(jnp.zeros(half), declared(0, half)),
-                   linear=True),
-            Latent("phi", init=jnp.zeros(WIDE_COEFFICIENTS - half),
-                   prior=dist.Normal(jnp.zeros(WIDE_COEFFICIENTS - half),
-                                     declared(half, WIDE_COEFFICIENTS)),
-                   linear=True),
+            Latent(
+                "theta",
+                init=jnp.zeros(half),
+                prior=dist.Normal(jnp.zeros(half), declared(0, half)),
+                linear=True,
+            ),
+            Latent(
+                "phi",
+                init=jnp.zeros(WIDE_COEFFICIENTS - half),
+                prior=dist.Normal(
+                    jnp.zeros(WIDE_COEFFICIENTS - half), declared(half, WIDE_COEFFICIENTS)
+                ),
+                linear=True,
+            ),
         ]
-        bindings = [Bind("theta", into=lambda p: p["wide"].theta),
-                    Bind("phi", into=lambda p: p["wide"].phi)]
+        bindings = [
+            Bind("theta", into=lambda p: p["wide"].theta),
+            Bind("phi", into=lambda p: p["wide"].phi),
+        ]
         operator = _Product if product else _Split
         pipeline = Pipeline(
-            operator(design=jnp.asarray(design), theta=jnp.zeros(half),
-                     phi=jnp.zeros(WIDE_COEFFICIENTS - half)),
+            operator(
+                design=jnp.asarray(design),
+                theta=jnp.zeros(half),
+                phi=jnp.zeros(WIDE_COEFFICIENTS - half),
+            ),
             names=("wide",),
         )
-        plan = SamplingPlan(ParameterSpace(latents=latents, bindings=bindings),
-                            Block("theta"), Block("phi"))
+        plan = SamplingPlan(
+            ParameterSpace(latents=latents, bindings=bindings), Block("theta"), Block("phi")
+        )
     return plan, pipeline, jnp.asarray(observed.reshape(WIDE_SHAPE)), exact, precision
 
 
@@ -795,7 +827,11 @@ def test_a_block_too_wide_to_form_a_hessian_certifies_on_its_prior_floor():
     cond, _ = plan._prepare(pipeline, state, observed, noise, False, "probe")
     assert plan._curvature_floor(cond) == pytest.approx(1.0 / WIDE_TAU**2)
     estimate = plan.estimate(
-        pipeline, state, observed, noise=noise, max_iter=30,
+        pipeline,
+        state,
+        observed,
+        noise=noise,
+        max_iter=30,
         check_identifiability=False,
     )
     diagnostics = estimate.diagnostics
@@ -820,28 +856,55 @@ def test_without_a_proof_that_block_refuses_and_says_what_would_prove_it():
     from rheplicant.inference.plan import _Attempt, _not_converged_message
 
     probed = certify.Decrement(
-        estimate=0.01, distance=0.02, lambda2=1e-4, residual=1e-6, reach=1e-3,
-        kappa=50.0, products=64, dense=False, floor_source=certify.FLOOR_PROBE,
+        estimate=0.01,
+        distance=0.02,
+        lambda2=1e-4,
+        residual=1e-6,
+        reach=1e-3,
+        kappa=50.0,
+        products=64,
+        dense=False,
+        floor_source=certify.FLOOR_PROBE,
         status=certify.CONVERGED,
     )
     message = _not_converged_message(
-        max_iter=50, tol=1e-8, gap_tol=0.005, effective=1e-8, changed=True,
-        objective=[1.0, 1.0], chi2=[1.0, 1.0], contraction=0.5, gap=1e-9,
-        rise=None, attempt=_Attempt(50, probed, False), solve_tol=1e-6,
-        dtype=np.float32, hidden="",
+        max_iter=50,
+        tol=1e-8,
+        gap_tol=0.005,
+        effective=1e-8,
+        changed=True,
+        objective=[1.0, 1.0],
+        chi2=[1.0, 1.0],
+        contraction=0.5,
+        gap=1e-9,
+        rise=None,
+        attempt=_Attempt(50, probed, False),
+        solve_tol=1e-6,
+        dtype=np.float32,
+        hidden="",
     )
     assert "cannot certify this estimate at this size and precision" in message
     assert "came from probe, not from a proof" in message
     assert f"more than {certify.DENSE_MAX} latents" in message  # form the Hessian
-    assert "ONE conjugate block" in message                     # prove the floor
-    assert "JAX_ENABLE_X64=1" in message                        # or change precision
+    assert "ONE conjugate block" in message  # prove the floor
+    assert "JAX_ENABLE_X64=1" in message  # or change precision
     # a proven floor says none of it
     proven = dataclasses.replace(probed, floor_source=certify.FLOOR_DENSE)
     plain = _not_converged_message(
-        max_iter=50, tol=1e-8, gap_tol=0.005, effective=1e-8, changed=True,
-        objective=[1.0, 1.0], chi2=[1.0, 1.0], contraction=0.5, gap=1e-9,
-        rise=None, attempt=_Attempt(50, proven, False), solve_tol=1e-6,
-        dtype=np.float32, hidden="",
+        max_iter=50,
+        tol=1e-8,
+        gap_tol=0.005,
+        effective=1e-8,
+        changed=True,
+        objective=[1.0, 1.0],
+        chi2=[1.0, 1.0],
+        contraction=0.5,
+        gap=1e-9,
+        rise=None,
+        attempt=_Attempt(50, proven, False),
+        solve_tol=1e-6,
+        dtype=np.float32,
+        hidden="",
     )
     assert plain.startswith("SamplingPlan.estimate did not converge")
     assert "not from a proof" not in plain
@@ -865,8 +928,9 @@ def test_a_wide_block_without_a_proof_runs_to_max_iter_and_refuses():
     cond, _ = plan._prepare(pipeline, state, observed, noise, False, "probe")
     assert plan._curvature_floor(cond) is None
     with pytest.raises(ParameterSpaceError) as refused:
-        plan.estimate(pipeline, state, observed, noise=noise, max_iter=20,
-                      check_identifiability=False)
+        plan.estimate(
+            pipeline, state, observed, noise=noise, max_iter=20, check_identifiability=False
+        )
     message = str(refused.value)
     assert "cannot certify this estimate at this size and precision" in message
     assert "came from probe, not from a proof" in message
@@ -903,35 +967,39 @@ def test_the_floor_is_claimed_only_where_the_model_proves_it(variation, floored)
         latents=[Latent("theta", init=jnp.zeros(size), prior=prior, linear=linear)],
         bindings=[Bind("theta", into=lambda p: p["wide"].theta)],
     )
-    pipeline = Pipeline(
-        _Wide(design=jnp.asarray(design), theta=jnp.zeros(size)), names=("wide",)
-    )
+    pipeline = Pipeline(_Wide(design=jnp.asarray(design), theta=jnp.zeros(size)), names=("wide",))
     blocks = (Block("theta"),)
     if variation in ("two blocks", "bilinear"):
         space = ParameterSpace(
             latents=[
-                Latent(name, init=jnp.zeros(size // 2) + (0.0 if name == "theta" else 1.0),
-                       prior=dist.Normal(jnp.zeros(size // 2), width), linear=True)
+                Latent(
+                    name,
+                    init=jnp.zeros(size // 2) + (0.0 if name == "theta" else 1.0),
+                    prior=dist.Normal(jnp.zeros(size // 2), width),
+                    linear=True,
+                )
                 for name in ("theta", "phi")
             ],
-            bindings=[Bind("theta", into=lambda p: p["wide"].theta),
-                      Bind("phi", into=lambda p: p["wide"].phi)],
+            bindings=[
+                Bind("theta", into=lambda p: p["wide"].theta),
+                Bind("phi", into=lambda p: p["wide"].phi),
+            ],
         )
         operator = _Split if variation == "two blocks" else _Product
         pipeline = Pipeline(
-            operator(design=jnp.asarray(design), theta=jnp.zeros(size // 2),
-                     phi=jnp.zeros(size // 2)),
+            operator(
+                design=jnp.asarray(design), theta=jnp.zeros(size // 2), phi=jnp.zeros(size // 2)
+            ),
             names=("wide",),
         )
         blocks = (Block("theta"), Block("phi"))
     noise = (
-        RadiometerNoise(1e3, 1.0) if variation == "sigma from the prediction"
+        RadiometerNoise(1e3, 1.0)
+        if variation == "sigma from the prediction"
         else HomoscedasticNoise(sigma=jnp.array(1.0))
     )
     plan = SamplingPlan(space, *blocks)
-    cond, _ = plan._prepare(
-        pipeline, _grid_state(*DENSE_SHAPE), observed, noise, False, "probe"
-    )
+    cond, _ = plan._prepare(pipeline, _grid_state(*DENSE_SHAPE), observed, noise, False, "probe")
     floor = plan._curvature_floor(cond)
     assert (floor is not None) is floored, (variation, floor)
     if floored:
@@ -969,8 +1037,12 @@ def test_the_claimed_floor_is_below_the_hessians_smallest_eigenvalue(scales):
     }[scales]
     plan, pipeline, observed, _, precision = _wide_plan(scales=width, seed=11)
     cond, _ = plan._prepare(
-        pipeline, _grid_state(*WIDE_SHAPE), observed,
-        HomoscedasticNoise(sigma=jnp.array(1.0)), False, "probe",
+        pipeline,
+        _grid_state(*WIDE_SHAPE),
+        observed,
+        HomoscedasticNoise(sigma=jnp.array(1.0)),
+        False,
+        "probe",
     )
     floor = plan._curvature_floor(cond)
     smallest = float(np.linalg.eigvalsh(precision)[0])

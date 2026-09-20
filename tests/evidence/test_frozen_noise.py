@@ -154,9 +154,7 @@ def test_the_residual_is_the_freezing_cost_alone_not_the_projection_error():
                 RawLikelihood(
                     predict=basis.predict,
                     observed=data,
-                    sigma=jnp.broadcast_to(
-                        noise.std(basis.predict(probe)), data.shape
-                    ),
+                    sigma=jnp.broadcast_to(noise.std(basis.predict(probe)), data.shape),
                     names=tuple(values),
                     epoch_id="e0",
                 )(probe)
@@ -256,9 +254,11 @@ def test_the_measurement_does_not_cost_the_traces_this_module_pins():
     assert bool(jnp.all(jnp.isfinite(jax.grad(scalar)(epoch))))
     stacked = jnp.stack([epoch, rhino_bank.observed(jax.random.key(67))])
     residuals = jax.vmap(
-        lambda d: compress_reduced_basis(
-            basis, observed=d, noise=rhino_bank.noise(), epoch_id="e0"
-        ).frozen_noise_residual
+        lambda d: (
+            compress_reduced_basis(
+                basis, observed=d, noise=rhino_bank.noise(), epoch_id="e0"
+            ).frozen_noise_residual
+        )
     )(stacked)
     assert residuals.shape == (2,)
     assert bool(jnp.all(residuals > 0.0))
@@ -296,9 +296,7 @@ def test_the_frozen_and_live_densities_agree_at_the_freeze_point_exactly():
     live_sigma = noise.std(predict(values))
     # The reference IS the truth for this fixture, so the two sigmas coincide
     # there and the residual comes entirely from probes away from it.
-    np.testing.assert_allclose(
-        np.asarray(frozen_sigma), np.asarray(live_sigma), rtol=1e-6
-    )
+    np.testing.assert_allclose(np.asarray(frozen_sigma), np.asarray(live_sigma), rtol=1e-6)
     term = compress_reduced_basis(
         basis, observed=data, noise=noise, epoch_id="e0", noise_frozen_at="reference"
     )

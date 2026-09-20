@@ -48,12 +48,8 @@ class SelectedPreset:
         if type(self.snapshot) is not PresetSnapshot:
             raise ConfigError("selected preset snapshot must be a PresetSnapshot.")
         if self.request.name != self.snapshot.name:
-            raise ConfigError(
-                "selected preset request and snapshot names must match."
-            )
-        object.__setattr__(
-            self, "request", PresetRequest(self.request.name, self.request.only)
-        )
+            raise ConfigError("selected preset request and snapshot names must match.")
+        object.__setattr__(self, "request", PresetRequest(self.request.name, self.request.only))
 
 
 def _canonical_text(value: object, *, where: str, nullable: bool = False):
@@ -61,9 +57,7 @@ def _canonical_text(value: object, *, where: str, nullable: bool = False):
         return None
     if not isinstance(value, str):
         suffix = " or null" if nullable else ""
-        raise ConfigError(
-            f"{where} must be a string{suffix}; got {type(value).__name__}."
-        )
+        raise ConfigError(f"{where} must be a string{suffix}; got {type(value).__name__}.")
     text = str.__str__(value)
     if not text:
         raise ConfigError(f"{where} must be a non-empty string.")
@@ -79,12 +73,9 @@ def _canonical_input_bytes(value: object) -> bytes:
         if isinstance(value, memoryview):
             return memoryview.tobytes(value)
     except Exception:
-        raise ConfigError(
-            "config source input_bytes must be a usable byte buffer."
-        ) from None
+        raise ConfigError("config source input_bytes must be a usable byte buffer.") from None
     raise ConfigError(
-        "config source input_bytes must be a byte buffer; got "
-        f"{type(value).__name__}."
+        f"config source input_bytes must be a byte buffer; got {type(value).__name__}."
     )
 
 
@@ -109,46 +100,34 @@ def _validate_source_shape(
         return os.path.isabs(path) and os.path.normpath(path) == path
 
     if not is_normalized_absolute(base_dir):
-        raise ConfigError(
-            f"{where} base_dir must be an absolute normalized path."
-        )
+        raise ConfigError(f"{where} base_dir must be an absolute normalized path.")
     if source_path == "<stdin>" or source_name == "<stdin>":
         if source_path != "<stdin>" or source_name != "<stdin>":
-            raise ConfigError(
-                f"{where} stdin source_path and source_name must both be '<stdin>'."
-            )
+            raise ConfigError(f"{where} stdin source_path and source_name must both be '<stdin>'.")
         if source_realpath is not None:
             raise ConfigError(f"{where} stdin source_realpath must be null.")
         return
     if source_name != source_path:
         raise ConfigError(f"{where} source_name must match source_path.")
     if not is_normalized_absolute(source_path):
-        raise ConfigError(
-            f"{where} source_path must be an absolute normalized path."
-        )
+        raise ConfigError(f"{where} source_path must be an absolute normalized path.")
     if source_realpath is None:
         raise ConfigError(f"{where} file source_realpath must not be null.")
     if not is_normalized_absolute(source_realpath):
-        raise ConfigError(
-            f"{where} source_realpath must be an absolute normalized path."
-        )
+        raise ConfigError(f"{where} source_realpath must be an absolute normalized path.")
 
 
 def _canonical_source_input(source: object) -> SourceInput:
     if type(source) is not SourceInput:
         raise ConfigError("source must be a SourceInput record.")
     input_bytes = _canonical_input_bytes(source.input_bytes)
-    source_path = _canonical_text(
-        source.source_path, where="source source_path"
-    )
+    source_path = _canonical_text(source.source_path, where="source source_path")
     source_realpath = _canonical_text(
         source.source_realpath,
         where="source source_realpath",
         nullable=True,
     )
-    source_name = _canonical_text(
-        source.source_name, where="source source_name"
-    )
+    source_name = _canonical_text(source.source_name, where="source source_name")
     base_dir = _canonical_text(source.base_dir, where="source base_dir")
     launch_mode = _canonical_launch_mode(source.launch_mode, where="source")
     _validate_source_shape(
@@ -180,49 +159,31 @@ class BootstrapManifest:
     base_dir: str
 
     def __post_init__(self) -> None:
-        if isinstance(self.protocol_version, bool) or not isinstance(
-            self.protocol_version, int
-        ) or int.__int__(self.protocol_version) != 1:
+        if (
+            isinstance(self.protocol_version, bool)
+            or not isinstance(self.protocol_version, int)
+            or int.__int__(self.protocol_version) != 1
+        ):
             raise ConfigError("bootstrap protocol_version must be 1.")
-        launch_mode = _canonical_launch_mode(
-            self.launch_mode, where="bootstrap"
-        )
+        launch_mode = _canonical_launch_mode(self.launch_mode, where="bootstrap")
         if not isinstance(self.input_sha256, str):
-            raise ConfigError(
-                "bootstrap input_sha256 must be a lowercase hexadecimal digest."
-            )
+            raise ConfigError("bootstrap input_sha256 must be a lowercase hexadecimal digest.")
         input_sha256 = str.__str__(self.input_sha256)
         if re.fullmatch(r"[0-9a-f]{64}", input_sha256) is None:
-            raise ConfigError(
-                "bootstrap input_sha256 must be a lowercase hexadecimal digest."
-            )
-        if isinstance(self.presets, str | bytes) or not isinstance(
-            self.presets, Sequence
-        ):
+            raise ConfigError("bootstrap input_sha256 must be a lowercase hexadecimal digest.")
+        if isinstance(self.presets, str | bytes) or not isinstance(self.presets, Sequence):
             raise ConfigError("bootstrap presets must be a sequence.")
         try:
             presets = tuple(self.presets)
         except Exception:
             raise ConfigError("bootstrap presets sequence traversal failed.") from None
         if any(type(item) is not SelectedPreset for item in presets):
-            raise ConfigError(
-                "bootstrap presets must contain SelectedPreset values."
-            )
-        canonical_presets = tuple(
-            SelectedPreset(item.request, item.snapshot) for item in presets
-        )
-        if len({item.request.name for item in canonical_presets}) != len(
-            canonical_presets
-        ):
-            raise ConfigError(
-                "bootstrap presets contain a duplicate preset name."
-            )
-        source_name = _canonical_text(
-            self.source_name, where="bootstrap source_name"
-        )
-        source_path = _canonical_text(
-            self.source_path, where="bootstrap source_path"
-        )
+            raise ConfigError("bootstrap presets must contain SelectedPreset values.")
+        canonical_presets = tuple(SelectedPreset(item.request, item.snapshot) for item in presets)
+        if len({item.request.name for item in canonical_presets}) != len(canonical_presets):
+            raise ConfigError("bootstrap presets contain a duplicate preset name.")
+        source_name = _canonical_text(self.source_name, where="bootstrap source_name")
+        source_path = _canonical_text(self.source_path, where="bootstrap source_path")
         source_realpath = _canonical_text(
             self.source_realpath,
             where="bootstrap source_realpath",
@@ -260,17 +221,13 @@ class ConfigSource:
 
     def __post_init__(self) -> None:
         input_bytes = _canonical_input_bytes(self.input_bytes)
-        source_path = _canonical_text(
-            self.source_path, where="config source source_path"
-        )
+        source_path = _canonical_text(self.source_path, where="config source source_path")
         source_realpath = _canonical_text(
             self.source_realpath,
             where="config source source_realpath",
             nullable=True,
         )
-        source_name = _canonical_text(
-            self.source_name, where="config source source_name"
-        )
+        source_name = _canonical_text(self.source_name, where="config source source_name")
         base_dir = _canonical_text(self.base_dir, where="config source base_dir")
         _validate_source_shape(
             source_path=source_path,
@@ -284,14 +241,10 @@ class ConfigSource:
         if self.origins.origin is not None:
             raise ConfigError("config source origins root must have null origin.")
         if type(self.bootstrap_manifest) is not BootstrapManifest:
-            raise ConfigError(
-                "config source bootstrap_manifest must be a BootstrapManifest."
-            )
+            raise ConfigError("config source bootstrap_manifest must be a BootstrapManifest.")
         manifest = self.bootstrap_manifest
         if hashlib.sha256(input_bytes).hexdigest() != manifest.input_sha256:
-            raise ConfigError(
-                "config source input_bytes do not match bootstrap input_sha256."
-            )
+            raise ConfigError("config source input_bytes do not match bootstrap input_sha256.")
         if (
             source_path,
             source_realpath,
@@ -303,9 +256,7 @@ class ConfigSource:
             manifest.source_name,
             manifest.base_dir,
         ):
-            raise ConfigError(
-                "config source fields do not match the bootstrap manifest."
-            )
+            raise ConfigError("config source fields do not match the bootstrap manifest.")
         if not isinstance(self.parsed_document, Mapping):
             raise ConfigError("config source parsed_document must be a mapping.")
         if not isinstance(self.layered_document, Mapping):
@@ -338,9 +289,7 @@ class PreparedConfig:
         if type(self.source) is not ConfigSource:
             raise ConfigError("prepared source must be a ConfigSource.")
         if type(self.process) is not EffectiveProcessEntry:
-            raise ConfigError(
-                "prepared process must be an EffectiveProcessEntry."
-            )
+            raise ConfigError("prepared process must be an EffectiveProcessEntry.")
         enumeration = LayerEnumeration(
             self.layers,
             self.layer_origins,
@@ -359,13 +308,9 @@ def _trusted_prepared_config(
     if type(source) is not ConfigSource:
         raise ConfigError("trusted prepared source must be a ConfigSource.")
     if type(process) is not EffectiveProcessEntry:
-        raise ConfigError(
-            "trusted prepared process must be an EffectiveProcessEntry."
-        )
+        raise ConfigError("trusted prepared process must be an EffectiveProcessEntry.")
     if type(enumeration) is not LayerEnumeration:
-        raise ConfigError(
-            "trusted prepared enumeration must carry deletion ledgers."
-        )
+        raise ConfigError("trusted prepared enumeration must carry deletion ledgers.")
     layers = enumeration.layers
     origins = enumeration.origins
     deletions = enumeration.deletions
@@ -380,13 +325,9 @@ def _trusted_prepared_config(
         origin_items = tuple(origins.items())
         deletion_items = tuple(deletions.items())
     except Exception:
-        raise ConfigError(
-            "trusted prepared enumeration evidence traversal failed."
-        ) from None
+        raise ConfigError("trusted prepared enumeration evidence traversal failed.") from None
     if len(origin_items) != len(layers) or len(deletion_items) != len(layers):
-        raise ConfigError(
-            "trusted prepared enumeration evidence must match every layer."
-        )
+        raise ConfigError("trusted prepared enumeration evidence must match every layer.")
 
     def matches_identity(value: object, layer: LayerRef) -> bool:
         return (
@@ -398,50 +339,34 @@ def _trusted_prepared_config(
         )
 
     for index, layer in enumerate(layers):
-        if (
-            type(layer) is not LayerRef
-            or type(layer.document) is not _OverlayMapping
-        ):
-            raise ConfigError(
-                "trusted prepared enumeration documents are invalid."
-            )
+        if type(layer) is not LayerRef or type(layer.document) is not _OverlayMapping:
+            raise ConfigError("trusted prepared enumeration documents are invalid.")
         if (
             type(layer.kind) is not str
             or type(layer.prefix) is not str
             or (layer.name is not None and type(layer.name) is not str)
         ):
-            raise ConfigError(
-                "trusted prepared enumeration identities are invalid."
-            )
+            raise ConfigError("trusted prepared enumeration identities are invalid.")
         if (
-            layer.kind == "base"
-            and (layer.name is not None or layer.prefix != "")
-        ) or (
-            layer.kind == "variant"
-            and (
-                not layer.name
-                or layer.prefix != f"variants.{layer.name}"
+            (layer.kind == "base" and (layer.name is not None or layer.prefix != ""))
+            or (
+                layer.kind == "variant"
+                and (not layer.name or layer.prefix != f"variants.{layer.name}")
             )
-        ) or layer.kind not in ("base", "variant") or (
-            index == 0 and layer.kind != "base"
-        ) or (index != 0 and layer.kind != "variant"):
-            raise ConfigError(
-                "trusted prepared enumeration identities are invalid."
-            )
+            or layer.kind not in ("base", "variant")
+            or (index == 0 and layer.kind != "base")
+            or (index != 0 and layer.kind != "variant")
+        ):
+            raise ConfigError("trusted prepared enumeration identities are invalid.")
         try:
             origin_identity, root = origin_items[index]
             deletion_identity, rows = deletion_items[index]
         except Exception:
-            raise ConfigError(
-                "trusted prepared enumeration evidence traversal failed."
-            ) from None
-        if (
-            not matches_identity(origin_identity, layer)
-            or not matches_identity(deletion_identity, layer)
+            raise ConfigError("trusted prepared enumeration evidence traversal failed.") from None
+        if not matches_identity(origin_identity, layer) or not matches_identity(
+            deletion_identity, layer
         ):
-            raise ConfigError(
-                "trusted prepared enumeration evidence must match every layer."
-            )
+            raise ConfigError("trusted prepared enumeration evidence must match every layer.")
         if (
             type(root) is not OriginNode
             or root.origin is not None
@@ -449,9 +374,7 @@ def _trusted_prepared_config(
             or len(layer.document) != len(root.children)
             or type(rows) is not _DeletionLedger
         ):
-            raise ConfigError(
-                "trusted prepared enumeration evidence values are invalid."
-            )
+            raise ConfigError("trusted prepared enumeration evidence values are invalid.")
     prepared = object.__new__(PreparedConfig)
     object.__setattr__(prepared, "source", source)
     object.__setattr__(prepared, "process", process)
@@ -476,17 +399,12 @@ def parse_effective_process_entry(
     raw: RawProcessEntry,
     parse_outputs: OutputGrammarParser,
 ) -> EffectiveProcessEntry:
-    return parse_effective_process_mapping(
-        document, layers, raw=raw, parse_outputs=parse_outputs
-    )
+    return parse_effective_process_mapping(document, layers, raw=raw, parse_outputs=parse_outputs)
 
 
-def _aggregate_limit(
-    *, name: str, observed: int, maximum: int
-) -> ConfigError:
+def _aggregate_limit(*, name: str, observed: int, maximum: int) -> ConfigError:
     return ConfigError(
-        f"defaults: aggregate YAML {name} observed {observed} exceeds "
-        f"limit {maximum}."
+        f"defaults: aggregate YAML {name} observed {observed} exceeds limit {maximum}."
     )
 
 
@@ -495,25 +413,19 @@ def prepare_config_pipeline(
     *,
     preset_provider: Callable[[str], PresetSnapshot],
     parse_outputs: OutputGrammarParser,
-    boundary_completed: Callable[[Stage, LayerIdentity | None], None]
-    | None = None,
+    boundary_completed: Callable[[Stage, LayerIdentity | None], None] | None = None,
 ) -> PreparedConfig:
     """Parse once, layer presets once, and enumerate every layer once."""
     source = _canonical_source_input(source)
-    loaded = safe_load_document(
-        source.input_bytes, source_name=source.source_name
-    )
+    loaded = safe_load_document(source.input_bytes, source_name=source.source_name)
     if boundary_completed is not None:
         boundary_completed("source", None)
     if not isinstance(loaded.value, Mapping):
         raise ConfigError(
-            "document: configuration root must be a mapping; got "
-            f"{type(loaded.value).__name__}."
+            f"document: configuration root must be a mapping; got {type(loaded.value).__name__}."
         )
     parsed_document = loaded.value
-    raw = parse_raw_process_entry(
-        parsed_document, parse_outputs=parse_outputs
-    )
+    raw = parse_raw_process_entry(parsed_document, parse_outputs=parse_outputs)
     if boundary_completed is not None:
         boundary_completed("raw_process_entry", None)
 
@@ -525,10 +437,7 @@ def prepare_config_pipeline(
         nonlocal aggregate_bytes, aggregate_nodes
         snapshot = preset_provider(name)
         if type(snapshot) is not PresetSnapshot:
-            raise ConfigError(
-                f"defaults: preset provider for {name!r} must return "
-                "PresetSnapshot."
-            )
+            raise ConfigError(f"defaults: preset provider for {name!r} must return PresetSnapshot.")
         next_bytes = aggregate_bytes + len(snapshot.input_bytes)
         if next_bytes > limits.input_bytes:
             raise _aggregate_limit(
@@ -552,9 +461,7 @@ def prepare_config_pipeline(
     )
     if boundary_completed is not None:
         boundary_completed("preset_layering", None)
-    enumeration = enumerate_layers_once(
-        merged.document, merged.origins, merged.deletions
-    )
+    enumeration = enumerate_layers_once(merged.document, merged.origins, merged.deletions)
     effective = parse_effective_process_entry(
         merged.document,
         enumeration.layers,
@@ -565,8 +472,7 @@ def prepare_config_pipeline(
         boundary_completed("effective_process_entry", None)
 
     selected = tuple(
-        SelectedPreset(request=request, snapshot=snapshot)
-        for request, snapshot in selected_pairs
+        SelectedPreset(request=request, snapshot=snapshot) for request, snapshot in selected_pairs
     )
     manifest = BootstrapManifest(
         protocol_version=1,
@@ -601,8 +507,7 @@ def prepare_config(
     *,
     preset_provider: Callable[[str], PresetSnapshot],
     parse_outputs: OutputGrammarParser,
-    boundary_completed: Callable[[Stage, LayerIdentity | None], None]
-    | None = None,
+    boundary_completed: Callable[[Stage, LayerIdentity | None], None] | None = None,
 ) -> PreparedConfig:
     return prepare_config_pipeline(
         source,

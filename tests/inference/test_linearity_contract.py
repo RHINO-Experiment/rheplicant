@@ -79,23 +79,20 @@ def _probe(fn, spec, *, names, **options):
             Latent(
                 n,
                 init=spec[n][0],
-                prior=(
-                    None
-                    if spec[n][1] is None
-                    else dist.Normal(spec[n][1], spec[n][2])
-                ),
+                prior=(None if spec[n][1] is None else dist.Normal(spec[n][1], spec[n][2])),
                 linear=spec[n][3],
             )
             for n in spec
         ],
-        bindings=[
-            Bind(n, into=(lambda p, _n=n: p["predict"].params[_n])) for n in spec
-        ],
+        bindings=[Bind(n, into=(lambda p, _n=n: p["predict"].params[_n])) for n in spec],
     )
     try:
         return "accepted", check_linearity(
-            space, Pipeline(operator, names=("predict",)), _state(),
-            names=names, **options,
+            space,
+            Pipeline(operator, names=("predict",)),
+            _state(),
+            names=names,
+            **options,
         )
     except LinearityRefused as refused:
         return "refused", refused
@@ -139,9 +136,7 @@ class TestTheAnchorIsThePriorWidth:
         assert verdict == "accepted"
 
     def test_it_reads_the_prior_and_not_the_init(self):
-        latent = Latent(
-            "u", init=jnp.asarray(75.0), prior=dist.Normal(75.0, 10.0), linear=True
-        )
+        latent = Latent("u", init=jnp.asarray(75.0), prior=dist.Normal(75.0, 10.0), linear=True)
         assert _probe_anchor(latent) == pytest.approx(10.0)
         assert _magnitude(latent) == pytest.approx(75.0)
 
@@ -164,9 +159,7 @@ class TestTheAnchorIsThePriorWidth:
         ``_gaussian_parameters``: duck-typing on ``.scale`` would anchor the
         probes on a number that is not a width in the latent at all.
         """
-        latent = Latent(
-            "u", init=jnp.asarray(4.0), prior=dist.LogNormal(0.0, 0.5), linear=True
-        )
+        latent = Latent("u", init=jnp.asarray(4.0), prior=dist.LogNormal(0.0, 0.5), linear=True)
         assert _probe_anchor(latent) == pytest.approx(4.0)  # the init, not 0.5
 
 
@@ -345,7 +338,7 @@ class TestSmallComparedToWhat:
         assert "weighted_rtol" in str(refused)
 
     def test_no_noise_means_the_second_column_is_absent_not_empty(self):
-        """"Not measured" and "measured as nothing" are different answers.
+        """ "Not measured" and "measured as nothing" are different answers.
 
         The whole reason this payload exists is that the second was once
         reported for both.

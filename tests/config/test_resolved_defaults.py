@@ -323,10 +323,13 @@ def test_producer_census_is_exact_and_default_paths_are_source_literals():
     for path in CONFIG.rglob("*.py"):
         relative = str(path.relative_to(CONFIG))
         tree = ast.parse(path.read_text())
-        if any(
-            isinstance(node, ast.Call) and _call_name(node) == "use_default"
-            for node in ast.walk(tree)
-        ) and relative not in allowed:
+        if (
+            any(
+                isinstance(node, ast.Call) and _call_name(node) == "use_default"
+                for node in ast.walk(tree)
+            )
+            and relative not in allowed
+        ):
             unexpected.append(relative)
     assert unexpected == []
 

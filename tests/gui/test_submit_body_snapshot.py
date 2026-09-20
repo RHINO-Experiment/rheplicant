@@ -71,9 +71,7 @@ def _advance(store: SessionStore, session_id: str) -> None:
     assert store.get(session_id).revision != current.revision
 
 
-def test_the_body_reports_the_snapshot_it_was_handed_not_the_stored_one(
-    store, submittable
-):
+def test_the_body_reports_the_snapshot_it_was_handed_not_the_stored_one(store, submittable):
     """The whole of A7.4, as one assertion.
 
     The session advances between the submit and the body build -- exactly
@@ -89,9 +87,7 @@ def test_the_body_reports_the_snapshot_it_was_handed_not_the_stored_one(
     assert body["revision"] != store.get(session_id).revision
 
 
-def test_every_session_field_in_the_body_comes_from_the_same_snapshot(
-    store, submittable
-):
+def test_every_session_field_in_the_body_comes_from_the_same_snapshot(store, submittable):
     """Anchoring is only worth having if it is TOTAL.
 
     A body that took its revision from the snapshot and its digest from the
@@ -109,23 +105,19 @@ def test_every_session_field_in_the_body_comes_from_the_same_snapshot(
 
     body = _session_body(store, session_id, submitted)
 
-    assert body["yaml_digest"] != _session_body(
-        store, session_id, store.get(session_id)
-    )["yaml_digest"]
+    assert (
+        body["yaml_digest"]
+        != _session_body(store, session_id, store.get(session_id))["yaml_digest"]
+    )
     assert body["dirty"] == submitted.dirty
     assert body["can_undo"] == submitted.can_undo
     assert body["can_redo"] == submitted.can_redo
     assert body["document"]["yaml_text"] == submitted.yaml_text
-    assert (
-        body["outputs"]
-        == dataclasses.asdict(project_output_workflow(submitted.yaml_text))
-    )
+    assert body["outputs"] == dataclasses.asdict(project_output_workflow(submitted.yaml_text))
     assert body["document"] == dataclasses.asdict(snapshot(submitted.yaml_text))
 
 
-def test_the_snapshots_digest_decides_which_jobs_are_marked_stale(
-    store, submittable
-):
+def test_the_snapshots_digest_decides_which_jobs_are_marked_stale(store, submittable):
     """The one live read, and what the digest actually does with it.
 
     Not filtering -- measured. ``JobStore.project`` returns every job of the
@@ -157,6 +149,5 @@ def test_the_snapshots_digest_decides_which_jobs_are_marked_stale(
         "the acknowledgement must not declare the job it is acknowledging stale"
     )
     assert reread[0]["stale"] is True, (
-        "and re-reading the session -- what A7.4 prescribes -- is what would "
-        "make it say so"
+        "and re-reading the session -- what A7.4 prescribes -- is what would make it say so"
     )

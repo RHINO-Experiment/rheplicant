@@ -64,9 +64,7 @@ def test_shared_records_are_frozen_and_slotted():
     from _rheplicant_bootstrap.types import DestinationDescriptor, LayerIdentity, SourceInput
 
     assert not hasattr(LayerIdentity("base", None), "__dict__")
-    assert not hasattr(
-        DestinationDescriptor("model", "model_field", "noise"), "__dict__"
-    )
+    assert not hasattr(DestinationDescriptor("model", "model_field", "noise"), "__dict__")
     assert dataclasses.fields(SourceInput)
 
 
@@ -106,9 +104,7 @@ class _HostileOriginText(str):
 def test_origin_canonicalizes_text_before_validation_and_rendering():
     from _rheplicant_bootstrap.types import Origin
 
-    origin = Origin(
-        _HostileOriginText("preset"), _HostileOriginText("base preset")
-    )
+    origin = Origin(_HostileOriginText("preset"), _HostileOriginText("base preset"))
 
     assert type(origin.kind) is str
     assert type(origin.name) is str
@@ -132,9 +128,7 @@ def test_destination_child_and_nested_preserve_the_parent_contract():
     assert parent.child(2, domain="resource_field", selector="[]") == DestinationDescriptor(
         "model[2]", "resource_field", "noise[]"
     )
-    assert parent.nested("value") == DestinationDescriptor(
-        "model.value", "model_field", "noise"
-    )
+    assert parent.nested("value") == DestinationDescriptor("model.value", "model_field", "noise")
     assert parent == DestinationDescriptor("model", "model_field", "noise")
     with pytest.raises(ValueError):
         DestinationDescriptor("", "model_field", "noise")
@@ -180,14 +174,20 @@ def _pickle_round_trip(name: str) -> dict:
     """Pickle ``name`` in one fresh process and unpickle it in another."""
     src = str(Path(__file__).parents[2] / "src")
     program = _PICKLE_PROBE.format(src=src)
-    env = {**os.environ,
-           "PYTHONPATH": os.pathsep.join(
-               [src, *filter(None, [os.environ.get("PYTHONPATH")])])}
-    dumped = subprocess.run([sys.executable, "-c", program, "dumps", name],
-                            capture_output=True, check=True, env=env)
-    loaded = subprocess.run([sys.executable, "-c", program, "loads"],
-                            input=dumped.stdout, capture_output=True,
-                            check=True, env=env)
+    env = {
+        **os.environ,
+        "PYTHONPATH": os.pathsep.join([src, *filter(None, [os.environ.get("PYTHONPATH")])]),
+    }
+    dumped = subprocess.run(
+        [sys.executable, "-c", program, "dumps", name], capture_output=True, check=True, env=env
+    )
+    loaded = subprocess.run(
+        [sys.executable, "-c", program, "loads"],
+        input=dumped.stdout,
+        capture_output=True,
+        check=True,
+        env=env,
+    )
     return json.loads(loaded.stdout)
 
 
@@ -203,8 +203,11 @@ def test_the_moved_assembly_error_pickles_as_dirt_error_does():
     """
     assembly = _pickle_round_trip("AssemblyError")
     dirt = _pickle_round_trip("DirtError")
-    assert assembly == {"module": "rheplicant.core.errors", "identical": True,
-                        "args": ["the message"],
-                        "jax_imported": dirt["jax_imported"]}
+    assert assembly == {
+        "module": "rheplicant.core.errors",
+        "identical": True,
+        "args": ["the message"],
+        "jax_imported": dirt["jax_imported"],
+    }
     assert dirt["module"] == "rheplicant.core.errors"
     assert dirt["identical"] is True

@@ -105,9 +105,7 @@ _REPORT_FORMATS = ("text", "json")
 _STDOUT = ("none", "summary", "verbose")
 _COMMANDS = ("validate", "run", "script")
 _MARKER_NAME = ".rheplicant-results.json"
-_MARKER_ID = re.compile(
-    r"[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}"
-)
+_MARKER_ID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}")
 _OPEN_DIRECTORY = (
     os.O_RDONLY
     | getattr(os, "O_DIRECTORY", 0)
@@ -205,18 +203,14 @@ def _product_request(name: str, value: object) -> ProductRequest:
         not static_isinstance(raw_format, str)
         or str.__str__(raw_format) not in _PRODUCT_FORMATS[name]
     ):
-        raise ConfigError(
-            f"{where}.format: must be one of {list(_PRODUCT_FORMATS[name])}."
-        )
+        raise ConfigError(f"{where}.format: must be one of {list(_PRODUCT_FORMATS[name])}.")
     format_ = str.__str__(raw_format)
     runs = ()
     if "runs" in raw:
         runs = _unique_texts(raw["runs"], where=f"{where}.runs")
     options: list[tuple[str, object]] = []
     if "keys" in raw:
-        options.append(
-            ("keys", _unique_texts(raw["keys"], where=f"{where}.keys"))
-        )
+        options.append(("keys", _unique_texts(raw["keys"], where=f"{where}.keys")))
     if "themes" in raw:
         options.append(
             (
@@ -310,9 +304,7 @@ def parse_output_grammar(raw_outputs: object) -> ParsedOutputSection:
         allowed=(*_WRITE_KEYS, *_PLAN4B_WRITE),
     )
     products = tuple(
-        _product_request(name, value)
-        for name, value in write.items()
-        if name in _PLAN4B_WRITE
+        _product_request(name, value) for name, value in write.items() if name in _PLAN4B_WRITE
     )
 
     write_config = _required_true(write.get("config", True), where="outputs.write.config")
@@ -407,18 +399,14 @@ def _invocation_write(
     names: list[str] = []
     for entry in value:
         if not static_isinstance(entry, str) or str.__str__(entry) not in _PLAN4B_WRITE:
-            raise ConfigError(
-                f"outputs_write: {entry!r} is not one of {list(_PLAN4B_WRITE)}."
-            )
+            raise ConfigError(f"outputs_write: {entry!r} is not one of {list(_PLAN4B_WRITE)}.")
         name = str.__str__(entry)
         if name in names:
             raise ConfigError(f"outputs_write: {name!r} is requested twice.")
         names.append(name)
     if not names:
         raise ConfigError("outputs_write: must name at least one selector.")
-    return tuple(
-        dataclasses.replace(_product_request(name, True), optional=True) for name in names
-    )
+    return tuple(dataclasses.replace(_product_request(name, True), optional=True) for name in names)
 
 
 def resolve_output_request(

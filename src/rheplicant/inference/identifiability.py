@@ -193,9 +193,7 @@ def _check_differentiable(space: ParameterSpace, names: Sequence[str]) -> None:
     Gibbs block is no obstacle to asking whether the gain block is identified.
     """
     complex_names = [
-        name
-        for name in names
-        if jnp.issubdtype(space.latent(name).init.dtype, jnp.complexfloating)
+        name for name in names if jnp.issubdtype(space.latent(name).init.dtype, jnp.complexfloating)
     ]
     if complex_names:
         raise ParameterSpaceError(
@@ -207,9 +205,7 @@ def _check_differentiable(space: ParameterSpace, names: Sequence[str]) -> None:
             "block with names=."
         )
     not_floating = [
-        name
-        for name in names
-        if not jnp.issubdtype(space.latent(name).init.dtype, jnp.floating)
+        name for name in names if not jnp.issubdtype(space.latent(name).init.dtype, jnp.floating)
     ]
     if not_floating:
         kinds = {name: str(space.latent(name).init.dtype) for name in not_floating}
@@ -341,9 +337,7 @@ class IdentifiabilityReport:
         raw = raw / (norm if norm > 0.0 else 1.0)
         return {
             name: raw[start:stop].reshape(shape)
-            for name, shape, (start, stop) in zip(
-                self.names, self.shapes, self.spans, strict=True
-            )
+            for name, shape, (start, stop) in zip(self.names, self.shapes, self.spans, strict=True)
         }
 
     def participation(self, index: int) -> dict[str, float]:
@@ -437,9 +431,7 @@ def identifiability(
         values0 = _widened({**space.initial_values(), **(at or {})})
         graph = _graph_for_rank(space, pipeline, state_template, values0)
         try:
-            found = _bayesmith_identifiability(
-                graph, names=selected, at=values0, rtol=rtol
-            )
+            found = _bayesmith_identifiability(graph, names=selected, at=values0, rtol=rtol)
         except BayesmithError as error:
             _reraise(error, rtol)
 
@@ -484,6 +476,7 @@ def _widened(values: dict[str, jax.Array]) -> dict[str, jax.Array]:
     :func:`_check_differentiable`; an UNSELECTED one is legal, is held fixed,
     and must survive the trip without losing its imaginary part.
     """
+
     def widen(value: jax.Array) -> jax.Array:
         array = jnp.asarray(value)
         if jnp.issubdtype(array.dtype, jnp.complexfloating):

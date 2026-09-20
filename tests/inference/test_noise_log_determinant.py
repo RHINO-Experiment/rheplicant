@@ -30,9 +30,7 @@ from rheplicant.inference.noise import (
 N_TIME, N_FREQ = 4, 10
 N = N_TIME * N_FREQ
 
-PREDICTION = jnp.abs(
-    2.0 + jax.random.normal(jax.random.key(1), (N_TIME, N_FREQ))
-) + 0.5
+PREDICTION = jnp.abs(2.0 + jax.random.normal(jax.random.key(1), (N_TIME, N_FREQ))) + 0.5
 OTHER = PREDICTION * 1.7
 OBSERVED = PREDICTION + 0.1 * jax.random.normal(jax.random.key(2), (N_TIME, N_FREQ))
 
@@ -61,9 +59,7 @@ def test_it_is_the_likelihoods_own_logdet_without_the_2pi(noise, n_seen):
     full = float(NoiseModelLikelihood(noise)(PREDICTION, OBSERVED))
     gls = float(NoiseModelLikelihood(noise, include_logdet=False)(PREDICTION, OBSERVED))
     expected = -(full - gls) - 0.5 * n_seen * np.log(2.0 * np.pi)
-    assert float(log_determinant(noise, PREDICTION)) == pytest.approx(
-        expected, rel=1e-5, abs=1e-5
-    )
+    assert float(log_determinant(noise, PREDICTION)) == pytest.approx(expected, rel=1e-5, abs=1e-5)
 
 
 @pytest.mark.parametrize("noise, n_seen", MODELS)

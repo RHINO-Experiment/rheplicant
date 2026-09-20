@@ -106,9 +106,7 @@ def node_levels(document: Mapping[str, Any]) -> tuple[NodeLevel, ...]:
         classes = table.get(node_id)
         declared = spec.get("type")
         if isinstance(declared, str):
-            chosen = next(
-                (cls for cls in (classes or ()) if cls.__name__ == declared), None
-            )
+            chosen = next((cls for cls in (classes or ()) if cls.__name__ == declared), None)
         elif classes and len(classes) == 1:
             chosen = classes[0]
         else:
@@ -117,9 +115,7 @@ def node_levels(document: Mapping[str, Any]) -> tuple[NodeLevel, ...]:
             name = declared if isinstance(declared, str) else None
             rows.append(NodeLevel(node_id, name, None, "unresolved_type"))
             continue
-        rows.append(
-            NodeLevel(node_id, chosen.__name__, levels[chosen.__name__].value, None)
-        )
+        rows.append(NodeLevel(node_id, chosen.__name__, levels[chosen.__name__].value, None))
     return tuple(rows)
 
 

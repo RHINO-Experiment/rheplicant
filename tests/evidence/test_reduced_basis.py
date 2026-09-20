@@ -62,9 +62,7 @@ def test_a_constant_sigma_would_make_this_file_vacuous():
     np.testing.assert_allclose(
         np.asarray(flat.whitened), np.asarray(orthonormalise(rows)), atol=1e-12
     )
-    assert not np.allclose(
-        np.asarray(graded.whitened), np.asarray(orthonormalise(rows)), atol=1e-3
-    )
+    assert not np.allclose(np.asarray(graded.whitened), np.asarray(orthonormalise(rows)), atol=1e-3)
 
 
 def test_the_gram_factor_is_the_identity_after_orthonormalisation():
@@ -94,9 +92,7 @@ def test_out_of_span_content_stays_in_the_residual():
     # and the residual really is N^-1-orthogonal to the span, which is the
     # property the whole of section 5 requirement 1 rests on
     residual = basis.whiten(outside) - basis.expand(basis.project(outside))
-    np.testing.assert_allclose(
-        np.asarray(basis.whitened @ residual), np.zeros(3), atol=1e-10
-    )
+    np.testing.assert_allclose(np.asarray(basis.whitened @ residual), np.zeros(3), atol=1e-10)
 
 
 def test_raw_snapshots_are_ill_conditioned_and_orthonormalising_repairs_it():

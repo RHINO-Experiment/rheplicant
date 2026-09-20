@@ -154,9 +154,7 @@ def test_raw_plugins_preserve_getitem_only_ordered_sequence_compatibility():
     ids=("set", "frozenset", "generator"),
 )
 def test_raw_plugins_reject_unordered_or_streaming_iterables(plugins):
-    with pytest.raises(
-        ConfigError, match="plugins: must be a list of Python module names"
-    ):
+    with pytest.raises(ConfigError, match="plugins: must be a list of Python module names"):
         parse_raw_process_mapping(
             {"schema_version": 1, "plugins": plugins},
             parse_outputs=fake_parse_outputs,
@@ -204,9 +202,7 @@ def test_iterable_only_plugins_are_rejected_without_iteration():
             type(self).calls += 1
             raise AssertionError("unordered iterable was consumed")
 
-    with pytest.raises(
-        ConfigError, match="plugins: must be a list of Python module names"
-    ):
+    with pytest.raises(ConfigError, match="plugins: must be a list of Python module names"):
         parse_raw_process_mapping(
             {"schema_version": 1, "plugins": IterableOnly()},
             parse_outputs=fake_parse_outputs,
@@ -216,9 +212,7 @@ def test_iterable_only_plugins_are_rejected_without_iteration():
 
 @pytest.mark.parametrize("plugins", ({"example.plugin": 1},))
 def test_mapping_plugins_are_not_misclassified_as_sequences(plugins):
-    with pytest.raises(
-        ConfigError, match="plugins: must be a list of Python module names"
-    ):
+    with pytest.raises(ConfigError, match="plugins: must be a list of Python module names"):
         parse_raw_process_mapping(
             {"schema_version": 1, "plugins": plugins},
             parse_outputs=fake_parse_outputs,
@@ -236,9 +230,7 @@ def test_items_only_mapping_plugins_are_not_misclassified_as_sequences():
         def __len__(self):
             return 1
 
-    with pytest.raises(
-        ConfigError, match="plugins: must be a list of Python module names"
-    ):
+    with pytest.raises(ConfigError, match="plugins: must be a list of Python module names"):
         parse_raw_process_mapping(
             {"schema_version": 1, "plugins": ItemsOnly()},
             parse_outputs=fake_parse_outputs,
@@ -284,19 +276,20 @@ def test_plugin_sequence_budget_precedes_processing_the_limit_plus_one_item(
     assert HostileItem.class_calls == 0
 
 
-@pytest.mark.parametrize(("bad", "expected"), [
-    (True, "schema_version: 1 is required (got True)"),
-    (1.0, "schema_version: 1 is required (got 1.0)"),
-    ("1", "schema_version: 1 is required (got '1')"),
-    (None, "schema_version: 1 is required (got None)"),
-    (2, "schema_version: 2 is newer than this rheplicant reads"),
-    (0, "schema_version: 0 is older than any version this rheplicant reads"),
-])
+@pytest.mark.parametrize(
+    ("bad", "expected"),
+    [
+        (True, "schema_version: 1 is required (got True)"),
+        (1.0, "schema_version: 1 is required (got 1.0)"),
+        ("1", "schema_version: 1 is required (got '1')"),
+        (None, "schema_version: 1 is required (got None)"),
+        (2, "schema_version: 2 is newer than this rheplicant reads"),
+        (0, "schema_version: 0 is older than any version this rheplicant reads"),
+    ],
+)
 def test_schema_version_is_the_integer_one(bad, expected):
     with pytest.raises(ConfigError) as caught:
-        parse_raw_process_mapping(
-            {"schema_version": bad}, parse_outputs=fake_parse_outputs
-        )
+        parse_raw_process_mapping({"schema_version": bad}, parse_outputs=fake_parse_outputs)
     assert str(caught.value).startswith(expected)
 
 
@@ -304,9 +297,7 @@ def test_a_huge_schema_version_is_refused_without_rendering_it():
     """An integer past Python's int-to-str limit must not turn a refusal into
     a ``ValueError`` crash; the bounded renderer names its type instead."""
     with pytest.raises(ConfigError) as caught:
-        parse_raw_process_mapping(
-            {"schema_version": 10**5000}, parse_outputs=fake_parse_outputs
-        )
+        parse_raw_process_mapping({"schema_version": 10**5000}, parse_outputs=fake_parse_outputs)
     assert str(caught.value).startswith("schema_version: int is newer")
 
 
@@ -335,15 +326,11 @@ def test_non_string_top_level_keys_are_refused_in_source_order():
     document = {"schema_version": 1, 7: None, "z": None}
     with pytest.raises(ConfigError) as caught:
         parse_raw_process_mapping(document, parse_outputs=fake_parse_outputs)
-    assert str(caught.value) == (
-        "document: top-level key 2 must be a string; got int 7."
-    )
+    assert str(caught.value) == ("document: top-level key 2 must be a string; got int 7.")
 
 
 def test_raw_runtime_may_be_absent_but_a_present_value_is_a_mapping():
-    raw = parse_raw_process_mapping(
-        {"schema_version": 1}, parse_outputs=fake_parse_outputs
-    )
+    raw = parse_raw_process_mapping({"schema_version": 1}, parse_outputs=fake_parse_outputs)
     assert raw.raw_runtime is None
 
     with pytest.raises(ConfigError) as caught:
@@ -363,18 +350,14 @@ def test_explicit_null_process_sections_are_not_treated_as_omitted(section):
         )
 
 
-@pytest.mark.parametrize(
-    "name", ["", ".plug", "plug.", "two..dots", "not-a-module", "for"]
-)
+@pytest.mark.parametrize("name", ["", ".plug", "plug.", "two..dots", "not-a-module", "for"])
 def test_plugin_names_are_nonempty_dotted_identifiers(name):
     with pytest.raises(ConfigError) as caught:
         parse_raw_process_mapping(
             {"schema_version": 1, "plugins": [name]},
             parse_outputs=fake_parse_outputs,
         )
-    assert str(caught.value) == (
-        f"plugins[0]: {name!r} is not a dot-separated Python module name."
-    )
+    assert str(caught.value) == (f"plugins[0]: {name!r} is not a dot-separated Python module name.")
 
 
 def test_duplicate_plugins_and_presets_are_refused_in_declaration_order():
@@ -438,9 +421,7 @@ def test_parser_results_and_direct_process_records_freeze_nested_outputs():
         (type("Blob", (bytes,), {})(b"x"), bytes),
     ],
 )
-def test_process_output_scalar_subclasses_are_canonicalized(
-    value, expected_type
-):
+def test_process_output_scalar_subclasses_are_canonicalized(value, expected_type):
     runtime = RuntimeSpec(False, "auto", None, {})
     raw = RawProcessEntry(1, [], [], None, value)
     effective = EffectiveProcessEntry(runtime, [], value)
@@ -523,9 +504,7 @@ def test_omitted_outputs_is_passed_as_an_empty_mapping():
         seen.append(value)
         return "parsed-output"
 
-    parse_raw_process_mapping(
-        {"schema_version": 1}, parse_outputs=parse_outputs
-    )
+    parse_raw_process_mapping({"schema_version": 1}, parse_outputs=parse_outputs)
 
     assert seen == [{}]
 
@@ -608,13 +587,9 @@ def test_runtime_freezes_before_reading_and_never_calls_source_get():
 
 def test_mapping_item_emissions_are_strict_pairs_and_baseexception_propagates():
     with pytest.raises(ConfigError, match="top-level mapping traversal"):
-        parse_raw_process_mapping(
-            _TripleItems(), parse_outputs=fake_parse_outputs
-        )
+        parse_raw_process_mapping(_TripleItems(), parse_outputs=fake_parse_outputs)
     with pytest.raises(_AbortItems, match="stop"):
-        parse_raw_process_mapping(
-            _BaseExceptionItems(), parse_outputs=fake_parse_outputs
-        )
+        parse_raw_process_mapping(_BaseExceptionItems(), parse_outputs=fake_parse_outputs)
 
 
 class _ProcessItemsOnly:
@@ -668,9 +643,7 @@ def test_public_variant_validator_consumes_only_the_items_protocol():
         (
             (
                 "variants",
-                _ProcessItemsOnly(
-                    (("safe", _ProcessItemsOnly(())),)
-                ),
+                _ProcessItemsOnly((("safe", _ProcessItemsOnly(())),)),
             ),
         )
     )
@@ -725,12 +698,8 @@ def test_raw_process_record_restores_its_complete_entry_snapshot(callback_field)
     assert record.schema_version == 1
     assert tuple(item.name for item in record.defaults) == ("base",)
     assert record.plugins == ("base.plugin",)
-    assert record.raw_runtime == (
-        {"stable": True} if callback_field == "raw_runtime" else {}
-    )
-    assert record.outputs == (
-        {"stable": True} if callback_field == "outputs" else {}
-    )
+    assert record.raw_runtime == ({"stable": True} if callback_field == "raw_runtime" else {})
+    assert record.outputs == ({"stable": True} if callback_field == "outputs" else {})
 
 
 def test_runtime_spec_restores_all_fields_after_seed_protocol_callbacks():
@@ -796,8 +765,7 @@ def test_runtime_direct_construction_freezes_seeds():
         ),
         (
             {"platform": "cuda"},
-            "runtime.platform is one of ['auto', 'cpu', 'gpu', 'tpu']; "
-            "got 'cuda'.",
+            "runtime.platform is one of ['auto', 'cpu', 'gpu', 'tpu']; got 'cuda'.",
         ),
         (
             {"platform": 1},
@@ -867,9 +835,7 @@ def test_runtime_grammar_never_formats_hostile_custom_values():
 
     with pytest.raises(ConfigError) as caught:
         parse_runtime({"jax_enable_x64": Hostile()})
-    assert str(caught.value) == (
-        "runtime.jax_enable_x64 is a bool; got Hostile."
-    )
+    assert str(caught.value) == ("runtime.jax_enable_x64 is a bool; got Hostile.")
 
 
 def test_runtime_type_diagnostics_never_call_a_metaclass_name_descriptor():
@@ -951,24 +917,16 @@ def test_process_and_origin_type_diagnostics_use_only_static_class_metadata():
         raise HostileError("foreign")
 
     routes = (
-        lambda: parse_raw_process_mapping(
-            hostile, parse_outputs=fake_parse_outputs
-        ),
-        lambda: parse_raw_process_mapping(
-            Pairs(((hostile, 1),)), parse_outputs=fake_parse_outputs
-        ),
+        lambda: parse_raw_process_mapping(hostile, parse_outputs=fake_parse_outputs),
+        lambda: parse_raw_process_mapping(Pairs(((hostile, 1),)), parse_outputs=fake_parse_outputs),
         lambda: parse_raw_process_mapping(
             {"schema_version": 1, "plugins": [hostile]},
             parse_outputs=fake_parse_outputs,
         ),
-        lambda: parse_raw_process_mapping(
-            {"schema_version": 1}, parse_outputs=hostile_parser
-        ),
+        lambda: parse_raw_process_mapping({"schema_version": 1}, parse_outputs=hostile_parser),
         lambda: parse_runtime(Pairs(((hostile, 1),))),
         lambda: validate_variant_process_sections({"variants": hostile}),
-        lambda: validate_variant_process_sections(
-            {"variants": Pairs(((hostile, {}),))}
-        ),
+        lambda: validate_variant_process_sections({"variants": Pairs(((hostile, {}),))}),
     )
     for route in routes:
         with pytest.raises(ConfigError) as caught:
@@ -1009,9 +967,7 @@ def test_runtime_error_rendering_is_bounded_for_deep_and_wide_sequences():
         assert len(str(caught.value)) < 200
 
 
-@pytest.mark.parametrize(
-    "value", [10**5000, "x" * 10_000], ids=("integer", "string")
-)
+@pytest.mark.parametrize("value", [10**5000, "x" * 10_000], ids=("integer", "string"))
 def test_runtime_error_rendering_is_bounded_for_oversized_scalars(value):
     with pytest.raises(ConfigError) as caught:
         parse_runtime({"jax_enable_x64": value})
@@ -1028,9 +984,7 @@ def test_runtime_renderer_rejects_oversized_text_before_repr(monkeypatch):
     monkeypatch.setattr(process_module, "repr", forbidden_repr, raising=False)
     with pytest.raises(ConfigError) as caught:
         parse_runtime({"jax_enable_x64": "x" * 121})
-    assert str(caught.value) == (
-        "runtime.jax_enable_x64 is a bool; got str."
-    )
+    assert str(caught.value) == ("runtime.jax_enable_x64 is a bool; got str.")
 
 
 class _CollidingSeedNames(Mapping[str, object]):
@@ -1155,9 +1109,7 @@ def test_runtime_bounded_pair_unpack_propagates_baseexception(
 
 
 def test_effective_runtime_is_required():
-    raw = parse_raw_process_mapping(
-        {"schema_version": 1}, parse_outputs=fake_parse_outputs
-    )
+    raw = parse_raw_process_mapping({"schema_version": 1}, parse_outputs=fake_parse_outputs)
     with pytest.raises(ConfigError) as caught:
         parse_effective_process_mapping(
             {"schema_version": 1},
@@ -1165,15 +1117,11 @@ def test_effective_runtime_is_required():
             raw=raw,
             parse_outputs=fake_parse_outputs,
         )
-    assert str(caught.value) == (
-        "runtime: is required after package presets are layered."
-    )
+    assert str(caught.value) == ("runtime: is required after package presets are layered.")
 
 
 def test_effective_layer_sequence_protocol_is_controlled():
-    raw = parse_raw_process_mapping(
-        {"schema_version": 1}, parse_outputs=fake_parse_outputs
-    )
+    raw = parse_raw_process_mapping({"schema_version": 1}, parse_outputs=fake_parse_outputs)
     with pytest.raises(ConfigError, match="layer sequence traversal"):
         parse_effective_process_mapping(
             {"schema_version": 1, "runtime": {}},
@@ -1206,9 +1154,7 @@ def test_effective_layer_kind_is_canonicalized_before_comparison():
             comparison_calls += 1
             raise SystemExit("kind comparison hook must not run")
 
-    raw = parse_raw_process_mapping(
-        {"schema_version": 1}, parse_outputs=fake_parse_outputs
-    )
+    raw = parse_raw_process_mapping({"schema_version": 1}, parse_outputs=fake_parse_outputs)
     layer = LayerRef(
         kind="variant",
         name="safe",
@@ -1238,9 +1184,7 @@ def test_effective_layer_name_is_canonicalized_before_diagnostics():
             format_calls += 1
             raise AssertionError("name formatting hook must not run")
 
-    raw = parse_raw_process_mapping(
-        {"schema_version": 1}, parse_outputs=fake_parse_outputs
-    )
+    raw = parse_raw_process_mapping({"schema_version": 1}, parse_outputs=fake_parse_outputs)
     layer = LayerRef(
         kind="variant",
         name="safe",
@@ -1292,9 +1236,7 @@ def test_effective_layer_identities_are_snapshotted_before_document_callbacks():
         declared_runs=(),
     )
     object.__setattr__(first, "document", MutatingDocument())
-    raw = parse_raw_process_mapping(
-        {"schema_version": 1}, parse_outputs=fake_parse_outputs
-    )
+    raw = parse_raw_process_mapping({"schema_version": 1}, parse_outputs=fake_parse_outputs)
 
     parsed = parse_effective_process_mapping(
         {"schema_version": 1, "runtime": {}},
@@ -1312,9 +1254,7 @@ def test_effective_variant_layer_reads_the_proved_items_protocol_not_get():
         def items(self):
             return (("runtime", {}),)
 
-    raw = parse_raw_process_mapping(
-        {"schema_version": 1}, parse_outputs=fake_parse_outputs
-    )
+    raw = parse_raw_process_mapping({"schema_version": 1}, parse_outputs=fake_parse_outputs)
     layer = LayerRef(
         kind="variant",
         name="duck",
@@ -1345,9 +1285,7 @@ def test_effective_variant_layer_items_failure_has_a_controlled_boundary(
         def items(self):
             raise failure
 
-    raw = parse_raw_process_mapping(
-        {"schema_version": 1}, parse_outputs=fake_parse_outputs
-    )
+    raw = parse_raw_process_mapping({"schema_version": 1}, parse_outputs=fake_parse_outputs)
     layer = LayerRef(
         kind="variant",
         name="broken",
@@ -1410,9 +1348,7 @@ def test_effective_parser_bounds_a_forged_raw_plugin_sequence(monkeypatch):
                 type(self).next_calls += 1
                 yield "base.plugin"
 
-    raw = parse_raw_process_mapping(
-        {"schema_version": 1}, parse_outputs=fake_parse_outputs
-    )
+    raw = parse_raw_process_mapping({"schema_version": 1}, parse_outputs=fake_parse_outputs)
     object.__setattr__(raw, "plugins", InfiniteOrdered())
     monkeypatch.setattr(process_module, "_PROCESS_SEQUENCE_ENTRY_LIMIT", 1)
 
@@ -1456,9 +1392,7 @@ def test_effective_parser_snapshots_raw_plugins_before_document_protocols():
     [{}, {"runtime": {"platform": "cuda"}}],
 )
 def test_variant_runtime_refusals_keep_the_complete_raw_variant_name(document):
-    raw = parse_raw_process_mapping(
-        {"schema_version": 1}, parse_outputs=fake_parse_outputs
-    )
+    raw = parse_raw_process_mapping({"schema_version": 1}, parse_outputs=fake_parse_outputs)
     layer = LayerRef(
         kind="variant",
         name="slash/雪",

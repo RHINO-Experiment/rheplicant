@@ -153,9 +153,7 @@ def space():
 
 @pytest.fixture
 def noise():
-    return RadiometerNoise(
-        channel_width=CHANNEL_WIDTH, integration_time=INTEGRATION_TIME
-    )
+    return RadiometerNoise(channel_width=CHANNEL_WIDTH, integration_time=INTEGRATION_TIME)
 
 
 @pytest.fixture
@@ -178,9 +176,7 @@ class TestTheBlock:
         block = log_linear_operator(space, pipeline, state, "log_gain")
         assert jnp.allclose(block.offset, jnp.log(SKY)[None, :], rtol=1e-6)
 
-    def test_the_block_is_affine_where_the_prediction_is_not(
-        self, space, pipeline, state
-    ):
+    def test_the_block_is_affine_where_the_prediction_is_not(self, space, pipeline, state):
         """log(prediction) passes the affinity check; the prediction itself fails.
 
         Both halves matter. Without the second, "it is log-linear" would be
@@ -193,9 +189,7 @@ class TestTheBlock:
         with pytest.raises(LinearityRefused):
             check_linearity(log_gain_space(linear=True), pipeline, state, "log_gain")
 
-    def test_offset_plus_forward_reproduces_log_of_the_model(
-        self, space, pipeline, state
-    ):
+    def test_offset_plus_forward_reproduces_log_of_the_model(self, space, pipeline, state):
         block = log_linear_operator(space, pipeline, state, "log_gain")
         forward, values0 = space.forward_fn(pipeline, state)
         assert jnp.allclose(
@@ -246,7 +240,8 @@ class TestTheNoiseTransform:
         ``tests/evidence/test_log_route_floor.py``.
         """
         noise = RadiometerNoise(
-            channel_width=CHANNEL_WIDTH, integration_time=INTEGRATION_TIME,
+            channel_width=CHANNEL_WIDTH,
+            integration_time=INTEGRATION_TIME,
             floor=floor,
         )
         with pytest.raises(ParameterSpaceError) as caught:
@@ -257,7 +252,8 @@ class TestTheNoiseTransform:
         """The negative control: ``floor=0.0`` is the default and the exact
         multiplicative model, so the refusal above must not reach it."""
         noise = RadiometerNoise(
-            channel_width=CHANNEL_WIDTH, integration_time=INTEGRATION_TIME,
+            channel_width=CHANNEL_WIDTH,
+            integration_time=INTEGRATION_TIME,
             floor=0.0,
         )
         _, sigma = to_log_space(observed, noise)
@@ -269,9 +265,7 @@ class TestTheFirstOrderBoundary:
 
     @staticmethod
     def _noise_with(fractional: float) -> RadiometerNoise:
-        return RadiometerNoise(
-            channel_width=1.0 / fractional**2, integration_time=1.0
-        )
+        return RadiometerNoise(channel_width=1.0 / fractional**2, integration_time=1.0)
 
     def test_just_below_the_threshold_is_accepted(self, observed):
         noise = self._noise_with(FIRST_ORDER_MAX_FRACTIONAL * 0.99)
@@ -320,9 +314,7 @@ class TestTheExits:
         y, sigma = to_log_space(observed, noise)
         keys = jax.random.split(jax.random.key(4), 4000)
         draws = jax.vmap(
-            lambda k: gcr_sample(
-                block, y, noise_std=sigma, prior_std=PRIOR_STD, key=k
-            )[0]
+            lambda k: gcr_sample(block, y, noise_std=sigma, prior_std=PRIOR_STD, key=k)[0]
         )(keys)
         _, sd = _closed_form(y, noise.fractional)
         assert jnp.allclose(jnp.std(draws, axis=0), sd, rtol=0.08)
@@ -335,9 +327,7 @@ class TestTheExits:
         estimate, _ = wiener_solve(block, y, noise_std=sigma, prior_std=PRIOR_STD)
         keys = jax.random.split(jax.random.key(5), 4000)
         draws = jax.vmap(
-            lambda k: gcr_sample(
-                block, y, noise_std=sigma, prior_std=PRIOR_STD, key=k
-            )[0]
+            lambda k: gcr_sample(block, y, noise_std=sigma, prior_std=PRIOR_STD, key=k)[0]
         )(keys)
         _, sd = _closed_form(y, noise.fractional)
         assert jnp.all(jnp.abs(jnp.mean(draws, axis=0) - estimate) < 4.0 * sd / 4000**0.5)
@@ -362,19 +352,13 @@ class TestThePlan:
     def test_the_plan_recovers_the_truth_through_a_log_conjugate_block(
         self, pipeline, state, observed, noise
     ):
-        plan = SamplingPlan(
-            self._space_with_prior(), Block("log_gain", engine="log_conjugate")
-        )
+        plan = SamplingPlan(self._space_with_prior(), Block("log_gain", engine="log_conjugate"))
         assert plan.engines == {("log_gain",): "log_conjugate"}
         estimate = plan.estimate(pipeline, state, observed, noise=noise)
         assert jnp.max(jnp.abs(estimate.values["log_gain"] - LOG_G)) < 0.02
 
-    def test_the_plan_draws_through_a_log_conjugate_block(
-        self, pipeline, state, observed, noise
-    ):
-        plan = SamplingPlan(
-            self._space_with_prior(), Block("log_gain", engine="log_conjugate")
-        )
+    def test_the_plan_draws_through_a_log_conjugate_block(self, pipeline, state, observed, noise):
+        plan = SamplingPlan(self._space_with_prior(), Block("log_gain", engine="log_conjugate"))
         draws = plan.sample(
             pipeline,
             state,
@@ -388,9 +372,7 @@ class TestThePlan:
         # posterior's own -- compare against f/sqrt(n_freq), not a pinned number.
         assert jnp.all(draws.std["log_gain"] < 5.0 * noise.fractional / N_FREQ**0.5)
 
-    def test_the_log_engine_gets_its_own_program_slot(
-        self, pipeline, state, observed, noise
-    ):
+    def test_the_log_engine_gets_its_own_program_slot(self, pipeline, state, observed, noise):
         """The cache key carries the engine, so the two spaces cannot cross-serve.
 
         Serving a log block from a linear block's slot would run one space's
@@ -416,8 +398,13 @@ class TestThePlan:
         programs: dict = {}
         for _ in range(3):
             log_conjugate_estimate(
-                cond, ("log_gain",), values0, tol=1e-8, maxiter=None,
-                require_convergence=None, programs=programs,
+                cond,
+                ("log_gain",),
+                values0,
+                tol=1e-8,
+                maxiter=None,
+                require_convergence=None,
+                programs=programs,
             )
         assert len(programs) == 1, "a key that grows per sweep never hits"
         assert next(iter(programs))[-1] == "log_conjugate"
@@ -476,9 +463,7 @@ class TestRefusals:
             log_linear_operator(space, pipeline, state)
         assert "name=" in str(caught.value)
 
-    def test_a_probe_that_overflows_the_exponential_says_so(
-        self, space, pipeline, state
-    ):
+    def test_a_probe_that_overflows_the_exponential_says_so(self, space, pipeline, state):
         """Not a modelling failure, and the message must not claim it is.
 
         The map stays exactly affine in log space where ``exp`` of the probe

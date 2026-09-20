@@ -323,10 +323,10 @@ def _read(
 #: Formats that are real but are not read through a value node, and where they are.
 _ELSEWHERE: dict[str, str] = {
     "cst_dir": "resources.beams, with format: cst -- it needs the frequency grid, an "
-               "nside, and phi0_deg/phi_sense, none of which a value node can carry",
+    "nside, and phi0_deg/phi_sense, none of which a value node can carry",
     "healpix": "resources.beams, with format: healpix -- it needs order: (RING versus "
-               "NESTED is declared, not guessed), the declared frequency grid, and "
-               "frame:, none of which a value node can carry",
+    "NESTED is declared, not guessed), the declared frequency grid, and "
+    "frame:, none of which a value node can carry",
 }
 
 
@@ -344,9 +344,7 @@ def _refuse_healpix(spec: dict) -> None:
 def _file(node, context, modifiers, target):
     raw_spec = node["file"]
     if not isinstance(raw_spec, dict):
-        raise ConfigError(
-            f"file: expects a mapping, got {type(raw_spec).__name__} ({raw_spec!r})."
-        )
+        raise ConfigError(f"file: expects a mapping, got {type(raw_spec).__name__} ({raw_spec!r}).")
     spec = dict(raw_spec)
     for required in ("path", "format"):
         if required not in spec:
@@ -367,8 +365,7 @@ def _file(node, context, modifiers, target):
         _refuse_healpix(spec)
     elif fmt in _ELSEWHERE:
         raise ConfigError(
-            f"file: format {fmt!r} is not read through a value node. It lives at "
-            f"{_ELSEWHERE[fmt]}."
+            f"file: format {fmt!r} is not read through a value node. It lives at {_ELSEWHERE[fmt]}."
         )
     entry = _READERS.get(fmt)
     if entry is None:

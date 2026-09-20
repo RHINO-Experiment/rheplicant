@@ -144,17 +144,13 @@ class TestFlaggedNoise:
         base = RadiometerNoise(CHANNEL_WIDTH, INTEGRATION_TIME)
         assert FlaggedNoise(base, flags).depends_on_prediction is True
         assert (
-            FlaggedNoise(HomoscedasticNoise(jnp.asarray(1.0)), flags)
-            .depends_on_prediction
-            is False
+            FlaggedNoise(HomoscedasticNoise(jnp.asarray(1.0)), flags).depends_on_prediction is False
         )
 
     def test_wrapping_twice_takes_the_union(self, prediction):
         first = jnp.arange(N_DATA) % 4 == 0
         second = jnp.arange(N_DATA) % 3 == 0
-        noise = FlaggedNoise(
-            FlaggedNoise(HomoscedasticNoise(jnp.asarray(0.5)), first), second
-        )
+        noise = FlaggedNoise(FlaggedNoise(HomoscedasticNoise(jnp.asarray(0.5)), first), second)
         bad = jnp.isinf(noise.std(prediction))
         assert jnp.array_equal(bad, first | second)
 
@@ -178,23 +174,17 @@ class TestInverseVariance:
 
 
 class TestNoiseModelLikelihood:
-    def test_homoscedastic_reproduces_the_existing_gaussian_exactly(
-        self, prediction, observed
-    ):
+    def test_homoscedastic_reproduces_the_existing_gaussian_exactly(self, prediction, observed):
         old = GaussianLikelihood(jnp.asarray(0.5))(prediction, observed)
-        new = NoiseModelLikelihood(HomoscedasticNoise(jnp.asarray(0.5)))(
-            prediction, observed
-        )
+        new = NoiseModelLikelihood(HomoscedasticNoise(jnp.asarray(0.5)))(prediction, observed)
         assert jnp.allclose(old, new, rtol=1e-6)
 
-    def test_flagged_reproduces_the_existing_masked_gaussian_exactly(
-        self, prediction, observed
-    ):
+    def test_flagged_reproduces_the_existing_masked_gaussian_exactly(self, prediction, observed):
         flags = jnp.arange(N_DATA) % 4 == 0
         old = MaskedGaussianLikelihood(jnp.asarray(0.5), flags)(prediction, observed)
-        new = NoiseModelLikelihood(
-            FlaggedNoise(HomoscedasticNoise(jnp.asarray(0.5)), flags)
-        )(prediction, observed)
+        new = NoiseModelLikelihood(FlaggedNoise(HomoscedasticNoise(jnp.asarray(0.5)), flags))(
+            prediction, observed
+        )
         assert jnp.allclose(old, new, rtol=1e-6)
 
     def test_an_unobserved_sample_cannot_poison_the_total(self, prediction):

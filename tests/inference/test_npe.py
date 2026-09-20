@@ -72,9 +72,7 @@ N_SIMULATIONS = 32768
 @pytest.fixture(scope="module")
 def state():
     return State(
-        coords=Coordinates(
-            time=jnp.linspace(0.0, 7.0, 8), freq=jnp.linspace(60e6, 85e6, 4)
-        ),
+        coords=Coordinates(time=jnp.linspace(0.0, 7.0, 8), freq=jnp.linspace(60e6, 85e6, 4)),
         env=Environment(temperature=jnp.array(280.0)),
         key=jax.random.key(0),
     )
@@ -96,8 +94,11 @@ def twin():
 @pytest.fixture(scope="module")
 def space():
     return ParameterSpace.direct(
-        "gain", init=1.0, into=lambda p: p["gain"].gain,
-        prior=dist.Normal(PRIOR_MEAN, PRIOR_STD), linear=True,
+        "gain",
+        init=1.0,
+        into=lambda p: p["gain"].gain,
+        prior=dist.Normal(PRIOR_MEAN, PRIOR_STD),
+        linear=True,
     )
 
 
@@ -115,8 +116,12 @@ def observed(state):
 @pytest.fixture(scope="module")
 def bank(twin, state, space, noise):
     return simulate_pairs(
-        twin, state, space,
-        noise=noise, key=jax.random.key(0), n_simulations=N_SIMULATIONS,
+        twin,
+        state,
+        space,
+        noise=noise,
+        key=jax.random.key(0),
+        n_simulations=N_SIMULATIONS,
     )
 
 
@@ -126,13 +131,20 @@ def exact(twin, state, space, observed):
     4000 exact constrained realizations."""
     block = linear_operator(space, twin, state)
     mean, _ = wiener_solve(
-        block, observed, noise_std=SIGMA,
-        prior_std=PRIOR_STD, prior_mean=PRIOR_MEAN,
+        block,
+        observed,
+        noise_std=SIGMA,
+        prior_std=PRIOR_STD,
+        prior_mean=PRIOR_MEAN,
     )
     draws = jax.vmap(
         lambda k: gcr_sample(
-            block, observed, noise_std=SIGMA, prior_std=PRIOR_STD,
-            prior_mean=PRIOR_MEAN, key=k,
+            block,
+            observed,
+            noise_std=SIGMA,
+            prior_std=PRIOR_STD,
+            prior_mean=PRIOR_MEAN,
+            key=k,
         )[0]
     )(jax.random.split(jax.random.key(4), 4000))
     return float(mean), float(jnp.std(draws))
@@ -147,8 +159,13 @@ def trained(bank):
         thetas, data, key=jax.random.key(1), n_components=1, width=64, depth=2
     )
     return train_posterior(
-        q, thetas, data, key=jax.random.key(2),
-        n_steps=2000, batch_size=512, learning_rate=2e-3,
+        q,
+        thetas,
+        data,
+        key=jax.random.key(2),
+        n_steps=2000,
+        batch_size=512,
+        learning_rate=2e-3,
     )
 
 
@@ -157,9 +174,7 @@ class TestSimulatePairs:
         thetas, data = bank
         assert thetas.shape == (N_SIMULATIONS, 1)
         assert data.shape[0] == N_SIMULATIONS
-        assert data.shape[1:] == space.bind(twin, {"gain": jnp.array(1.0)})(
-            state
-        ).data.shape
+        assert data.shape[1:] == space.bind(twin, {"gain": jnp.array(1.0)})(state).data.shape
 
     def test_theta_follows_the_prior(self, bank):
         thetas, _ = bank
@@ -170,22 +185,20 @@ class TestSimulatePairs:
         """Each simulated datum is prediction + sigma * normal, so the residual
         against its OWN theta has the noise model's width."""
         thetas, data = bank
-        clean = jax.vmap(
-            lambda t: space.bind(twin, {"gain": t[0]})(state).data
-        )(thetas)
+        clean = jax.vmap(lambda t: space.bind(twin, {"gain": t[0]})(state).data)(thetas)
         assert float((data - clean).std()) == pytest.approx(SIGMA, rel=0.05)
 
-    def test_a_multiplicative_noise_model_is_honoured(
-        self, twin, state, space
-    ):
+    def test_a_multiplicative_noise_model_is_honoured(self, twin, state, space):
         radiometer = RadiometerNoise(1e4, 1.0)
         thetas, data = simulate_pairs(
-            twin, state, space,
-            noise=radiometer, key=jax.random.key(1), n_simulations=2048,
+            twin,
+            state,
+            space,
+            noise=radiometer,
+            key=jax.random.key(1),
+            n_simulations=2048,
         )
-        clean = jax.vmap(
-            lambda t: space.bind(twin, {"gain": t[0]})(state).data
-        )(thetas)
+        clean = jax.vmap(lambda t: space.bind(twin, {"gain": t[0]})(state).data)(thetas)
         fractional = ((data - clean) / clean).std()
         assert float(fractional) == pytest.approx(radiometer.fractional, rel=0.06)
 
@@ -216,12 +229,14 @@ class TestSimulatePairs:
         floored = RadiometerNoise(1e4, 1.0, floor=1e3 * clean_scale)
 
         thetas, data = simulate_pairs(
-            twin, state, space,
-            noise=floored, key=jax.random.key(3), n_simulations=2048,
+            twin,
+            state,
+            space,
+            noise=floored,
+            key=jax.random.key(3),
+            n_simulations=2048,
         )
-        clean = jax.vmap(
-            lambda t: space.bind(twin, {"gain": t[0]})(state).data
-        )(thetas)
+        clean = jax.vmap(lambda t: space.bind(twin, {"gain": t[0]})(state).data)(thetas)
         fractional = float(((data - clean) / clean).std())
 
         # The generator ignores the floor, so the scatter is the SAME as with
@@ -237,15 +252,23 @@ class TestSimulatePairs:
         space = ParameterSpace.direct("gain", init=1.0, into=lambda p: p["gain"].gain)
         with pytest.raises(ParameterSpaceError, match="no prior"):
             simulate_pairs(
-                twin, state, space,
-                noise=noise, key=jax.random.key(0), n_simulations=8,
+                twin,
+                state,
+                space,
+                noise=noise,
+                key=jax.random.key(0),
+                n_simulations=8,
             )
 
     def test_zero_simulations_is_refused(self, twin, state, space, noise):
         with pytest.raises(StateValidationError, match="positive"):
             simulate_pairs(
-                twin, state, space,
-                noise=noise, key=jax.random.key(0), n_simulations=0,
+                twin,
+                state,
+                space,
+                noise=noise,
+                key=jax.random.key(0),
+                n_simulations=0,
             )
 
 
@@ -265,20 +288,14 @@ class TestNeuralPosteriorConstruction:
         by quadrature over a range the trained density is confined to."""
         thetas, data = bank
         q = NeuralPosterior.create(thetas, data, key=jax.random.key(1))
-        q, _ = train_posterior(
-            q, thetas, data, key=jax.random.key(2), n_steps=600, batch_size=256
-        )
+        q, _ = train_posterior(q, thetas, data, key=jax.random.key(2), n_steps=600, batch_size=256)
         grid = jnp.linspace(PRIOR_MEAN - 8 * PRIOR_STD, PRIOR_MEAN + 8 * PRIOR_STD, 4001)
-        density = jnp.exp(
-            jax.vmap(lambda t: q.log_prob(jnp.array([t]), observed))(grid)
-        )
+        density = jnp.exp(jax.vmap(lambda t: q.log_prob(jnp.array([t]), observed))(grid))
         assert float(jnp.trapezoid(density, grid)) == pytest.approx(1.0, abs=0.02)
 
 
 class TestAgainstTheExactPosterior:
     """The only test that can catch a confidently wrong estimator."""
-
-
 
     def test_training_reduces_the_loss(self, trained):
         _, history = trained
@@ -329,13 +346,14 @@ class TestAgainstTheExactPosterior:
 
         block = linear_operator(space, twin, state)
         reference, _ = wiener_solve(
-            block, fresh, noise_std=SIGMA,
-            prior_std=PRIOR_STD, prior_mean=PRIOR_MEAN,
+            block,
+            fresh,
+            noise_std=SIGMA,
+            prior_std=PRIOR_STD,
+            prior_mean=PRIOR_MEAN,
         )
         draws = q.sample(fresh, jax.random.key(8), 4000)
-        assert float(draws.mean()) == pytest.approx(
-            float(reference), abs=0.35 * PRIOR_STD
-        )
+        assert float(draws.mean()) == pytest.approx(float(reference), abs=0.35 * PRIOR_STD)
 
 
 class TestTheRestatedSignaturesStillMatchTheFarSide:
@@ -390,7 +408,9 @@ class TestTheRestatedSignaturesStillMatchTheFarSide:
             if name in skip:
                 continue
             assert ours[name].default == theirs[name].default, (
-                name, ours[name].default, theirs[name].default
+                name,
+                ours[name].default,
+                theirs[name].default,
             )
             assert ours[name].kind == theirs[name].kind, (name, ours[name].kind, theirs[name].kind)
 
@@ -404,6 +424,6 @@ class TestTheRestatedSignaturesStillMatchTheFarSide:
 
         ours = list(inspect.signature(rheplicant_npe.NeuralPosterior.create).parameters)
         assert "min_scale" in ours and "width" in ours, ours
-        assert ours != list(
-            inspect.signature(rheplicant_npe.train_posterior).parameters
-        ), "the two signatures are indistinguishable, so the check above proves little"
+        assert ours != list(inspect.signature(rheplicant_npe.train_posterior).parameters), (
+            "the two signatures are indistinguishable, so the check above proves little"
+        )

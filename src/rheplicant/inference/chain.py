@@ -128,9 +128,7 @@ class LinearGaussianTransition(eqx.Module):
         self.initial_mean = (
             jnp.zeros_like(self.initial_std)
             if initial_mean is None
-            else jnp.broadcast_to(
-                jnp.atleast_1d(jnp.asarray(initial_mean)), self.initial_std.shape
-            )
+            else jnp.broadcast_to(jnp.atleast_1d(jnp.asarray(initial_mean)), self.initial_std.shape)
         )
         self.hyper = tuple(hyper)
 
@@ -206,9 +204,7 @@ def ornstein_uhlenbeck(
     decay = jnp.exp(-1.0 / jnp.asarray(tau))
     return LinearGaussianTransition(
         phi=decay * jnp.eye(width),
-        process_std=jnp.broadcast_to(
-            jnp.asarray(sigma) * jnp.sqrt(1.0 - decay**2), (width,)
-        ),
+        process_std=jnp.broadcast_to(jnp.asarray(sigma) * jnp.sqrt(1.0 - decay**2), (width,)),
         initial_std=jnp.broadcast_to(jnp.asarray(sigma), (width,)),
         hyper=hyper,
     )
@@ -232,9 +228,7 @@ class HyperTransition(eqx.Module):
             has a value to look at.
     """
 
-    build: Callable[[dict[str, jax.Array]], LinearGaussianTransition] = eqx.field(
-        static=True
-    )
+    build: Callable[[dict[str, jax.Array]], LinearGaussianTransition] = eqx.field(static=True)
     hyper: tuple[str, ...] = eqx.field(static=True)
     width: int = eqx.field(static=True)
 
@@ -414,11 +408,7 @@ def _zeta_joint(
         rhs.append(targets[e] - factors[e][:, :n_theta] @ theta)
 
     # zeta_1's prior.
-    rows.append(
-        jnp.zeros((n_zeta, total))
-        .at[:, :n_zeta]
-        .set(jnp.diag(1.0 / resolved.initial_std))
-    )
+    rows.append(jnp.zeros((n_zeta, total)).at[:, :n_zeta].set(jnp.diag(1.0 / resolved.initial_std)))
     rhs.append(resolved.initial_mean / resolved.initial_std)
 
     # The couplings. `diag(1/q) @ phi`, not `phi @ diag(1/q)` -- the same line
@@ -437,9 +427,7 @@ def _zeta_joint(
         rhs.append(jnp.zeros(n_zeta))
 
     upper = jnp.linalg.qr(
-        jnp.concatenate(
-            [jnp.concatenate(rows, axis=0), jnp.concatenate(rhs)[:, None]], axis=1
-        ),
+        jnp.concatenate([jnp.concatenate(rows, axis=0), jnp.concatenate(rhs)[:, None]], axis=1),
         mode="r",
     )
     return upper[:total, :total], upper[:total, total], n_epochs, n_zeta
@@ -462,12 +450,8 @@ def _joint_covariance(
     ``tests/evidence/test_chain_smoother.py`` pins the full matrix against the
     dense oracle's, at both chain widths.
     """
-    triangular, _, n_epochs, n_zeta = _zeta_joint(
-        blocks, transition, values, names, shapes
-    )
-    inverse = jax.scipy.linalg.solve_triangular(
-        triangular, jnp.eye(n_epochs * n_zeta), lower=False
-    )
+    triangular, _, n_epochs, n_zeta = _zeta_joint(blocks, transition, values, names, shapes)
+    inverse = jax.scipy.linalg.solve_triangular(triangular, jnp.eye(n_epochs * n_zeta), lower=False)
     return inverse @ inverse.T
 
 
@@ -555,9 +539,7 @@ _CHAIN_REPEAT_REMEDY = (
 )
 
 
-def _column_spans(
-    names: tuple[str, ...], shapes: tuple[tuple[int, ...], ...]
-) -> dict[str, range]:
+def _column_spans(names: tuple[str, ...], shapes: tuple[tuple[int, ...], ...]) -> dict[str, range]:
     """``{name: which columns of a factor over these names it owns}``.
 
     One copy, read by :func:`_square_block` when it permutes an epoch into the
@@ -590,9 +572,7 @@ def _square_block(info: SqrtInfo, order: tuple[str, ...]) -> SqrtInfo:
     if tuple(info.names) != order:
         shapes = dict(zip(info.names, info.shapes, strict=True))
         columns = _column_spans(tuple(info.names), tuple(info.shapes))
-        permutation = jnp.asarray(
-            [column for name in order for column in columns[name]], dtype=int
-        )
+        permutation = jnp.asarray([column for name in order for column in columns[name]], dtype=int)
         info = SqrtInfo(
             factor=info.factor[:, permutation],
             target=info.target,
@@ -731,9 +711,7 @@ def _reject_a_foreign_stack(
     )
     root_eps = float(np.sqrt(np.finfo(np.asarray(factors).dtype).eps))
     for index, term in enumerate(terms):
-        _reject_a_foreign_block(
-            tuple(part[index] for part in found), term, order, index, root_eps
-        )
+        _reject_a_foreign_block(tuple(part[index] for part in found), term, order, index, root_eps)
 
 
 def _reject_a_foreign_block(
@@ -788,9 +766,7 @@ def _reject_a_foreign_block(
         ("cross term", float(np.max(np.abs(found[1] - expected[1]))), root_eps * cross),
         ("constant", abs(found[2] - expected[2]), root_eps * shared),
     )
-    failed = [
-        leg for leg in legs if not (np.isfinite(leg[2]) and leg[1] <= leg[2])
-    ]
+    failed = [leg for leg in legs if not (np.isfinite(leg[2]) and leg[1] <= leg[2])]
     if failed:
         label, difference, tolerance = failed[0]
         raise StateValidationError(
@@ -820,9 +796,7 @@ class _Epochs:
 
     def __init__(self, terms: Sequence[Any] = (), ids: frozenset[str] | None = None):
         self.terms = tuple(terms)
-        self.ids = (
-            frozenset(term.epoch_id for term in self.terms) if ids is None else ids
-        )
+        self.ids = frozenset(term.epoch_id for term in self.terms) if ids is None else ids
 
     def appended(self, term: Any) -> "_Epochs":
         """A new record holding ``term`` last. The original is unchanged."""
@@ -903,15 +877,11 @@ class ChainMemory(eqx.Module):
             else stacked
         )
         self._epochs = epochs if isinstance(epochs, _Epochs) else _Epochs(epochs)
-        _reject_a_foreign_stack(
-            self.stacked, self._epochs.terms, self.column_order, width
-        )
+        _reject_a_foreign_stack(self.stacked, self._epochs.terms, self.column_order, width)
 
     @staticmethod
     def _width(factorization: Any) -> int:
-        globals_width = sum(
-            int(jnp.zeros(shape).size) for shape in factorization.global_shapes
-        )
+        globals_width = sum(int(jnp.zeros(shape).size) for shape in factorization.global_shapes)
         transition = factorization.linked[factorization.linked_names[0]]
         return globals_width + transition.width
 
@@ -1118,8 +1088,7 @@ class ChainMemory(eqx.Module):
         ]
         if wrong:
             detail = ", ".join(
-                f"{name!r} carries {got} column(s) where this memory declares "
-                f"{want}"
+                f"{name!r} carries {got} column(s) where this memory declares {want}"
                 for name, got, want in wrong
             )
             raise StateValidationError(
@@ -1198,9 +1167,7 @@ class ChainMemory(eqx.Module):
         shapes = self.factorization.global_shapes
 
         def density(values: dict[str, jax.Array]) -> jax.Array:
-            return chain_log_likelihood(
-                stacked, transition, values, names=names, shapes=shapes
-            )
+            return chain_log_likelihood(stacked, transition, values, names=names, shapes=shapes)
 
         return BayesMemory(
             self.factorization,

@@ -21,13 +21,18 @@ from tests.config.inference_helpers import MODEL, context, state, twin
 
 
 def harness(model=None, seeds=None, base_dir=None):
-    ctx = context(**({"seeds": seeds} if seeds else {}),
-                  **({"base_dir": base_dir} if base_dir else {}))
+    ctx = context(
+        **({"seeds": seeds} if seeds else {}), **({"base_dir": base_dir} if base_dir else {})
+    )
     full = twin(model, ctx)
     space = build_space(
-        parse_latents({"g": {"init": 1.0, "linear": True,
-                             "into": "gain.gain"}}, ctx),
-        None, None, fit_twin=full, replaced=(), context=ctx)
+        parse_latents({"g": {"init": 1.0, "linear": True, "into": "gain.gain"}}, ctx),
+        None,
+        None,
+        fit_twin=full,
+        replaced=(),
+        context=ctx,
+    )
     return ctx, full, space
 
 
@@ -38,19 +43,22 @@ class _FakeObservation:
 
 
 def build(spec, *, ctx, full, space, noise=None):
-    return build_observed(spec, twin=full, fit_twin=full, space=space,
-                          noise=noise or build_noise(
-                              None, observation=_FakeObservation(),
-                              context=ctx),
-                          state=state(), observation=_FakeObservation(),
-                          context=ctx)
+    return build_observed(
+        spec,
+        twin=full,
+        fit_twin=full,
+        space=space,
+        noise=noise or build_noise(None, observation=_FakeObservation(), context=ctx),
+        state=state(),
+        observation=_FakeObservation(),
+        context=ctx,
+    )
 
 
 class TestSimulation:
     def test_at_binds_the_truth_before_evaluating(self):
         ctx, full, space = harness()
-        observed = build({"from": "simulation",
-                          "at": {"g": 2.0}}, ctx=ctx, full=full, space=space)
+        observed = build({"from": "simulation", "at": {"g": 2.0}}, ctx=ctx, full=full, space=space)
         reference = space.bind(full, {"g": jnp.asarray(2.0)})(state()).data
         assert observed.primary == "primary"
         assert jnp.allclose(observed.entries["primary"], reference)
@@ -59,54 +67,51 @@ class TestSimulation:
     def test_at_an_unknown_latent_is_refused_listing_the_names(self):
         ctx, full, space = harness()
         with pytest.raises(ConfigError, match="ghost"):
-            build({"from": "simulation", "at": {"ghost": 2.0}},
-                  ctx=ctx, full=full, space=space)
+            build({"from": "simulation", "at": {"ghost": 2.0}}, ctx=ctx, full=full, space=space)
 
     def test_at_without_parameters_is_refused(self):
         ctx, full, _ = harness()
         with pytest.raises(ConfigError, match="parameters"):
-            build({"from": "simulation", "at": {"g": 2.0}},
-                  ctx=ctx, full=full, space=None)
+            build({"from": "simulation", "at": {"g": 2.0}}, ctx=ctx, full=full, space=None)
 
     def test_twin_must_be_full_or_fit(self):
         ctx, full, space = harness()
         with pytest.raises(ConfigError, match="full"):
-            build({"from": "simulation", "twin": "both"},
-                  ctx=ctx, full=full, space=space)
+            build({"from": "simulation", "twin": "both"}, ctx=ctx, full=full, space=space)
 
     def test_twin_fit_evaluates_the_repaired_twin_and_records_it(self):
         # The fit twin here is DISTINGUISHABLE from the full one (a deeper
         # trough), so twin: fit reading the full twin anyway cannot pass.
         ctx, full, space = harness()
-        deeper = {"depth": {"value": 0.9, "unit": "K"},
-                  "centre": {"value": 75.0, "unit": "MHz"},
-                  "width": {"value": 5.0, "unit": "MHz"}}
-        fit, _ = build_fit_twin({"replace": {"global_signal": deeper}},
-                                full, ctx)
+        deeper = {
+            "depth": {"value": 0.9, "unit": "K"},
+            "centre": {"value": 75.0, "unit": "MHz"},
+            "width": {"value": 5.0, "unit": "MHz"},
+        }
+        fit, _ = build_fit_twin({"replace": {"global_signal": deeper}}, full, ctx)
         observed = build_observed(
-            {"from": "simulation", "twin": "fit"}, twin=full, fit_twin=fit,
-            space=space, noise=build_noise(None,
-                                           observation=_FakeObservation(),
-                                           context=ctx),
-            state=state(), observation=_FakeObservation(), context=ctx)
+            {"from": "simulation", "twin": "fit"},
+            twin=full,
+            fit_twin=fit,
+            space=space,
+            noise=build_noise(None, observation=_FakeObservation(), context=ctx),
+            state=state(),
+            observation=_FakeObservation(),
+            context=ctx,
+        )
         init = dict(space.initial_values())
-        assert jnp.allclose(observed.entries["primary"],
-                            space.bind(fit, init)(state()).data)
-        assert not jnp.allclose(observed.entries["primary"],
-                                space.bind(full, init)(state()).data)
+        assert jnp.allclose(observed.entries["primary"], space.bind(fit, init)(state()).data)
+        assert not jnp.allclose(observed.entries["primary"], space.bind(full, init)(state()).data)
         assert observed.records["primary"]["twin"] == "fit"
 
     def test_a_clean_simulation_is_evaluated_at_the_declared_init(self):
         # init g=1.0 differs from the twin's declared gain 1.1, so a build
         # that skips binding the initial values shows up here.
         ctx, full, space = harness()
-        observed = build({"from": "simulation"}, ctx=ctx, full=full,
-                         space=space)
-        reference = space.bind(full, dict(space.initial_values()))(
-            state()).data
+        observed = build({"from": "simulation"}, ctx=ctx, full=full, space=space)
+        reference = space.bind(full, dict(space.initial_values()))(state()).data
         assert jnp.allclose(observed.entries["primary"], reference)
-        assert not jnp.allclose(observed.entries["primary"],
-                                full(state()).data)
+        assert not jnp.allclose(observed.entries["primary"], full(state()).data)
 
 
 class TestRealise:
@@ -118,16 +123,21 @@ class TestRealise:
 
     def test_homoscedastic_scatter_is_reproducible_from_its_named_seed(self):
         ctx, full, space = harness(seeds={"observed_noise": 7})
-        one = build(self.spec("homoscedastic",
-                              sigma={"value": 0.5, "unit": "K"}),
-                    ctx=ctx, full=full, space=space)
-        two = build(self.spec("homoscedastic",
-                              sigma={"value": 0.5, "unit": "K"}),
-                    ctx=ctx, full=full, space=space)
+        one = build(
+            self.spec("homoscedastic", sigma={"value": 0.5, "unit": "K"}),
+            ctx=ctx,
+            full=full,
+            space=space,
+        )
+        two = build(
+            self.spec("homoscedastic", sigma={"value": 0.5, "unit": "K"}),
+            ctx=ctx,
+            full=full,
+            space=space,
+        )
         clean = build({"from": "simulation"}, ctx=ctx, full=full, space=space)
         assert jnp.allclose(one.entries["primary"], two.entries["primary"])
-        assert not jnp.allclose(one.entries["primary"],
-                                clean.entries["primary"])
+        assert not jnp.allclose(one.entries["primary"], clean.entries["primary"])
 
     def test_a_different_declared_seed_draws_a_different_scatter(self):
         # Reproducibility alone cannot see a draw that ignores the seed --
@@ -137,21 +147,23 @@ class TestRealise:
         ctx8, full8, space8 = harness(seeds={"observed_noise": 8})
         seven = build(spec, ctx=ctx7, full=full7, space=space7)
         eight = build(spec, ctx=ctx8, full=full8, space=space8)
-        assert not jnp.allclose(seven.entries["primary"],
-                                eight.entries["primary"])
+        assert not jnp.allclose(seven.entries["primary"], eight.entries["primary"])
 
     def test_the_draw_is_the_packages_realise_at_the_recorded_seed(self):
         # The seam claim, pinned bitwise: the data is NoiseModel.realise at
         # jax.random.key(recorded seed), nothing hand-written beside it.
         ctx, full, space = harness(seeds={"observed_noise": 7})
-        observed = build(self.spec("homoscedastic",
-                                   sigma={"value": 0.5, "unit": "K"}),
-                         ctx=ctx, full=full, space=space)
+        observed = build(
+            self.spec("homoscedastic", sigma={"value": 0.5, "unit": "K"}),
+            ctx=ctx,
+            full=full,
+            space=space,
+        )
         clean = build({"from": "simulation"}, ctx=ctx, full=full, space=space)
         assert observed.records["primary"]["seed"] == 7
-        expected = HomoscedasticNoise(jnp.asarray(0.5, dtype=jnp.float32)
-                                      ).realise(clean.entries["primary"],
-                                                key=jax.random.key(7))
+        expected = HomoscedasticNoise(jnp.asarray(0.5, dtype=jnp.float32)).realise(
+            clean.entries["primary"], key=jax.random.key(7)
+        )
         assert jnp.array_equal(observed.entries["primary"], expected)
 
     def test_an_undeclared_seed_name_derives_by_blake2s_not_luck(self):
@@ -159,28 +171,33 @@ class TestRealise:
         # is derived: the blake2s digest of the name XOR the root seed. It is
         # also the seed the scatter was drawn from.
         ctx, full, space = harness()
-        observed = build(self.spec("homoscedastic",
-                                   sigma={"value": 0.5, "unit": "K"}),
-                         ctx=ctx, full=full, space=space)
+        observed = build(
+            self.spec("homoscedastic", sigma={"value": 0.5, "unit": "K"}),
+            ctx=ctx,
+            full=full,
+            space=space,
+        )
         derived = _digest("observed_noise") ^ int(ctx.seed)
         assert observed.records["primary"]["seed"] == derived
         clean = build({"from": "simulation"}, ctx=ctx, full=full, space=space)
-        expected = HomoscedasticNoise(jnp.asarray(0.5, dtype=jnp.float32)
-                                      ).realise(clean.entries["primary"],
-                                                key=jax.random.key(derived))
+        expected = HomoscedasticNoise(jnp.asarray(0.5, dtype=jnp.float32)).realise(
+            clean.entries["primary"], key=jax.random.key(derived)
+        )
         assert jnp.array_equal(observed.entries["primary"], expected)
 
     def test_the_seed_is_required_on_a_drawing_kind(self):
         ctx, full, space = harness()
         with pytest.raises(ConfigError, match="seed"):
-            build(self.spec("homoscedastic", seed=None,
-                            sigma={"value": 0.5, "unit": "K"}),
-                  ctx=ctx, full=full, space=space)
+            build(
+                self.spec("homoscedastic", seed=None, sigma={"value": 0.5, "unit": "K"}),
+                ctx=ctx,
+                full=full,
+                space=space,
+            )
 
     def test_radiometer_scatter_is_multiplicative(self):
         ctx, full, space = harness()
-        observed = build(self.spec("radiometer"),
-                         ctx=ctx, full=full, space=space)
+        observed = build(self.spec("radiometer"), ctx=ctx, full=full, space=space)
         clean = build({"from": "simulation"}, ctx=ctx, full=full, space=space)
         ratio = observed.entries["primary"] / clean.entries["primary"]
         fractional = 1.0 / np.sqrt(3.125e6 * 2.0)
@@ -193,24 +210,24 @@ class TestRealise:
         # test above cannot see. Bitwise equality with the package's own
         # realise is the check that can.
         ctx, full, space = harness(seeds={"observed_noise": 11})
-        observed = build(self.spec("radiometer"),
-                         ctx=ctx, full=full, space=space)
+        observed = build(self.spec("radiometer"), ctx=ctx, full=full, space=space)
         clean = build({"from": "simulation"}, ctx=ctx, full=full, space=space)
         assert observed.records["primary"]["seed"] == 11
         expected = RadiometerNoise(3.125e6, 2.0).realise(
-            clean.entries["primary"], key=jax.random.key(11))
+            clean.entries["primary"], key=jax.random.key(11)
+        )
         assert jnp.array_equal(observed.entries["primary"], expected)
 
     def test_from_model_draws_with_the_declared_noise_model(self):
         ctx, full, space = harness()
-        noise = build_noise({"kind": "homoscedastic",
-                             "sigma": {"value": 0.5, "unit": "K"}},
-                            observation=_FakeObservation(), context=ctx)
-        observed = build(self.spec("from_model"), ctx=ctx, full=full,
-                         space=space, noise=noise)
+        noise = build_noise(
+            {"kind": "homoscedastic", "sigma": {"value": 0.5, "unit": "K"}},
+            observation=_FakeObservation(),
+            context=ctx,
+        )
+        observed = build(self.spec("from_model"), ctx=ctx, full=full, space=space, noise=noise)
         clean = build({"from": "simulation"}, ctx=ctx, full=full, space=space)
-        assert not jnp.allclose(observed.entries["primary"],
-                                clean.entries["primary"])
+        assert not jnp.allclose(observed.entries["primary"], clean.entries["primary"])
 
     def test_from_model_with_kind_none_is_refused_by_name(self):
         ctx, full, space = harness()
@@ -219,32 +236,36 @@ class TestRealise:
 
     def test_kind_none_takes_no_seed_and_adds_nothing(self):
         ctx, full, space = harness()
-        observed = build({"from": "simulation", "realise": {"kind": "none"}},
-                         ctx=ctx, full=full, space=space)
+        observed = build(
+            {"from": "simulation", "realise": {"kind": "none"}}, ctx=ctx, full=full, space=space
+        )
         clean = build({"from": "simulation"}, ctx=ctx, full=full, space=space)
-        assert jnp.allclose(observed.entries["primary"],
-                            clean.entries["primary"])
+        assert jnp.allclose(observed.entries["primary"], clean.entries["primary"])
 
 
 class TestFileForm:
     def test_an_npz_lands_shape_checked(self, tmp_path):
-        np.savez(tmp_path / "night1.npz",
-                 waterfall=np.ones((16, 8), dtype=np.float32))
+        np.savez(tmp_path / "night1.npz", waterfall=np.ones((16, 8), dtype=np.float32))
         ctx, full, space = harness(base_dir=str(tmp_path))
-        observed = build({"file": {"path": "night1.npz", "format": "npz",
-                                   "key": "waterfall"}},
-                         ctx=ctx, full=full, space=space)
+        observed = build(
+            {"file": {"path": "night1.npz", "format": "npz", "key": "waterfall"}},
+            ctx=ctx,
+            full=full,
+            space=space,
+        )
         assert observed.entries["primary"].shape == (16, 8)
         assert observed.records["primary"]["from"] == "file"
 
     def test_a_wrong_shape_is_refused_exactly(self, tmp_path):
-        np.savez(tmp_path / "night1.npz",
-                 waterfall=np.ones((8, 16), dtype=np.float32))
+        np.savez(tmp_path / "night1.npz", waterfall=np.ones((8, 16), dtype=np.float32))
         ctx, full, space = harness(base_dir=str(tmp_path))
         with pytest.raises(ConfigError, match="16, 8"):
-            build({"file": {"path": "night1.npz", "format": "npz",
-                            "key": "waterfall"}},
-                  ctx=ctx, full=full, space=space)
+            build(
+                {"file": {"path": "night1.npz", "format": "npz", "key": "waterfall"}},
+                ctx=ctx,
+                full=full,
+                space=space,
+            )
 
 
 class TestTheFileIsMatchedAgainstThePrediction:
@@ -276,19 +297,21 @@ class TestTheFileIsMatchedAgainstThePrediction:
     def _build(self, ctx, full, name, *, fit_twin=None, space=None):
         return build_observed(
             {"file": {"path": name, "format": "npz", "key": "w"}},
-            twin=full, fit_twin=full if fit_twin is None else fit_twin,
+            twin=full,
+            fit_twin=full if fit_twin is None else fit_twin,
             space=space,
-            noise=build_noise(None, observation=_FakeObservation(),
-                              context=ctx),
-            state=state(), observation=_FakeObservation(), context=ctx)
+            noise=build_noise(None, observation=_FakeObservation(), context=ctx),
+            state=state(),
+            observation=_FakeObservation(),
+            context=ctx,
+        )
 
     def _file(self, tmp_path, shape):
         name = f"n{shape[0]}x{shape[1]}.npz"
         np.savez(tmp_path / name, w=np.ones(shape, dtype=np.float32))
         return name
 
-    def test_n_chunk_4_refuses_the_grid_shaped_file_and_accepts_the_prediction(
-            self, tmp_path):
+    def test_n_chunk_4_refuses_the_grid_shaped_file_and_accepts_the_prediction(self, tmp_path):
         """§5's named box: the INVERSION, stated as an inversion.
 
         At ``e0e024a`` this document accepted ``(16, 8)`` and refused
@@ -308,24 +331,22 @@ class TestTheFileIsMatchedAgainstThePrediction:
         observed = self._build(ctx, full, predicted)
         assert observed.entries["primary"].shape == (4, 8)
 
-    def test_n_chunk_16_no_longer_accepts_a_file_that_would_broadcast(
-            self, tmp_path):
+    def test_n_chunk_16_no_longer_accepts_a_file_that_would_broadcast(self, tmp_path):
         """The case the shipped sentence names and the shipped code missed.
 
         Prediction ``(1, 8)``; a ``(16, 8)`` file is broadcast-compatible with
         it, which is exactly *"the dangerous case"*.
         """
-        ctx, full = self._harness(tmp_path, {**MODEL,
-                                             "averaging": {"n_chunk": 16}})
+        ctx, full = self._harness(tmp_path, {**MODEL, "averaging": {"n_chunk": 16}})
         with pytest.raises(ConfigError) as caught:
             self._build(ctx, full, self._file(tmp_path, (16, 8)))
         assert "predicts (1, 8)" in str(caught.value)
-        assert self._build(
-            ctx, full, self._file(tmp_path, (1, 8))
-        ).entries["primary"].shape == (1, 8)
+        assert self._build(ctx, full, self._file(tmp_path, (1, 8))).entries["primary"].shape == (
+            1,
+            8,
+        )
 
-    def test_the_refusal_names_the_prediction_and_keeps_the_clause_that_was_right(
-            self, tmp_path):
+    def test_the_refusal_names_the_prediction_and_keeps_the_clause_that_was_right(self, tmp_path):
         """S1: the whole sentence, by equality, in both of its two forms.
 
         Named by ``test_config_preflight.py``'s ``_ASSEMBLED_ELSEWHERE`` as
@@ -354,8 +375,7 @@ class TestTheFileIsMatchedAgainstThePrediction:
             "is the dangerous case (check C11)."
         )
 
-    def test_applying_the_refusals_own_advice_makes_the_document_build(
-            self, tmp_path):
+    def test_applying_the_refusals_own_advice_makes_the_document_build(self, tmp_path):
         """S4's second half: take the remedy the message names, and pass.
 
         The message names the shape to match; a file written at that shape
@@ -370,8 +390,7 @@ class TestTheFileIsMatchedAgainstThePrediction:
         observed = self._build(ctx, full, self._file(tmp_path, shape))
         assert observed.entries["primary"].shape == shape
 
-    def test_it_reads_the_fit_twin_so_inference_twin_replace_is_walked(
-            self, tmp_path):
+    def test_it_reads_the_fit_twin_so_inference_twin_replace_is_walked(self, tmp_path):
         """0.3 E.10, and the TRAP the task body names.
 
         ``inference.twin.replace`` reaches ``build_node_operator`` and can
@@ -384,20 +403,17 @@ class TestTheFileIsMatchedAgainstThePrediction:
         in, not by a second traversal of the document.
         """
         ctx, full = self._harness(tmp_path, self.MODEL_N_CHUNK_4)
-        fit, replaced = build_fit_twin(
-            {"replace": {"averaging": {"n_chunk": 8}}}, full, ctx)
+        fit, replaced = build_fit_twin({"replace": {"averaging": {"n_chunk": 8}}}, full, ctx)
         assert replaced == ("averaging",)
 
         # The fit twin predicts (2, 8); the FULL twin predicts (4, 8).
-        observed = self._build(ctx, full, self._file(tmp_path, (2, 8)),
-                               fit_twin=fit)
+        observed = self._build(ctx, full, self._file(tmp_path, (2, 8)), fit_twin=fit)
         assert observed.entries["primary"].shape == (2, 8)
         with pytest.raises(ConfigError, match=r"predicts \(2, 8\)"):
             self._build(ctx, full, self._file(tmp_path, (4, 8)), fit_twin=fit)
 
     @pytest.mark.parametrize("predicted", [(4, 8), (16, 4), (4, 4)])
-    def test_the_aside_fires_on_any_axis_the_model_reshapes(
-            self, tmp_path, predicted):
+    def test_the_aside_fires_on_any_axis_the_model_reshapes(self, tmp_path, predicted):
         """The gate is ``wanted == grids``, not ``wanted[0] == grids[0]``.
 
         Every document this class can cheaply build reshapes the TIME axis
@@ -409,14 +425,12 @@ class TestTheFileIsMatchedAgainstThePrediction:
         prediction is substituted directly rather than modelled.
         """
         ctx, full = self._harness(tmp_path, MODEL)
-        with mock.patch.object(observed_module, "_predicted_shape",
-                               lambda *a, **k: predicted):
+        with mock.patch.object(observed_module, "_predicted_shape", lambda *a, **k: predicted):
             with pytest.raises(ConfigError) as caught:
                 self._build(ctx, full, self._file(tmp_path, (2, 2)))
         assert "The time and frequency grids are (16, 8):" in str(caught.value)
 
-    def test_the_aside_stays_silent_when_the_model_reshapes_nothing(
-            self, tmp_path):
+    def test_the_aside_stays_silent_when_the_model_reshapes_nothing(self, tmp_path):
         """The other side of the same gate, so it cannot be widened either."""
         ctx, full = self._harness(tmp_path, MODEL)
         with pytest.raises(ConfigError) as caught:
@@ -432,16 +446,20 @@ class TestTheFileIsMatchedAgainstThePrediction:
         """
         ctx, full = self._harness(tmp_path, self.MODEL_N_CHUNK_4)
         observed = build_observed(
-            {"from": "simulation"}, twin=full, fit_twin=full, space=None,
-            noise=build_noise(None, observation=_FakeObservation(),
-                              context=ctx),
-            state=state(), observation=_FakeObservation(), context=ctx)
+            {"from": "simulation"},
+            twin=full,
+            fit_twin=full,
+            space=None,
+            noise=build_noise(None, observation=_FakeObservation(), context=ctx),
+            state=state(),
+            observation=_FakeObservation(),
+            context=ctx,
+        )
         # The grids say (16, 8) and this is accepted at (4, 8) with no
         # refusal anywhere -- which is the shipped behaviour, unchanged.
         assert observed.entries["primary"].shape == (4, 8)
 
-    def test_the_prediction_is_taken_by_eval_shape_and_nothing_is_computed(
-            self, tmp_path):
+    def test_the_prediction_is_taken_by_eval_shape_and_nothing_is_computed(self, tmp_path):
         """R9, as a MECHANISM pin rather than a wall-clock one.
 
         The plan's bound for reading the twin is "one ``jax.eval_shape`` and
@@ -466,41 +484,53 @@ class TestTheFileIsMatchedAgainstThePrediction:
 class TestSeveralObservations:
     def test_named_entries_each_simulate_their_own_truth(self):
         ctx, full, space = harness()
-        observed = build({"primary": {"from": "simulation", "at": {"g": 1.1}},
-                          "second": {"from": "simulation", "at": {"g": 1.5}}},
-                         ctx=ctx, full=full, space=space)
+        observed = build(
+            {
+                "primary": {"from": "simulation", "at": {"g": 1.1}},
+                "second": {"from": "simulation", "at": {"g": 1.5}},
+            },
+            ctx=ctx,
+            full=full,
+            space=space,
+        )
         assert set(observed.entries) == {"primary", "second"}
         assert observed.primary == "primary"
-        assert not jnp.allclose(observed.entries["primary"],
-                                observed.entries["second"])
+        assert not jnp.allclose(observed.entries["primary"], observed.entries["second"])
 
     def test_each_entrys_at_is_its_own_record(self):
         # Task 6's truth derivation reads ObservedBuild.at per entry; a dict
         # shared across entries would hand it the LAST entry's truth for all.
         ctx, full, space = harness()
-        observed = build({"primary": {"from": "simulation", "at": {"g": 1.1}},
-                          "second": {"from": "simulation", "at": {"g": 1.5}},
-                          "third": {"from": "simulation"}},
-                         ctx=ctx, full=full, space=space)
+        observed = build(
+            {
+                "primary": {"from": "simulation", "at": {"g": 1.1}},
+                "second": {"from": "simulation", "at": {"g": 1.5}},
+                "third": {"from": "simulation"},
+            },
+            ctx=ctx,
+            full=full,
+            space=space,
+        )
         assert float(observed.at["primary"]["g"]) == pytest.approx(1.1)
         assert float(observed.at["second"]["g"]) == pytest.approx(1.5)
         assert observed.at["third"] == {}
 
     def test_without_a_primary_the_default_is_unresolved(self):
         ctx, full, space = harness()
-        observed = build({"a": {"from": "simulation"},
-                          "b": {"from": "simulation"}},
-                         ctx=ctx, full=full, space=space)
+        observed = build(
+            {"a": {"from": "simulation"}, "b": {"from": "simulation"}},
+            ctx=ctx,
+            full=full,
+            space=space,
+        )
         assert observed.primary is None
 
     def test_an_entry_name_colliding_with_the_grammar_is_refused(self):
         ctx, full, space = harness()
         with pytest.raises(ConfigError, match="realise"):
-            build({"realise": {"from": "simulation"}},
-                  ctx=ctx, full=full, space=space)
+            build({"realise": {"from": "simulation"}}, ctx=ctx, full=full, space=space)
 
     def test_unknown_keys_in_a_simulation_spec_are_swept(self):
         ctx, full, space = harness()
         with pytest.raises(ConfigError, match="sigma"):
-            build({"from": "simulation", "sigma": 0.5},
-                  ctx=ctx, full=full, space=space)
+            build({"from": "simulation", "sigma": 0.5}, ctx=ctx, full=full, space=space)

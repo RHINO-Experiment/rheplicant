@@ -252,9 +252,7 @@ LINE_TRUTH = {
 
 
 def make_line_pipeline() -> Pipeline:
-    return Pipeline(
-        GaussianLine(amp=jnp.zeros(N_TIME), centre=jnp.array(0.0)), names=("line",)
-    )
+    return Pipeline(GaussianLine(amp=jnp.zeros(N_TIME), centre=jnp.array(0.0)), names=("line",))
 
 
 def _line_map(observed, *, sigma):
@@ -277,18 +275,20 @@ def _line_map(observed, *, sigma):
     def derivatives(amp, centre):
         u = (x - centre) / width**2
         profile = np.exp(-0.5 * ((x - centre) / width) ** 2)
-        slope = profile * u                        # d profile / d centre
-        bend = profile * (u**2 - 1.0 / width**2)   # d2 profile / d centre2
+        slope = profile * u  # d profile / d centre
+        bend = profile * (u**2 - 1.0 / width**2)  # d2 profile / d centre2
         residual = (data - amp[:, None] * profile[None, :]) / sigma
-        gradient = np.concatenate([
-            -residual @ profile / sigma + (amp - amp_loc) / amp_scale**2,
-            [-np.sum(residual * amp[:, None] * slope[None, :]) / sigma
-             + (centre - centre_loc) / centre_scale**2],
-        ])
-        hessian = np.zeros((N_TIME + 1, N_TIME + 1))
-        hessian[:N_TIME, :N_TIME] = np.diag(
-            np.sum(profile**2) / sigma**2 + 1.0 / amp_scale**2
+        gradient = np.concatenate(
+            [
+                -residual @ profile / sigma + (amp - amp_loc) / amp_scale**2,
+                [
+                    -np.sum(residual * amp[:, None] * slope[None, :]) / sigma
+                    + (centre - centre_loc) / centre_scale**2
+                ],
+            ]
         )
+        hessian = np.zeros((N_TIME + 1, N_TIME + 1))
+        hessian[:N_TIME, :N_TIME] = np.diag(np.sum(profile**2) / sigma**2 + 1.0 / amp_scale**2)
         cross = amp * np.sum(profile * slope) / sigma**2 - residual @ slope / sigma
         hessian[:N_TIME, N_TIME] = hessian[N_TIME, :N_TIME] = cross
         hessian[N_TIME, N_TIME] = (
@@ -298,8 +298,9 @@ def _line_map(observed, *, sigma):
         )
         return gradient, hessian
 
-    flat = np.concatenate([np.asarray(LINE_TRUTH["amp"], np.float64),
-                           [float(LINE_TRUTH["centre"])]])
+    flat = np.concatenate(
+        [np.asarray(LINE_TRUTH["amp"], np.float64), [float(LINE_TRUTH["centre"])]]
+    )
     for _ in range(30):
         gradient, hessian = derivatives(flat[:N_TIME], flat[N_TIME])
         flat = flat - np.linalg.solve(hessian, gradient)
@@ -337,9 +338,7 @@ def _basis_map(observed, *, sigma, gain_prior=GAIN_PRIOR, coeff_prior=COEFF_PRIO
     loc = np.concatenate([gain_loc, coeff_loc])
     prior_precision = 1.0 / np.concatenate([gain_scale, coeff_scale]) ** 2
     # d T[t, f] / d c[i, j] = TIME_BASIS[t, i] * FREQ_BASIS[f, j], as (t, f, i*j)
-    basis = np.einsum("ti,fj->tfij", time_basis, freq_basis).reshape(
-        N_TIME, N_FREQ, -1
-    )
+    basis = np.einsum("ti,fj->tfij", time_basis, freq_basis).reshape(N_TIME, N_FREQ, -1)
 
     def objective(theta):
         gain, coeff = theta[:n_gain], theta[n_gain:].reshape(shape)
@@ -355,9 +354,7 @@ def _basis_map(observed, *, sigma, gain_prior=GAIN_PRIOR, coeff_prior=COEFF_PRIO
         jacobian[np.arange(N_TIME), :, np.arange(N_TIME)] = signal
         jacobian[:, :, n_gain:] = gain[:, None, None] * basis
         jacobian = jacobian.reshape(N_TIME * N_FREQ, theta.size)
-        gradient = (
-            -jacobian.T @ residual.ravel() / sigma + prior_precision * (theta - loc)
-        )
+        gradient = -jacobian.T @ residual.ravel() / sigma + prior_precision * (theta - loc)
         hessian = jacobian.T @ jacobian / sigma**2 + np.diag(prior_precision)
         # d2 mu[t, f] / d gain[t] d c[i, j] = basis[t, f, ij]
         cross = -np.einsum("tf,tfk->tk", residual, basis) / sigma
@@ -365,8 +362,7 @@ def _basis_map(observed, *, sigma, gain_prior=GAIN_PRIOR, coeff_prior=COEFF_PRIO
         hessian[n_gain:, :n_gain] += cross.T
         return gradient, hessian
 
-    theta = np.concatenate([np.asarray(GAIN0, np.float64),
-                            np.asarray(COEFF0, np.float64).ravel()])
+    theta = np.concatenate([np.asarray(GAIN0, np.float64), np.asarray(COEFF0, np.float64).ravel()])
     for _ in range(100):
         gradient, hessian = derivatives(theta)
         step = -np.linalg.solve(hessian, gradient)
@@ -504,9 +500,7 @@ class TestEngineDerivation:
         assert plan.engines == {("amp", "centre"): GRADIENT}
 
     def test_an_all_linear_block_may_also_be_downgraded(self):
-        plan = SamplingPlan(
-            basis_space(), Block("gain", engine=GRADIENT), Block("t_coeff")
-        )
+        plan = SamplingPlan(basis_space(), Block("gain", engine=GRADIENT), Block("t_coeff"))
         assert plan.engines == {("gain",): GRADIENT, ("t_coeff",): CONJUGATE}
 
     def test_a_block_cannot_be_UPGRADED_to_conjugate(self):
@@ -561,8 +555,12 @@ class TestTheMotivatingCase:
         # need it less and which needs it more
         with pytest.raises(ParameterSpaceError, match="nullity 6"):
             plan.sample(
-                pipeline, state, observed, noise=NOISE,
-                key=jax.random.key(0), n_sweeps=8,
+                pipeline,
+                state,
+                observed,
+                noise=NOISE,
+                key=jax.random.key(0),
+                n_sweeps=8,
             )
 
     def test_the_tone_buys_nothing_here_which_is_why_the_check_is_the_repair(self, state):
@@ -575,9 +573,7 @@ class TestTheMotivatingCase:
         without = identifiability(space, make_pipeline(0.0), state)
         assert with_tone.nullity == without.nullity == N_TIME
 
-    def test_the_basis_model_runs_and_both_exits_agree_with_the_truth(
-        self, basis_setup, state
-    ):
+    def test_the_basis_model_runs_and_both_exits_agree_with_the_truth(self, basis_setup, state):
         """Item two, and the whole thesis in one test: a point estimate and a
         posterior sample are two exits from ONE workflow. The same plan, the
         same partition, the same conditioning — and the mean of the draws lands
@@ -586,12 +582,16 @@ class TestTheMotivatingCase:
         space, pipeline, observed = basis_setup
         plan = SamplingPlan(space, Block("gain"), Block("t_coeff"))
 
-        est = plan.estimate(
-            pipeline, state, observed, noise=NOISE, max_iter=200, solve_guard=None
-        )
+        est = plan.estimate(pipeline, state, observed, noise=NOISE, max_iter=200, solve_guard=None)
         draws = plan.sample(
-            pipeline, state, observed, noise=NOISE, key=jax.random.key(0),
-            n_sweeps=200, warmup=100, solve_guard=None,
+            pipeline,
+            state,
+            observed,
+            noise=NOISE,
+            key=jax.random.key(0),
+            n_sweeps=200,
+            warmup=100,
+            solve_guard=None,
         )
 
         assert est.diagnostics.converged is True
@@ -608,16 +608,15 @@ class TestTheMotivatingCase:
         for name in ("gain", "t_coeff"):
             gap = jnp.abs(draws.mean[name] - TRUTH[name])
             assert jnp.all(gap < 5.0 * draws.std[name] + 1e-6), (name, gap)
-            assert jnp.all(jnp.abs(draws.mean[name] - est.values[name])
-                           < 5.0 * draws.std[name] + 1e-6), name
+            assert jnp.all(
+                jnp.abs(draws.mean[name] - est.values[name]) < 5.0 * draws.std[name] + 1e-6
+            ), name
 
         # the posterior has real width — a draw that came back as the mean
         # would satisfy every assertion above and be wrong about everything
         assert float(jnp.min(draws.std["gain"])) > 0.0
 
-    def test_the_JOINT_chi2_sees_what_every_per_block_residual_misses(
-        self, basis_setup, state
-    ):
+    def test_the_JOINT_chi2_sees_what_every_per_block_residual_misses(self, basis_setup, state):
         """Item three, and the evidence the piece is worth having.
 
         Three sweeps in, the joint chi-squared is still falling by tens of
@@ -633,9 +632,7 @@ class TestTheMotivatingCase:
         plan = SamplingPlan(space, Block("gain"), Block("t_coeff"))
 
         with pytest.raises(ParameterSpaceError) as caught:
-            plan.estimate(
-                pipeline, state, observed, noise=NOISE, max_iter=3, solve_guard=None
-            )
+            plan.estimate(pipeline, state, observed, noise=NOISE, max_iter=3, solve_guard=None)
         message = str(caught.value)
         assert "did not converge" in message
         assert "JOINT negative log posterior is still changing" in message, message
@@ -644,7 +641,12 @@ class TestTheMotivatingCase:
         # and the counter-evidence, in the message itself: the per-block number
         # that reads converged the whole way down
         short = plan.estimate(
-            pipeline, state, observed, noise=NOISE, max_iter=3, tol=None,
+            pipeline,
+            state,
+            observed,
+            noise=NOISE,
+            max_iter=3,
+            tol=None,
             solve_guard=None,
         )
         assert short.diagnostics.converged is None
@@ -657,9 +659,7 @@ class TestTheMotivatingCase:
 
         # the same plan, given the sweeps it needs, does converge — so the
         # refusal above is about the SWEEP COUNT and not about the model
-        full = plan.estimate(
-            pipeline, state, observed, noise=NOISE, max_iter=200, solve_guard=None
-        )
+        full = plan.estimate(pipeline, state, observed, noise=NOISE, max_iter=200, solve_guard=None)
         assert full.diagnostics.converged is True
         assert full.diagnostics.sweeps > 3
         assert full.diagnostics.chi2[-1] < trace[-1]
@@ -673,21 +673,30 @@ class TestIdentifiabilityCadence:
         space, pipeline, observed = basis_setup
         plan = SamplingPlan(space, Block("gain"), Block("t_coeff"))
         with pytest.raises(ParameterSpaceError, match="check_identifiability"):
-            plan.estimate(
-                pipeline, state, observed, noise=NOISE, check_identifiability="sometimes"
-            )
+            plan.estimate(pipeline, state, observed, noise=NOISE, check_identifiability="sometimes")
         with pytest.raises(ParameterSpaceError, match="check_identifiability"):
             plan.sample(
-                pipeline, state, observed, noise=NOISE, key=jax.random.key(0),
-                n_sweeps=8, check_identifiability=True,
+                pipeline,
+                state,
+                observed,
+                noise=NOISE,
+                key=jax.random.key(0),
+                n_sweeps=8,
+                check_identifiability=True,
             )
 
     def test_once_runs_the_check_and_reports_it(self, basis_setup, state):
         space, pipeline, observed = basis_setup
         plan = SamplingPlan(space, Block("gain"), Block("t_coeff"))
         est = plan.estimate(
-            pipeline, state, observed, noise=NOISE, max_iter=4, tol=None,
-            check_identifiability=CHECK_ONCE, solve_guard=None,
+            pipeline,
+            state,
+            observed,
+            noise=NOISE,
+            max_iter=4,
+            tol=None,
+            check_identifiability=CHECK_ONCE,
+            solve_guard=None,
         )
         assert est.diagnostics.identifiability is not None
         assert est.diagnostics.identifiability.nullity == 0
@@ -697,8 +706,14 @@ class TestIdentifiabilityCadence:
         space, pipeline, observed = basis_setup
         plan = SamplingPlan(space, Block("gain"), Block("t_coeff"))
         est = plan.estimate(
-            pipeline, state, observed, noise=NOISE, max_iter=2, tol=None,
-            check_identifiability=False, solve_guard=None,
+            pipeline,
+            state,
+            observed,
+            noise=NOISE,
+            max_iter=2,
+            tol=None,
+            check_identifiability=False,
+            solve_guard=None,
         )
         assert est.diagnostics.identifiability is None
 
@@ -710,8 +725,14 @@ class TestIdentifiabilityCadence:
         observed = observed_of(space, pipeline, {"gain": GAIN0, "t_ant": T_ANT0})
         plan = SamplingPlan(space, Block("gain"), Block("t_ant"))
         est = plan.estimate(
-            pipeline, state, observed, noise=NOISE, max_iter=2, tol=None,
-            check_identifiability=False, solve_guard=None,
+            pipeline,
+            state,
+            observed,
+            noise=NOISE,
+            max_iter=2,
+            tol=None,
+            check_identifiability=False,
+            solve_guard=None,
         )
         assert est.diagnostics.identifiability is None
         assert set(est.values) == {"gain", "t_ant"}
@@ -749,19 +770,30 @@ class TestIdentifiabilityCadence:
         # The plan's own reading of the same two points: "once" looks only at
         # the first, "each_sweep" at every one.
         plan = SamplingPlan(space, Block("gain"), Block("t_coeff"))
-        assert plan._identifiable(  # the check itself, at the declared start
-            plan._prepare(
-                pipeline, STATE, observed_of(space, pipeline, TRUTH), NOISE,
-                CHECK_ONCE, "test",
-            )[0],
-            space.initial_values(),
-            "test",
-        ).nullity == 0
+        assert (
+            plan._identifiable(  # the check itself, at the declared start
+                plan._prepare(
+                    pipeline,
+                    STATE,
+                    observed_of(space, pipeline, TRUTH),
+                    NOISE,
+                    CHECK_ONCE,
+                    "test",
+                )[0],
+                space.initial_values(),
+                "test",
+            ).nullity
+            == 0
+        )
         with pytest.raises(ParameterSpaceError, match="nullity 12"):
             plan._identifiable(
                 plan._prepare(
-                    pipeline, STATE, observed_of(space, pipeline, TRUTH), NOISE,
-                    CHECK_EACH_SWEEP, "test",
+                    pipeline,
+                    STATE,
+                    observed_of(space, pipeline, TRUTH),
+                    NOISE,
+                    CHECK_EACH_SWEEP,
+                    "test",
                 )[0],
                 {**space.initial_values(), "gain": jnp.zeros(N_TIME)},
                 "test",
@@ -782,15 +814,27 @@ class TestIdentifiabilityCadence:
             lambda *a, **k: (calls.append(1), real(*a, **k))[1],
         )
         plan.estimate(
-            pipeline, state, observed, noise=NOISE, max_iter=4, tol=None,
-            check_identifiability=CHECK_EACH_SWEEP, solve_guard=None,
+            pipeline,
+            state,
+            observed,
+            noise=NOISE,
+            max_iter=4,
+            tol=None,
+            check_identifiability=CHECK_EACH_SWEEP,
+            solve_guard=None,
         )
         assert len(calls) == 4, calls
 
         calls.clear()
         plan.estimate(
-            pipeline, state, observed, noise=NOISE, max_iter=4, tol=None,
-            check_identifiability=CHECK_ONCE, solve_guard=None,
+            pipeline,
+            state,
+            observed,
+            noise=NOISE,
+            max_iter=4,
+            tol=None,
+            check_identifiability=CHECK_ONCE,
+            solve_guard=None,
         )
         assert len(calls) == 1, calls
 
@@ -799,13 +843,16 @@ class TestIdentifiabilityCadence:
 
 
 class TestConvergence:
-    def test_tol_None_returns_an_answer_with_no_convergence_claim(
-        self, basis_setup, state
-    ):
+    def test_tol_None_returns_an_answer_with_no_convergence_claim(self, basis_setup, state):
         space, pipeline, observed = basis_setup
         plan = SamplingPlan(space, Block("gain"), Block("t_coeff"))
         est = plan.estimate(
-            pipeline, state, observed, noise=NOISE, max_iter=2, tol=None,
+            pipeline,
+            state,
+            observed,
+            noise=NOISE,
+            max_iter=2,
+            tol=None,
             solve_guard=None,
         )
         assert est.diagnostics.converged is None
@@ -849,9 +896,7 @@ class TestConvergence:
         distance = _posterior_sigmas_from(estimate, exact, precision)
         assert distance < 0.1, (distance, diagnostics.sweeps)
 
-    def test_an_inexact_inner_solve_is_tightened_until_it_certifies(
-        self, basis_setup, state
-    ):
+    def test_an_inexact_inner_solve_is_tightened_until_it_certifies(self, basis_setup, state):
         """The second review's MEDIUM, in float32. At noise 0.30 the sweep's
         fixed point at the default ``solve_tol = 1e-6`` is 0.113 posterior
         sigma from the MAP (the reviewer's float64 measurement), so a stop
@@ -889,13 +934,12 @@ class TestConvergence:
         assert floored.diagnostics.effective_tol == OBJECTIVE_FLOOR_EPS * eps
         loose = plan.estimate(pipeline, state, observed, tol=1e-3, **common)
         assert loose.diagnostics.effective_tol == 1e-3
-        free = plan.estimate(pipeline, state, observed, tol=None, max_iter=2,
-                             noise=NOISE, solve_guard=None)
+        free = plan.estimate(
+            pipeline, state, observed, tol=None, max_iter=2, noise=NOISE, solve_guard=None
+        )
         assert free.diagnostics.effective_tol is None
 
-    def test_the_float32_basis_model_converges_onto_the_float64_map(
-        self, basis_setup, state
-    ):
+    def test_the_float32_basis_model_converges_onto_the_float64_map(self, basis_setup, state):
         """The motivating model, in this module's float32, within 0.1 posterior
         sigma of its MAP computed in float64.
 
@@ -906,9 +950,7 @@ class TestConvergence:
         """
         space, pipeline, observed = basis_setup
         plan = SamplingPlan(space, Block("gain"), Block("t_coeff"))
-        est = plan.estimate(
-            pipeline, state, observed, noise=NOISE, max_iter=200, solve_guard=None
-        )
+        est = plan.estimate(pipeline, state, observed, noise=NOISE, max_iter=200, solve_guard=None)
         assert est.diagnostics.converged is True
         exact, precision = _basis_map(observed, sigma=NOISE)
         distance = _posterior_sigmas_from(est, exact, precision)
@@ -920,13 +962,9 @@ class TestConvergence:
         space, pipeline, observed = basis_setup
         plan = SamplingPlan(space, Block("gain"), Block("t_coeff"))
         with pytest.raises(ParameterSpaceError, match="min_sweeps <= max_iter"):
-            plan.estimate(
-                pipeline, state, observed, noise=NOISE, max_iter=5, min_sweeps=6
-            )
+            plan.estimate(pipeline, state, observed, noise=NOISE, max_iter=5, min_sweeps=6)
 
-    def test_min_sweeps_is_not_policed_when_no_verdict_is_asked_for(
-        self, basis_setup, state
-    ):
+    def test_min_sweeps_is_not_policed_when_no_verdict_is_asked_for(self, basis_setup, state):
         """``min_sweeps`` is the floor under a VERDICT, so with ``tol=None``
         there is no verdict for it to floor and the pair above is not the
         caller's mistake: the run takes its sweeps and returns, making no
@@ -945,25 +983,34 @@ class TestConvergence:
         plan = SamplingPlan(space, Block("gain"), Block("t_coeff"))
         common = {"noise": NOISE, "tol": None, "solve_guard": None}
 
-        free = plan.estimate(pipeline, state, observed, max_iter=5,
-                             min_sweeps=6, **common)
+        free = plan.estimate(pipeline, state, observed, max_iter=5, min_sweeps=6, **common)
         assert free.diagnostics.converged is None
         assert free.diagnostics.sweeps == 5
 
         # and below the earliest sweep a verdict could be reached at all,
         # where a run WITH a tol can only refuse
-        early = plan.estimate(pipeline, state, observed,
-                              max_iter=EARLIEST_CONVERGED_SWEEP - 1,
-                              min_sweeps=EARLIEST_CONVERGED_SWEEP + 3, **common)
+        early = plan.estimate(
+            pipeline,
+            state,
+            observed,
+            max_iter=EARLIEST_CONVERGED_SWEEP - 1,
+            min_sweeps=EARLIEST_CONVERGED_SWEEP + 3,
+            **common,
+        )
         assert early.diagnostics.converged is None
         assert early.diagnostics.sweeps == EARLIEST_CONVERGED_SWEEP - 1
         # asserted without a `match=`, because the sentence belongs to
         # test_a_min_sweeps_above_the_cap_is_refused and the refusal census
         # counts each one once
         with pytest.raises(ParameterSpaceError) as refused:
-            plan.estimate(pipeline, state, observed, noise=NOISE,
-                          max_iter=EARLIEST_CONVERGED_SWEEP - 1,
-                          min_sweeps=EARLIEST_CONVERGED_SWEEP + 3)
+            plan.estimate(
+                pipeline,
+                state,
+                observed,
+                noise=NOISE,
+                max_iter=EARLIEST_CONVERGED_SWEEP - 1,
+                min_sweeps=EARLIEST_CONVERGED_SWEEP + 3,
+            )
         assert "min_sweeps <= max_iter" in str(refused.value)
 
     @pytest.mark.parametrize("max_iter", [0, -1, 2.0])
@@ -988,7 +1035,11 @@ class TestSampleGuards:
         plan, pipeline, observed = plan_and_data
         with pytest.raises(ParameterSpaceError, match="n_sweeps >= 1"):
             plan.sample(
-                pipeline, state, observed, noise=NOISE, key=jax.random.key(0),
+                pipeline,
+                state,
+                observed,
+                noise=NOISE,
+                key=jax.random.key(0),
                 n_sweeps=n_sweeps,
             )
 
@@ -998,27 +1049,40 @@ class TestSampleGuards:
         plan, pipeline, observed = plan_and_data
         with pytest.raises(ParameterSpaceError, match="warmup >= 0"):
             plan.sample(
-                pipeline, state, observed, noise=NOISE, key=jax.random.key(0),
-                n_sweeps=10, warmup=-2,
+                pipeline,
+                state,
+                observed,
+                noise=NOISE,
+                key=jax.random.key(0),
+                n_sweeps=10,
+                warmup=-2,
             )
 
-    def test_too_few_kept_draws_is_refused_because_r_hat_is_undefined(
-        self, plan_and_data, state
-    ):
+    def test_too_few_kept_draws_is_refused_because_r_hat_is_undefined(self, plan_and_data, state):
         """A run whose only convergence evidence is undefined is exactly the
         silent answer this plan exists to refuse."""
         plan, pipeline, observed = plan_and_data
         with pytest.raises(ParameterSpaceError, match=f"at least {MIN_DRAWS}"):
             plan.sample(
-                pipeline, state, observed, noise=NOISE, key=jax.random.key(0),
-                n_sweeps=10, warmup=8,
+                pipeline,
+                state,
+                observed,
+                noise=NOISE,
+                key=jax.random.key(0),
+                n_sweeps=10,
+                warmup=8,
             )
 
     def test_warmup_defaults_to_half_the_sweeps(self, plan_and_data, state):
         plan, pipeline, observed = plan_and_data
         draws = plan.sample(
-            pipeline, state, observed, noise=NOISE, key=jax.random.key(0),
-            n_sweeps=11, solve_guard=None,
+            pipeline,
+            state,
+            observed,
+            noise=NOISE,
+            key=jax.random.key(0),
+            n_sweeps=11,
+            solve_guard=None,
         )
         assert draws.diagnostics.warmup == 5
         assert draws.n_draw == 6
@@ -1034,13 +1098,22 @@ class TestSampleGuards:
         plan = SamplingPlan(space, Block("amp"), Block("centre"))
         with pytest.raises(ParameterSpaceError, match=r"\['centre'\] have none"):
             plan.sample(
-                pipeline, state, observed, noise=NOISE, key=jax.random.key(0),
+                pipeline,
+                state,
+                observed,
+                noise=NOISE,
+                key=jax.random.key(0),
                 n_sweeps=8,
             )
         # ... while the point estimate, for which a free parameter is
         # meaningful, is not refused.
         est = plan.estimate(
-            pipeline, state, observed, noise=NOISE, max_iter=2, tol=None,
+            pipeline,
+            state,
+            observed,
+            noise=NOISE,
+            max_iter=2,
+            tol=None,
             solve_guard=None,
         )
         assert set(est.values) == {"amp", "centre"}
@@ -1070,12 +1143,22 @@ class TestSharedSeam:
         assert jnp.shape(wrong - observed) == jnp.shape(observed), "must broadcast"
         with pytest.raises(ParameterSpaceError, match="this plan's model predicts"):
             plan.estimate(
-                pipeline, state, wrong, noise=NOISE, max_iter=2, tol=None,
+                pipeline,
+                state,
+                wrong,
+                noise=NOISE,
+                max_iter=2,
+                tol=None,
                 solve_guard=None,
             )
         with pytest.raises(ParameterSpaceError, match="this plan's model predicts"):
             plan.sample(
-                pipeline, state, wrong, noise=NOISE, key=jax.random.key(0), n_sweeps=8,
+                pipeline,
+                state,
+                wrong,
+                noise=NOISE,
+                key=jax.random.key(0),
+                n_sweeps=8,
                 solve_guard=None,
             )
 
@@ -1098,12 +1181,22 @@ class TestSharedSeam:
         assert jnp.shape(wrong - observed) == jnp.shape(observed), "must broadcast"
         with pytest.raises(ParameterSpaceError, match="this plan's model predicts"):
             plan.estimate(
-                pipeline, state, wrong, noise=NOISE, max_iter=2, tol=None,
+                pipeline,
+                state,
+                wrong,
+                noise=NOISE,
+                max_iter=2,
+                tol=None,
                 check_identifiability=False,
             )
         with pytest.raises(ParameterSpaceError, match="this plan's model predicts"):
             plan.sample(
-                pipeline, state, wrong, noise=NOISE, key=jax.random.key(0), n_sweeps=8,
+                pipeline,
+                state,
+                wrong,
+                noise=NOISE,
+                key=jax.random.key(0),
+                n_sweeps=8,
                 check_identifiability=False,
             )
 
@@ -1116,12 +1209,22 @@ class TestSharedSeam:
         plan = SamplingPlan(space, Block("gain", "t_coeff"))
         with pytest.raises(ParameterSpaceError, match="not affine in them JOINTLY"):
             plan.estimate(
-                pipeline, state, observed, noise=NOISE, max_iter=2, tol=None,
+                pipeline,
+                state,
+                observed,
+                noise=NOISE,
+                max_iter=2,
+                tol=None,
                 solve_guard=None,
             )
         with pytest.raises(ParameterSpaceError, match="not affine in them JOINTLY"):
             plan.sample(
-                pipeline, state, observed, noise=NOISE, key=jax.random.key(0), n_sweeps=8,
+                pipeline,
+                state,
+                observed,
+                noise=NOISE,
+                key=jax.random.key(0),
+                n_sweeps=8,
                 solve_guard=None,
             )
 
@@ -1138,9 +1241,7 @@ class TestSharedSeam:
         space, pipeline, observed = basis_setup
         plan = SamplingPlan(space, Block("gain"), Block("t_coeff"))
         with pytest.raises(TypeError):
-            plan.estimate(
-                pipeline, state, observed, noise=NOISE, key=jax.random.key(0)
-            )
+            plan.estimate(pipeline, state, observed, noise=NOISE, key=jax.random.key(0))
 
     def test_a_bare_sigma_and_a_noise_model_are_the_same_run(self, basis_setup, state):
         space, pipeline, observed = basis_setup
@@ -1148,15 +1249,16 @@ class TestSharedSeam:
         common = {"max_iter": 6, "tol": None, "solve_guard": None}
         bare = plan.estimate(pipeline, state, observed, noise=NOISE, **common)
         wrapped = plan.estimate(
-            pipeline, state, observed,
-            noise=HomoscedasticNoise(jnp.asarray(NOISE)), **common,
+            pipeline,
+            state,
+            observed,
+            noise=HomoscedasticNoise(jnp.asarray(NOISE)),
+            **common,
         )
         assert jnp.allclose(bare.values["gain"], wrapped.values["gain"])
         assert bare.diagnostics.noise_depends_on_prediction is False
 
-    def test_a_flagged_sample_contributes_nothing_to_the_JOINT_chi2(
-        self, basis_setup, state
-    ):
+    def test_a_flagged_sample_contributes_nothing_to_the_JOINT_chi2(self, basis_setup, state):
         """A flagged sample was not observed, so it must inform nothing — and it
         arrives at the monitor as an infinite sigma, where the naive residual is
         ``0 * inf`` and the whole convergence trace becomes NaN.
@@ -1171,19 +1273,23 @@ class TestSharedSeam:
         noise = FlaggedNoise(HomoscedasticNoise(jnp.asarray(NOISE)), flags)
         corrupted = observed.at[2, 5].set(1e9).at[4, 1].set(-1e9)
         common = {
-            "noise": noise, "max_iter": 4, "tol": None, "solve_guard": None,
+            "noise": noise,
+            "max_iter": 4,
+            "tol": None,
+            "solve_guard": None,
             "check_identifiability": False,
         }
 
-        clean = plan_estimate = SamplingPlan(
-            space, Block("gain"), Block("t_coeff")
-        ).estimate(pipeline, state, observed, **common)
+        clean = plan_estimate = SamplingPlan(space, Block("gain"), Block("t_coeff")).estimate(
+            pipeline, state, observed, **common
+        )
         dirty = SamplingPlan(space, Block("gain"), Block("t_coeff")).estimate(
             pipeline, state, corrupted, **common
         )
         assert np.all(np.isfinite(clean.diagnostics.chi2)), clean.diagnostics.chi2
         assert np.array_equal(plan_estimate.diagnostics.chi2, dirty.diagnostics.chi2), (
-            clean.diagnostics.chi2, dirty.diagnostics.chi2
+            clean.diagnostics.chi2,
+            dirty.diagnostics.chi2,
         )
         # ... and the run really did depend on the unflagged data, so the
         # comparison above is not two runs that both ignored everything.
@@ -1193,18 +1299,20 @@ class TestSharedSeam:
         )
         assert not np.array_equal(clean.diagnostics.chi2, moved.diagnostics.chi2)
 
-    def test_a_prediction_dependent_noise_model_is_recorded_as_such(
-        self, basis_setup, state
-    ):
+    def test_a_prediction_dependent_noise_model_is_recorded_as_such(self, basis_setup, state):
         """The sweep IS the reweighting for a RadiometerNoise, so the plan does
         not nest iterative_gls — and the statistical consequence of freezing
         sigma inside each solve is recorded rather than hidden."""
         space, pipeline, observed = basis_setup
         plan = SamplingPlan(space, Block("gain"), Block("t_coeff"))
         est = plan.estimate(
-            pipeline, state, observed,
+            pipeline,
+            state,
+            observed,
             noise=RadiometerNoise(channel_width=1e6, integration_time=1.0, floor=1.0),
-            max_iter=6, tol=None, solve_guard=None,
+            max_iter=6,
+            tol=None,
+            solve_guard=None,
         )
         assert est.diagnostics.noise_depends_on_prediction is True
 
@@ -1217,7 +1325,12 @@ class TestResults:
         space, pipeline, observed = basis_setup
         plan = SamplingPlan(space, Block("gain"), Block("t_coeff"))
         est = plan.estimate(
-            pipeline, state, observed, noise=NOISE, max_iter=4, tol=None,
+            pipeline,
+            state,
+            observed,
+            noise=NOISE,
+            max_iter=4,
+            tol=None,
             solve_guard=None,
         )
         assert isinstance(est, Estimate)
@@ -1225,14 +1338,18 @@ class TestResults:
         assert est.values["gain"].shape == (N_TIME,)
         assert est.values["t_coeff"].shape == (3, 4)
 
-    def test_draws_are_stacked_per_latent_with_warmup_already_gone(
-        self, basis_setup, state
-    ):
+    def test_draws_are_stacked_per_latent_with_warmup_already_gone(self, basis_setup, state):
         space, pipeline, observed = basis_setup
         plan = SamplingPlan(space, Block("gain"), Block("t_coeff"))
         draws = plan.sample(
-            pipeline, state, observed, noise=NOISE, key=jax.random.key(1),
-            n_sweeps=14, warmup=4, solve_guard=None,
+            pipeline,
+            state,
+            observed,
+            noise=NOISE,
+            key=jax.random.key(1),
+            n_sweeps=14,
+            warmup=4,
+            solve_guard=None,
         )
         assert isinstance(draws, Draws)
         assert draws.names == ("gain", "t_coeff")
@@ -1245,26 +1362,33 @@ class TestResults:
         # that carried the wrong latent's draws cannot pass here
         assert draws.samples["gain"].size != draws.samples["t_coeff"].size
 
-    def test_both_results_expose_the_same_diagnostics_protocol(
-        self, basis_setup, state
-    ):
+    def test_both_results_expose_the_same_diagnostics_protocol(self, basis_setup, state):
         """Two types, one currency. A caller can log or assert on a run without
         knowing which exit produced it."""
         space, pipeline, observed = basis_setup
         plan = SamplingPlan(space, Block("gain"), Block("t_coeff"))
         est = plan.estimate(
-            pipeline, state, observed, noise=NOISE, max_iter=4, tol=None,
+            pipeline,
+            state,
+            observed,
+            noise=NOISE,
+            max_iter=4,
+            tol=None,
             solve_guard=None,
         )
         draws = plan.sample(
-            pipeline, state, observed, noise=NOISE, key=jax.random.key(2),
-            n_sweeps=10, warmup=4, solve_guard=None,
+            pipeline,
+            state,
+            observed,
+            noise=NOISE,
+            key=jax.random.key(2),
+            n_sweeps=10,
+            warmup=4,
+            solve_guard=None,
         )
         for result in (est, draws):
             assert set(result.names) == {"gain", "t_coeff"}
-            assert result.diagnostics.engines == {
-                ("gain",): CONJUGATE, ("t_coeff",): CONJUGATE
-            }
+            assert result.diagnostics.engines == {("gain",): CONJUGATE, ("t_coeff",): CONJUGATE}
             assert set(result.diagnostics.block_residuals) == {("gain",), ("t_coeff",)}
             assert result.diagnostics.chi2.ndim == 1
 
@@ -1348,8 +1472,14 @@ class TestSplitRhat:
         space, pipeline, observed = basis_setup
         plan = SamplingPlan(space, Block("gain"), Block("t_coeff"))
         draws = plan.sample(
-            pipeline, state, observed, noise=NOISE, key=jax.random.key(5),
-            n_sweeps=2 * MIN_DRAWS, warmup=MIN_DRAWS, solve_guard=None,
+            pipeline,
+            state,
+            observed,
+            noise=NOISE,
+            key=jax.random.key(5),
+            n_sweeps=2 * MIN_DRAWS,
+            warmup=MIN_DRAWS,
+            solve_guard=None,
         )
         assert draws.diagnostics.chi2[MIN_DRAWS:].size == MIN_DRAWS
         assert np.isfinite(draws.diagnostics.rhat)
@@ -1373,8 +1503,14 @@ class TestSplitRhat:
         space, pipeline, observed = basis_setup
         plan = SamplingPlan(space, Block("gain"), Block("t_coeff"))
         draws = plan.sample(
-            pipeline, state, observed, noise=NOISE, key=jax.random.key(3),
-            n_sweeps=12, warmup=4, solve_guard=None,
+            pipeline,
+            state,
+            observed,
+            noise=NOISE,
+            key=jax.random.key(3),
+            n_sweeps=12,
+            warmup=4,
+            solve_guard=None,
         )
         expected = split_rhat(draws.diagnostics.chi2[4:])
         assert draws.diagnostics.rhat == pytest.approx(expected)
@@ -1384,8 +1520,11 @@ class TestSplitRhat:
         space, pipeline, observed = basis_setup
         plan = SamplingPlan(space, Block("gain"), Block("t_coeff"))
         common = {
-            "noise": NOISE, "key": jax.random.key(4), "n_sweeps": 12,
-            "warmup": 4, "solve_guard": None,
+            "noise": NOISE,
+            "key": jax.random.key(4),
+            "n_sweeps": 12,
+            "warmup": 4,
+            "solve_guard": None,
         }
         strict = plan.sample(pipeline, state, observed, rhat_max=1.0, **common)
         loose = plan.sample(pipeline, state, observed, rhat_max=1e6, **common)
@@ -1419,8 +1558,12 @@ class TestGradientEngine:
         space, pipeline, observed = line_setup
         forward, values0 = space.forward_fn(pipeline, STATE)
         cond = Conditioning(
-            space=space, pipeline=pipeline, state_template=STATE, observed=observed,
-            noise=HomoscedasticNoise(jnp.asarray(0.5)), forward=forward,
+            space=space,
+            pipeline=pipeline,
+            state_template=STATE,
+            observed=observed,
+            noise=HomoscedasticNoise(jnp.asarray(0.5)),
+            forward=forward,
         )
         free = ParameterSpace(
             latents=[
@@ -1430,8 +1573,12 @@ class TestGradientEngine:
             bindings=list(space.bindings),
         )
         bare = Conditioning(
-            space=free, pipeline=pipeline, state_template=STATE, observed=observed,
-            noise=HomoscedasticNoise(jnp.asarray(0.5)), forward=forward,
+            space=free,
+            pipeline=pipeline,
+            state_template=STATE,
+            observed=observed,
+            noise=HomoscedasticNoise(jnp.asarray(0.5)),
+            forward=forward,
         )
 
         probe = {"centre": jnp.array(0.42)}
@@ -1460,22 +1607,23 @@ class TestGradientEngine:
         block = Block("centre") if steps is None else Block("centre", steps=steps)
         plan = SamplingPlan(space, Block("amp"), block)
         est = plan.estimate(
-            pipeline, state, observed, noise=0.05, max_iter=60, tol=1e-6,
+            pipeline,
+            state,
+            observed,
+            noise=0.05,
+            max_iter=60,
+            tol=1e-6,
             solve_guard=None,
         )
         assert plan.engines == {("amp",): CONJUGATE, ("centre",): GRADIENT}
         exact, precision = _line_map(observed, sigma=0.05)
-        got = np.concatenate(
-            [np.ravel(np.asarray(est.values[name], np.float64)) for name in exact]
-        )
+        got = np.concatenate([np.ravel(np.asarray(est.values[name], np.float64)) for name in exact])
         residual = got - np.concatenate([np.ravel(value) for value in exact.values()])
         distance = float(np.sqrt(residual @ precision @ residual))
         assert distance < 0.1, (distance, est.values, exact)
         # the amps are all different from each other, so a solve that returned
         # one number broadcast across the block would fail here
-        assert jnp.allclose(est.values["amp"], LINE_TRUTH["amp"], rtol=2e-2), (
-            est.values["amp"]
-        )
+        assert jnp.allclose(est.values["amp"], LINE_TRUTH["amp"], rtol=2e-2), est.values["amp"]
 
     def test_a_mixed_plan_samples_both_blocks(self, line_setup, state):
         """NUTS-within-Gibbs: the conjugate block is drawn exactly and the
@@ -1484,8 +1632,14 @@ class TestGradientEngine:
         space, pipeline, observed = line_setup
         plan = SamplingPlan(space, Block("amp"), Block("centre", steps=8))
         draws = plan.sample(
-            pipeline, state, observed, noise=0.5, key=jax.random.key(0),
-            n_sweeps=12, warmup=6, solve_guard=None,
+            pipeline,
+            state,
+            observed,
+            noise=0.5,
+            key=jax.random.key(0),
+            n_sweeps=12,
+            warmup=6,
+            solve_guard=None,
         )
         assert draws.n_draw == 6
         assert draws.samples["centre"].shape == (6,)
@@ -1495,9 +1649,7 @@ class TestGradientEngine:
         # starting point would leave every draw identical
         assert float(jnp.std(draws.samples["centre"])) > 0.0
 
-    def test_the_NUTS_tuning_is_frozen_once_warmup_ends(
-        self, line_setup, state, monkeypatch
-    ):
+    def test_the_NUTS_tuning_is_frozen_once_warmup_ends(self, line_setup, state, monkeypatch):
         """A kernel that keeps adapting from the states it visits is no longer a
         valid transition, so every sweep whose draws are KEPT must run frozen.
         Asserted on the argument itself rather than on an outcome: adaptive and
@@ -1518,14 +1670,18 @@ class TestGradientEngine:
 
         monkeypatch.setattr(plan_module, "gradient_draw", spy)
         plan.sample(
-            pipeline, state, observed, noise=0.5, key=jax.random.key(0),
-            n_sweeps=9, warmup=3, solve_guard=None,
+            pipeline,
+            state,
+            observed,
+            noise=0.5,
+            key=jax.random.key(0),
+            n_sweeps=9,
+            warmup=3,
+            solve_guard=None,
         )
         assert seen == [True, True, True, False, False, False, False, False, False], seen
 
-    def test_the_gradient_block_uses_its_declared_step_count(
-        self, line_setup, state, monkeypatch
-    ):
+    def test_the_gradient_block_uses_its_declared_step_count(self, line_setup, state, monkeypatch):
         """``steps`` is a statistical assumption for a draw and a budget of
         Adam steps for an estimate; either way it must reach the engine.
 
@@ -1540,7 +1696,10 @@ class TestGradientEngine:
 
         space, pipeline, observed = line_setup
         common = {
-            "noise": 0.05, "max_iter": 3, "tol": None, "solve_guard": None,
+            "noise": 0.05,
+            "max_iter": 3,
+            "tol": None,
+            "solve_guard": None,
             "check_identifiability": False,
         }
         seen: list[int] = []
@@ -1556,9 +1715,9 @@ class TestGradientEngine:
         )
         assert set(seen) == {1}, seen
         seen.clear()
-        generous = SamplingPlan(
-            space, Block("amp"), Block("centre", steps=400)
-        ).estimate(pipeline, state, observed, **common)
+        generous = SamplingPlan(space, Block("amp"), Block("centre", steps=400)).estimate(
+            pipeline, state, observed, **common
+        )
         assert set(seen) == {400}, seen
         assert float(stingy.values["centre"]) == pytest.approx(
             float(generous.values["centre"]), rel=1e-6

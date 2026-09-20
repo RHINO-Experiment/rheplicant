@@ -82,8 +82,13 @@ def graph():
             "t3": NodeSpec(T),
         },
         [
-            ("a", "j1"), ("b", "j1"), ("j1", "t1"),
-            ("t1", "j2"), ("c", "j2"), ("j2", "t2"), ("t2", "t3"),
+            ("a", "j1"),
+            ("b", "j1"),
+            ("j1", "t1"),
+            ("t1", "j2"),
+            ("c", "j2"),
+            ("j2", "t2"),
+            ("t2", "t3"),
         ],
     )
 
@@ -96,21 +101,18 @@ class TestTemplateValidation:
     def test_two_sinks_rejected(self):
         with pytest.raises(AssemblyError, match="sink"):
             SignalGraph(
-                "bad", {"a": NodeSpec(S), "x": NodeSpec(T), "y": NodeSpec(T)},
+                "bad",
+                {"a": NodeSpec(S), "x": NodeSpec(T), "y": NodeSpec(T)},
                 [("a", "x"), ("a", "y")],
             )
 
     def test_junction_degree_enforced(self):
         with pytest.raises(AssemblyError, match="in-degree"):
-            SignalGraph(
-                "bad", {"a": NodeSpec(S), "j": NodeSpec(J)}, [("a", "j")]
-            )
+            SignalGraph("bad", {"a": NodeSpec(S), "j": NodeSpec(J)}, [("a", "j")])
 
     def test_source_indegree_enforced(self):
         with pytest.raises(AssemblyError, match="in-degree"):
-            SignalGraph(
-                "bad", {"b": NodeSpec(S), "a": NodeSpec(S)}, [("b", "a")]
-            )
+            SignalGraph("bad", {"b": NodeSpec(S), "a": NodeSpec(S)}, [("b", "a")])
 
     def test_unknown_edge_node(self):
         with pytest.raises(AssemblyError, match="unknown"):
@@ -193,8 +195,10 @@ class TestFolding:
     def test_full_graph(self, graph):
         asm = assemble(
             graph,
-            SrcA(value=jnp.array(1.0)), SrcB(value=jnp.array(2.0)),
-            MulT1(factor=jnp.array(10.0)), SrcC(value=jnp.array(4.0)),
+            SrcA(value=jnp.array(1.0)),
+            SrcB(value=jnp.array(2.0)),
+            MulT1(factor=jnp.array(10.0)),
+            SrcC(value=jnp.array(4.0)),
             MulT2(factor=jnp.array(0.5)),
         )
         # ((1+2)*10 + 4) * 0.5 = 17
@@ -215,8 +219,7 @@ class TestCallerDataGuards:
 
 class TestDeterminism:
     def test_argument_order_is_irrelevant(self, graph):
-        ops = [SrcA(value=jnp.array(1.0)), SrcB(value=jnp.array(2.0)),
-               MulT2(factor=jnp.array(3.0))]
+        ops = [SrcA(value=jnp.array(1.0)), SrcB(value=jnp.array(2.0)), MulT2(factor=jnp.array(3.0))]
         asm1 = assemble(graph, *ops)
         asm2 = assemble(graph, *reversed(ops))
         assert eqx.tree_equal(asm1, asm2)
@@ -231,7 +234,9 @@ class TestDeterminism:
 class TestAssemblyErgonomics:
     def test_node_id_access(self, graph):
         asm = assemble(
-            graph, SrcA(value=jnp.array(1.0)), SrcC(value=jnp.array(2.0)),
+            graph,
+            SrcA(value=jnp.array(1.0)),
+            SrcC(value=jnp.array(2.0)),
             MulT2(factor=jnp.array(3.0)),
         )
         assert asm["a"].value == 1.0
@@ -293,7 +298,8 @@ class TestAssemblyErgonomics:
     def test_node_lookup_prefers_outer_fold_level(self, graph):
         """Regression: user-internal stage names must not shadow graph nodes."""
         inner = Pipeline(
-            Mul(factor=jnp.array(1.0)), Mul(factor=jnp.array(2.0)),
+            Mul(factor=jnp.array(1.0)),
+            Mul(factor=jnp.array(2.0)),
             names=("prep", "t2"),  # deliberately collides with graph node t2
         )
         asm = assemble(
@@ -330,12 +336,14 @@ class TestCompositionSymbols:
         return SignalGraph(
             "sum-and-switch",
             {
-                "p": NodeSpec(S), "q": NodeSpec(S), "sum": NodeSpec(J),
-                "load": NodeSpec(S), "switch": NodeSpec("selector"),
+                "p": NodeSpec(S),
+                "q": NodeSpec(S),
+                "sum": NodeSpec(J),
+                "load": NodeSpec(S),
+                "switch": NodeSpec("selector"),
                 "out": NodeSpec(T),
             },
-            [("p", "sum"), ("q", "sum"), ("sum", "switch"), ("load", "switch"),
-             ("switch", "out")],
+            [("p", "sum"), ("q", "sum"), ("sum", "switch"), ("load", "switch"), ("switch", "out")],
         )
 
     def test_mermaid_gives_them_different_shapes(self, both):
@@ -457,8 +465,13 @@ class TestRegionCoverage:
         """Regression: a region may not hide a signal that forks out of it."""
         forked = SignalGraph(
             "forked",
-            {"a": NodeSpec(S), "x": NodeSpec(T), "y": NodeSpec(T),
-             "z": NodeSpec(T), "j": NodeSpec(J)},
+            {
+                "a": NodeSpec(S),
+                "x": NodeSpec(T),
+                "y": NodeSpec(T),
+                "z": NodeSpec(T),
+                "j": NodeSpec(J),
+            },
             [("a", "x"), ("x", "y"), ("x", "z"), ("y", "j"), ("z", "j")],
         )
         with pytest.raises(AssemblyError, match="not closed"):
@@ -468,8 +481,13 @@ class TestRegionCoverage:
         """Regression: the culprit in the error is the region's FIRST node."""
         g = SignalGraph(
             "chain",
-            {"p": NodeSpec(T), "q": NodeSpec(T), "c": NodeSpec(S),
-             "j": NodeSpec(J), "t": NodeSpec(T)},
+            {
+                "p": NodeSpec(T),
+                "q": NodeSpec(T),
+                "c": NodeSpec(S),
+                "j": NodeSpec(J),
+                "t": NodeSpec(T),
+            },
             [("p", "q"), ("q", "j"), ("c", "j"), ("j", "t")],
         )
         with pytest.raises(AssemblyError, match="'p'"):
@@ -496,8 +514,12 @@ class TestManyNodes:
     def many_graph(self):
         return SignalGraph(
             "many-graph",
-            {"a": NodeSpec(S, many=True), "b": NodeSpec(S), "j": NodeSpec(J),
-             "t": NodeSpec(T, many=True)},
+            {
+                "a": NodeSpec(S, many=True),
+                "b": NodeSpec(S),
+                "j": NodeSpec(J),
+                "t": NodeSpec(T, many=True),
+            },
             [("a", "j"), ("b", "j"), ("j", "t")],
         )
 
@@ -534,8 +556,12 @@ class TestManyNodeAddressing:
     def many_graph(self):
         return SignalGraph(
             "many-addressing",
-            {"a": NodeSpec(S, many=True), "b": NodeSpec(S), "j": NodeSpec(J),
-             "t": NodeSpec(T, many=True)},
+            {
+                "a": NodeSpec(S, many=True),
+                "b": NodeSpec(S),
+                "j": NodeSpec(J),
+                "t": NodeSpec(T, many=True),
+            },
             [("a", "j"), ("b", "j"), ("j", "t")],
         )
 
@@ -592,8 +618,11 @@ class TestManyNodeAddressing:
 
     def test_multi_instance_forward_output_is_unchanged(self, many_graph):
         """Renaming instances is a naming change only: the physics is bitwise."""
-        ops = [At("a", Src(value=jnp.array(1.0))), At("a", Src(value=jnp.array(2.0))),
-               At("b", Src(value=jnp.array(4.0)))]
+        ops = [
+            At("a", Src(value=jnp.array(1.0))),
+            At("a", Src(value=jnp.array(2.0))),
+            At("b", Src(value=jnp.array(4.0))),
+        ]
         asm = assemble(many_graph, *ops)
         hand = SumOperator(
             SumOperator(Src(value=jnp.array(1.0)), Src(value=jnp.array(2.0))),
@@ -641,8 +670,7 @@ def many_source_graph():
     """``a`` is a ``many`` source reaching the sink by exactly ONE path."""
     return SignalGraph(
         "many-source",
-        {"a": NodeSpec(S, many=True), "b": NodeSpec(S), "j": NodeSpec(J),
-         "t": NodeSpec(T)},
+        {"a": NodeSpec(S, many=True), "b": NodeSpec(S), "j": NodeSpec(J), "t": NodeSpec(T)},
         [("a", "j"), ("b", "j"), ("j", "t")],
     )
 
@@ -909,13 +937,9 @@ class TestReprSurfacesFanOut:
         character of it.
         """
         asm = assemble(graph, SrcA(value=jnp.array(10.0)), SrcB(value=jnp.array(20.0)))
-        assert repr(asm) == (
-            "Assembly(graph='test-graph', lit=['a', 'b'], skipped-as-identity=[])"
-        )
+        assert repr(asm) == ("Assembly(graph='test-graph', lit=['a', 'b'], skipped-as-identity=[])")
 
-    def test_the_non_empty_repr_is_the_empty_one_plus_one_field(
-        self, fork_rejoin_graph
-    ):
+    def test_the_non_empty_repr_is_the_empty_one_plus_one_field(self, fork_rejoin_graph):
         """The new field is appended, so nothing a reader already parses moves."""
         asm = assemble(fork_rejoin_graph, At("x", Src(value=jnp.array(10.0))))
         assert repr(asm) == (

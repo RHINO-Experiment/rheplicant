@@ -48,9 +48,7 @@ def _concrete_operators() -> dict[str, type]:
     operators; the prose CHECKS below cover every capability.
     """
     return {
-        name: cls
-        for name, cls in capability_classes().items()
-        if issubclass(cls, AbstractOperator)
+        name: cls for name, cls in capability_classes().items() if issubclass(cls, AbstractOperator)
     }
 
 
@@ -75,8 +73,7 @@ def _concrete_operators() -> dict[str, type]:
 #: so the registry said MAINTAINED while this census said placeholder and
 #: nothing compared them. Two criteria, two answers, no failure.
 PLACEHOLDER = frozenset(
-    name for name, cls in _concrete_operators().items()
-    if cls.maturity is Maturity.PLACEHOLDER
+    name for name, cls in _concrete_operators().items() if cls.maturity is Maturity.PLACEHOLDER
 )
 REAL = frozenset(_concrete_operators()) - PLACEHOLDER
 
@@ -185,15 +182,18 @@ class TestProseAgrees:
         root = Path(__file__).resolve().parents[2]
         text = (root / relative_path).read_text(encoding="utf-8")
         words = {
-            10: "ten", 11: "eleven", 12: "twelve", 13: "thirteen", 14: "fourteen",
-            15: "fifteen", 16: "sixteen", 17: "seventeen", 18: "eighteen",
+            10: "ten",
+            11: "eleven",
+            12: "twelve",
+            13: "thirteen",
+            14: "fourteen",
+            15: "fifteen",
+            16: "sixteen",
+            17: "seventeen",
+            18: "eighteen",
         }
-        assert len(REAL) in words, (
-            f"{len(REAL)} real operators -- extend the number words above"
-        )
-        stated = re.search(
-            r"[Tt]he other[\s\n]+([a-z]+)", text
-        )
+        assert len(REAL) in words, f"{len(REAL)} real operators -- extend the number words above"
+        stated = re.search(r"[Tt]he other[\s\n]+([a-z]+)", text)
         if stated is None:
             pytest.skip(f"{relative_path} does not state the complement")
         assert stated.group(1) == words[len(REAL)], (

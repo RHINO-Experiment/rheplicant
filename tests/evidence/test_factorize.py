@@ -29,8 +29,7 @@ def _space(*latents):
     return ParameterSpace(
         latents=latents,
         bindings=tuple(
-            Bind(latent.name, into=lambda p, n=latent.name: getattr(p, n))
-            for latent in latents
+            Bind(latent.name, into=lambda p, n=latent.name: getattr(p, n)) for latent in latents
         ),
     )
 

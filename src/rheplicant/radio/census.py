@@ -75,6 +75,4 @@ def capabilities() -> dict[str, Maturity]:
 
 def at_level(level: Maturity) -> frozenset[str]:
     """The names declared at one level."""
-    return frozenset(
-        name for name, declared in capabilities().items() if declared is level
-    )
+    return frozenset(name for name, declared in capabilities().items() if declared is level)

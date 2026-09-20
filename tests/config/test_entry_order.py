@@ -21,9 +21,7 @@ def test_bootstrap_import_does_not_import_the_main_package_or_jax():
     assert probe.returncode == 0, probe.stderr
 
 
-def test_plugin_fact_is_recorded_before_post_import_runtime_verification(
-    tmp_path, monkeypatch
-):
+def test_plugin_fact_is_recorded_before_post_import_runtime_verification(tmp_path, monkeypatch):
     import _rheplicant_bootstrap.entry as entry
     import _rheplicant_bootstrap.execution_environment as environment
 

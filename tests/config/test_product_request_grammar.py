@@ -42,8 +42,7 @@ DEFAULT_FORMATS = {
 def test_all_product_defaults_are_typed_and_keep_document_order():
     parsed = parse_output_grammar({"write": dict.fromkeys(DEFAULT_FORMATS, True)})
     assert parsed.products == tuple(
-        ProductRequest(name, format_, (), ())
-        for name, format_ in DEFAULT_FORMATS.items()
+        ProductRequest(name, format_, (), ()) for name, format_ in DEFAULT_FORMATS.items()
     )
 
 

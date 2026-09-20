@@ -125,14 +125,13 @@ def test_shared_stable_reader_uses_its_source_name_in_limit_refusals(tmp_path):
 
 def test_shared_reader_normalizes_an_invalid_pathlike_with_semantic_name():
     """Catches a raw os.fspath TypeError escaping the neutral source boundary."""
+
     class InvalidPath:
         def __fspath__(self):
             return 42
 
     with pytest.raises(ConfigError, match="preset:fixture: cannot read source"):
-        read_stable_regular_bytes(
-            InvalidPath(), maximum=8, source_name="preset:fixture"
-        )
+        read_stable_regular_bytes(InvalidPath(), maximum=8, source_name="preset:fixture")
 
 
 def test_shared_reader_uses_a_neutral_label_without_repr_for_invalid_pathlike():
@@ -198,9 +197,7 @@ class _HostileMaximum(int):
     [True, 8.0],
     ids=("bool", "float"),
 )
-def test_shared_reader_requires_an_exact_nonboolean_integer_limit(
-    tmp_path, maximum
-):
+def test_shared_reader_requires_an_exact_nonboolean_integer_limit(tmp_path, maximum):
     class CountedPath:
         calls = 0
 
@@ -227,9 +224,7 @@ def test_shared_reader_canonicalizes_path_and_semantic_label_before_use(tmp_path
     with pytest.raises(ConfigError, match=r"payload\.yaml: YAML byte count 1"):
         read_stable_regular_bytes(_HostileSourceText(str(path)), maximum=0)
     with pytest.raises(ConfigError, match=r"semantic: YAML byte count 1"):
-        read_stable_regular_bytes(
-            path, maximum=0, source_name=_HostileSourceText("semantic")
-        )
+        read_stable_regular_bytes(path, maximum=0, source_name=_HostileSourceText("semantic"))
 
 
 def test_shared_reader_calls_pathlike_once_then_canonicalizes_its_text(tmp_path):
@@ -251,9 +246,7 @@ def test_read_source_canonicalizes_path_and_base_dir_text_subclasses(tmp_path):
     path = tmp_path / "payload.yaml"
     path.write_bytes(b"{}")
 
-    source = read_source(
-        _HostileSourceText(str(path)), base_dir=None, stdin=None
-    )
+    source = read_source(_HostileSourceText(str(path)), base_dir=None, stdin=None)
     stdin_source = read_source(
         "-",
         base_dir=_HostileSourceText(str(tmp_path)),
@@ -543,24 +536,18 @@ def test_stable_reader_lifecycle_callback_failures_are_static_or_propagate(
 
     if failure == "base":
         with pytest.raises(BaseException) as caught:
-            read_stable_regular_bytes(
-                path, maximum=8, source_name="preset:fixture"
-            )
+            read_stable_regular_bytes(path, maximum=8, source_name="preset:fixture")
         assert caught.value is marker
         return
 
     with pytest.raises(ConfigError) as caught:
-        read_stable_regular_bytes(
-            path, maximum=8, source_name="preset:fixture"
-        )
+        read_stable_regular_bytes(path, maximum=8, source_name="preset:fixture")
 
     assert id(caught.value) != id(marker)
     assert str(caught.value) == "preset:fixture: cannot read source."
 
 
-def test_stable_reader_does_not_truth_test_a_normal_exit_result(
-    tmp_path, monkeypatch
-):
+def test_stable_reader_does_not_truth_test_a_normal_exit_result(tmp_path, monkeypatch):
     path = tmp_path / "normal-exit.yaml"
     path.write_bytes(b"{}")
     original_fdopen = os.fdopen
@@ -590,18 +577,14 @@ def test_stable_reader_does_not_truth_test_a_normal_exit_result(
     monkeypatch.setattr(
         source_module.os,
         "fdopen",
-        lambda *args, **kwargs: WrappedFile(
-            original_fdopen(*args, **kwargs)
-        ),
+        lambda *args, **kwargs: WrappedFile(original_fdopen(*args, **kwargs)),
     )
 
     assert read_stable_regular_bytes(path, maximum=8) == b"{}"
 
 
 @pytest.mark.parametrize("failure", ["config", "ordinary", "base"])
-def test_truthy_exit_never_suppresses_a_body_failure(
-    tmp_path, monkeypatch, failure
-):
+def test_truthy_exit_never_suppresses_a_body_failure(tmp_path, monkeypatch, failure):
     path = tmp_path / "truthy-exit.yaml"
     path.write_bytes(b"{}")
     original_fdopen = os.fdopen
@@ -654,23 +637,17 @@ def test_truthy_exit_never_suppresses_a_body_failure(
     monkeypatch.setattr(
         source_module.os,
         "fdopen",
-        lambda *args, **kwargs: TruthyExitFile(
-            original_fdopen(*args, **kwargs)
-        ),
+        lambda *args, **kwargs: TruthyExitFile(original_fdopen(*args, **kwargs)),
     )
     monkeypatch.setattr(source_module, "_lexical_lstat", counted_lstat)
 
     if failure == "base":
         with pytest.raises(BaseException) as caught:
-            read_stable_regular_bytes(
-                path, maximum=8, source_name="preset:fixture"
-            )
+            read_stable_regular_bytes(path, maximum=8, source_name="preset:fixture")
         assert caught.value is marker
     else:
         with pytest.raises(ConfigError) as caught:
-            read_stable_regular_bytes(
-                path, maximum=8, source_name="preset:fixture"
-            )
+            read_stable_regular_bytes(path, maximum=8, source_name="preset:fixture")
         assert id(caught.value) != id(marker)
         assert str(caught.value) == "preset:fixture: cannot read source."
 
@@ -703,9 +680,7 @@ def test_exit_failure_obeys_process_control_precedence(
         "ordinary": BodyError("body"),
         "base": BodyStop("body"),
     }[body_failure]
-    exit_marker = (
-        ExitError("exit") if exit_failure == "ordinary" else ExitStop("exit")
-    )
+    exit_marker = ExitError("exit") if exit_failure == "ordinary" else ExitStop("exit")
 
     class DualFailureFile:
         def __init__(self, wrapped):
@@ -724,34 +699,24 @@ def test_exit_failure_obeys_process_control_precedence(
     monkeypatch.setattr(
         source_module.os,
         "fdopen",
-        lambda *args, **kwargs: DualFailureFile(
-            original_fdopen(*args, **kwargs)
-        ),
+        lambda *args, **kwargs: DualFailureFile(original_fdopen(*args, **kwargs)),
     )
 
     if exit_failure == "base":
         with pytest.raises(BaseException) as caught:
-            read_stable_regular_bytes(
-                path, maximum=8, source_name="preset:fixture"
-            )
+            read_stable_regular_bytes(path, maximum=8, source_name="preset:fixture")
         assert caught.value is exit_marker
     elif body_failure == "base":
         with pytest.raises(BaseException) as caught:
-            read_stable_regular_bytes(
-                path, maximum=8, source_name="preset:fixture"
-            )
+            read_stable_regular_bytes(path, maximum=8, source_name="preset:fixture")
         assert caught.value is body_marker
     else:
         with pytest.raises(ConfigError) as caught:
-            read_stable_regular_bytes(
-                path, maximum=8, source_name="preset:fixture"
-            )
+            read_stable_regular_bytes(path, maximum=8, source_name="preset:fixture")
         assert str(caught.value) == "preset:fixture: cannot read source."
 
 
-def test_exit_failure_does_not_read_body_exception_class(
-    tmp_path, monkeypatch
-):
+def test_exit_failure_does_not_read_body_exception_class(tmp_path, monkeypatch):
     path = tmp_path / "hostile-body-class.yaml"
     path.write_bytes(b"{}")
     original_fdopen = os.fdopen
@@ -787,15 +752,11 @@ def test_exit_failure_does_not_read_body_exception_class(
     monkeypatch.setattr(
         source_module.os,
         "fdopen",
-        lambda *args, **kwargs: DualFailureFile(
-            original_fdopen(*args, **kwargs)
-        ),
+        lambda *args, **kwargs: DualFailureFile(original_fdopen(*args, **kwargs)),
     )
 
     with pytest.raises(BaseException) as caught:
-        read_stable_regular_bytes(
-            path, maximum=8, source_name="preset:fixture"
-        )
+        read_stable_regular_bytes(path, maximum=8, source_name="preset:fixture")
 
     if id(caught.value) != id(body_marker):
         pytest.fail("body process-control exception identity changed")
@@ -818,11 +779,7 @@ def test_stable_reader_retains_fd_ownership_across_context_failures(
     class StopNow(BaseException):
         pass
 
-    marker = (
-        MarkerError("private lifecycle marker")
-        if failure == "ordinary"
-        else StopNow("stop")
-    )
+    marker = MarkerError("private lifecycle marker") if failure == "ordinary" else StopNow("stop")
 
     class NonClosingFile:
         def __init__(self, fd):
@@ -852,15 +809,11 @@ def test_stable_reader_retains_fd_ownership_across_context_failures(
 
     if failure == "base":
         with pytest.raises(BaseException) as caught:
-            read_stable_regular_bytes(
-                path, maximum=8, source_name="preset:fixture"
-            )
+            read_stable_regular_bytes(path, maximum=8, source_name="preset:fixture")
         assert caught.value is marker
     else:
         with pytest.raises(ConfigError) as caught:
-            read_stable_regular_bytes(
-                path, maximum=8, source_name="preset:fixture"
-            )
+            read_stable_regular_bytes(path, maximum=8, source_name="preset:fixture")
         assert str(caught.value) == "preset:fixture: cannot read source."
 
     assert len(captured_fds) == 1
@@ -965,9 +918,7 @@ def test_source_overflow_is_refused_before_retaining_the_extra_byte(
         ("-", ".", io.BytesIO(b"{}")),
     ],
 )
-def test_source_boundary_normalizes_expected_stream_and_path_errors(
-    path_or_dash, base_dir, stdin
-):
+def test_source_boundary_normalizes_expected_stream_and_path_errors(path_or_dash, base_dir, stdin):
     """Catches raw path/base-dir/closed-stream exceptions leaking past ConfigError."""
     if stdin is not None and base_dir == ".":
         stdin.close()
@@ -977,6 +928,7 @@ def test_source_boundary_normalizes_expected_stream_and_path_errors(
 
 def test_source_normalizes_a_failing_stdin():
     """Catches injected standard-input OSErrors escaping the neutral boundary."""
+
     class FailingStdin:
         def read(self, size: int) -> bytes:
             raise OSError("read failed")
@@ -997,9 +949,7 @@ def _resized_stat(result: os.stat_result, size: int) -> os.stat_result:
     return os.stat_result(fields)
 
 
-def test_stable_reader_refuses_premature_eof_against_descriptor_size(
-    tmp_path, monkeypatch
-):
+def test_stable_reader_refuses_premature_eof_against_descriptor_size(tmp_path, monkeypatch):
     path = tmp_path / "truncated.yaml"
     path.write_bytes(b"abcdef")
     original_fdopen = os.fdopen
@@ -1029,14 +979,10 @@ def test_stable_reader_refuses_premature_eof_against_descriptor_size(
     )
 
     with pytest.raises(ConfigError, match="preset:fixture"):
-        read_stable_regular_bytes(
-            path, maximum=8, source_name="preset:fixture"
-        )
+        read_stable_regular_bytes(path, maximum=8, source_name="preset:fixture")
 
 
-def test_link_mutation_refusal_precedes_a_premature_eof_refusal(
-    tmp_path, monkeypatch
-):
+def test_link_mutation_refusal_precedes_a_premature_eof_refusal(tmp_path, monkeypatch):
     path = tmp_path / "truncated.yaml"
     path.write_bytes(b"abcdef")
     original_fdopen = os.fdopen
@@ -1078,14 +1024,10 @@ def test_link_mutation_refusal_precedes_a_premature_eof_refusal(
     monkeypatch.setattr(source_module, "_lexical_lstat", changed_lstat)
 
     with pytest.raises(ConfigError, match="source link changed"):
-        read_stable_regular_bytes(
-            path, maximum=8, source_name="preset:fixture"
-        )
+        read_stable_regular_bytes(path, maximum=8, source_name="preset:fixture")
 
 
-def test_target_mutation_refusal_precedes_a_premature_eof_refusal(
-    tmp_path, monkeypatch
-):
+def test_target_mutation_refusal_precedes_a_premature_eof_refusal(tmp_path, monkeypatch):
     path = tmp_path / "truncated.yaml"
     path.write_bytes(b"abcdef")
     original_fdopen = os.fdopen
@@ -1130,9 +1072,7 @@ def test_target_mutation_refusal_precedes_a_premature_eof_refusal(
     monkeypatch.setattr(source_module.os, "stat", matching_final_stat)
 
     with pytest.raises(ConfigError, match="source target changed"):
-        read_stable_regular_bytes(
-            path, maximum=8, source_name="preset:fixture"
-        )
+        read_stable_regular_bytes(path, maximum=8, source_name="preset:fixture")
 
 
 def test_changed_lexical_lstat_is_refused(tmp_path, monkeypatch):

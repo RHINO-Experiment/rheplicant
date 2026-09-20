@@ -97,16 +97,12 @@ def _numeric_tree(value: object) -> tuple[object, tuple[_Leaf, ...]]:
                 f"comparison product at {'.'.join(path) or '<root>'} is not numeric."
             ) from None
         if array.dtype.hasobject:
-            raise ConfigError(
-                f"comparison product at {'.'.join(path) or '<root>'} is not numeric."
-            )
+            raise ConfigError(f"comparison product at {'.'.join(path) or '<root>'} is not numeric.")
         kind = _dtype_class(array.dtype)
         if kind in ("float", "complex") and not np.all(np.isfinite(array)):
             raise ConfigError("comparison inputs must contain only finite numbers.")
         index = len(leaves)
-        leaves.append(
-            _Leaf("/".join(path) or "value", tuple(array.shape), kind, array)
-        )
+        leaves.append(_Leaf("/".join(path) or "value", tuple(array.shape), kind, array))
         return ("leaf", index)
 
     structure = walk(value, ())

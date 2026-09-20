@@ -167,8 +167,7 @@ class _HostGuard:
         if port is None:
             port = _DEFAULT_PORTS.get(scope.get("scheme", "http"))
         if _may_change_state(scope) and any(
-            _origin(origin) != (host, port)
-            for origin in _header_values(scope, b"origin")
+            _origin(origin) != (host, port) for origin in _header_values(scope, b"origin")
         ):
             await _refuse(scope, send, 403, "Cross-origin request refused.")
             return
@@ -187,9 +186,7 @@ def _may_change_state(scope) -> bool:
 
 def _header_values(scope, name: bytes) -> list[str]:
     return [
-        value.decode("latin-1")
-        for key, value in scope.get("headers", ())
-        if key.lower() == name
+        value.decode("latin-1") for key, value in scope.get("headers", ()) if key.lower() == name
     ]
 
 
@@ -261,9 +258,7 @@ def _resolves_to_loopback_only(name: str) -> bool:
         return False
 
 
-def _assert_bind(
-    host: str, *, allow_remote: bool, allowed_hosts: Sequence[str] = ()
-) -> None:
+def _assert_bind(host: str, *, allow_remote: bool, allowed_hosts: Sequence[str] = ()) -> None:
     """Refuse a bind the caller has not acknowledged or named hosts for.
 
     This is the one home for the bind rules. Both `serve` (the

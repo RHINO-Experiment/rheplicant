@@ -114,8 +114,7 @@ class BeamSpillOperator(AbstractOperator):
         return cls(sky_fraction=projector.horizon_fraction(), t_ground=t_ground)
 
     def __check_init__(self):
-        for name, value in (("sky_fraction", self.sky_fraction),
-                            ("t_ground", self.t_ground)):
+        for name, value in (("sky_fraction", self.sky_fraction), ("t_ground", self.t_ground)):
             if value.ndim > 1:
                 raise StateValidationError(
                     f"{name} must be scalar or (n_freq,), got ndim={value.ndim}."
@@ -147,6 +146,5 @@ class BeamSpillOperator(AbstractOperator):
         self._check_channels("sky_fraction", self.sky_fraction, n_freq)
         self._check_channels("t_ground", self.t_ground, n_freq)
         return state.with_data(
-            self.sky_fraction * state.data
-            + (1.0 - self.sky_fraction) * self.t_ground
+            self.sky_fraction * state.data + (1.0 - self.sky_fraction) * self.t_ground
         )

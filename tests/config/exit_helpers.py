@@ -67,51 +67,76 @@ MODEL_NOISE = {"type": "NoiseOperator", "sigma": {"value": SIGMA_K, "unit": "K"}
 # context or twin alongside these documents would have one `from ... import
 # MODEL` silently win over the other.
 CONJUGATE_MODEL = {
-    "global_signal": {"depth": {"value": 0.5, "unit": "K"},
-                      "centre": {"value": 75.0, "unit": "MHz"},
-                      "width": {"value": 5.0, "unit": "MHz"}},
+    "global_signal": {
+        "depth": {"value": 0.5, "unit": "K"},
+        "centre": {"value": 75.0, "unit": "MHz"},
+        "width": {"value": 5.0, "unit": "MHz"},
+    },
     "uniform_sky": {"amplitude": {"value": 10.0, "unit": "K"}},
     "gain": {"gain": {"value": 1.1, "unit": "dimensionless"}},
     "noise": MODEL_NOISE,
 }
 
-HOMOSCEDASTIC = {"kind": "homoscedastic",
-                 "sigma": {"value": SIGMA_K, "unit": "K"}}
-RADIOMETER = {"kind": "radiometer", "include_logdet": True,
-              "channel_width": {"value": CHANNEL_WIDTH_HZ, "unit": "Hz"},
-              "integration_time": {"value": INTEGRATION_TIME_S, "unit": "s"}}
-FROZEN = {"kind": "radiometer_frozen", "source": "observed",
-          "channel_width": {"value": CHANNEL_WIDTH_HZ, "unit": "Hz"},
-          "integration_time": {"value": INTEGRATION_TIME_S, "unit": "s"}}
+HOMOSCEDASTIC = {"kind": "homoscedastic", "sigma": {"value": SIGMA_K, "unit": "K"}}
+RADIOMETER = {
+    "kind": "radiometer",
+    "include_logdet": True,
+    "channel_width": {"value": CHANNEL_WIDTH_HZ, "unit": "Hz"},
+    "integration_time": {"value": INTEGRATION_TIME_S, "unit": "s"},
+}
+FROZEN = {
+    "kind": "radiometer_frozen",
+    "source": "observed",
+    "channel_width": {"value": CHANNEL_WIDTH_HZ, "unit": "Hz"},
+    "integration_time": {"value": INTEGRATION_TIME_S, "unit": "s"},
+}
 
 ONE_LATENT = {
-    "parameters": {"g": {"init": 1.0, "linear": True, "into": "gain.gain",
-                         "prior": {"normal": {"loc": 1.0, "scale": 0.5}}}},
+    "parameters": {
+        "g": {
+            "init": 1.0,
+            "linear": True,
+            "into": "gain.gain",
+            "prior": {"normal": {"loc": 1.0, "scale": 0.5}},
+        }
+    },
     "noise": HOMOSCEDASTIC,
     "observed": {"from": "simulation", "at": {"g": TRUTH_G}},
 }
 
 TWO_LATENTS = {
     "parameters": {
-        "d": {"init": 0.5, "linear": True, "into": "global_signal.depth",
-              "prior": {"normal": {"loc": 0.5, "scale": 1.0}}},
-        "a": {"init": 10.0, "linear": True, "into": "uniform_sky.amplitude",
-              "prior": {"normal": {"loc": 10.0, "scale": 5.0}}},
+        "d": {
+            "init": 0.5,
+            "linear": True,
+            "into": "global_signal.depth",
+            "prior": {"normal": {"loc": 0.5, "scale": 1.0}},
+        },
+        "a": {
+            "init": 10.0,
+            "linear": True,
+            "into": "uniform_sky.amplitude",
+            "prior": {"normal": {"loc": 10.0, "scale": 5.0}},
+        },
     },
     "noise": HOMOSCEDASTIC,
     "observed": {"from": "simulation", "at": {"d": TRUTH_D, "a": TRUTH_A}},
 }
 
 NONLINEAR_LATENT = {
-    "parameters": {"w": {"init": 5.0, "linear": True,
-                         "into": "global_signal.width",
-                         "prior": {"normal": {"loc": 5.0, "scale": 1.0}}}},
+    "parameters": {
+        "w": {
+            "init": 5.0,
+            "linear": True,
+            "into": "global_signal.width",
+            "prior": {"normal": {"loc": 5.0, "scale": 1.0}},
+        }
+    },
     "noise": HOMOSCEDASTIC,
     "observed": {"from": "simulation", "at": {"w": 6.0}},
 }
 
-NO_OBSERVED = {key: value for key, value in ONE_LATENT.items()
-               if key != "observed"}
+NO_OBSERVED = {key: value for key, value in ONE_LATENT.items() if key != "observed"}
 
 # The prior-FREE route, and the only one on which a compiled prior_std: can
 # reach a solve.  Every latent above declares a prior:, and linear.py's
@@ -167,14 +192,18 @@ def _repaired(block):
     repaired = dict(block)
     repaired.setdefault("twin", {"without": ["noise"]})
     observed = repaired.get("observed")
-    if (isinstance(observed, Mapping) and "twin" not in observed
-            and observed.get("from") == "simulation"):
+    if (
+        isinstance(observed, Mapping)
+        and "twin" not in observed
+        and observed.get("from") == "simulation"
+    ):
         repaired["observed"] = {**observed, "twin": "fit"}
     return repaired
 
 
-def conjugate_document(*runs, inference=None, parameters=None, noise=None,
-                       prior=None, at=None, seeds=None, model=None):
+def conjugate_document(
+    *runs, inference=None, parameters=None, noise=None, prior=None, at=None, seeds=None, model=None
+):
     """The shared document, with the runs a test wants declared on it.
 
     This is the ONE document builder the conjugate tests use, across both
@@ -206,20 +235,20 @@ def conjugate_document(*runs, inference=None, parameters=None, noise=None,
     names.
     """
     doc = synthetic_document()
-    doc["model"] = {key: dict(value)
-                    for key, value in (CONJUGATE_MODEL if model is None
-                                       else model).items()}
+    doc["model"] = {
+        key: dict(value) for key, value in (CONJUGATE_MODEL if model is None else model).items()
+    }
     block = dict(inference if inference is not None else ONE_LATENT)
     if parameters is not None:
         block["parameters"] = dict(parameters)
     if prior is not None:
-        block["parameters"] = {name: {**latent, "prior": prior}
-                               for name, latent in block["parameters"].items()}
+        block["parameters"] = {
+            name: {**latent, "prior": prior} for name, latent in block["parameters"].items()
+        }
     if noise is not None:
         block["noise"] = noise
     if at is not None:
-        block["observed"] = {**block.get("observed", {"from": "simulation"}),
-                             "at": at}
+        block["observed"] = {**block.get("observed", {"from": "simulation"}), "at": at}
     doc["inference"] = _repaired(block)
     if seeds is not None:
         doc["runtime"] = {**doc["runtime"], "seeds": dict(seeds)}
@@ -247,8 +276,7 @@ def spec(kind="conjugate.wiener", *, on="primary", **options):
     option today (measured: zero), so making it keyword-only takes nothing
     away.
     """
-    return RunSpec(name=kind, kind=kind, variant=None, on=on,
-                   expect="ok", options=dict(options))
+    return RunSpec(name=kind, kind=kind, variant=None, on=on, expect="ok", options=dict(options))
 
 
 # --- The two documents the RUNNABLE conjugate exits are measured on --------
@@ -264,19 +292,27 @@ def spec(kind="conjugate.wiener", *, on="primary", **options):
 #: the second additive latent CONJUGATE_MODEL exists to provide would change
 #: the conditioning of both documents below.
 WIENER_MODEL = {
-    "global_signal": {"depth": {"value": 0.5, "unit": "K"},
-                      "centre": {"value": 75.0, "unit": "MHz"},
-                      "width": {"value": 5.0, "unit": "MHz"}},
+    "global_signal": {
+        "depth": {"value": 0.5, "unit": "K"},
+        "centre": {"value": 75.0, "unit": "MHz"},
+        "width": {"value": 5.0, "unit": "MHz"},
+    },
     "gain": {"gain": {"value": 1.1, "unit": "dimensionless"}},
     "noise": MODEL_NOISE,
 }
 # gain.gain is the LAST node of the synthetic twin, so g scales the whole
 # prediction and the block is exactly affine in it.  scale 10.0 is a prior
 # wide enough that the posterior mean IS the truth, to 1.3e-06 (measured).
-GAIN_LATENT = {"init": 1.0, "linear": True, "into": "gain.gain",
-               "prior": {"normal": {"loc": 1.0, "scale": 10.0}}}
-GROUND_PICKUP = {"coupling": {"value": 0.01, "unit": "dimensionless"},
-                 "t_ground": {"value": 290.0, "unit": "K"}}
+GAIN_LATENT = {
+    "init": 1.0,
+    "linear": True,
+    "into": "gain.gain",
+    "prior": {"normal": {"loc": 1.0, "scale": 10.0}},
+}
+GROUND_PICKUP = {
+    "coupling": {"value": 0.01, "unit": "dimensionless"},
+    "t_ground": {"value": 290.0, "unit": "K"},
+}
 
 
 def wiener_document(run, *, parameters=None, at=None, noise=None):
@@ -286,11 +322,14 @@ def wiener_document(run, *, parameters=None, at=None, noise=None):
     residual of 0.0.
     """
     return conjugate_document(
-        run, model=WIENER_MODEL,
-        inference={"parameters": parameters or {"g": GAIN_LATENT},
-                   "noise": noise or HOMOSCEDASTIC,
-                   "observed": {"from": "simulation",
-                                "at": at or {"g": TRUTH_G}}})
+        run,
+        model=WIENER_MODEL,
+        inference={
+            "parameters": parameters or {"g": GAIN_LATENT},
+            "noise": noise or HOMOSCEDASTIC,
+            "observed": {"from": "simulation", "at": at or {"g": TRUTH_G}},
+        },
+    )
 
 
 def two_latent_document(run, *, noise=None):
@@ -317,20 +356,27 @@ def two_latent_document(run, *, noise=None):
     watch travel.
     """
     return conjugate_document(
-        run, model={**WIENER_MODEL, "ground_pickup": GROUND_PICKUP},
+        run,
+        model={**WIENER_MODEL, "ground_pickup": GROUND_PICKUP},
         inference={
             "parameters": {
-                "dep": {"init": 0.5, "linear": True,
-                        "into": "global_signal.depth",
-                        "prior": {"normal": {"loc": 0.5, "scale": 10.0}}},
-                "c": {"init": 0.01, "linear": True,
-                      "into": "ground_pickup.coupling",
-                      "prior": {"normal": {"loc": 0.01, "scale": 10.0}}},
+                "dep": {
+                    "init": 0.5,
+                    "linear": True,
+                    "into": "global_signal.depth",
+                    "prior": {"normal": {"loc": 0.5, "scale": 10.0}},
+                },
+                "c": {
+                    "init": 0.01,
+                    "linear": True,
+                    "into": "ground_pickup.coupling",
+                    "prior": {"normal": {"loc": 0.01, "scale": 10.0}},
+                },
             },
             "noise": HOMOSCEDASTIC if noise is None else noise,
-            "observed": {"from": "simulation",
-                         "at": {"dep": 1.0, "c": 0.02}},
-        })
+            "observed": {"from": "simulation", "at": {"dep": 1.0, "c": 0.02}},
+        },
+    )
 
 
 # --- The runs those documents carry, and the one way to execute them -------
@@ -347,20 +393,27 @@ def two_latent_document(run, *, noise=None):
 # :func:`gcr_document`'s own single latent; the :func:`two_latent_document`
 # call sites override it with ``["dep", "c"]`` or a deliberate sub-block.
 WIENER = {"kind": "conjugate.wiener", "width": "none", "names": ["g"]}
-GCR = {"kind": "conjugate.gcr", "names": ["g"],
-       "seed": {"from": "runtime.seeds.draws"}}
+GCR = {"kind": "conjugate.gcr", "names": ["g"], "seed": {"from": "runtime.seeds.draws"}}
 
 # GAIN_LATENT -- the document's default latent, above -- is what
 # wiener_document() binds when a test passes no parameters=.  The same latent
 # under a prior tight enough that the prior curvature is two thirds of the
 # answer, which is what makes width: fisher's space= visible as a number
 # rather than as a fifth decimal place:
-TIGHT_GAIN = {"init": 1.0, "linear": True, "into": "gain.gain",
-              "prior": {"normal": {"loc": 1.0, "scale": 0.005}}}
+TIGHT_GAIN = {
+    "init": 1.0,
+    "linear": True,
+    "into": "gain.gain",
+    "prior": {"normal": {"loc": 1.0, "scale": 0.005}},
+}
 # Declared linear=True and demonstrably not: the prediction is a Gaussian in
 # frequency, so its CENTRE is the knob check_linearity refuses.
-CENTRE_LATENT = {"init": 75.0, "linear": True, "into": "global_signal.centre",
-                 "prior": {"normal": {"loc": 75.0, "scale": 10.0}}}
+CENTRE_LATENT = {
+    "init": 75.0,
+    "linear": True,
+    "into": "global_signal.centre",
+    "prior": {"normal": {"loc": 75.0, "scale": 10.0}},
+}
 
 #: The same latent with an uncertainty wide enough for the probe to REACH its
 #: curvature -- the fixture for "check: refuses a latent that is not linear".
@@ -384,9 +437,12 @@ CENTRE_LATENT = {"init": 75.0, "linear": True, "into": "global_signal.centre",
 #: This is the probe answering a different question, not a weaker one: over
 #: +-10 the prediction really is affine to better than the tolerance, and it
 #: is +-100 where it stops being.
-CURVED_CENTRE_LATENT = {"init": 75.0, "linear": True,
-                        "into": "global_signal.centre",
-                        "prior": {"normal": {"loc": 75.0, "scale": 100.0}}}
+CURVED_CENTRE_LATENT = {
+    "init": 75.0,
+    "linear": True,
+    "into": "global_signal.centre",
+    "prior": {"normal": {"loc": 75.0, "scale": 100.0}},
+}
 
 
 def run_product(document, name="conjugate.wiener"):
@@ -422,10 +478,12 @@ POSTERIOR_SIGMA = 0.0084608
 # name is GCR_RADIOMETER, not RADIOMETER: this module already exports a
 # RADIOMETER at a different bandwidth, and every number measured under this
 # one would move if the two were confused.
-GCR_RADIOMETER = {"kind": "radiometer",
-                  "channel_width": {"value": 3.5714286, "unit": "MHz"},
-                  "integration_time": {"value": 2.0, "unit": "s"},
-                  "include_logdet": False}
+GCR_RADIOMETER = {
+    "kind": "radiometer",
+    "channel_width": {"value": 3.5714286, "unit": "MHz"},
+    "integration_time": {"value": 2.0, "unit": "s"},
+    "include_logdet": False,
+}
 
 
 def gcr_document(run=None, **kwargs):
@@ -517,8 +575,12 @@ def gls_product(run=None, **kwargs):
 #: is ill-conditioned enough that the package's own default guard fires on it
 #: (it compares residual x kappa, linear.py::_check_solve_arguments), so every test that is not
 #: ABOUT the guard would otherwise spend its first line turning it off.
-GLS_PAIR = {"name": "gls", "kind": "conjugate.gls", "names": ["dep", "c"],
-            "require_convergence": None}
+GLS_PAIR = {
+    "name": "gls",
+    "kind": "conjugate.gls",
+    "names": ["dep", "c"],
+    "require_convergence": None,
+}
 
 
 def gls_pair_document(run=None):
@@ -565,8 +627,7 @@ DIAGNOSTIC_DEPTH = {"init": 0.5, "into": "global_signal.depth"}
 #: 0.514969.  That is the pair on which ``rtol`` can move the rank -- on the
 #: degenerate pair the rank is 1 for every tolerance, and an executor that
 #: dropped ``rtol:`` would pass every test built on it.
-DIAGNOSTIC_WIDTH = {"init": {"value": 5.0, "unit": "MHz"},
-                    "into": "global_signal.width"}
+DIAGNOSTIC_WIDTH = {"init": {"value": 5.0, "unit": "MHz"}, "into": "global_signal.width"}
 
 #: ``..._PAIR``, because ``DEGENERATE`` is already
 #: ``test_config_exits_diagnostics.py``'s frequency basis for its condition
@@ -598,8 +659,11 @@ def diagnostic_document(run, parameters=None, inference=None):
     alternatives: ``inference`` wins, and ``parameters`` is then ignored.
     """
     doc = synthetic_document()
-    block = (dict(inference) if inference is not None
-             else {"parameters": dict(parameters or DEGENERATE_PAIR)})
+    block = (
+        dict(inference)
+        if inference is not None
+        else {"parameters": dict(parameters or DEGENERATE_PAIR)}
+    )
     doc["inference"] = _repaired(block)
     doc["runs"] = [run]
     return doc
@@ -613,14 +677,12 @@ def diagnostic_report(run, parameters=None):
     a run after its kind.  The one test that needs a name of its own calls
     ``run_document`` directly.
     """
-    return run_product(diagnostic_document(run, parameters),
-                       "identifiability")
+    return run_product(diagnostic_document(run, parameters), "identifiability")
 
 
 def diagnostic_rows(run, parameters=None):
     """One ``score_directions`` exit -> its ``{latent: (size, n_data)}``."""
-    return run_product(diagnostic_document(run, parameters),
-                       "score_directions")
+    return run_product(diagnostic_document(run, parameters), "score_directions")
 
 
 # --- What the observation FAN is measured on --------------------------------
@@ -646,10 +708,8 @@ TWO_OBSERVED = {
     # whose NoiseOperator makes the data a noise realisation and every exact
     # ratio below a near miss.
     "observed": {
-        "primary": {"from": "simulation", "twin": "fit",
-                    "at": {"g": TRUTH_G}},
-        "night": {"from": "simulation", "twin": "fit",
-                  "at": {"g": TRUTH_NIGHT}},
+        "primary": {"from": "simulation", "twin": "fit", "at": {"g": TRUTH_G}},
+        "night": {"from": "simulation", "twin": "fit", "at": {"g": TRUTH_NIGHT}},
     },
 }
 
@@ -674,8 +734,7 @@ def fanned_document(run, *, noise=None):
 
 def fanned_built(run=None, *, noise=None):
     """:func:`fanned_document`, built -- the ``built`` an accessor receives."""
-    return load_document(fanned_document(run or {"kind": "forward"},
-                                         noise=noise))
+    return load_document(fanned_document(run or {"kind": "forward"}, noise=noise))
 
 
 #: :data:`TWO_LATENTS` with a ``ref:`` on EACH -- the document the name-to-ref
@@ -684,14 +743,18 @@ def fanned_built(run=None, *, noise=None):
 #: pairing is a number no assertion can read as rounding; ``d`` is declared
 #: before ``a``, which is NOT alphabetical, because ``space.names`` carries
 #: declaration order and everything downstream inherits it.
-TWO_REFS = {**TWO_LATENTS,
-            "parameters": {
-                "d": {**TWO_LATENTS["parameters"]["d"], "ref": 0.25},
-                "a": {**TWO_LATENTS["parameters"]["a"], "ref": 40.0}}}
+TWO_REFS = {
+    **TWO_LATENTS,
+    "parameters": {
+        "d": {**TWO_LATENTS["parameters"]["d"], "ref": 0.25},
+        "a": {**TWO_LATENTS["parameters"]["a"], "ref": 40.0},
+    },
+}
 
 #: The same pair with a ``ref:`` on ONE of them: the MIXED document
 #: ``_init_strategy``'s refusal is written about and that no document with
 #: zero refs (:data:`ONE_LATENT`) or two (above) can stand in for.
-ONE_REF = {**TWO_REFS,
-           "parameters": {**TWO_REFS["parameters"],
-                          "a": TWO_LATENTS["parameters"]["a"]}}
+ONE_REF = {
+    **TWO_REFS,
+    "parameters": {**TWO_REFS["parameters"], "a": TWO_LATENTS["parameters"]["a"]},
+}

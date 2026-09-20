@@ -43,9 +43,7 @@ def test_the_registry_has_reserved_document_keys_to_check():
 
 
 @pytest.mark.parametrize("row", RESERVED, ids=[row.name for row in RESERVED])
-def test_a_reserved_key_is_either_absent_or_disabled_with_the_registrys_reason(
-    row, catalog
-):
+def test_a_reserved_key_is_either_absent_or_disabled_with_the_registrys_reason(row, catalog):
     under = [
         widget
         for widget in catalog.widgets
@@ -55,8 +53,7 @@ def test_a_reserved_key_is_either_absent_or_disabled_with_the_registrys_reason(
         pytest.skip(f"{row.name} is not offered by the form at all")
     enabled = [widget.path for widget in under if not widget.disabled]
     assert not enabled, (
-        f"the registry calls {row.name!r} unavailable and the form offers "
-        f"{enabled} as editable"
+        f"the registry calls {row.name!r} unavailable and the form offers {enabled} as editable"
     )
     assert {widget.reason for widget in under} == {_reserved_reason(row.name)}
 
@@ -160,9 +157,7 @@ def test_the_composition_rule_is_not_respelled_anywhere():
                 continue
             if "node_modules" in path.parts:
                 continue
-            for number, line in enumerate(
-                path.read_text(encoding="utf-8").splitlines(), 1
-            ):
+            for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
                 if pattern.search(line):
                     offenders.append(f"{path.relative_to(root)}:{number}")
     assert not offenders, (

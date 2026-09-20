@@ -34,6 +34,5 @@ def test_core_never_imports_domain_layers():
             if banned in source:
                 offenders.append(f"{path.name}: contains {banned!r}")
     assert not offenders, (
-        "rheplicant.core must stay domain-agnostic (extractable), but:\n"
-        + "\n".join(offenders)
+        "rheplicant.core must stay domain-agnostic (extractable), but:\n" + "\n".join(offenders)
     )

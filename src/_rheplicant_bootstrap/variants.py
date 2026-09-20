@@ -38,9 +38,7 @@ F = TypeVar("F", bound=AttributableFinding)
 
 def _trusted_origin_root(children: Mapping[object, OriginNode]) -> OriginNode:
     if type(children) is not _OverlayMapping:
-        raise ConfigError(
-            "trusted layer origin children must be an exact overlay."
-        )
+        raise ConfigError("trusted layer origin children must be an exact overlay.")
     root = object.__new__(OriginNode)
     object.__setattr__(root, "origin", None)
     object.__setattr__(root, "children", children)
@@ -49,15 +47,11 @@ def _trusted_origin_root(children: Mapping[object, OriginNode]) -> OriginNode:
 
 def _without_variants(
     result: MergeResult,
-) -> tuple[
-    Mapping[str, object], OriginNode, Sequence[DeletionRecord]
-]:
+) -> tuple[Mapping[str, object], OriginNode, Sequence[DeletionRecord]]:
     document = _trusted_overlay_omit(result.document, "variants")
     children = _trusted_overlay_omit(result.origins.children, "variants")
     origins = (
-        result.origins
-        if children is result.origins.children
-        else _trusted_origin_root(children)
+        result.origins if children is result.origins.children else _trusted_origin_root(children)
     )
     return (
         document,
@@ -76,17 +70,12 @@ class LayerRef:
 
     def __post_init__(self) -> None:
         if not isinstance(self.kind, str):
-            raise ConfigError(
-                f"layer kind must be a string; got {type(self.kind).__name__}."
-            )
+            raise ConfigError(f"layer kind must be a string; got {type(self.kind).__name__}.")
         kind = str.__str__(self.kind)
         if kind not in ("base", "variant"):
             raise ConfigError(f"layer kind is invalid: {kind!r}.")
         if not isinstance(self.prefix, str):
-            raise ConfigError(
-                "layer prefix must be a string; got "
-                f"{type(self.prefix).__name__}."
-            )
+            raise ConfigError(f"layer prefix must be a string; got {type(self.prefix).__name__}.")
         prefix = str.__str__(self.prefix)
         object.__setattr__(self, "kind", kind)
         object.__setattr__(self, "prefix", prefix)
@@ -133,9 +122,7 @@ class LayerRef:
     def attribute(self, finding: F) -> F:
         if self.kind == "base":
             return finding
-        if not isinstance(finding.where, str) or not isinstance(
-            finding.message, str
-        ):
+        if not isinstance(finding.where, str) or not isinstance(finding.message, str):
             raise ConfigError("finding attribution requires string where/message.")
         return dataclasses.replace(
             finding,
@@ -165,9 +152,7 @@ def _trusted_layer_ref(
     elif type(name) is not str or not name or prefix != f"variants.{name}":
         raise ConfigError("trusted variant layer identity is invalid.")
     if type(document) is not _OverlayMapping:
-        raise ConfigError(
-            "trusted layer document must be an exact overlay."
-        )
+        raise ConfigError("trusted layer document must be an exact overlay.")
     if "variants" in document:
         raise ConfigError("trusted layer document must not retain variants:.")
     layer = object.__new__(LayerRef)
@@ -179,9 +164,7 @@ def _trusted_layer_ref(
     return layer
 
 
-def _layer_identity_token(
-    value: object, *, where: str
-) -> tuple[str, str | None]:
+def _layer_identity_token(value: object, *, where: str) -> tuple[str, str | None]:
     if type(value) is not LayerIdentity:
         raise ConfigError(f"{where} keys must be LayerIdentity values.")
     if not isinstance(value.kind, str):
@@ -193,9 +176,7 @@ def _layer_identity_token(
         name = str.__str__(value.name)
     else:
         raise ConfigError(f"{where} keys contain an invalid layer name.")
-    if (kind == "base" and name is None) or (
-        kind == "variant" and name is not None and bool(name)
-    ):
+    if (kind == "base" and name is None) or (kind == "variant" and name is not None and bool(name)):
         return kind, name
     raise ConfigError(f"{where} keys contain an invalid layer identity.")
 
@@ -208,10 +189,7 @@ def _canonical_layer_evidence_mapping(
 ) -> dict[LayerIdentity, object]:
     if not isinstance(mapping, Mapping):
         raise ConfigError(f"{where} must be a mapping.")
-    expected = {
-        _layer_identity_token(identity, where=where): identity
-        for identity in identities
-    }
+    expected = {_layer_identity_token(identity, where=where): identity for identity in identities}
     observed: dict[tuple[str, str | None], object] = {}
     try:
         iterator = iter(mapping.items())
@@ -234,9 +212,7 @@ def _canonical_layer_evidence_mapping(
         observed[token] = value
     if observed.keys() != expected.keys():
         raise ConfigError("layer enumeration evidence must match every layer.")
-    return {
-        identity: observed[token] for token, identity in expected.items()
-    }
+    return {identity: observed[token] for token, identity in expected.items()}
 
 
 @dataclass(frozen=True, slots=True)
@@ -246,20 +222,14 @@ class LayerEnumeration:
     deletions: Mapping[LayerIdentity, Sequence[DeletionRecord]]
 
     def __post_init__(self) -> None:
-        if isinstance(self.layers, str | bytes) or not isinstance(
-            self.layers, Sequence
-        ):
+        if isinstance(self.layers, str | bytes) or not isinstance(self.layers, Sequence):
             raise ConfigError("layer enumeration layers must be a sequence.")
         try:
             layers = tuple(self.layers)
         except Exception:
-            raise ConfigError(
-                "layer enumeration layers sequence traversal failed."
-            ) from None
+            raise ConfigError("layer enumeration layers sequence traversal failed.") from None
         if any(type(layer) is not LayerRef for layer in layers):
-            raise ConfigError(
-                "layer enumeration layers must contain LayerRef values."
-            )
+            raise ConfigError("layer enumeration layers must contain LayerRef values.")
         layers = tuple(
             LayerRef(
                 layer.kind,
@@ -288,33 +258,23 @@ class LayerEnumeration:
             where="layer enumeration deletions",
         )
         canonical_origins: dict[LayerIdentity, OriginNode] = {}
-        canonical_deletions: dict[
-            LayerIdentity, Sequence[DeletionRecord]
-        ] = {}
+        canonical_deletions: dict[LayerIdentity, Sequence[DeletionRecord]] = {}
         for layer, identity in zip(layers, identities, strict=True):
             origin = origins[identity]
             if type(origin) is not OriginNode:
-                raise ConfigError(
-                    "layer enumeration origins must contain OriginNode values."
-                )
+                raise ConfigError("layer enumeration origins must contain OriginNode values.")
             canonical_origin = OriginNode(origin.origin, origin.children)
             _validate_parallel_origin_tree(layer.document, canonical_origin)
             canonical_origins[identity] = canonical_origin
             rows = deletions[identity]
             if isinstance(rows, str | bytes) or not isinstance(rows, Sequence):
-                raise ConfigError(
-                    "layer enumeration deletions must contain sequences."
-                )
+                raise ConfigError("layer enumeration deletions must contain sequences.")
             try:
                 frozen_rows = tuple(rows)
             except Exception:
-                raise ConfigError(
-                    "layer enumeration deletion sequence traversal failed."
-                ) from None
+                raise ConfigError("layer enumeration deletion sequence traversal failed.") from None
             if any(type(row) is not DeletionRecord for row in frozen_rows):
-                raise ConfigError(
-                    "layer enumeration deletions must contain DeletionRecord values."
-                )
+                raise ConfigError("layer enumeration deletions must contain DeletionRecord values.")
             canonical_deletions[identity] = frozen_rows
         object.__setattr__(self, "layers", layers)
         object.__setattr__(
@@ -325,11 +285,7 @@ class LayerEnumeration:
         object.__setattr__(
             self,
             "deletions",
-            MappingProxyType(
-                {
-                    identity: canonical_deletions[identity] for identity in identities
-                }
-            ),
+            MappingProxyType({identity: canonical_deletions[identity] for identity in identities}),
         )
 
 
@@ -339,9 +295,7 @@ def _trusted_layer_enumeration(
     deletions: Mapping[LayerIdentity, Sequence[DeletionRecord]],
 ) -> LayerEnumeration:
     if type(layers) is not tuple or not layers:
-        raise ConfigError(
-            "trusted layer enumeration requires an exact non-empty layer tuple."
-        )
+        raise ConfigError("trusted layer enumeration requires an exact non-empty layer tuple.")
     identities: list[LayerIdentity] = []
     for index, layer in enumerate(layers):
         if (
@@ -350,19 +304,11 @@ def _trusted_layer_enumeration(
             or type(layer.prefix) is not str
             or (layer.name is not None and type(layer.name) is not str)
         ):
-            raise ConfigError(
-                "trusted layer enumeration layer values are invalid."
-            )
+            raise ConfigError("trusted layer enumeration layer values are invalid.")
         if type(layer.document) is not _OverlayMapping:
-            raise ConfigError(
-                "trusted layer enumeration documents have invalid exact types."
-            )
+            raise ConfigError("trusted layer enumeration documents have invalid exact types.")
         if index == 0:
-            valid_shape = (
-                layer.kind == "base"
-                and layer.name is None
-                and layer.prefix == ""
-            )
+            valid_shape = layer.kind == "base" and layer.name is None and layer.prefix == ""
         else:
             valid_shape = (
                 layer.kind == "variant"
@@ -370,25 +316,15 @@ def _trusted_layer_enumeration(
                 and layer.prefix == f"variants.{layer.name}"
             )
         if not valid_shape:
-            raise ConfigError(
-                "trusted layer enumeration begins with exactly one base layer."
-            )
+            raise ConfigError("trusted layer enumeration begins with exactly one base layer.")
         identities.append(LayerIdentity(layer.kind, layer.name))
     if type(origins) is not dict or type(deletions) is not dict:
-        raise ConfigError(
-            "trusted layer enumeration evidence must use exact private maps."
-        )
+        raise ConfigError("trusted layer enumeration evidence must use exact private maps.")
     origin_items = tuple(dict.items(origins))
     deletion_items = tuple(dict.items(deletions))
-    if len(origin_items) != len(identities) or len(deletion_items) != len(
-        identities
-    ):
-        raise ConfigError(
-            "trusted layer enumeration evidence must match every layer."
-        )
-    canonical_deletions: dict[
-        LayerIdentity, Sequence[DeletionRecord]
-    ] = {}
+    if len(origin_items) != len(identities) or len(deletion_items) != len(identities):
+        raise ConfigError("trusted layer enumeration evidence must match every layer.")
+    canonical_deletions: dict[LayerIdentity, Sequence[DeletionRecord]] = {}
     canonical_origins: dict[LayerIdentity, OriginNode] = {}
     for index, identity in enumerate(identities):
         origin_identity, origin = origin_items[index]
@@ -398,41 +334,25 @@ def _trusted_layer_enumeration(
             or type(deletion_identity) is not LayerIdentity
             or type(origin_identity.kind) is not str
             or type(deletion_identity.kind) is not str
-            or (
-                origin_identity.name is not None
-                and type(origin_identity.name) is not str
-            )
-            or (
-                deletion_identity.name is not None
-                and type(deletion_identity.name) is not str
-            )
+            or (origin_identity.name is not None and type(origin_identity.name) is not str)
+            or (deletion_identity.name is not None and type(deletion_identity.name) is not str)
             or origin_identity.kind != identity.kind
             or origin_identity.name != identity.name
             or deletion_identity.kind != identity.kind
             or deletion_identity.name != identity.name
         ):
-            raise ConfigError(
-                "trusted layer enumeration evidence must match every layer."
-            )
+            raise ConfigError("trusted layer enumeration evidence must match every layer.")
         frozen_rows: Sequence[DeletionRecord]
         if type(rows) is _DeletionLedger:
             frozen_rows = rows
-        elif type(rows) is tuple and all(
-            type(row) is DeletionRecord for row in rows
-        ):
+        elif type(rows) is tuple and all(type(row) is DeletionRecord for row in rows):
             frozen_rows = rows
         else:
-            raise ConfigError(
-                "trusted layer enumeration deletion values are invalid."
-            )
+            raise ConfigError("trusted layer enumeration deletion values are invalid.")
         if type(origin) is not OriginNode:
-            raise ConfigError(
-                "trusted layer enumeration evidence values are invalid."
-            )
+            raise ConfigError("trusted layer enumeration evidence values are invalid.")
         if type(origin.children) is not _OverlayMapping:
-            raise ConfigError(
-                "trusted layer enumeration origins have invalid exact types."
-            )
+            raise ConfigError("trusted layer enumeration origins have invalid exact types.")
         canonical_origins[identity] = origin
         canonical_deletions[identity] = frozen_rows
     enumeration = object.__new__(LayerEnumeration)
@@ -445,12 +365,7 @@ def _trusted_layer_enumeration(
     object.__setattr__(
         enumeration,
         "deletions",
-        MappingProxyType(
-            {
-                identity: canonical_deletions[identity]
-                for identity in identities
-            }
-        ),
+        MappingProxyType({identity: canonical_deletions[identity] for identity in identities}),
     )
     return enumeration
 
@@ -461,9 +376,7 @@ class LayerAttributor:
     def __init__(self) -> None:
         self._base: frozenset[AttributableFinding] | None = None
 
-    def attribute(
-        self, layer: LayerRef, findings: Iterable[F]
-    ) -> tuple[F, ...]:
+    def attribute(self, layer: LayerRef, findings: Iterable[F]) -> tuple[F, ...]:
         rows = tuple(findings)
         if layer.kind == "base":
             if self._base is not None:
@@ -472,11 +385,7 @@ class LayerAttributor:
             return rows
         if self._base is None:
             raise RuntimeError("base layer must be attributed first")
-        return tuple(
-            layer.attribute(finding)
-            for finding in rows
-            if finding not in self._base
-        )
+        return tuple(layer.attribute(finding) for finding in rows if finding not in self._base)
 
 
 def _variant_items(document: Mapping[str, object]):
@@ -485,8 +394,7 @@ def _variant_items(document: Mapping[str, object]):
     variants = document["variants"]
     if not isinstance(variants, Mapping):
         raise ConfigError(
-            "variants: is a mapping of name -> patch; got "
-            f"{type(variants).__name__}."
+            f"variants: is a mapping of name -> patch; got {type(variants).__name__}."
         )
     try:
         return tuple(variants.items())
@@ -500,9 +408,7 @@ def enumerate_layers_once(
     deletions: Sequence[DeletionRecord],
 ) -> LayerEnumeration:
     """Build one base plus one effective document/evidence tuple per variant."""
-    parent = _canonical_variant_parent(
-        MergeResult(layered_document, origins, deletions)
-    )
+    parent = _canonical_variant_parent(MergeResult(layered_document, origins, deletions))
     validate_variant_process_sections(parent.document)
     base_document, base_origins, base_deletions = _without_variants(parent)
     base = _trusted_layer_ref(
@@ -512,17 +418,12 @@ def enumerate_layers_once(
         document=base_document,
     )
     layers: list[LayerRef] = [base]
-    layer_origins: dict[LayerIdentity, OriginNode] = {
-        base.identity: base_origins
-    }
-    layer_deletions: dict[LayerIdentity, Sequence[DeletionRecord]] = {
-        base.identity: base_deletions
-    }
+    layer_origins: dict[LayerIdentity, OriginNode] = {base.identity: base_origins}
+    layer_deletions: dict[LayerIdentity, Sequence[DeletionRecord]] = {base.identity: base_deletions}
     for raw_name, patch in _variant_items(parent.document):
         if not isinstance(raw_name, str):
             raise ConfigError(
-                "variants: names must be non-empty strings; got "
-                f"{type(raw_name).__name__}."
+                f"variants: names must be non-empty strings; got {type(raw_name).__name__}."
             )
         name = str.__str__(raw_name)
         if not name:
@@ -531,18 +432,11 @@ def enumerate_layers_once(
         if not isinstance(patch, Mapping):
             # Keep apply_variant as the single owner of this public wording.
             apply_variant(canonical_document, name)
-            raise ConfigError(
-                f"variants.{name}: compatibility apply accepted a "
-                "non-mapping patch."
-            )
+            raise ConfigError(f"variants.{name}: compatibility apply accepted a non-mapping patch.")
 
         returned = apply_variant(canonical_document, name)
-        merged = _take_canonical_variant_result(
-            canonical_document, returned
-        )
-        effective_document, effective_origins, effective_deletions = (
-            _without_variants(merged)
-        )
+        merged = _take_canonical_variant_result(canonical_document, returned)
+        effective_document, effective_origins, effective_deletions = _without_variants(merged)
         layer = _trusted_layer_ref(
             kind="variant",
             name=name,

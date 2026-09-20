@@ -170,9 +170,7 @@ class TestTheRuleItself:
     def test_a_homoscedastic_model_carries_the_same_ambiguity(self):
         """Wrapping the vector in the noise model does not resolve it."""
         with pytest.raises(StateValidationError, match="more than one"):
-            check_noise_std_axis(
-                HomoscedasticNoise(SIGMA_VECTOR), (N, N), "caller"
-            )
+            check_noise_std_axis(HomoscedasticNoise(SIGMA_VECTOR), (N, N), "caller")
 
     def test_flagging_does_not_hide_it_either(self):
         noise = FlaggedNoise(HomoscedasticNoise(SIGMA_VECTOR), jnp.zeros((N, N), bool))
@@ -289,17 +287,13 @@ class TestFisherInformation:
         space, twin = gain_model
         forward, values0 = space.forward_fn(twin, oblong_state)
         sigma = jnp.linspace(0.01, 1.0, N + 3)  # matches the freq axis alone
-        cov = parameter_covariance(
-            fisher_information(forward, values0, noise_std=sigma)
-        )
+        cov = parameter_covariance(fisher_information(forward, values0, noise_std=sigma))
         assert cov.sigma("gt").shape == (N,)
 
     def test_a_scalar_is_never_ambiguous(self, square_state, gain_model):
         space, twin = gain_model
         forward, values0 = space.forward_fn(twin, square_state)
-        cov = parameter_covariance(
-            fisher_information(forward, values0, noise_std=0.5)
-        )
+        cov = parameter_covariance(fisher_information(forward, values0, noise_std=0.5))
         assert jnp.allclose(cov.sigma("gt"), 0.5 / (jnp.sqrt(N) * SKY), rtol=1e-4)
 
 
@@ -322,16 +316,12 @@ class TestWienerSolve:
     def test_the_ambiguous_vector_is_refused(self, square_block, square_state):
         observed = jnp.full((N, N), SKY)
         with pytest.raises(StateValidationError, match="more than one"):
-            wiener_solve(
-                square_block, observed, noise_std=SIGMA_VECTOR, prior_std=1.0
-            )
+            wiener_solve(square_block, observed, noise_std=SIGMA_VECTOR, prior_std=1.0)
 
     def test_the_refusal_names_the_solve(self, square_block):
         observed = jnp.full((N, N), SKY)
         with pytest.raises(StateValidationError, match="wiener_solve"):
-            wiener_solve(
-                square_block, observed, noise_std=SIGMA_VECTOR, prior_std=1.0
-            )
+            wiener_solve(square_block, observed, noise_std=SIGMA_VECTOR, prior_std=1.0)
 
     def test_an_explicit_column_solves(self, square_block):
         observed = jnp.full((N, N), SKY)
@@ -366,9 +356,7 @@ class TestWienerSolve:
 
     def test_a_scalar_still_solves(self, square_block):
         observed = jnp.full((N, N), SKY)
-        solved, _ = wiener_solve(
-            square_block, observed, noise_std=0.5, prior_std=1.0
-        )
+        solved, _ = wiener_solve(square_block, observed, noise_std=0.5, prior_std=1.0)
         assert solved.shape == (N,)
 
 
@@ -412,7 +400,10 @@ class TestBothExitsAgree:
                 block, observed, noise_std=noise_std, prior_std=1.0
             ),
             "gcr_sample": lambda: gcr_sample(
-                block, observed, noise_std=noise_std, prior_std=1.0,
+                block,
+                observed,
+                noise_std=noise_std,
+                prior_std=1.0,
                 key=jax.random.PRNGKey(0),
             ),
         }
@@ -520,9 +511,7 @@ class TestWhyTheRuleHasTwoHomes:
         warm = inverse_variance(noise, jnp.full((2, 2), 300.0))
         assert float(cold[0, 0] / warm[0, 0]) == pytest.approx(9.0, rel=1e-3)
 
-    def test_a_constant_noise_model_is_refused_by_name_not_by_TypeError(
-        self, square_block
-    ):
+    def test_a_constant_noise_model_is_refused_by_name_not_by_TypeError(self, square_block):
         """The seam this whole assessment is about, asserted rather than implied.
 
         ``check_noise_std_axis`` accepts a noise model, because every other
@@ -562,7 +551,10 @@ class TestWhyTheRuleHasTwoHomes:
             wiener_solve(square_block, observed, noise_std=model, prior_std=1.0)
         with pytest.raises(ParameterSpaceError, match="gcr_sample"):
             gcr_sample(
-                square_block, observed, noise_std=model, prior_std=1.0,
+                square_block,
+                observed,
+                noise_std=model,
+                prior_std=1.0,
                 key=jax.random.PRNGKey(0),
             )
 
@@ -619,20 +611,14 @@ class TestConditionEstimateRunsTheSameRules:
         kappa = condition_estimate(square_block, noise_std=reading, prior_std=1.0)
         assert jnp.isfinite(kappa) and float(kappa) >= 1.0
 
-    def test_the_two_explicit_readings_give_different_condition_numbers(
-        self, square_block
-    ):
+    def test_the_two_explicit_readings_give_different_condition_numbers(self, square_block):
         """Which is why leaving the axis to broadcasting was not harmless here.
 
         If the two readings agreed, the missing check would be a cosmetic
         message problem. They do not.
         """
-        per_time = condition_estimate(
-            square_block, noise_std=SIGMA_VECTOR[:, None], prior_std=1.0
-        )
-        per_freq = condition_estimate(
-            square_block, noise_std=SIGMA_VECTOR[None, :], prior_std=1.0
-        )
+        per_time = condition_estimate(square_block, noise_std=SIGMA_VECTOR[:, None], prior_std=1.0)
+        per_freq = condition_estimate(square_block, noise_std=SIGMA_VECTOR[None, :], prior_std=1.0)
         assert not jnp.allclose(per_time, per_freq, rtol=1e-3), (per_time, per_freq)
 
     def test_all_three_exits_now_refuse_the_same_input(self, square_block):
@@ -649,7 +635,10 @@ class TestConditionEstimateRunsTheSameRules:
                 square_block, observed, noise_std=SIGMA_VECTOR, prior_std=1.0
             ),
             "gcr_sample": lambda: gcr_sample(
-                square_block, observed, noise_std=SIGMA_VECTOR, prior_std=1.0,
+                square_block,
+                observed,
+                noise_std=SIGMA_VECTOR,
+                prior_std=1.0,
                 key=jax.random.PRNGKey(0),
             ),
             "condition_estimate": lambda: condition_estimate(

@@ -29,9 +29,7 @@ class LinuxOutputPlatform:
             )
             self._renameat2.restype = ctypes.c_int
         acl_library = ctypes.util.find_library("acl")
-        self._acl = (
-            None if acl_library is None else ctypes.CDLL(acl_library, use_errno=True)
-        )
+        self._acl = None if acl_library is None else ctypes.CDLL(acl_library, use_errno=True)
         self._acl_get_fd = None if self._acl is None else getattr(self._acl, "acl_get_fd", None)
         self._acl_equiv_mode = (
             None if self._acl is None else getattr(self._acl, "acl_equiv_mode", None)

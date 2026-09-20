@@ -101,9 +101,7 @@ class SinglePrecisionSky(AbstractOperator):
     def __call__(self, state):
         n_time = state.coords.time.shape[0]
         n_freq = state.coords.freq.shape[0]
-        return state.with_data(
-            (self.amplitude * jnp.ones((n_time, n_freq))).astype(jnp.float32)
-        )
+        return state.with_data((self.amplitude * jnp.ones((n_time, n_freq))).astype(jnp.float32))
 
 
 # ------------------------------------------------------------------- fixtures --
@@ -491,9 +489,7 @@ class TestConditionalBlocks:
         assert joint.nullity == 1
 
     def test_a_subset_reports_only_its_own_parameters(self, state):
-        report = identifiability(
-            basis_space(), make_pipeline(0.0), state, names=("t_coeff",)
-        )
+        report = identifiability(basis_space(), make_pipeline(0.0), state, names=("t_coeff",))
         assert report.names == ("t_coeff",)
         assert report.n_par == 9
 
@@ -511,9 +507,7 @@ class TestConditionalBlocks:
         the normalisation ``names="gain"`` iterates into ``('g','a','i','n')``
         and comes back as four undeclared latents."""
         one = identifiability(basis_space(), make_pipeline(0.0), state, names="gain")
-        tupled = identifiability(
-            basis_space(), make_pipeline(0.0), state, names=("gain",)
-        )
+        tupled = identifiability(basis_space(), make_pipeline(0.0), state, names=("gain",))
         assert one.names == ("gain",) == tupled.names
         assert one.n_par == tupled.n_par == N_TIME
 
@@ -561,9 +555,7 @@ class TestConditionalBlocks:
 
     def test_at_rejects_an_unknown_name(self, state):
         with pytest.raises(ParameterSpaceError, match="not a latent"):
-            identifiability(
-                basis_space(), make_pipeline(0.0), state, at={"nope": jnp.array(1.0)}
-            )
+            identifiability(basis_space(), make_pipeline(0.0), state, at={"nope": jnp.array(1.0)})
 
 
 # ------------------------------------------------------- column normalisation --
@@ -602,9 +594,7 @@ class TestColumnNormalisation:
         report = identifiability(space, pipeline, state)
         assert (report.n_par, report.rank, report.nullity) == (2, 2, 0)
 
-    def test_the_same_model_without_normalisation_would_be_called_degenerate(
-        self, state
-    ):
+    def test_the_same_model_without_normalisation_would_be_called_degenerate(self, state):
         """The counterfactual, computed here rather than asserted by assertion.
 
         The RAW Jacobian's singular values differ by 1e-10, which is below the
@@ -970,9 +960,7 @@ class TestGuards:
         a repeat manufactures a null direction that says nothing about the
         model."""
         with pytest.raises(ParameterSpaceError, match="more than once|repeated"):
-            identifiability(
-                basis_space(), make_pipeline(0.0), state, names=("gain", "gain")
-            )
+            identifiability(basis_space(), make_pipeline(0.0), state, names=("gain", "gain"))
 
     def test_an_empty_selection_is_refused(self, state):
         """``names=()`` would report nullity 0 over nothing at all, which reads
@@ -1019,8 +1007,7 @@ class TestGuards:
                 Bind(
                     "count",
                     into=lambda p: p["t_ant"].t_ant,
-                    fn=lambda n: jnp.sum(n).astype(jnp.float32)
-                    * jnp.ones((N_TIME, N_FREQ)),
+                    fn=lambda n: jnp.sum(n).astype(jnp.float32) * jnp.ones((N_TIME, N_FREQ)),
                 ),
             ],
         )
@@ -1262,9 +1249,7 @@ class TestTheSynthesisedGraph:
                 Latent(
                     "t_coeff",
                     init=jnp.asarray(COEFF0, dtype=jnp.float64),
-                    prior=dist.Normal(
-                        jnp.asarray(COEFF0, dtype=jnp.float64), prior_width
-                    ),
+                    prior=dist.Normal(jnp.asarray(COEFF0, dtype=jnp.float64), prior_width),
                 ),
             ],
             bindings=[
@@ -1308,9 +1293,7 @@ class TestTheSynthesisedGraph:
                 assert other.nullity == baseline.nullity
                 assert other.rank == baseline.rank
                 assert other.n_data == baseline.n_data
-                np.testing.assert_array_equal(
-                    other.singular_values, baseline.singular_values
-                )
+                np.testing.assert_array_equal(other.singular_values, baseline.singular_values)
                 np.testing.assert_array_equal(other.jacobian, baseline.jacobian)
                 np.testing.assert_array_equal(other.column_norms, baseline.column_norms)
 

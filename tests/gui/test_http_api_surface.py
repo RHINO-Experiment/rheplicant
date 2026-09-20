@@ -88,8 +88,7 @@ def test_every_route_is_under_the_api_prefix_or_is_a_mount():
     shadow a client route and the failure is a page that stops loading.
     """
     stray = [
-        row for row in _live()
-        if not row["path"].startswith("/api") and row["method"] != "MOUNT"
+        row for row in _live() if not row["path"].startswith("/api") and row["method"] != "MOUNT"
     ]
     assert not stray, (
         f"these routes are outside /api and are not mounts: {stray}. The "
@@ -105,13 +104,18 @@ def test_the_stability_page_states_the_real_route_count():
     routes is exactly the edit that makes a written-out count wrong.
     """
     words = {
-        18: "Eighteen", 19: "Nineteen", 20: "Twenty", 21: "Twenty-one",
-        22: "Twenty-two", 23: "Twenty-three", 24: "Twenty-four",
+        18: "Eighteen",
+        19: "Nineteen",
+        20: "Twenty",
+        21: "Twenty-one",
+        22: "Twenty-two",
+        23: "Twenty-three",
+        24: "Twenty-four",
     }
     count = len(json.loads(GOLDEN.read_bytes()))
-    page = (
-        pathlib.Path(__file__).resolve().parents[2] / "docs" / "stability.md"
-    ).read_text(encoding="utf-8")
+    page = (pathlib.Path(__file__).resolve().parents[2] / "docs" / "stability.md").read_text(
+        encoding="utf-8"
+    )
     assert f"{words[count]} routes under `/api`" in page, (
         f"docs/stability.md does not say there are {count} routes"
     )

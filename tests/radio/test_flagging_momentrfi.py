@@ -102,18 +102,15 @@ class TestMomentRFIFlaggingOperator:
         """``jax.pure_callback`` is the permanent integration, not a stopgap:
         a boolean decision has no gradient, but it must still survive jit."""
         eager = MomentRFIFlaggingOperator()(spiky_state).aux["flags"]
-        jitted = jax.jit(
-            lambda d: MomentRFIFlaggingOperator()(State(data=d)).aux["flags"]
-        )(spiky_state.data)
+        jitted = jax.jit(lambda d: MomentRFIFlaggingOperator()(State(data=d)).aux["flags"])(
+            spiky_state.data
+        )
         assert jnp.array_equal(eager, jitted)
 
     def test_config_reaches_the_fitter(self, spiky_state):
         loose = MomentRFIFlaggingOperator(config={"sigma_threshold": 8.0})
         tight = MomentRFIFlaggingOperator(config={"sigma_threshold": 3.0})
-        assert (
-            loose(spiky_state).aux["flags"].sum()
-            < tight(spiky_state).aux["flags"].sum()
-        )
+        assert loose(spiky_state).aux["flags"].sum() < tight(spiky_state).aux["flags"].sum()
 
 
 @needs_momentrfi
@@ -145,9 +142,9 @@ class TestBroadRounds:
     def test_a_box_kernel_recovers_it(self, faint_blob):
         contaminated, truth = faint_blob
         flags = np.asarray(
-            MomentRFIFlaggingOperator(kernel_shapes=((3, 3),))(
-                State(data=contaminated)
-            ).aux["flags"]
+            MomentRFIFlaggingOperator(kernel_shapes=((3, 3),))(State(data=contaminated)).aux[
+                "flags"
+            ]
         )
         assert flags[truth].mean() > 0.9
         assert flags[~truth].mean() < 0.02  # and does not flag the sky to do it
@@ -172,9 +169,7 @@ class TestFlagsReachTheNoiseCovariance:
         """Argmax over a grid — no optimizer, so nothing to tune or diagnose."""
         like = NoiseModelLikelihood(noise)
         amps = jnp.linspace(0.9 * AMP_TRUE, 1.3 * AMP_TRUE, 2001)
-        logp = jax.vmap(
-            lambda a: like(jnp.broadcast_to(_spectrum(a), data.shape), data)
-        )(amps)
+        logp = jax.vmap(lambda a: like(jnp.broadcast_to(_spectrum(a), data.shape), data))(amps)
         return amps[jnp.argmax(logp)]
 
     def test_unflagged_the_rfi_biases_the_fit(self, contaminated):

@@ -142,6 +142,7 @@ class DataIngestionError(DirtError, ValueError):
     otherwise propagate as a finite, correctly-shaped, wrong answer.
     """
 
+
 class AmbiguousNodeError(AssemblyError):
     """A node id was used as an address, but it holds more than one operator.
 

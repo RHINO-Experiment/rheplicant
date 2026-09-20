@@ -96,9 +96,7 @@ def test_a_legitimately_enormous_process_std_is_accepted():
 
 def test_a_mismatched_phi_is_refused_rather_than_broadcast():
     with pytest.raises(StateValidationError, match="phi"):
-        LinearGaussianTransition(
-            phi=jnp.eye(2), process_std=jnp.ones(3), initial_std=jnp.ones(3)
-        )
+        LinearGaussianTransition(phi=jnp.eye(2), process_std=jnp.ones(3), initial_std=jnp.ones(3))
 
 
 def test_a_hyper_transition_builds_a_fixed_one_from_named_globals():
@@ -124,9 +122,7 @@ def test_a_hyper_transition_resolves_under_a_trace():
         return transition.at({"tau": tau}).phi[0, 0]
 
     assert float(jax.jit(phi_of)(4.0)) == pytest.approx(float(np.exp(-0.25)))
-    assert float(jax.grad(phi_of)(4.0)) == pytest.approx(
-        float(np.exp(-0.25)) / 16.0, rel=1e-9
-    )
+    assert float(jax.grad(phi_of)(4.0)) == pytest.approx(float(np.exp(-0.25)) / 16.0, rel=1e-9)
 
 
 def test_a_fixed_transition_reports_itself_when_asked_to_resolve():

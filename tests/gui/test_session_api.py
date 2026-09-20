@@ -59,9 +59,7 @@ def test_full_session_carries_exact_yaml_digest(client):
 
     session = create_session(client, BASE)
 
-    assert session["yaml_digest"] == yaml_digest(
-        session["document"]["yaml_text"]
-    )
+    assert session["yaml_digest"] == yaml_digest(session["document"]["yaml_text"])
 
 
 def test_get_jobs_returns_identity_without_full_document(client):
@@ -346,9 +344,7 @@ def test_session_field_route_returns_the_complete_updated_projection(client):
     assert "base_diagram" in body["document"]
     assert "validation" in body["document"]
     assert body["outputs"]["requested_yaml"] == body["document"]["yaml_text"]
-    assert yaml.safe_load(body["document"]["yaml_text"])["runtime"][
-        "jax_enable_x64"
-    ] is False
+    assert yaml.safe_load(body["document"]["yaml_text"])["runtime"]["jax_enable_x64"] is False
 
 
 def test_session_field_route_preserves_exact_yaml_and_revision_on_noop(client):
@@ -652,9 +648,7 @@ def test_real_priced_jobs_with_outputs_reach_succeeded(real_job_client, tmp_path
             json={"expected_revision": session["revision"], "kind": kind},
         )
         assert submitted.status_code == 202
-        terminal = wait_for_terminal_job(
-            real_job_client, session["session_id"], kind
-        )
+        terminal = wait_for_terminal_job(real_job_client, session["session_id"], kind)
         assert terminal["status"] == "succeeded"
         assert terminal["stale"] is False
 
@@ -753,9 +747,7 @@ def test_output_product_and_report_routes_are_revision_checked(client):
     )
     assert product.status_code == 200
     assert product.json()["revision"] == 1
-    selected = next(
-        row for row in product.json()["outputs"]["products"] if row["name"] == "chains"
-    )
+    selected = next(row for row in product.json()["outputs"]["products"] if row["name"] == "chains")
     assert selected["enabled"] is True
     assert selected["format"] == "netcdf"
     assert selected["runs"] == ["forward"]
@@ -836,9 +828,7 @@ def test_completed_job_audit_link_is_identity_bound(tmp_path):
     refreshed = browser.get(f"/api/sessions/{session_id}").json()
     assert refreshed["jobs"][0]["status"] == "succeeded"
 
-    link = browser.get(
-        f"/api/sessions/{session_id}/jobs/{job_id}/artifacts/config.resolved.yaml"
-    )
+    link = browser.get(f"/api/sessions/{session_id}/jobs/{job_id}/artifacts/config.resolved.yaml")
     assert link.status_code == 200
     assert link.content == b"schema_version: 1\n"
 
@@ -847,9 +837,12 @@ def test_completed_job_audit_link_is_identity_bound(tmp_path):
         "run_directory_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
     }
     marker.write_text(json.dumps(replaced), encoding="utf-8")
-    assert browser.get(
-        f"/api/sessions/{session_id}/jobs/{job_id}/artifacts/config.resolved.yaml"
-    ).status_code == 409
+    assert (
+        browser.get(
+            f"/api/sessions/{session_id}/jobs/{job_id}/artifacts/config.resolved.yaml"
+        ).status_code
+        == 409
+    )
 
 
 def test_formal_job_api_projects_closed_unsafe_output_refusal(tmp_path, monkeypatch):
@@ -876,11 +869,15 @@ def test_formal_job_api_projects_closed_unsafe_output_refusal(tmp_path, monkeypa
         stderr.write("formal API refusal without an output classification")
         return 2
 
-    browser = TestClient(create_app(job_runner=lambda kind, text: execute_job(
-        kind,
-        text,
-        dispatcher=refused,
-    )))
+    browser = TestClient(
+        create_app(
+            job_runner=lambda kind, text: execute_job(
+                kind,
+                text,
+                dispatcher=refused,
+            )
+        )
+    )
     document = preflight_document(variants={})
     target = tmp_path / "unsafe-api-result"
     document["outputs"] = {"dir": str(target), "stdout": "none"}
@@ -958,9 +955,7 @@ def test_two_concurrent_api_submissions_of_one_action_create_exactly_one_job():
 
     client = TestClient(create_app(job_runner=runner))
     text = yaml.safe_dump(preflight_document(variants={}), sort_keys=False)
-    session_id = client.post("/api/sessions", json={"yaml_text": text}).json()[
-        "session_id"
-    ]
+    session_id = client.post("/api/sessions", json={"yaml_text": text}).json()["session_id"]
     outcome: dict[str, object] = {}
 
     def submit_first():
@@ -1013,9 +1008,7 @@ def test_a_megabyte_job_failure_leaves_the_api_response_bounded():
 
     client = TestClient(create_app(job_runner=runner))
     text = yaml.safe_dump(preflight_document(variants={}), sort_keys=False)
-    session_id = client.post("/api/sessions", json={"yaml_text": text}).json()[
-        "session_id"
-    ]
+    session_id = client.post("/api/sessions", json={"yaml_text": text}).json()["session_id"]
 
     submitted = client.post(
         f"/api/sessions/{session_id}/jobs",
@@ -1033,9 +1026,7 @@ def test_a_megabyte_job_failure_leaves_the_api_response_bounded():
     assert len(client.get(f"/api/sessions/{session_id}").content) < 1_000_000
 
 
-def test_a_submission_that_fails_after_the_insert_leaves_no_queued_ghost(
-    job_client, monkeypatch
-):
+def test_a_submission_that_fails_after_the_insert_leaves_no_queued_ghost(job_client, monkeypatch):
     """Nothing between the insert and the response may strand a ``queued`` row.
 
     ``submit_job`` inserts the row as ``queued`` and the background task is

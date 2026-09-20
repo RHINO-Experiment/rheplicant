@@ -32,8 +32,12 @@ HOOKS = {
 }
 
 NAMESPACES = (
-    "rheplicant", "rheplicant.core", "rheplicant.radio",
-    "rheplicant.inference", "rheplicant.config", "rheplicant.gui",
+    "rheplicant",
+    "rheplicant.core",
+    "rheplicant.radio",
+    "rheplicant.inference",
+    "rheplicant.config",
+    "rheplicant.gui",
 )
 
 
@@ -50,7 +54,8 @@ def test_the_hook_exists_where_this_file_says_it_does(hook, module):
 @pytest.mark.parametrize("hook", sorted(HOOKS), ids=sorted(HOOKS))
 def test_the_hook_is_on_no_public_surface(hook):
     published = [
-        namespace for namespace in NAMESPACES
+        namespace
+        for namespace in NAMESPACES
         if hook in getattr(importlib.import_module(namespace), "__all__", ())
     ]
     assert not published, (

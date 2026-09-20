@@ -127,9 +127,7 @@ def build_product_manifest(
     tree = {
         "format_version": 1,
         "requests": [_request_record(request) for request in requests],
-        "files": [
-            _file_record(file, component_limit=component_limit) for file in frozen_files
-        ],
+        "files": [_file_record(file, component_limit=component_limit) for file in frozen_files],
         "omissions": [_omission_record(omission) for omission in omissions],
     }
     return ProductBundle(frozen_files, canonical_product_json(tree))
@@ -161,9 +159,7 @@ def validate_product_bundle(bundle: ProductBundle, *, component_limit: int) -> N
         or type(value["files"]) is not list
         or type(value["omissions"]) is not list
     ):
-        raise ConfigError(
-            "scientific product manifest has an invalid format version or table."
-        )
+        raise ConfigError("scientific product manifest has an invalid format version or table.")
     for row in value["requests"]:
         if type(row) is not dict or set(row) != {"selector", "format", "runs", "options"}:
             raise ConfigError("scientific product manifest has an invalid request row.")
@@ -184,9 +180,7 @@ def validate_product_bundle(bundle: ProductBundle, *, component_limit: int) -> N
         omission = ProductOmission(row["selector"], row["run"], row["kind"], row["reason"])
         if _omission_record(omission) != row:
             raise ConfigError("scientific product manifest has an invalid omission row.")
-    expected = [
-        _file_record(file, component_limit=component_limit) for file in bundle.files
-    ]
+    expected = [_file_record(file, component_limit=component_limit) for file in bundle.files]
     if value["files"] != expected:
         raise ConfigError("scientific product manifest disagrees with product payloads.")
     if any(row["selector"] not in requested_selectors for row in value["files"]):

@@ -82,9 +82,7 @@ class TestTheReactTestTypecheckIsClosed:
         check while looking like a tidy-up. The same argument the e2e project
         records, for the same reason."""
         project = _project()
-        assert "extends" not in project, (
-            "the flags below would stop being the whole truth"
-        )
+        assert "extends" not in project, "the flags below would stop being the whole truth"
         assert project["compilerOptions"] | _FLAGS == project["compilerOptions"]
         assert "lib" not in project["compilerOptions"], (
             "the command omits it, so the target's default lib is the baseline"

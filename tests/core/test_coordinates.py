@@ -181,9 +181,7 @@ class TestATimeAxisTheStoredDtypeCannotCarry:
             ("single", [np.nan]),
         ],
     )
-    def test_a_non_finite_axis_is_named_rather_than_defeating_the_comparison(
-        self, label, times
-    ):
+    def test_a_non_finite_axis_is_named_rather_than_defeating_the_comparison(self, label, times):
         """The trap this check would otherwise walk into.
 
         NaN compares False against everything, so ``nan > 0`` is False and a
@@ -310,8 +308,9 @@ class TestAnAxisCollapsedToOneValue:
     CELL = 128.0  # np.spacing(np.float32(EPOCH))
     #: Offsets into the float32 cell: both ends, the round-half point and its
     #: neighbours, and a regular sweep between them.
-    OFFSETS = sorted({*np.arange(0.0, 128.0, 8.0).tolist(), 0.001, 63.999, 64.0,
-                      64.001, 127.0, 127.999})
+    OFFSETS = sorted(
+        {*np.arange(0.0, 128.0, 8.0).tolist(), 0.001, 63.999, 64.0, 64.001, 127.0, 127.999}
+    )
 
     @pytest.mark.parametrize(
         ("cadence", "n_samples"),
@@ -361,8 +360,15 @@ class TestAnAxisCollapsedToOneValue:
 
     @pytest.mark.parametrize(
         ("cadence", "span"),
-        [(1e-3, 4.0), (1e-3, 63.0), (1e-3, 127.0),
-         (1.0, 4.0), (1.0, 63.0), (1.0, 127.0), (1.0, 129.0)],
+        [
+            (1e-3, 4.0),
+            (1e-3, 63.0),
+            (1e-3, 127.0),
+            (1.0, 4.0),
+            (1.0, 63.0),
+            (1.0, 127.0),
+            (1.0, 129.0),
+        ],
     )
     def test_the_same_axes_measured_from_their_start_are_accepted(self, cadence, span):
         """The remedy the refusal names, run: a relative axis in float32.
@@ -394,9 +400,7 @@ class TestAnAxisCollapsedToOneValue:
         """Both sides of :data:`FINEST_CADENCE_S`, in each dtype and on both
         sides of zero, one representable step apart."""
         assert np.spacing(dtype(fine)) <= FINEST_CADENCE_S < np.spacing(dtype(coarse))
-        _refuse_a_time_axis_the_stored_dtype_cannot_carry(
-            np.full(4, sign * fine, dtype=dtype)
-        )
+        _refuse_a_time_axis_the_stored_dtype_cannot_carry(np.full(4, sign * fine, dtype=dtype))
         with pytest.raises(StateValidationError, match="representable"):
             _refuse_a_time_axis_the_stored_dtype_cannot_carry(
                 np.full(4, sign * coarse, dtype=dtype)

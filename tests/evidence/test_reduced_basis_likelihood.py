@@ -97,8 +97,7 @@ def _probes(count=5):
     return [
         {
             name: values[name]
-            + rhino_bank.PRIOR_STD[name]
-            * jax.random.normal(jax.random.fold_in(key, i), ())
+            + rhino_bank.PRIOR_STD[name] * jax.random.normal(jax.random.fold_in(key, i), ())
             for i, name in enumerate(values)
         }
         for key in keys
@@ -149,9 +148,7 @@ def test_the_offset_is_the_normalisation_minus_the_qr_corner(basis, epoch):
     -51.3 nats and moves no gradient at all.
     """
     term = _term(basis, epoch)
-    assert float(term.info.offset) == pytest.approx(
-        NORMALISATION + QR_CORNER, abs=1e-5
-    )
+    assert float(term.info.offset) == pytest.approx(NORMALISATION + QR_CORNER, abs=1e-5)
 
 
 def test_the_stored_term_holds_nothing_of_size_n_data(basis, epoch):
@@ -228,9 +225,7 @@ def test_traced_flags_are_refused_too(basis, epoch):
     from rheplicant.inference.noise import FlaggedNoise
 
     def go(flags):
-        return _term(
-            basis, epoch, noise=FlaggedNoise(rhino_bank.noise(), flags)
-        ).info.offset
+        return _term(basis, epoch, noise=FlaggedNoise(rhino_bank.noise(), flags)).info.offset
 
     with pytest.raises(StateValidationError, match="cannot run under jit"):
         jax.jit(go)(jnp.zeros(rhino_bank.N_FREQ, bool))
@@ -267,9 +262,7 @@ def test_a_flagged_epoch_gives_a_finite_term_and_a_smaller_n_observed(basis, epo
 
     flags = jnp.zeros(rhino_bank.N_FREQ, bool).at[jnp.array([3, 40, 41])].set(True)
     poisoned = epoch.at[40].set(jnp.nan)
-    term = _term(
-        basis, poisoned, noise=FlaggedNoise(rhino_bank.noise(), flags), epoch_id="e1"
-    )
+    term = _term(basis, poisoned, noise=FlaggedNoise(rhino_bank.noise(), flags), epoch_id="e1")
     assert term.n_observed == rhino_bank.N_FREQ - 3
     assert bool(jnp.all(jnp.isfinite(term.info.factor)))
     assert bool(jnp.all(jnp.isfinite(term.info.target)))
@@ -295,8 +288,6 @@ def test_a_memory_cannot_archive_a_t1_term(basis, epoch, tmp_path):
     from rheplicant.inference.factorize import Factorization
     from rheplicant.inference.memory import BayesMemory
 
-    memory = BayesMemory(
-        Factorization(rhino_bank.space()), archive=(_term(basis, epoch),)
-    )
+    memory = BayesMemory(Factorization(rhino_bank.space()), archive=(_term(basis, epoch),))
     with pytest.raises(StateValidationError, match="reconstruction spec"):
         save_memory(memory, tmp_path / "campaign.eqx")

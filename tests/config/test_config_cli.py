@@ -203,9 +203,7 @@ def test_stdout_none_suppresses_success_only(tmp_path, capsys):
     assert capsys.readouterr().out == ""
 
 
-def test_validate_never_calls_the_executor_or_acquires_an_output_lease(
-    tmp_path, monkeypatch
-):
+def test_validate_never_calls_the_executor_or_acquires_an_output_lease(tmp_path, monkeypatch):
     import _rheplicant_bootstrap.entry as entry
     import rheplicant.config.orchestration as orchestration
     from _rheplicant_bootstrap.cli import main
@@ -231,9 +229,7 @@ def test_validate_an_explicit_missing_destination_is_read_only(tmp_path):
     assert not target.parent.exists()
 
 
-def test_validate_warns_once_for_a_trusted_writing_plugin(
-    tmp_path, monkeypatch, capsys
-):
+def test_validate_warns_once_for_a_trusted_writing_plugin(tmp_path, monkeypatch, capsys):
     from _rheplicant_bootstrap.cli import main
 
     sentinel = tmp_path / "plugin-ran"
@@ -256,8 +252,9 @@ def test_validate_warns_once_for_a_trusted_writing_plugin(
     )
 
 
-def _npy_beam_document(tmp_path: Path, *, fmt: str = "npy", referenced: bool,
-                       output: Path | None = None):
+def _npy_beam_document(
+    tmp_path: Path, *, fmt: str = "npy", referenced: bool, output: Path | None = None
+):
     """The synthetic document with one file-backed beam, read by a driftscan
     projector or by nothing."""
     import numpy as np
@@ -270,29 +267,42 @@ def _npy_beam_document(tmp_path: Path, *, fmt: str = "npy", referenced: bool,
         np.savez(tmp_path / "beam.npz", maps=maps)
         beam = {"format": "npz", "path": "beam.npz", "key": "maps"}
     value = document(output=output)
-    value["resources"]["beams"] = {"horn": {
-        **beam, "nside": 4, "normalize": "pixel_sum", "frame": "beam_local"}}
+    value["resources"]["beams"] = {
+        "horn": {**beam, "nside": 4, "normalize": "pixel_sum", "frame": "beam_local"}
+    }
     if referenced:
         value["observation"]["pointing"] = {
-            "mode": "drift", "az_deg": {"value": 0.0, "unit": "deg"},
-            "el_deg": {"value": 90.0, "unit": "deg"},
-            "materialise": ["pointing"],
-            "lst": {"mode": "uniform_turn", "n_time": "n_time",
-                    "lst0_deg": {"value": 0.0, "unit": "deg"}}}
-        value["resources"]["projectors"] = {"drift": {
-            "engine": "driftscan", "beam": {"ref": "resources.beams.horn"},
-            "lmax": 8, "lat_deg": {"value": 53.2, "unit": "deg"},
+            "mode": "drift",
             "az_deg": {"value": 0.0, "unit": "deg"},
             "el_deg": {"value": 90.0, "unit": "deg"},
-            "normalize_beam": True, "acknowledge_float32_sky": True}}
+            "materialise": ["pointing"],
+            "lst": {
+                "mode": "uniform_turn",
+                "n_time": "n_time",
+                "lst0_deg": {"value": 0.0, "unit": "deg"},
+            },
+        }
+        value["resources"]["projectors"] = {
+            "drift": {
+                "engine": "driftscan",
+                "beam": {"ref": "resources.beams.horn"},
+                "lmax": 8,
+                "lat_deg": {"value": 53.2, "unit": "deg"},
+                "az_deg": {"value": 0.0, "unit": "deg"},
+                "el_deg": {"value": 90.0, "unit": "deg"},
+                "normalize_beam": True,
+                "acknowledge_float32_sky": True,
+            }
+        }
     return value
 
 
-@pytest.mark.parametrize(("fmt", "referenced"), [
-    ("npy", False), ("npy", True), ("npz", False)],
-    ids=["npy-unreferenced", "npy-referenced", "npz-unreferenced"])
-def test_a_file_backed_beam_validates_on_the_command_line(
-        tmp_path, capsys, fmt, referenced):
+@pytest.mark.parametrize(
+    ("fmt", "referenced"),
+    [("npy", False), ("npy", True), ("npz", False)],
+    ids=["npy-unreferenced", "npy-referenced", "npz-unreferenced"],
+)
+def test_a_file_backed_beam_validates_on_the_command_line(tmp_path, capsys, fmt, referenced):
     """N-3: every ``format: npy``/``npz`` beam refused on the command line
     with ``audit: no origin for 'resources.beams.horn.maps'`` -- referenced
     or not -- because the builder records the maps at ``<beam>.maps``, a key
@@ -301,8 +311,7 @@ def test_a_file_backed_beam_validates_on_the_command_line(
     from _rheplicant_bootstrap.cli import main
 
     config = tmp_path / "config.yaml"
-    write_document(config, _npy_beam_document(tmp_path, fmt=fmt,
-                                              referenced=referenced))
+    write_document(config, _npy_beam_document(tmp_path, fmt=fmt, referenced=referenced))
     assert main(["validate", str(config)]) == 0
     streams = capsys.readouterr()
     assert streams.out == "configuration valid: base + 0 variants\n"
@@ -316,23 +325,24 @@ def test_the_audit_says_the_beam_maps_came_from_the_path_the_user_wrote(tmp_path
 
     target = tmp_path / "result"
     config = tmp_path / "config.yaml"
-    write_document(config, _npy_beam_document(tmp_path, referenced=False,
-                                              output=target))
+    write_document(config, _npy_beam_document(tmp_path, referenced=False, output=target))
     assert main(["run", str(config)]) == 0
     resolved = yaml.safe_load((target / "config.resolved.yaml").read_text())
     audit = resolved["_rheplicant_resolved"]
     assert audit["numeric"]["resources.beams.horn.maps"]["origin"] == "user"
-    (row,) = [one for one in audit["inputs"]
-              if one["document_path"] == "resources.beams.horn.maps"]
+    (row,) = [one for one in audit["inputs"] if one["document_path"] == "resources.beams.horn.maps"]
     assert row["path"] == str(tmp_path / "beam.npy")
 
 
-@pytest.mark.parametrize("child", [
-    {"extends": "horn"},
-    {"extends": "horn", "normalize": "none"},
-], ids=["inherits-everything", "overrides-a-sibling-key"])
-def test_a_beam_inheriting_its_file_through_extends_validates(
-        tmp_path, capsys, child):
+@pytest.mark.parametrize(
+    "child",
+    [
+        {"extends": "horn"},
+        {"extends": "horn", "normalize": "none"},
+    ],
+    ids=["inherits-everything", "overrides-a-sibling-key"],
+)
+def test_a_beam_inheriting_its_file_through_extends_validates(tmp_path, capsys, child):
     """A value an entry inherits through ``extends:`` has no key of its own
     in the document, so its origin is the ancestor's that writes it.  Before,
     the lookup stopped at the child and refused the document with
@@ -347,8 +357,7 @@ def test_a_beam_inheriting_its_file_through_extends_validates(
     assert "audit:" not in capsys.readouterr().err
 
 
-def test_an_inherited_value_carries_the_origin_of_the_entry_that_writes_it(
-        tmp_path):
+def test_an_inherited_value_carries_the_origin_of_the_entry_that_writes_it(tmp_path):
     """Two shapes the npy fix does not reach: an inline beam's ``maps:`` and
     a gaussian beam's ``sigma_deg``, each inherited by a child."""
     import numpy as np
@@ -360,18 +369,21 @@ def test_an_inherited_value_carries_the_origin_of_the_entry_that_writes_it(
     value = document(output=target)
     common = {"nside": 4, "normalize": "pixel_sum", "frame": "beam_local"}
     value["resources"]["beams"] = {
-        "flat": {"format": "inline", **common,
-                 "maps": {"file": {"path": "beam.npy", "format": "npy"}}},
+        "flat": {
+            "format": "inline",
+            **common,
+            "maps": {"file": {"path": "beam.npy", "format": "npy"}},
+        },
         "flat_child": {"extends": "flat"},
-        "gauss": {"format": "gaussian", **common,
-                  "sigma_deg": {"value": 20.0, "unit": "deg"}},
+        "gauss": {"format": "gaussian", **common, "sigma_deg": {"value": 20.0, "unit": "deg"}},
         "gauss_child": {"extends": "gauss"},
     }
     config = tmp_path / "config.yaml"
     write_document(config, value)
     assert main(["run", str(config)]) == 0
-    numeric = yaml.safe_load((target / "config.resolved.yaml").read_text())[
-        "_rheplicant_resolved"]["numeric"]
+    numeric = yaml.safe_load((target / "config.resolved.yaml").read_text())["_rheplicant_resolved"][
+        "numeric"
+    ]
     assert numeric["resources.beams.flat_child.maps"]["origin"] == "user"
     assert numeric["resources.beams.gauss_child.sigma_deg"]["origin"] == "user"
 
@@ -397,24 +409,18 @@ def test_the_documented_output_tree_lists_what_a_run_publishes(tmp_path):
     write_document(config, document(output=target))
     assert main(["run", str(config)]) == 0
 
-    page = (
-        Path(__file__).resolve().parents[2] / "docs" / "config-cli.md"
-    ).read_text(encoding="utf-8")
+    page = (Path(__file__).resolve().parents[2] / "docs" / "config-cli.md").read_text(
+        encoding="utf-8"
+    )
     block = re.search(r"```text\nconfig\.results/\n(.*?)```", page, re.S)
     assert block, "docs/config-cli.md no longer carries the output tree"
     documented = {
         line.split("#")[0].strip()
-        for line in (
-            re.sub(r"^[├└│─\s]+", "", row) for row in block.group(1).splitlines()
-        )
+        for line in (re.sub(r"^[├└│─\s]+", "", row) for row in block.group(1).splitlines())
         if line.strip()
     }
 
-    published = {
-        str(path.relative_to(target))
-        for path in target.rglob("*")
-        if path.is_file()
-    }
+    published = {str(path.relative_to(target)) for path in target.rglob("*") if path.is_file()}
     missing = published - documented
     assert not missing, (
         f"docs/config-cli.md's tree does not list {sorted(missing)}, which a "
@@ -435,9 +441,9 @@ def test_the_documented_machine_lines_are_the_ones_the_code_produces():
     """
     from _rheplicant_bootstrap.entry import AUDIT_LINE_PREFIXES
 
-    page = (
-        Path(__file__).resolve().parents[2] / "docs" / "config-cli.md"
-    ).read_text(encoding="utf-8")
+    page = (Path(__file__).resolve().parents[2] / "docs" / "config-cli.md").read_text(
+        encoding="utf-8"
+    )
     for prefix in AUDIT_LINE_PREFIXES:
         assert f"`{prefix}PATH`" in page, f"the page does not document {prefix!r}"
     assert "`configuration valid: base + N variants`" in page

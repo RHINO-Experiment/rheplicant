@@ -224,9 +224,7 @@ def _expected_product_paths(
             for key in keys
         )
     extension = _EXTENSIONS[format_]
-    return tuple(
-        f"runs/{encode_name(run)}/{name}.{extension}" for run in chosen_runs
-    )
+    return tuple(f"runs/{encode_name(run)}/{name}.{extension}" for run in chosen_runs)
 
 
 def _product_rows(
@@ -309,8 +307,7 @@ def _resolved_preview(
     except ConfigError as error:
         return (
             yaml_text,
-            "Resolved preview is unavailable until process-entry validation passes: "
-            f"{error}",
+            f"Resolved preview is unavailable until process-entry validation passes: {error}",
         )
     plain = _plain(prepared.source.layered_document)
     if not isinstance(plain, dict):
@@ -377,9 +374,7 @@ def project_output_workflow(
         target_state = OutputState("unavailable", "This document resolves no run target.")
     else:
         try:
-            target_state = _inspection_state(
-                inspect_output_path(request, platform_adapter())
-            )
+            target_state = _inspection_state(inspect_output_path(request, platform_adapter()))
         except ConfigError as error:
             target_state = OutputState("blocked_unsafe", str(error))
     products = _product_rows(
@@ -394,9 +389,7 @@ def project_output_workflow(
         "provenance.json",
         "diagnostics.json",
     ]
-    audit_paths.extend(
-        f"variants/{encode_name(name)}/config.resolved.yaml" for name in variants
-    )
+    audit_paths.extend(f"variants/{encode_name(name)}/config.resolved.yaml" for name in variants)
     if any(row.enabled for row in products) or report.enabled:
         audit_paths.append("products.json")
     audit_paths.extend(report.expected_paths)

@@ -69,9 +69,7 @@ def test_one_bad_night_shows_up_as_one_bad_score():
         shapes={"x": (camp.N_THETA,)},
         epoch_id="rogue",
     )
-    scores = {
-        row.epoch_id: row.z for row in held_out_z(tuple(collected), camp.prior_fisher())
-    }
+    scores = {row.epoch_id: row.z for row in held_out_z(tuple(collected), camp.prior_fisher())}
     assert scores["rogue"] > 10.0
     others = np.array([z for name, z in scores.items() if name != "rogue"])
     assert np.abs(others).max() < 6.0
@@ -94,9 +92,7 @@ def test_the_score_is_the_chi_square_of_the_held_out_residual():
     collected = _varying(20, biased=False)
     rows = held_out_z(collected, camp.prior_fisher())
     for row in rows[:3]:
-        assert row.z == pytest.approx(
-            (row.chi2 - row.dof) / np.sqrt(2 * row.dof), rel=1e-12
-        )
+        assert row.z == pytest.approx((row.chi2 - row.dof) / np.sqrt(2 * row.dof), rel=1e-12)
         assert row.dof == int(np.asarray(collected[0].info.factor).shape[0])
 
 

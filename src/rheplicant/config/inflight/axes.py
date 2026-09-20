@@ -159,7 +159,8 @@ def _non_finite(check: str, where: str, subject: str, values) -> Finding:
     # send the reader to the second one. Axis 0 is n_time on all four subjects.
     rows = bad if bad.ndim == 1 else bad.reshape(bad.shape[0], -1).any(axis=1)
     return refuse(
-        check, where,
+        check,
+        where,
         f"{where}: {subject} holds {int(bad.sum())} non-finite value(s), the "
         f"first at sample {int(np.flatnonzero(rows)[0])} (0-based). Nothing "
         "downstream says so and nothing raises: measured, a NaN at index 5 of "
@@ -168,7 +169,8 @@ def _non_finite(check: str, where: str, subject: str, values) -> Finding:
         "correctly-shaped, identically ZERO map. So a check on the OUTPUT "
         "sees no NaN, a gradient of zero everywhere, and a fit that looks "
         "converged. A sample time, an LST, a pointing and a self-rotation are "
-        f"never legitimately NaN or infinite (check {check}).")
+        f"never legitimately NaN or infinite (check {check}).",
+    )
 
 
 @register_axes("C1", "C2.time")
@@ -202,8 +204,7 @@ def _time_axis(facts: Axes) -> Iterable[Finding]:
         _refuse_a_time_axis_the_stored_dtype_cannot_carry(times)
     except StateValidationError as exc:
         check = "C1" if bool(np.all(np.isfinite(values))) else "C2"
-        yield refuse(check, _time_where(facts.document),
-                     f"{exc} {_TIME_TAIL} (check {check}).")
+        yield refuse(check, _time_where(facts.document), f"{exc} {_TIME_TAIL} (check {check}).")
 
 
 @register_axes("C2.pointing")
@@ -221,12 +222,10 @@ def _pointing_finite(facts: Axes) -> Iterable[Finding]:
     document with two bad axes sends the reader to two lines.
     """
     document = facts.document
-    yield from _one("observation.pointing", "coords.pointing",
-                    facts.observation.pointing)
+    yield from _one("observation.pointing", "coords.pointing", facts.observation.pointing)
     extra = facts.observation.extra or {}
     for key in _NAMED_EXTRA:
-        yield from _one(_extra_where(document, key),
-                        f'coords.extra["{key}"]', extra.get(key))
+        yield from _one(_extra_where(document, key), f'coords.extra["{key}"]', extra.get(key))
 
 
 def _extra_where(document: Mapping[str, Any], key: str) -> str:

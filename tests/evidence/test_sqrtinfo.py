@@ -10,22 +10,26 @@ def test_log_prob_matches_the_dense_quadratic_it_encodes():
     factor = jnp.array([[2.0, 0.5], [0.0, 1.5]])
     target = jnp.array([1.0, -0.5])
     term = SqrtInfo(
-        factor=factor, target=target, offset=jnp.array(3.0),
-        names=("a", "b"), shapes=((), ()),
+        factor=factor,
+        target=target,
+        offset=jnp.array(3.0),
+        names=("a", "b"),
+        shapes=((), ()),
     )
     values = {"a": jnp.array(0.3), "b": jnp.array(-1.2)}
 
-    expected = 3.0 - 0.5 * float(
-        jnp.sum((factor @ jnp.array([0.3, -1.2]) - target) ** 2)
-    )
+    expected = 3.0 - 0.5 * float(jnp.sum((factor @ jnp.array([0.3, -1.2]) - target) ** 2))
     assert float(term.log_prob(values)) == pytest.approx(expected, abs=1e-12)
 
 
 def test_log_prob_ravels_multi_element_latents_in_declared_order():
     factor = jnp.eye(3)
     term = SqrtInfo(
-        factor=factor, target=jnp.zeros(3), offset=jnp.array(0.0),
-        names=("vec", "scalar"), shapes=((2,), ()),
+        factor=factor,
+        target=jnp.zeros(3),
+        offset=jnp.array(0.0),
+        names=("vec", "scalar"),
+        shapes=((2,), ()),
     )
     values = {"vec": jnp.array([1.0, 2.0]), "scalar": jnp.array(3.0)}
     assert float(term.log_prob(values)) == pytest.approx(-0.5 * 14.0, abs=1e-12)
@@ -33,8 +37,11 @@ def test_log_prob_ravels_multi_element_latents_in_declared_order():
 
 def test_a_value_of_the_wrong_shape_is_refused():
     term = SqrtInfo(
-        factor=jnp.eye(2), target=jnp.zeros(2), offset=jnp.array(0.0),
-        names=("a", "b"), shapes=((), ()),
+        factor=jnp.eye(2),
+        target=jnp.zeros(2),
+        offset=jnp.array(0.0),
+        names=("a", "b"),
+        shapes=((), ()),
     )
     with pytest.raises(Exception, match="shape"):
         term.log_prob({"a": jnp.zeros(3), "b": jnp.array(0.0)})
@@ -83,9 +90,7 @@ def test_combine_is_associative():
     values = _values(jax.random.key(9), ("a", "b", "c"))
     left = SqrtInfo.combine(SqrtInfo.combine(a, b), c)
     right = SqrtInfo.combine(a, SqrtInfo.combine(b, c))
-    assert float(left.log_prob(values)) == pytest.approx(
-        float(right.log_prob(values)), abs=1e-10
-    )
+    assert float(left.log_prob(values)) == pytest.approx(float(right.log_prob(values)), abs=1e-10)
 
 
 def test_the_null_term_is_the_identity_of_combine():
@@ -124,8 +129,11 @@ def test_a_thousand_epochs_stay_positive_definite():
         running = SqrtInfo.combine(
             running,
             SqrtInfo(
-                factor=row, target=jnp.zeros(1), offset=jnp.array(0.0),
-                names=("a", "b", "c"), shapes=((), (), ()),
+                factor=row,
+                target=jnp.zeros(1),
+                offset=jnp.array(0.0),
+                names=("a", "b", "c"),
+                shapes=((), (), ()),
             ),
         )
     eigenvalues = np.linalg.eigvalsh(np.asarray(running.fisher()))

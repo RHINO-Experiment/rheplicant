@@ -31,8 +31,8 @@ from rheplicant.radio.sky import GeneralPointingProjector
 
 N_TIME, N_FREQ = 5, 3
 NSIDE, LMAX = 2, 3
-N_PIX = 12 * NSIDE**2          # 48
-N_ALM = (LMAX + 1) * (LMAX + 2) // 2   # 10
+N_PIX = 12 * NSIDE**2  # 48
+N_ALM = (LMAX + 1) * (LMAX + 2) // 2  # 10
 
 assert len({N_TIME, N_FREQ, N_PIX, N_ALM}) == 4, "the fixture must be unambiguous"
 
@@ -49,9 +49,7 @@ def projector():
         jax.random.key(1), (N_FREQ, N_ALM)
     )
     beam = beam.at[:, : LMAX + 1].set(beam[:, : LMAX + 1].real)
-    return GeneralPointingProjector(
-        beam_alms=beam, lat_deg=-30.7, lmax=LMAX, nside=NSIDE
-    )
+    return GeneralPointingProjector(beam_alms=beam, lat_deg=-30.7, lmax=LMAX, nside=NSIDE)
 
 
 def _coords(*, pointing=..., lst=...):
@@ -133,9 +131,7 @@ class TestCoordinateGuard:
             )
         assert "lst_deg" not in str(no_pointing.value), str(no_pointing.value)
         assert "lst_deg" in str(no_lst.value), str(no_lst.value)
-        assert all(
-            "GeneralPointingProjector" in str(e.value) for e in (no_pointing, no_lst)
-        )
+        assert all("GeneralPointingProjector" in str(e.value) for e in (no_pointing, no_lst))
 
     @pytest.mark.parametrize("direction", ["forward", "adjoint"])
     def test_complete_coordinates_get_past_the_guard(self, projector, direction):
@@ -181,20 +177,18 @@ class TestTodShapeGuard:
     @pytest.mark.parametrize(
         "shape",
         [
-            (N_FREQ, N_TIME),          # transposed -- the real-world mistake
-            (N_TIME, N_FREQ + 1),      # wrong channel count
-            (N_TIME + 1, N_FREQ),      # wrong sample count
-            (N_TIME,),                 # rank 1
-            (N_TIME, N_FREQ, 1),       # rank 3
+            (N_FREQ, N_TIME),  # transposed -- the real-world mistake
+            (N_TIME, N_FREQ + 1),  # wrong channel count
+            (N_TIME + 1, N_FREQ),  # wrong sample count
+            (N_TIME,),  # rank 1
+            (N_TIME, N_FREQ, 1),  # rank 3
         ],
     )
     def test_tod_that_is_not_the_expected_waterfall_is_refused(self, projector, shape):
         with pytest.raises(StateValidationError, match="tod must be"):
             projector.adjoint(jnp.ones(shape), _coords())
 
-    def test_the_expected_shape_is_stated_and_taken_from_the_coordinates(
-        self, projector
-    ):
+    def test_the_expected_shape_is_stated_and_taken_from_the_coordinates(self, projector):
         """``n_time`` is read from ``coords.pointing``, ``n_freq`` from the
         beam. A message that transposed the two would still be a plausible
         sentence, so both numbers are pinned against a fixture where they
@@ -252,9 +246,7 @@ class TestANonFinitePointingIsRefused:
             getattr(projector, direction)(argument, self._corrupt(field))
 
     @pytest.mark.parametrize("field", ["pointing", "lst"])
-    def test_the_refusal_names_the_field_and_counts_the_bad_values(
-        self, projector, field
-    ):
+    def test_the_refusal_names_the_field_and_counts_the_bad_values(self, projector, field):
         """Two NaN fields produce one sentence each, not one generic sentence.
 
         A message that said only "non-finite coordinates" would leave a caller
@@ -336,17 +328,13 @@ class TestTheGuardUnderTracing:
     def _needs_limtod(self):
         pytest.importorskip("limtod_jax", reason="limTOD[jax] not installed")
 
-    def test_a_concrete_nan_field_is_still_caught_when_a_sibling_is_traced(
-        self, projector
-    ):
+    def test_a_concrete_nan_field_is_still_caught_when_a_sibling_is_traced(self, projector):
         import numpy as np
 
         bad_lst = np.full((N_TIME,), np.nan)  # concrete, closed over
 
         def run(pointing):
-            return projector.adjoint(
-                _tod(), _coords(pointing=pointing, lst=bad_lst)
-            )
+            return projector.adjoint(_tod(), _coords(pointing=pointing, lst=bad_lst))
 
         with pytest.raises(StateValidationError, match=r"lst_deg.*non-finite"):
             jax.jit(run)(_coords().pointing)
@@ -375,4 +363,3 @@ class TestTheGuardUnderTracing:
         out = jax.jit(run)(_coords().pointing, jnp.full((N_TIME,), jnp.nan))
         assert bool(jnp.all(jnp.isfinite(out)))
         assert float(jnp.max(jnp.abs(out))) == 0.0
-

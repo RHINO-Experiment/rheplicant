@@ -85,9 +85,7 @@ def test_the_refusal_reports_the_in_degree_it_found():
 
 def test_a_transform_with_one_parent_is_accepted():
     """The other branch: the guard is ``indeg > 1``, not ``indeg != 1``."""
-    template = SignalGraph(
-        "one-into-one", {"a": NodeSpec(S), "t": NodeSpec(T)}, [("a", "t")]
-    )
+    template = SignalGraph("one-into-one", {"a": NodeSpec(S), "t": NodeSpec(T)}, [("a", "t")])
     assert template.sink == "t"
 
 
@@ -258,9 +256,7 @@ def _single_sink_templates(max_nodes: int = 5):
                         )
                         for i in range(n)
                     }
-                    yield SignalGraph(
-                        "probe", nodes, [(names[a], names[b]) for a, b in edges]
-                    )
+                    yield SignalGraph("probe", nodes, [(names[a], names[b]) for a, b in edges])
 
 
 def test_every_node_of_a_valid_template_reaches_the_sink():

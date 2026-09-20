@@ -101,8 +101,7 @@ _B2_PROJECTORS = "resources.projectors."
 #: (a ``MatrixProjector`` reads no beam and has exactly one field), and a
 #: hand-written pair here would be a second source of truth for a list that is
 #: one line away.
-_B2_SKY_ENGINES: tuple[str, ...] = tuple(
-    engine for engine in ENGINES if engine != "matrix")
+_B2_SKY_ENGINES: tuple[str, ...] = tuple(engine for engine in ENGINES if engine != "matrix")
 
 
 def _b2_dtype(layer: Mapping[str, Any]) -> str | None:
@@ -128,8 +127,7 @@ def _b2_dtype(layer: Mapping[str, Any]) -> str | None:
     x64 = runtime.get("jax_enable_x64", False)
     if not isinstance(x64, bool):
         return None
-    return RuntimeFacts(jax_enable_x64=x64, platform="auto", seed=None,
-                        seeds={}).dtype
+    return RuntimeFacts(jax_enable_x64=x64, platform="auto", seed=None, seeds={}).dtype
 
 
 def _b2_beams_in(layer: Mapping[str, Any]) -> Iterable[Finding]:

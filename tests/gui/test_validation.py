@@ -58,9 +58,7 @@ def test_preflight_severities_and_messages_cross_the_gui_boundary_verbatim(monke
         )
     )
     monkeypatch.setattr(public_config, "preflight", lambda _document: expected)
-    found = snapshot(
-        yaml.safe_dump(preflight_document(variants={}), sort_keys=False)
-    ).validation
+    found = snapshot(yaml.safe_dump(preflight_document(variants={}), sort_keys=False)).validation
 
     assert tuple(row.message for row in found.findings) == (
         "first refusal",

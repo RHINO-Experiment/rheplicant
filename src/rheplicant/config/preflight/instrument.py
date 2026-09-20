@@ -231,8 +231,7 @@ def _entry_class(node_id: str, entry: Any, table: Mapping[str, Any]) -> type | N
     return classes[0] if len(classes) == 1 else None
 
 
-def _unknown_field(entry: Mapping, specs: Mapping[str, Any],
-                   composed: bool) -> bool:
+def _unknown_field(entry: Mapping, specs: Mapping[str, Any], composed: bool) -> bool:
     """Does ``_construct`` refuse this entry for a key before it reads a value?
 
     ``sections/model.py::_field_value`` sweeps unknown keys BEFORE it looks for
@@ -338,18 +337,19 @@ def _text_number(node: Any) -> float | None:
     return float(converted)
 
 
-def _tone_legs(where: str, entry: Mapping, cls: type,
-               specs: Mapping[str, Any], composed: bool) -> Iterable[Finding]:
+def _tone_legs(
+    where: str, entry: Mapping, cls: type, specs: Mapping[str, Any], composed: bool
+) -> Iterable[Finding]:
     """A13's four text legs on one ``CWCalibrationOperator`` entry."""
     from rheplicant.radio.instrument.calibration import LINESHAPES
 
     if _unknown_field(entry, specs, composed):
         return
-    missing = sorted(name for name, spec in specs.items()
-                     if spec.required and name not in entry)
+    missing = sorted(name for name, spec in specs.items() if spec.required and name not in entry)
     if missing:
         yield refuse(
-            "A13", where,
+            "A13",
+            where,
             f"{where}: a CW calibration tone declares {missing} nowhere, and "
             f"{cls.__name__} gives {'them' if len(missing) > 1 else 'it'} no "
             "default on purpose: line_width is the spectrometer's own channel "
@@ -357,39 +357,46 @@ def _tone_legs(where: str, entry: Mapping, cls: type,
             "amplitude is the level the tone contributes in total. A tone the "
             "operator has to guess one of those for monitors nothing, because "
             f"the gain it is meant to track absorbs it exactly. {_A13_TAIL} "
-            "(check A13).")
+            "(check A13).",
+        )
         return
     width = _text_number(entry.get("line_width"))
     if width is not None and width <= 0:
         yield refuse(
-            "A13", f"{where}.line_width",
+            "A13",
+            f"{where}.line_width",
             f"{where}.line_width: {width:.6g} Hz is not above zero. The width "
             "is a scale, not an offset: it divides the frequency offset that "
             "the lineshape is evaluated at, so zero divides by zero and a "
             "negative value evaluates the shape mirrored about the centre "
-            f"before it is normalised. {_A13_TAIL} (check A13).")
+            f"before it is normalised. {_A13_TAIL} (check A13).",
+        )
     floor = _text_number(entry.get("protect_floor"))
     if floor is not None and not 0.0 < floor <= 1.0:
         yield refuse(
-            "A13", f"{where}.protect_floor",
+            "A13",
+            f"{where}.protect_floor",
             f"{where}.protect_floor: {floor:.6g} is outside (0, 1]. It is read "
             "as a fraction of the tone's own peak channel, so 1 protects the "
             "peak channel alone and anything at or below 0 protects the whole "
             "band -- which hands every channel's RFI verdict to a calibrator "
             "that touches one line. Above 1 protects nothing at all and the "
             "flagger then eats the tone it was told to keep. "
-            f"{_A13_TAIL} (check A13).")
+            f"{_A13_TAIL} (check A13).",
+        )
     shape = entry.get("lineshape")
     if isinstance(shape, str) and shape not in LINESHAPES:
         yield refuse(
-            "A13", f"{where}.lineshape",
+            "A13",
+            f"{where}.lineshape",
             f"{where}.lineshape: {shape!r} is not a lineshape this operator "
             f"evaluates; it takes {list(LINESHAPES)}. The two are not "
             "interchangeable spellings of one curve and line_width does not "
             "mean the same thing in each -- for 'sinc2' it is the offset to "
             "the first null of a critically sampled unwindowed FFT, and for "
             "'gaussian' it is the standard deviation of an apodised polyphase "
-            f"channel. {_A13_TAIL} (check A13).")
+            f"channel. {_A13_TAIL} (check A13).",
+        )
 
 
 def _tone_text(layer: Mapping[str, Any]) -> Iterable[Finding]:
@@ -573,8 +580,9 @@ def _static_fields(layer: Mapping[str, Any]) -> Iterable[Finding]:
             try:
                 _refuse_array_form(spec, form)
             except ConfigError as exc:
-                yield refuse("A40", f"{where}.{name}",
-                             f"{where}.{name}: {exc} {_A40_TAIL} (check A40).")
+                yield refuse(
+                    "A40", f"{where}.{name}", f"{where}.{name}: {exc} {_A40_TAIL} (check A40)."
+                )
 
 
 # ---------------------------------------------------------------------------
@@ -628,8 +636,7 @@ def _region_key(layer: Mapping[str, Any]) -> Iterable[Finding]:
         try:
             refuse_misaddressed_region(key, _t5_claims(key, spec))
         except ConfigError as exc:
-            yield refuse("A47", f"model.{key}",
-                         f"model.{key}: {exc} {_A47_TAIL} (check A47).")
+            yield refuse("A47", f"model.{key}", f"model.{key}: {exc} {_A47_TAIL} (check A47).")
 
 
 # ---------------------------------------------------------------------------

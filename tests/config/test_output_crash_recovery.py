@@ -34,9 +34,7 @@ def _complete_fresh(target, platform, verified, candidate):
     assert target.is_dir()
 
 
-def test_every_fresh_persistence_ordinal_is_observable_and_restart_safe(
-    tmp_path, monkeypatch
-):
+def test_every_fresh_persistence_ordinal_is_observable_and_restart_safe(tmp_path, monkeypatch):
     baseline_dir = tmp_path / "baseline"
     baseline_dir.mkdir()
     target, platform, lease, _publication, verified = lease_for(baseline_dir)
@@ -157,9 +155,7 @@ def test_product_write_interruption_is_recovered_without_a_partial_target(tmp_pa
     ("scenario", "event_count"),
     (("fresh", 76), ("clobber", 97), ("refused", 76), ("error", 76)),
 )
-def test_sigkill_after_every_persistence_ordinal_is_restart_safe(
-    tmp_path, scenario, event_count
-):
+def test_sigkill_after_every_persistence_ordinal_is_restart_safe(tmp_path, scenario, event_count):
     script = """
 import os
 import sys
@@ -265,10 +261,7 @@ finally:
     close_output_lease(lease)
 """
     target = tmp_path / "result"
-    writers = [
-        subprocess.Popen([sys.executable, "-c", script, str(target)])
-        for _index in range(2)
-    ]
+    writers = [subprocess.Popen([sys.executable, "-c", script, str(target)]) for _index in range(2)]
     codes = sorted(writer.wait(timeout=30) for writer in writers)
     assert codes == [0, 2]
     candidate = bundle()

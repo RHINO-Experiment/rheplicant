@@ -115,14 +115,12 @@ class SqrtInfo(eqx.Module):
         for name, shape in zip(self.names, self.shapes, strict=True):
             if name not in values:
                 raise StateValidationError(
-                    f"This term is over {list(self.names)}; no value was given for "
-                    f"{name!r}."
+                    f"This term is over {list(self.names)}; no value was given for {name!r}."
                 )
             leaf = jnp.asarray(values[name])
             if leaf.shape != shape:
                 raise StateValidationError(
-                    f"Latent {name!r} has shape {shape} in this term but "
-                    f"{leaf.shape} was supplied."
+                    f"Latent {name!r} has shape {shape} in this term but {leaf.shape} was supplied."
                 )
             parts.append(jnp.ravel(leaf))
         return jnp.concatenate(parts) if parts else jnp.zeros(0)
@@ -407,9 +405,7 @@ def marginalise(info: SqrtInfo, block: Sequence[str]) -> SqrtInfo:
                 "before marginalising."
             )
 
-    factor, target, offset, pivots = marginalise_arrays(
-        permuted, info.target, info.offset, n_block
-    )
+    factor, target, offset, pivots = marginalise_arrays(permuted, info.target, info.offset, n_block)
 
     if n_block:
         # Finiteness FIRST, and it is not defensive padding: the comparison

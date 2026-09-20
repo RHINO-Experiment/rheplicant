@@ -22,8 +22,7 @@ def make_file(path):
         handle["/sdr/sdr_times"] = TIME_S
         handle["/sdr/sdr_waterfall"] = np.ones((TIME_S.size, FREQ_MHZ.size))
         handle["/switches/switch_times"] = np.array([1000.0, 1004.0, 1008.0])
-        handle["/switches/switch_states"] = np.array(
-            [b"antenna", b"internal_load", b"heated_load"])
+        handle["/switches/switch_states"] = np.array([b"antenna", b"internal_load", b"heated_load"])
         handle["/temperatures/temperatures"] = np.full((TIME_S.size, 2), 20.0)
         handle["/temperatures/temperature_times"] = TIME_S
     return path
@@ -43,9 +42,16 @@ class TestTheReader:
         from rheplicant.config import resolve_value
 
         resolved = resolve_value(
-            {"file": {"path": "obs.hd5f", "format": "rhino_hdf5",
-                      "freq_unit": "MHz", "settle_seconds": 0.0}},
-            context)
+            {
+                "file": {
+                    "path": "obs.hd5f",
+                    "format": "rhino_hdf5",
+                    "freq_unit": "MHz",
+                    "settle_seconds": 0.0,
+                }
+            },
+            context,
+        )
         assert isinstance(resolved.value, RhinoObservation)
         assert resolved.value.freq_hz[0] == pytest.approx(60e6)
 
@@ -54,24 +60,31 @@ class TestTheReader:
 
         with pytest.raises(ConfigError, match="modifiers"):
             resolve_value(
-                {"file": {"path": "obs.hd5f", "format": "rhino_hdf5",
-                          "freq_unit": "MHz"}, "unit": "K"},
-                context)
+                {
+                    "file": {"path": "obs.hd5f", "format": "rhino_hdf5", "freq_unit": "MHz"},
+                    "unit": "K",
+                },
+                context,
+            )
 
     def test_freq_unit_is_required_with_no_default(self, context):
         from rheplicant.config import resolve_value
 
         with pytest.raises(ConfigError, match="freq_unit"):
-            resolve_value(
-                {"file": {"path": "obs.hd5f", "format": "rhino_hdf5"}}, context)
+            resolve_value({"file": {"path": "obs.hd5f", "format": "rhino_hdf5"}}, context)
 
 
 class TestParseFromFile:
     def test_the_observation_and_its_record(self, context):
         obs, record = parse_from_file(
-            {"format": "rhino_hdf5", "path": "obs.hd5f", "freq_unit": "MHz",
-             "settle_seconds": {"value": 0.0, "unit": "s"}},
-            context)
+            {
+                "format": "rhino_hdf5",
+                "path": "obs.hd5f",
+                "freq_unit": "MHz",
+                "settle_seconds": {"value": 0.0, "unit": "s"},
+            },
+            context,
+        )
         assert isinstance(obs, RhinoObservation)
         assert set(record) == {"from_file/path", "from_file/sha256"}
 
@@ -83,11 +96,15 @@ class TestParseFromFile:
         """Every label in the switch log needs a column -- the reader refuses
         a partial map (rhino.py) -- so the antenna column is declared too."""
         obs, _ = parse_from_file(
-            {"format": "rhino_hdf5", "path": "obs.hd5f", "freq_unit": "MHz",
-             "settle_seconds": 0.0,
-             "thermistor_columns": {"antenna": 0, "internal_load": 0,
-                                    "heated_load": 1}},
-            context)
+            {
+                "format": "rhino_hdf5",
+                "path": "obs.hd5f",
+                "freq_unit": "MHz",
+                "settle_seconds": 0.0,
+                "thermistor_columns": {"antenna": 0, "internal_load": 0, "heated_load": 1},
+            },
+            context,
+        )
         assert {"internal_load", "heated_load"} <= set(obs.thermistor_k)
         assert obs.thermistor_k["internal_load"][0] == pytest.approx(293.15)
 
@@ -102,24 +119,28 @@ class TestBuildObservationIngested:
         from rheplicant.config.sections.observation import build_observation
 
         section = {
-            "from_file": {"format": "rhino_hdf5", "path": "obs.hd5f",
-                          "freq_unit": "MHz", "settle_seconds": 0.0},
-            "time": {"grid": {"arange": {"start": 0.0, "step": 1.0, "num": 4},
-                              "unit": "s"}},
+            "from_file": {
+                "format": "rhino_hdf5",
+                "path": "obs.hd5f",
+                "freq_unit": "MHz",
+                "settle_seconds": 0.0,
+            },
+            "time": {"grid": {"arange": {"start": 0.0, "step": 1.0, "num": 4}, "unit": "s"}},
         }
         with pytest.raises(ConfigError, match="together say two things"):
-            build_observation(section, runtime=self._runtime(),
-                              base_dir=str(tmp_path))
+            build_observation(section, runtime=self._runtime(), base_dir=str(tmp_path))
 
     def test_an_ingested_run_declares_order_only(self, context, tmp_path):
         from rheplicant.config.sections.observation import build_observation
 
         section = {
-            "from_file": {"format": "rhino_hdf5", "path": "obs.hd5f",
-                          "freq_unit": "MHz", "settle_seconds": 0.0},
-            "switching": {"mode": "cycle",
-                          "order": ["antenna", "internal_load", "heated_load"]},
+            "from_file": {
+                "format": "rhino_hdf5",
+                "path": "obs.hd5f",
+                "freq_unit": "MHz",
+                "settle_seconds": 0.0,
+            },
+            "switching": {"mode": "cycle", "order": ["antenna", "internal_load", "heated_load"]},
         }
         with pytest.raises(ConfigError, match="declares order"):
-            build_observation(section, runtime=self._runtime(),
-                              base_dir=str(tmp_path))
+            build_observation(section, runtime=self._runtime(), base_dir=str(tmp_path))

@@ -31,20 +31,21 @@ def prediction_only_loss(prediction):
 
 def document(run, inference=None, model_gain=1.1):
     doc = synthetic_document()
-    doc["model"] = {key: value for key, value in doc["model"].items()
-                    if key != "noise"}
-    doc["model"]["gain"] = {"gain": {"value": model_gain,
-                                     "unit": "dimensionless"}}
+    doc["model"] = {key: value for key, value in doc["model"].items() if key != "noise"}
+    doc["model"]["gain"] = {"gain": {"value": model_gain, "unit": "dimensionless"}}
     doc["inference"] = inference or {
         # prior scale 0.05 makes space=True's narrowing a ~5% effect --
         # measurable in float32 (with scale 10.0 the margin is 1e-6 relative,
         # measured by the pre-execution review). optimize never reads it.
-        "parameters": {"g": {"init": 1.0, "linear": True,
-                             "into": "gain.gain",
-                             "prior": {"normal": {"loc": 1.0,
-                                                  "scale": 0.05}}}},
-        "noise": {"kind": "homoscedastic",
-                  "sigma": {"value": 0.05, "unit": "K"}},
+        "parameters": {
+            "g": {
+                "init": 1.0,
+                "linear": True,
+                "into": "gain.gain",
+                "prior": {"normal": {"loc": 1.0, "scale": 0.05}},
+            }
+        },
+        "noise": {"kind": "homoscedastic", "sigma": {"value": 0.05, "unit": "K"}},
         "observed": {"from": "simulation", "at": {"g": 1.5}},
     }
     doc["runs"] = [run]
@@ -62,8 +63,9 @@ class TestFisher:
     def test_space_true_adds_the_declared_prior_curvature(self):
         flat = run_document(document({"kind": "fisher"}))
         posterior = run_document(document({"kind": "fisher", "space": True}))
-        assert float(posterior["fisher"].product["covariance"].sigma("g")) \
-            < float(flat["fisher"].product["covariance"].sigma("g"))
+        assert float(posterior["fisher"].product["covariance"].sigma("g")) < float(
+            flat["fisher"].product["covariance"].sigma("g")
+        )
 
     def test_noise_kind_none_is_refused_naming_the_legal_exits(self):
         doc = document({"kind": "fisher"})
@@ -74,8 +76,9 @@ class TestFisher:
 
     def test_without_parameters_fisher_is_refused(self):
         doc = document({"kind": "fisher"})
-        doc["inference"] = {"noise": {"kind": "homoscedastic",
-                                      "sigma": {"value": 0.05, "unit": "K"}}}
+        doc["inference"] = {
+            "noise": {"kind": "homoscedastic", "sigma": {"value": 0.05, "unit": "K"}}
+        }
         with pytest.raises(ConfigError, match="parameters"):
             run_document(doc)
 
@@ -90,15 +93,19 @@ class TestFisher:
         # inference.fit_twin cannot see the repair at all.
         flat = run_document(document({"kind": "fisher"}))
         doc = document({"kind": "fisher"})
-        doc["inference"]["twin"] = {"replace": {"global_signal": {
-            "depth": {"value": 1.0, "unit": "K"},
-            "centre": {"value": 75.0, "unit": "MHz"},
-            "width": {"value": 5.0, "unit": "MHz"}}}}
+        doc["inference"]["twin"] = {
+            "replace": {
+                "global_signal": {
+                    "depth": {"value": 1.0, "unit": "K"},
+                    "centre": {"value": 75.0, "unit": "MHz"},
+                    "width": {"value": 5.0, "unit": "MHz"},
+                }
+            }
+        }
         repaired = run_document(doc)
-        assert float(repaired["fisher"].product["covariance"].sigma("g")) == \
-            pytest.approx(
-                0.5 * float(flat["fisher"].product["covariance"].sigma("g")),
-                rel=1e-3)
+        assert float(repaired["fisher"].product["covariance"].sigma("g")) == pytest.approx(
+            0.5 * float(flat["fisher"].product["covariance"].sigma("g")), rel=1e-3
+        )
 
     def test_a_negative_jitter_is_refused(self):
         with pytest.raises(ConfigError, match="jitter"):
@@ -108,13 +115,13 @@ class TestFisher:
         # F ~ 4e3 here, so against jitter: 1e12 the data is negligible and
         # sigma pins to 1/sqrt(jitter) -- parameter_covariance's own words.
         results = run_document(document({"kind": "fisher", "jitter": 1.0e12}))
-        assert float(results["fisher"].product["covariance"].sigma("g")) == \
-            pytest.approx(1.0e-6, rel=1e-3)
+        assert float(results["fisher"].product["covariance"].sigma("g")) == pytest.approx(
+            1.0e-6, rel=1e-3
+        )
 
 
 class TestOptimize:
-    RUN = {"kind": "optimize", "optimizer": "gradient",
-           "learning_rate": 1.0, "n_steps": 200}
+    RUN = {"kind": "optimize", "optimizer": "gradient", "learning_rate": 1.0, "n_steps": 200}
 
     def test_gradient_descent_recovers_the_truth(self):
         results = run_document(document(self.RUN))
@@ -123,8 +130,9 @@ class TestOptimize:
         assert float(product["losses"][-1]) < float(product["losses"][0])
 
     def test_adam_takes_its_own_knobs(self):
-        results = run_document(document({**self.RUN, "optimizer": "adam",
-                                         "n_steps": 300, "beta1": 0.8}))
+        results = run_document(
+            document({**self.RUN, "optimizer": "adam", "n_steps": 300, "beta1": 0.8})
+        )
         product = results["optimize"].product
         assert product["losses"].shape == (300,)
         assert float(product["losses"][-1]) < float(product["losses"][0])
@@ -133,8 +141,9 @@ class TestOptimize:
         # eps: 1e6 caps the step at ~learning_rate/eps, so g cannot leave
         # its init -- the one knob whose honouring is visible in the product
         # (defaults reach 1.5 exactly; declared-but-dropped knobs would too).
-        results = run_document(document({**self.RUN, "optimizer": "adam",
-                                         "n_steps": 300, "eps": 1.0e6}))
+        results = run_document(
+            document({**self.RUN, "optimizer": "adam", "n_steps": 300, "eps": 1.0e6})
+        )
         product = results["optimize"].product
         assert float(product["params"]["g"]) == pytest.approx(1.0, abs=1e-3)
         assert float(product["losses"][-1]) > 0.01
@@ -151,23 +160,20 @@ class TestOptimize:
 
     def test_optimizer_learning_rate_and_n_steps_are_required(self):
         for missing in ("optimizer", "learning_rate", "n_steps"):
-            run = {key: value for key, value in self.RUN.items()
-                   if key != missing}
+            run = {key: value for key, value in self.RUN.items() if key != missing}
             with pytest.raises(ConfigError, match=missing):
                 run_document(document(run))
 
     def test_the_trainable_route_needs_no_parameters(self):
         doc = document(self.RUN)
         doc["inference"] = {
-            "twin": {"replace": {"gain": {"gain": {"value": 1.0,
-                                                   "unit": "dimensionless"}}}},
+            "twin": {"replace": {"gain": {"gain": {"value": 1.0, "unit": "dimensionless"}}}},
             "trainable": {"leaves": ["gain.gain"]},
             "observed": {"from": "simulation"},
         }
         results = run_document(doc)
         product = results["optimize"].product
-        fitted = [x for x in jax.tree.leaves(product["params"])
-                  if x is not None]
+        fitted = [x for x in jax.tree.leaves(product["params"]) if x is not None]
         assert len(fitted) == 1
         assert abs(float(fitted[0]) - 1.1) < 0.1
         assert float(product["losses"][-1]) < float(product["losses"][0])
@@ -185,11 +191,10 @@ class TestOptimize:
             run_document(doc)
 
     def test_a_python_loss_is_imported_not_called(self):
-        results = run_document(document(
-            {**self.RUN, "loss": {"python":
-                                  "rheplicant.inference:mean_squared_error"}}))
-        assert float(results["optimize"].product["params"]["g"]) == \
-            pytest.approx(1.5, abs=1e-3)
+        results = run_document(
+            document({**self.RUN, "loss": {"python": "rheplicant.inference:mean_squared_error"}})
+        )
+        assert float(results["optimize"].product["params"]["g"]) == pytest.approx(1.5, abs=1e-3)
 
     def test_a_one_argument_python_loss_is_refused_naming_the_signature(self):
         """The sibling seam kind: gradient's objective: check names.
@@ -203,9 +208,17 @@ class TestOptimize:
         not in the grep.
         """
         with pytest.raises(ConfigError, match="cannot be called as") as caught:
-            run_document(document({**self.RUN, "loss": {
-                "python": "tests.config.test_config_exits_estimators"
-                          ":prediction_only_loss"}}))
+            run_document(
+                document(
+                    {
+                        **self.RUN,
+                        "loss": {
+                            "python": "tests.config.test_config_exits_estimators"
+                            ":prediction_only_loss"
+                        },
+                    }
+                )
+            )
         message = str(caught.value)
         assert message.startswith("runs['optimize']: loss: ")
         # The signature is quoted so the reader sees WHICH argument is
@@ -221,8 +234,14 @@ class TestOptimize:
         half_mse takes (prediction, observed) and must still run -- a check
         that refused every python: loss would satisfy the test above.
         """
-        results = run_document(document({**self.RUN, "loss": {
-            "python": "tests.config.test_config_exits_estimators:half_mse"}}))
+        results = run_document(
+            document(
+                {
+                    **self.RUN,
+                    "loss": {"python": "tests.config.test_config_exits_estimators:half_mse"},
+                }
+            )
+        )
         assert "params" in results["optimize"].product
 
     def test_the_python_loss_is_the_loss_the_fit_minimizes(self):
@@ -230,11 +249,16 @@ class TestOptimize:
         # recorded loss says which function .fit was actually handed --
         # a run that quietly falls back to mse cannot produce the ratio.
         mse = run_document(document(self.RUN))["optimize"].product
-        half = run_document(document({**self.RUN, "loss": {
-            "python": "tests.config.test_config_exits_estimators:half_mse"}}))
+        half = run_document(
+            document(
+                {
+                    **self.RUN,
+                    "loss": {"python": "tests.config.test_config_exits_estimators:half_mse"},
+                }
+            )
+        )
         product = half["optimize"].product
-        assert float(product["losses"][0]) == \
-            pytest.approx(0.5 * float(mse["losses"][0]), rel=1e-5)
+        assert float(product["losses"][0]) == pytest.approx(0.5 * float(mse["losses"][0]), rel=1e-5)
         assert float(product["losses"][-1]) < float(product["losses"][0])
 
 
@@ -245,8 +269,7 @@ def _explode(*args, **kwargs):
 class TestRefusalsPrecedeScience:
     """A grammar refusal used to wait for the science ahead of it (Task 7)."""
 
-    def test_a_negative_jitter_speaks_before_the_fisher_computation(
-            self, monkeypatch):
+    def test_a_negative_jitter_speaks_before_the_fisher_computation(self, monkeypatch):
         import rheplicant.inference as inference
 
         monkeypatch.setattr(inference, "fisher_information", _explode)
@@ -254,8 +277,7 @@ class TestRefusalsPrecedeScience:
         with pytest.raises(ConfigError, match="jitter: must be >= 0"):
             run_document(document({"kind": "fisher", "jitter": -1.0}))
 
-    def test_a_non_bool_space_speaks_before_the_fisher_computation(
-            self, monkeypatch):
+    def test_a_non_bool_space_speaks_before_the_fisher_computation(self, monkeypatch):
         import rheplicant.inference as inference
 
         monkeypatch.setattr(inference, "fisher_information", _explode)
@@ -278,9 +300,12 @@ class TestTheExecutorReadsOnlyTheParsedView:
         doc = document({"kind": "fisher", "jitter": 1.0})
         built = load_document(doc)
         (spec,) = parse_runs(doc["runs"])
-        parsed = parse_run(spec, built, index=0,
-                           layer=LayerRef(kind="base", name=None, prefix="",
-                                          document={}, declared_runs=None))
+        parsed = parse_run(
+            spec,
+            built,
+            index=0,
+            layer=LayerRef(kind="base", name=None, prefix="", document={}, declared_runs=None),
+        )
         baseline = run_document(document({"kind": "fisher", "jitter": 1.0}))
         expected = float(baseline["fisher"].product["covariance"].sigma("g"))
 

@@ -85,6 +85,7 @@ class TestTheAttributesParser:
         section header (``Raises:``) look like a field, which is worse. Every
         operator here writes the conventional shape, and the census below is
         what keeps that true."""
+
         class Terse:
             pass
 
@@ -146,6 +147,7 @@ class TestTheSentenceIsPlainTextByTheTimeItLeaves:
         """Sphinx's ``~`` means "print the final segment", and a reader of a
         one-line field description wants the class name, not its import
         path."""
+
         class Referring:
             """One line.
 

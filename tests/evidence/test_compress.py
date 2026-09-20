@@ -13,15 +13,14 @@ def _design(key, n_data, n_theta, n_phi):
 
 def _dense_marginal_log_likelihood(a_theta, a_phi, data, sigma, prior_std, x):
     """Oracle: the analytic N(A_theta x, sigma^2 I + A_phi S A_phi^T) density."""
-    cov = np.diag(np.full(len(data), sigma**2)) + a_phi @ np.diag(
-        np.full(a_phi.shape[1], prior_std**2)
-    ) @ a_phi.T
+    cov = (
+        np.diag(np.full(len(data), sigma**2))
+        + a_phi @ np.diag(np.full(a_phi.shape[1], prior_std**2)) @ a_phi.T
+    )
     resid = np.asarray(data) - np.asarray(a_theta) @ np.asarray(x)
     sign, logdet = np.linalg.slogdet(cov)
     assert sign > 0
-    return -0.5 * (
-        resid @ np.linalg.solve(cov, resid) + logdet + len(data) * np.log(2 * np.pi)
-    )
+    return -0.5 * (resid @ np.linalg.solve(cov, resid) + logdet + len(data) * np.log(2 * np.pi))
 
 
 def test_with_no_nuisance_the_term_reproduces_the_gaussian_log_likelihood():
@@ -31,14 +30,15 @@ def test_with_no_nuisance_the_term_reproduces_the_gaussian_log_likelihood():
     data = a_theta @ truth + 0.1 * jax.random.normal(jax.random.key(1), (40,))
 
     term = compress_linear(
-        design={"x": a_theta}, observed=data, noise_std=0.1,
-        shapes={"x": (3,)}, epoch_id="e0",
+        design={"x": a_theta},
+        observed=data,
+        noise_std=0.1,
+        shapes={"x": (3,)},
+        epoch_id="e0",
     )
     probe = {"x": jnp.array([0.1, 0.2, 0.3])}
     resid = data - a_theta @ probe["x"]
-    expected = -0.5 * float(
-        jnp.sum(resid**2) / 0.01 + 40 * jnp.log(2 * jnp.pi * 0.01)
-    )
+    expected = -0.5 * float(jnp.sum(resid**2) / 0.01 + 40 * jnp.log(2 * jnp.pi * 0.01))
     assert float(term(probe)) == pytest.approx(expected, rel=1e-10)
 
 
@@ -46,19 +46,20 @@ def test_a_linear_gaussian_nuisance_is_marginalised_to_the_analytic_density():
     """The pin: the covariance must be N + A S A^T, log-det and prior norm included."""
     key = jax.random.key(2)
     a_theta, a_phi = _design(key, n_data=40, n_theta=2, n_phi=3)
-    data = a_theta @ jnp.array([1.0, -0.5]) + 0.1 * jax.random.normal(
-        jax.random.key(3), (40,)
-    )
+    data = a_theta @ jnp.array([1.0, -0.5]) + 0.1 * jax.random.normal(jax.random.key(3), (40,))
 
     term = compress_linear(
-        design={"x": a_theta}, nuisance_design={"p": a_phi},
-        nuisance_prior_std={"p": 0.7}, observed=data, noise_std=0.1,
-        shapes={"x": (2,)}, nuisance_shapes={"p": (3,)}, epoch_id="e0",
+        design={"x": a_theta},
+        nuisance_design={"p": a_phi},
+        nuisance_prior_std={"p": 0.7},
+        observed=data,
+        noise_std=0.1,
+        shapes={"x": (2,)},
+        nuisance_shapes={"p": (3,)},
+        epoch_id="e0",
     )
     probe = {"x": jnp.array([0.3, 0.9])}
-    expected = _dense_marginal_log_likelihood(
-        a_theta, a_phi, data, 0.1, 0.7, probe["x"]
-    )
+    expected = _dense_marginal_log_likelihood(a_theta, a_phi, data, 0.1, 0.7, probe["x"])
     assert float(term(probe)) == pytest.approx(expected, rel=1e-9)
 
 
@@ -91,19 +92,20 @@ def test_the_nuisance_priors_own_normalisation_is_in_the_offset():
     n_phi, prior_std = 6, 20.0
     key = jax.random.key(10)
     a_theta, a_phi = _design(key, n_data=40, n_theta=2, n_phi=n_phi)
-    data = a_theta @ jnp.array([0.8, -1.4]) + 0.1 * jax.random.normal(
-        jax.random.key(11), (40,)
-    )
+    data = a_theta @ jnp.array([0.8, -1.4]) + 0.1 * jax.random.normal(jax.random.key(11), (40,))
 
     term = compress_linear(
-        design={"x": a_theta}, nuisance_design={"p": a_phi},
-        nuisance_prior_std={"p": prior_std}, observed=data, noise_std=0.1,
-        shapes={"x": (2,)}, nuisance_shapes={"p": (n_phi,)}, epoch_id="e0",
+        design={"x": a_theta},
+        nuisance_design={"p": a_phi},
+        nuisance_prior_std={"p": prior_std},
+        observed=data,
+        noise_std=0.1,
+        shapes={"x": (2,)},
+        nuisance_shapes={"p": (n_phi,)},
+        epoch_id="e0",
     )
     probe = {"x": jnp.array([0.3, 0.9])}
-    expected = _dense_marginal_log_likelihood(
-        a_theta, a_phi, data, 0.1, prior_std, probe["x"]
-    )
+    expected = _dense_marginal_log_likelihood(a_theta, a_phi, data, 0.1, prior_std, probe["x"])
     shipped = float(term(probe))
     assert shipped == pytest.approx(expected, rel=1e-9)
 
@@ -119,16 +121,19 @@ def test_the_nuisance_priors_own_normalisation_is_in_the_offset():
 def test_ignoring_the_nuisance_would_be_too_tight_which_this_measures():
     key = jax.random.key(4)
     a_theta, a_phi = _design(key, n_data=40, n_theta=2, n_phi=3)
-    data = a_theta @ jnp.array([1.0, -0.5]) + 0.1 * jax.random.normal(
-        jax.random.key(5), (40,)
-    )
+    data = a_theta @ jnp.array([1.0, -0.5]) + 0.1 * jax.random.normal(jax.random.key(5), (40,))
     common = dict(
-        design={"x": a_theta}, observed=data, noise_std=0.1,
-        shapes={"x": (2,)}, epoch_id="e0",
+        design={"x": a_theta},
+        observed=data,
+        noise_std=0.1,
+        shapes={"x": (2,)},
+        epoch_id="e0",
     )
     without = compress_linear(**common)
     with_nuisance = compress_linear(
-        **common, nuisance_design={"p": a_phi}, nuisance_prior_std={"p": 0.7},
+        **common,
+        nuisance_design={"p": a_phi},
+        nuisance_prior_std={"p": 0.7},
         nuisance_shapes={"p": (3,)},
     )
     tight = np.linalg.eigvalsh(np.asarray(without.info.fisher()))
@@ -144,9 +149,11 @@ def test_flagged_samples_give_a_finite_term_not_minus_infinity():
     data = jax.random.normal(jax.random.key(7), (8,))
     flags = jnp.array([False, True, False, False, False, False, True, False])
     term = compress_linear(
-        design={"x": a_theta}, observed=data,
+        design={"x": a_theta},
+        observed=data,
         noise_std=FlaggedNoise(HomoscedasticNoise(jnp.array(0.1)), flags),
-        shapes={"x": (2,)}, epoch_id="e0",
+        shapes={"x": (2,)},
+        epoch_id="e0",
     )
     assert np.isfinite(float(term({"x": jnp.zeros(2)})))
     assert term.n_observed == 6
@@ -157,9 +164,11 @@ def test_a_fully_flagged_epoch_gives_the_null_term():
 
     a_theta, _ = _design(jax.random.key(8), n_data=8, n_theta=2, n_phi=1)
     term = compress_linear(
-        design={"x": a_theta}, observed=jax.random.normal(jax.random.key(9), (8,)),
+        design={"x": a_theta},
+        observed=jax.random.normal(jax.random.key(9), (8,)),
         noise_std=FlaggedNoise(HomoscedasticNoise(jnp.array(0.1)), jnp.ones(8, bool)),
-        shapes={"x": (2,)}, epoch_id="e0",
+        shapes={"x": (2,)},
+        epoch_id="e0",
     )
     assert term.n_observed == 0
     assert float(term({"x": jnp.array([3.0, -2.0])})) == pytest.approx(0.0, abs=1e-12)
@@ -170,8 +179,11 @@ def test_a_rank_deficient_epoch_is_representable_and_not_an_error():
     """One epoch that constrains one direction of two."""
     design = jnp.array([[1.0, 0.0]] * 10)
     term = compress_linear(
-        design={"x": design}, observed=jnp.zeros(10), noise_std=0.1,
-        shapes={"x": (2,)}, epoch_id="e0",
+        design={"x": design},
+        observed=jnp.zeros(10),
+        noise_std=0.1,
+        shapes={"x": (2,)},
+        epoch_id="e0",
     )
     assert int(np.linalg.matrix_rank(np.asarray(term.info.fisher()), tol=1e-9)) == 1
 
@@ -204,14 +216,20 @@ class TestANaNAtAFlaggedSampleMustNotReachTheTerm:
         a_theta, data = self._design_and_data()
         flags = jnp.array([False, True, False, False, False, False, True, False])
         clean = compress_linear(
-            design={"x": a_theta}, observed=jnp.asarray(data),
-            noise_std=self._noise(flags), shapes={"x": (2,)}, epoch_id="clean",
+            design={"x": a_theta},
+            observed=jnp.asarray(data),
+            noise_std=self._noise(flags),
+            shapes={"x": (2,)},
+            epoch_id="clean",
         )
         spiked = data.copy()
         spiked[1] = poisoned  # index 1 is flagged
         poisonedterm = compress_linear(
-            design={"x": a_theta}, observed=jnp.asarray(spiked),
-            noise_std=self._noise(flags), shapes={"x": (2,)}, epoch_id="spiked",
+            design={"x": a_theta},
+            observed=jnp.asarray(spiked),
+            noise_std=self._noise(flags),
+            shapes={"x": (2,)},
+            epoch_id="spiked",
         )
         probe = {"x": jnp.array([0.3, -0.7])}
         # Not merely finite -- EQUAL. A flagged sample contributes nothing, so
@@ -231,8 +249,11 @@ class TestANaNAtAFlaggedSampleMustNotReachTheTerm:
         spiked = np.asarray(a_theta).copy()
         spiked[1, :] = np.nan  # flagged row
         term = compress_linear(
-            design={"x": jnp.asarray(spiked)}, observed=jnp.asarray(data),
-            noise_std=self._noise(flags), shapes={"x": (2,)}, epoch_id="e",
+            design={"x": jnp.asarray(spiked)},
+            observed=jnp.asarray(data),
+            noise_std=self._noise(flags),
+            shapes={"x": (2,)},
+            epoch_id="e",
         )
         assert np.all(np.isfinite(np.asarray(term.info.fisher())))
         assert np.isfinite(float(term({"x": jnp.zeros(2)})))
@@ -252,8 +273,11 @@ class TestANaNAtAFlaggedSampleMustNotReachTheTerm:
         sigma[3] = np.nan
         with pytest.raises(StateValidationError, match="NaN"):
             compress_linear(
-                design={"x": a_theta}, observed=jnp.asarray(data),
-                noise_std=jnp.asarray(sigma), shapes={"x": (2,)}, epoch_id="e",
+                design={"x": a_theta},
+                observed=jnp.asarray(data),
+                noise_std=jnp.asarray(sigma),
+                shapes={"x": (2,)},
+                epoch_id="e",
             )
 
 
@@ -271,8 +295,11 @@ class TestWhatCompressionCanAndCannotBeTracedThrough:
     def _call(self, observed, noise_std=0.1):
         a_theta, _ = _design(jax.random.key(30), n_data=8, n_theta=2, n_phi=1)
         return compress_linear(
-            design={"x": a_theta}, observed=observed, noise_std=noise_std,
-            shapes={"x": (2,)}, epoch_id="e",
+            design={"x": a_theta},
+            observed=observed,
+            noise_std=noise_std,
+            shapes={"x": (2,)},
+            epoch_id="e",
         )
 
     def test_jit_is_refused_by_name_rather_than_leaking_a_tracer_error(self):

@@ -60,9 +60,7 @@ def _load_mapping(yaml_text: str) -> dict[str, object]:
     except ConfigError:
         raise ConfigError("Field edit requires a safe YAML mapping document.") from None
     document = plain(loaded)
-    if not isinstance(document, dict) or not all(
-        isinstance(key, str) for key in document
-    ):
+    if not isinstance(document, dict) or not all(isinstance(key, str) for key in document):
         raise ConfigError("Field edit requires a safe YAML mapping document.")
     return document
 
@@ -88,9 +86,7 @@ def _projected_widget(document: Mapping[str, object], path: str) -> ProjectedWid
         if widget.path == path
     )
     if len(matches) != 1:
-        raise ConfigError(
-            f"Field edit path is not one exact projected field. {_YAML_GUIDANCE}"
-        )
+        raise ConfigError(f"Field edit path is not one exact projected field. {_YAML_GUIDANCE}")
     widget = matches[0]
     if not _matches_pattern(path, widget.path_pattern):
         raise ConfigError(
@@ -129,9 +125,7 @@ def _parent_mapping(document: dict[str, object], components: tuple[str, ...]) ->
             child = {}
             parent[component] = child
         if not isinstance(child, dict):
-            raise ConfigError(
-                f"Field edit cannot cross a non-mapping parent. {_YAML_GUIDANCE}"
-            )
+            raise ConfigError(f"Field edit cannot cross a non-mapping parent. {_YAML_GUIDANCE}")
         parent = child
     return parent
 

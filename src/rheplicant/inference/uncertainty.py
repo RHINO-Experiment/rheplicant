@@ -231,9 +231,7 @@ def _flat_forward(
         )
     x0, unravel = ravel_pytree(params)
     if x0.size == 0:
-        raise StateValidationError(
-            "params contains no trainable leaves — nothing to propagate."
-        )
+        raise StateValidationError("params contains no trainable leaves — nothing to propagate.")
 
     def f_flat(x: jax.Array) -> jax.Array:
         return jnp.ravel(forward(unravel(x)))
@@ -598,11 +596,7 @@ def fisher_information(
     # is P1's general rule -- a refusal whose evidence the seam would erase
     # lives in a pre-validation -- and `_declared_gaussian_priors` is where it
     # lives for this exit.
-    declared = (
-        None
-        if space is None
-        else _declared_gaussian_priors(space, names, spans, shapes)
-    )
+    declared = None if space is None else _declared_gaussian_priors(space, names, spans, shapes)
 
     # A flat `{name: array}` dict becomes one node per latent, which is what
     # lets the declared priors reach the far side as declarations. Anything
@@ -709,8 +703,7 @@ def parameter_covariance(fisher: FlatMatrix, jitter: float = 0.0) -> FlatMatrix:
         found = remote(_remote_flat(fisher), jitter)
     except ValueError as refusal:
         raise StateValidationError(
-            f"parameter_covariance() will not invert this {fisher.kind!r}: "
-            f"{refusal}"
+            f"parameter_covariance() will not invert this {fisher.kind!r}: {refusal}"
         ) from refusal
     return FlatMatrix(
         matrix=found.values,

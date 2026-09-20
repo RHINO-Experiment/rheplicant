@@ -47,8 +47,13 @@ def _run(program):
     each subprocess writes ``__pycache__`` into ``src/_rheplicant_bootstrap``,
     the stale-bytecode hazard CLAUDE.md records for mutation runs."""
     return subprocess.run(
-        [sys.executable, "-I", "-B", "-c",
-         f"import sys; sys.path.insert(0, {str(SRC)!r})\n" + program],
+        [
+            sys.executable,
+            "-I",
+            "-B",
+            "-c",
+            f"import sys; sys.path.insert(0, {str(SRC)!r})\n" + program,
+        ],
         check=True,
         capture_output=True,
         text=True,

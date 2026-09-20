@@ -496,9 +496,7 @@ class TestTheOptionLineAndRowShapeGuards:
         Touchstone from a corrupt file.
         """
         with pytest.raises(DataIngestionError, match=r"a Touchstone data row has 3"):
-            read_touchstone(
-                write(tmp_path, "wide.s1p", "# MHZ S RI R 50\n60.0  0.1 0.2 0.3\n")
-            )
+            read_touchstone(write(tmp_path, "wide.s1p", "# MHZ S RI R 50\n60.0  0.1 0.2 0.3\n"))
 
     def test_a_file_with_no_data_rows_at_all_is_refused(self, tmp_path):
         """Header and comments, no numbers.

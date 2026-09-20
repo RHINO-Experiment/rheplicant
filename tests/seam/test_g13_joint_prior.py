@@ -58,8 +58,8 @@ def _closed_form() -> float:
     ``mu`` has cancelled, which is why no amplitude and no index appear.
     """
     nu = np.linspace(60e6, 85e6, N_FREQ) / NU0
-    g = np.stack([np.ones(N_FREQ), -np.log(nu)])          # (2, N_FREQ)
-    gram = (g @ g.T) * N_TIME                             # summed over time too
+    g = np.stack([np.ones(N_FREQ), -np.log(nu)])  # (2, N_FREQ)
+    gram = (g @ g.T) * N_TIME  # summed over time too
     information = (1.0 + 2.0 * F**2) / F**2 * gram
     return float(0.5 * np.linalg.slogdet(information)[1])
 
@@ -149,12 +149,18 @@ class TestTheDeclaredFactorIsTheJeffreysPrior:
         """
         values = {"fg_log_amp": jnp.array(log_amp), "fg_beta": jnp.array(beta)}
         with_prior = to_graph(
-            _covered_space(), power_law["twin"], power_law["state"],
-            power_law["observed"], power_law["noise"],
+            _covered_space(),
+            power_law["twin"],
+            power_law["state"],
+            power_law["observed"],
+            power_law["noise"],
         )
         without = to_graph(
-            _flat_space(), power_law["twin"], power_law["state"],
-            power_law["observed"], power_law["noise"],
+            _flat_space(),
+            power_law["twin"],
+            power_law["state"],
+            power_law["observed"],
+            power_law["noise"],
         )
         assert without.joint_prior is None, "the control declared a joint prior"
         moved = float(log_joint(with_prior, values)) - float(log_joint(without, values))
@@ -176,12 +182,14 @@ class TestTheDeclaredFactorIsTheJeffreysPrior:
         nothing varies.
         """
         without = to_graph(
-            _flat_space(), power_law["twin"], power_law["state"],
-            power_law["observed"], power_law["noise"],
+            _flat_space(),
+            power_law["twin"],
+            power_law["state"],
+            power_law["observed"],
+            power_law["noise"],
         )
         likelihoods = [
-            float(log_joint(without, {"fg_log_amp": jnp.array(la),
-                                      "fg_beta": jnp.array(be)}))
+            float(log_joint(without, {"fg_log_amp": jnp.array(la), "fg_beta": jnp.array(be)}))
             for la, be in GRID
         ]
         assert max(likelihoods) - min(likelihoods) > 1.0, (
@@ -200,8 +208,11 @@ class TestTheDeclaredFactorIsTheJeffreysPrior:
         """
         values = {"fg_log_amp": jnp.array(7.8), "fg_beta": jnp.array(2.55)}
         forward = to_graph(
-            _covered_space(), power_law["twin"], power_law["state"],
-            power_law["observed"], power_law["noise"],
+            _covered_space(),
+            power_law["twin"],
+            power_law["state"],
+            power_law["observed"],
+            power_law["noise"],
         )
         reversed_space = ParameterSpace(
             latents=list(_covered_space().latents),
@@ -209,8 +220,11 @@ class TestTheDeclaredFactorIsTheJeffreysPrior:
             joint_prior=JeffreysPrior(over=("fg_beta", "fg_log_amp")),
         )
         backward = to_graph(
-            reversed_space, power_law["twin"], power_law["state"],
-            power_law["observed"], power_law["noise"],
+            reversed_space,
+            power_law["twin"],
+            power_law["state"],
+            power_law["observed"],
+            power_law["noise"],
         )
         assert float(log_joint(forward, values)) == pytest.approx(
             float(log_joint(backward, values)), rel=1e-12

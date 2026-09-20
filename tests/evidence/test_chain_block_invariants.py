@@ -99,9 +99,7 @@ class TestTheFixturesReachTheStateTheyClaimTo:
     had rho = 0 on the machine it was written on.
     """
 
-    @pytest.mark.parametrize(
-        ("info", "expected"), [(ZERO_ROW, 25.0), (COLLINEAR, 16.0)]
-    )
+    @pytest.mark.parametrize(("info", "expected"), [(ZERO_ROW, 25.0), (COLLINEAR, 16.0)])
     def test_the_rank_deficient_fixtures_leave_a_corner(self, info, expected):
         assert corner_squared(info) == pytest.approx(expected, rel=1e-9)
 
@@ -119,14 +117,11 @@ class TestTheComparedCoefficientsAreInvariant:
         want = _quadratic_form(info.factor, info.target, info.offset)
         for index, label in enumerate(("gram", "cross term", "constant")):
             assert np.allclose(found[index], want[index], rtol=1e-9, atol=1e-9), (
-                f"the {label} moved when the epoch was stored: "
-                f"{found[index]} vs {want[index]}"
+                f"the {label} moved when the epoch was stored: {found[index]} vs {want[index]}"
             )
 
     @pytest.mark.parametrize("info", [ZERO_ROW, COLLINEAR])
-    def test_the_constant_is_the_log_densitys_own_and_not_z_dot_z_plus_offset(
-        self, info
-    ):
+    def test_the_constant_is_the_log_densitys_own_and_not_z_dot_z_plus_offset(self, info):
         """The two candidates, separated by a fixture that can tell them apart.
 
         ``offset - z.z/2`` is the constant term of ``offset - ||Rx - z||^2/2``.
@@ -143,9 +138,7 @@ class TestTheComparedCoefficientsAreInvariant:
 
         assert right(square) == pytest.approx(right(info), rel=1e-9)
         assert wrong(square) != pytest.approx(wrong(info), rel=1e-3)
-        assert wrong(square) - wrong(info) == pytest.approx(
-            -1.5 * corner_squared(info), rel=1e-9
-        )
+        assert wrong(square) - wrong(info) == pytest.approx(-1.5 * corner_squared(info), rel=1e-9)
 
 
 class TestTheGuardItself:

@@ -89,9 +89,7 @@ PLUGIN_ROW_KEYS = (
 )
 
 _ORIGIN_REASONS = frozenset(("no_origin", "namespace_package"))
-_LOADER_REASONS = frozenset(
-    ("no_origin", "namespace_package", "generated_module")
-)
+_LOADER_REASONS = frozenset(("no_origin", "namespace_package", "generated_module"))
 _PATH_REASONS = frozenset(
     (
         "no_origin",
@@ -103,9 +101,7 @@ _PATH_REASONS = frozenset(
 )
 _HASH_REASONS = frozenset((*_PATH_REASONS, "extension_module"))
 _VERSION_REASONS = frozenset(("not_installed", "unreadable"))
-_DIRECT_URL_REASONS = frozenset(
-    ("not_installed", "missing_direct_url", "unreadable")
-)
+_DIRECT_URL_REASONS = frozenset(("not_installed", "missing_direct_url", "unreadable"))
 _PEP_503_RUN = re.compile(r"[-_.]+")
 _LOWER_SHA256 = re.compile(r"[0-9a-f]{64}")
 _GENERATED_ORIGINS = frozenset(("built-in", "frozen"))
@@ -118,9 +114,7 @@ _EXTENSION_FILE_LOADER = importlib.machinery.ExtensionFileLoader
 _MISSING = object()
 _METADATA_EVIDENCE_LIMIT = 250_000
 _DIRECT_URL_TEXT_LIMIT = 1024 * 1024
-_DIRECT_URL_INTEGER_BIT_LIMIT = math.ceil(
-    _DIRECT_URL_TEXT_LIMIT * math.log2(10)
-)
+_DIRECT_URL_INTEGER_BIT_LIMIT = math.ceil(_DIRECT_URL_TEXT_LIMIT * math.log2(10))
 _DIRECT_URL_DEPTH_LIMIT = 100
 _FOREIGN_EXCEPTION_DETAIL_LIMIT = 1024
 
@@ -135,9 +129,7 @@ class _MetadataBudget:
     def __init__(self) -> None:
         limit = _METADATA_EVIDENCE_LIMIT
         if type(limit) is not int or limit < 1:
-            raise ConfigError(
-                "plugins: distribution metadata evidence budget is invalid."
-            )
+            raise ConfigError("plugins: distribution metadata evidence budget is invalid.")
         self._limit = limit
         self._used = 0
 
@@ -145,16 +137,14 @@ class _MetadataBudget:
         used = self._used + 1
         if used > self._limit:
             raise _MetadataBudgetExceeded(
-                "plugins: distribution metadata evidence budget exceeds limit "
-                f"{self._limit}."
+                f"plugins: distribution metadata evidence budget exceeds limit {self._limit}."
             )
         self._used = used
 
     def ensure_remaining(self, count: int) -> None:
         if count > self._limit - self._used:
             raise _MetadataBudgetExceeded(
-                "plugins: distribution metadata evidence budget exceeds limit "
-                f"{self._limit}."
+                f"plugins: distribution metadata evidence budget exceeds limit {self._limit}."
             )
 
 
@@ -190,12 +180,9 @@ def _canonical_module_name(value: object) -> str:
     _validate_utf8_text(canonical, where="plugin module name")
     parts = str.split(canonical, ".")
     if not canonical or any(
-        not part or not str.isidentifier(part) or keyword.iskeyword(part)
-        for part in parts
+        not part or not str.isidentifier(part) or keyword.iskeyword(part) for part in parts
     ):
-        raise ConfigError(
-            "plugins: entries must be non-empty dot-separated Python module names."
-        )
+        raise ConfigError("plugins: entries must be non-empty dot-separated Python module names.")
     return canonical
 
 
@@ -205,9 +192,7 @@ def _normalize_distribution_name(value: object, *, require_normalized: bool) -> 
     if not normalized:
         raise ConfigError("plugin distribution name must be non-empty.")
     if require_normalized and canonical != normalized:
-        raise ConfigError(
-            "plugin distribution name must be PEP-503-normalized."
-        )
+        raise ConfigError("plugin distribution name must be PEP-503-normalized.")
     return normalized
 
 
@@ -236,25 +221,19 @@ def _value_reason(
 ) -> tuple[object, str | None]:
     canonical_reason = _canonical_reason(reason, where=where, allowed=allowed)
     if (value is None) is (canonical_reason is None):
-        raise ConfigError(
-            f"plugin {where} value and reason must be exact complements."
-        )
+        raise ConfigError(f"plugin {where} value and reason must be exact complements.")
     return value, canonical_reason
 
 
 def _validate_json_text(value: str, *, where: str) -> None:
     if len(value) > _DIRECT_URL_TEXT_LIMIT:
-        raise ConfigError(
-            f"{where} scalar exceeds the {_DIRECT_URL_TEXT_LIMIT}-byte limit."
-        )
+        raise ConfigError(f"{where} scalar exceeds the {_DIRECT_URL_TEXT_LIMIT}-byte limit.")
     try:
         encoded = str.encode(value, "utf-8", "strict")
     except UnicodeEncodeError:
         raise ConfigError(f"{where} must contain only valid UTF-8 text.") from None
     if len(encoded) > _DIRECT_URL_TEXT_LIMIT:
-        raise ConfigError(
-            f"{where} scalar exceeds the {_DIRECT_URL_TEXT_LIMIT}-byte limit."
-        )
+        raise ConfigError(f"{where} scalar exceeds the {_DIRECT_URL_TEXT_LIMIT}-byte limit.")
 
 
 def _validate_frozen_json(
@@ -276,9 +255,7 @@ def _validate_frozen_json(
         if identity in visited:
             return
         if depth > _DIRECT_URL_DEPTH_LIMIT:
-            raise ConfigError(
-                f"{where} depth exceeds limit {_DIRECT_URL_DEPTH_LIMIT}."
-            )
+            raise ConfigError(f"{where} depth exceeds limit {_DIRECT_URL_DEPTH_LIMIT}.")
         if budget is not None:
             budget.consume()
         item_type = type(item)
@@ -298,9 +275,7 @@ def _validate_frozen_json(
             visited.add(identity)
             return
         is_mapping = (
-            item_type is MappingProxyType
-            if require_frozen
-            else static_isinstance(item, Mapping)
+            item_type is MappingProxyType if require_frozen else static_isinstance(item, Mapping)
         )
         if is_mapping:
             active_containers.add(identity)
@@ -316,21 +291,15 @@ def _validate_frozen_json(
                     except StopIteration:
                         break
                     except Exception:
-                        raise ConfigError(
-                            f"{where} JSON mapping traversal failed."
-                        ) from None
+                        raise ConfigError(f"{where} JSON mapping traversal failed.") from None
                     if budget is not None:
                         budget.consume()
                     try:
                         key, child = pair
                     except Exception:
-                        raise ConfigError(
-                            f"{where} JSON mapping traversal failed."
-                        ) from None
+                        raise ConfigError(f"{where} JSON mapping traversal failed.") from None
                     if type(key) is not str:
-                        raise ConfigError(
-                            f"{where} must have string JSON object keys."
-                        )
+                        raise ConfigError(f"{where} must have string JSON object keys.")
                     validate(key, depth + 1)
                     validate(child, depth + 1)
             finally:
@@ -395,9 +364,7 @@ class PluginDistributionRecord:
         version = (
             None
             if raw_version is None
-            else _canonical_text(
-                raw_version, where="plugin distribution version"
-            )
+            else _canonical_text(raw_version, where="plugin distribution version")
         )
         raw_direct_url, direct_url_reason = _value_reason(
             self.direct_url,
@@ -408,9 +375,7 @@ class PluginDistributionRecord:
         direct_url = (
             None
             if raw_direct_url is None
-            else _freeze_direct_url(
-                raw_direct_url, where="plugin distribution direct_url"
-            )
+            else _freeze_direct_url(raw_direct_url, where="plugin distribution direct_url")
         )
         object.__setattr__(self, "name", name)
         object.__setattr__(self, "version", version)
@@ -454,13 +419,9 @@ def _copy_distribution_record(
         raise ConfigError("plugin distribution snapshot is malformed.")
     try:
         raw_direct_url = object.__getattribute__(value, "direct_url")
-        raw_direct_url_reason = object.__getattribute__(
-            value, "direct_url_reason"
-        )
+        raw_direct_url_reason = object.__getattribute__(value, "direct_url_reason")
         direct_url_reason = (
-            raw_direct_url_reason
-            if raw_direct_url is None
-            else "missing_direct_url"
+            raw_direct_url_reason if raw_direct_url is None else "missing_direct_url"
         )
         if raw_direct_url is not None:
             _value_reason(
@@ -477,11 +438,7 @@ def _copy_distribution_record(
             direct_url_reason=direct_url_reason,
         )
         if raw_direct_url is not None:
-            retained_direct_url = (
-                raw_direct_url
-                if direct_url_copy is _MISSING
-                else direct_url_copy
-            )
+            retained_direct_url = raw_direct_url if direct_url_copy is _MISSING else direct_url_copy
             object.__setattr__(copied, "direct_url", retained_direct_url)
             object.__setattr__(copied, "direct_url_reason", None)
         return copied
@@ -510,36 +467,18 @@ class PluginRecord:
     def __post_init__(self) -> None:
         try:
             raw_name = object.__getattribute__(self, "name")
-            raw_already_imported = object.__getattribute__(
-                self, "already_imported"
-            )
+            raw_already_imported = object.__getattribute__(self, "already_imported")
             raw_origin_field = object.__getattribute__(self, "origin")
-            raw_origin_reason_field = object.__getattribute__(
-                self, "origin_reason"
-            )
-            raw_loader_type_field = object.__getattribute__(
-                self, "loader_type"
-            )
-            raw_loader_type_reason_field = object.__getattribute__(
-                self, "loader_type_reason"
-            )
-            raw_resolved_path_field = object.__getattribute__(
-                self, "resolved_path"
-            )
-            raw_resolved_path_reason_field = object.__getattribute__(
-                self, "resolved_path_reason"
-            )
+            raw_origin_reason_field = object.__getattribute__(self, "origin_reason")
+            raw_loader_type_field = object.__getattribute__(self, "loader_type")
+            raw_loader_type_reason_field = object.__getattribute__(self, "loader_type_reason")
+            raw_resolved_path_field = object.__getattribute__(self, "resolved_path")
+            raw_resolved_path_reason_field = object.__getattribute__(self, "resolved_path_reason")
             raw_distributions = object.__getattribute__(self, "distributions")
-            raw_distributions_reason = object.__getattribute__(
-                self, "distributions_reason"
-            )
+            raw_distributions_reason = object.__getattribute__(self, "distributions_reason")
             raw_code_hash_field = object.__getattribute__(self, "code_hash")
-            raw_code_hash_reason_field = object.__getattribute__(
-                self, "code_hash_reason"
-            )
-            raw_unobserved_io = object.__getattribute__(
-                self, "unobserved_io"
-            )
+            raw_code_hash_reason_field = object.__getattribute__(self, "code_hash_reason")
+            raw_unobserved_io = object.__getattribute__(self, "unobserved_io")
         except Exception:
             raise ConfigError("plugin record is malformed.") from None
 
@@ -553,11 +492,7 @@ class PluginRecord:
             where="origin",
             allowed=_ORIGIN_REASONS,
         )
-        origin = (
-            None
-            if raw_origin is None
-            else _canonical_text(raw_origin, where="plugin origin")
-        )
+        origin = None if raw_origin is None else _canonical_text(raw_origin, where="plugin origin")
         raw_loader_type, loader_type_reason = _value_reason(
             raw_loader_type_field,
             raw_loader_type_reason_field,
@@ -582,9 +517,7 @@ class PluginRecord:
         resolved_path = (
             None
             if raw_resolved_path is None
-            else _canonical_text(
-                raw_resolved_path, where="plugin resolved_path"
-            )
+            else _canonical_text(raw_resolved_path, where="plugin resolved_path")
         )
         if resolved_path is not None and not os.path.isabs(resolved_path):
             raise ConfigError("plugin resolved_path must be absolute.")
@@ -602,9 +535,7 @@ class PluginRecord:
             raw_direct_url = snapshot.direct_url
             if raw_direct_url is not None:
                 if type(raw_direct_url) is not MappingProxyType:
-                    raise ConfigError(
-                        "plugin distribution direct_url must be recursively frozen."
-                    )
+                    raise ConfigError("plugin distribution direct_url must be recursively frozen.")
                 direct_url_roots.append(raw_direct_url)
 
         frozen_direct_urls: tuple[object, ...] = ()
@@ -619,15 +550,11 @@ class PluginRecord:
             )
             frozen_direct_urls = frozen_roots
             if tuple.__len__(frozen_direct_urls) != len(direct_url_roots):
-                raise ConfigError(
-                    "plugin distribution direct_url snapshot is malformed."
-                )
+                raise ConfigError("plugin distribution direct_url snapshot is malformed.")
             validated_snapshot_nodes: set[int] = set()
             for frozen_direct_url in tuple.__iter__(frozen_direct_urls):
                 if type(frozen_direct_url) is not MappingProxyType:
-                    raise ConfigError(
-                        "plugin distribution direct_url must be a JSON object."
-                    )
+                    raise ConfigError("plugin distribution direct_url must be a JSON object.")
                 _validate_frozen_json(
                     frozen_direct_url,
                     where="plugin distribution direct_url",
@@ -649,9 +576,7 @@ class PluginRecord:
                 direct_url_copy=direct_url_copy,
             )
             if previous_name is not None and distribution.name <= previous_name:
-                raise ConfigError(
-                    "plugin distributions must be normalized, unique, and sorted."
-                )
+                raise ConfigError("plugin distributions must be normalized, unique, and sorted.")
             copied_distributions.append(distribution)
             previous_name = distribution.name
         distributions = tuple(copied_distributions)
@@ -662,13 +587,9 @@ class PluginRecord:
         )
         if distributions:
             if distributions_reason is not None:
-                raise ConfigError(
-                    "plugin distributions must have no reason when present."
-                )
+                raise ConfigError("plugin distributions must have no reason when present.")
         elif distributions_reason != "no_distribution":
-            raise ConfigError(
-                "plugin distributions must use no_distribution when empty."
-            )
+            raise ConfigError("plugin distributions must use no_distribution when empty.")
 
         raw_code_hash, code_hash_reason = _value_reason(
             raw_code_hash_field,
@@ -682,9 +603,7 @@ class PluginRecord:
             else _canonical_text(raw_code_hash, where="plugin code_hash")
         )
         if code_hash is not None and _LOWER_SHA256.fullmatch(code_hash) is None:
-            raise ConfigError(
-                "plugin code_hash must be a lowercase 64-character SHA-256."
-            )
+            raise ConfigError("plugin code_hash must be a lowercase 64-character SHA-256.")
         if raw_unobserved_io is not True:
             raise ConfigError("plugin unobserved_io must be exactly true.")
 
@@ -723,9 +642,7 @@ def _protocol_items(
         except StopIteration:
             return
         except Exception:
-            raise ConfigError(
-                f"plugins: distribution metadata {where} failed."
-            ) from None
+            raise ConfigError(f"plugins: distribution metadata {where} failed.") from None
         budget.consume()
         yield item
 
@@ -736,23 +653,17 @@ def _ordered_metadata_sequence(value: object, *, where: str) -> object:
         or static_isinstance(value, Mapping)
         or not static_isinstance(value, Sequence)
     ):
-        raise ConfigError(
-            f"plugins: distribution metadata {where} must be an ordered sequence."
-        )
+        raise ConfigError(f"plugins: distribution metadata {where} must be an ordered sequence.")
     return value
 
 
-def _top_level_distribution_names(
-    top_level: str, budget: _MetadataBudget
-) -> set[str]:
+def _top_level_distribution_names(top_level: str, budget: _MetadataBudget) -> set[str]:
     top_map = _protocol_value(
         metadata.packages_distributions,
         where="packages_distributions inspection",
     )
     if not static_isinstance(top_map, Mapping):
-        raise ConfigError(
-            "plugins: distribution metadata packages_distributions is not a mapping."
-        )
+        raise ConfigError("plugins: distribution metadata packages_distributions is not a mapping.")
     raw_pairs = _protocol_value(
         lambda: top_map.items(),
         where="packages_distributions traversal",
@@ -769,8 +680,7 @@ def _top_level_distribution_names(
             raw_key, raw_value = pair
         except Exception:
             raise ConfigError(
-                "plugins: distribution metadata packages_distributions "
-                "traversal failed."
+                "plugins: distribution metadata packages_distributions traversal failed."
             ) from None
         key = _canonical_text(
             raw_key,
@@ -778,8 +688,7 @@ def _top_level_distribution_names(
         )
         if key in seen_keys:
             raise ConfigError(
-                "plugins: distribution metadata top-level keys collide "
-                "after canonicalization."
+                "plugins: distribution metadata top-level keys collide after canonicalization."
             )
         seen_keys.add(key)
         if key == top_level:
@@ -787,22 +696,14 @@ def _top_level_distribution_names(
             found = True
     if not found:
         return set()
-    raw_names = _ordered_metadata_sequence(
-        raw_names, where="candidate names"
-    )
+    raw_names = _ordered_metadata_sequence(raw_names, where="candidate names")
     names: set[str] = set()
-    for raw_name in _protocol_items(
-        raw_names, where="candidate traversal", budget=budget
-    ):
-        names.add(
-            _normalize_distribution_name(raw_name, require_normalized=False)
-        )
+    for raw_name in _protocol_items(raw_names, where="candidate traversal", budget=budget):
+        names.add(_normalize_distribution_name(raw_name, require_normalized=False))
     return names
 
 
-def _record_text_top_level(
-    text: str, budget: _MetadataBudget
-) -> str | None:
+def _record_text_top_level(text: str, budget: _MetadataBudget) -> str | None:
     if not text or str.startswith(text, "/"):
         return None
     top_start: int | None = None
@@ -819,15 +720,10 @@ def _record_text_top_level(
             if component_length == 1 and text[start] == ".":
                 pass
             else:
-                if (
-                    component_length == 2
-                    and text[start] == "."
-                    and text[start + 1] == "."
-                ):
+                if component_length == 2 and text[start] == "." and text[start + 1] == ".":
                     return None
                 if any(
-                    str.find(text, forbidden, start, end) >= 0
-                    for forbidden in ("\x00", "\\", ":")
+                    str.find(text, forbidden, start, end) >= 0 for forbidden in ("\x00", "\\", ":")
                 ):
                     return None
                 if top_start is None:
@@ -848,29 +744,16 @@ def _record_parts(entry: object, budget: _MetadataBudget) -> str | None:
         raw_parts = entry.parts
         raw_is_absolute = entry.is_absolute()
     except Exception:
-        raise ConfigError(
-            "plugins: distribution metadata RECORD path inspection failed."
-        ) from None
+        raise ConfigError("plugins: distribution metadata RECORD path inspection failed.") from None
     if type(raw_is_absolute) is not bool:
-        raise ConfigError(
-            "plugins: distribution metadata RECORD path inspection failed."
-        )
-    raw_parts = _ordered_metadata_sequence(
-        raw_parts, where="RECORD path components"
-    )
+        raise ConfigError("plugins: distribution metadata RECORD path inspection failed.")
+    raw_parts = _ordered_metadata_sequence(raw_parts, where="RECORD path components")
     top_name: str | None = None
-    for part in _protocol_items(
-        raw_parts, where="RECORD path component traversal", budget=budget
-    ):
+    for part in _protocol_items(raw_parts, where="RECORD path component traversal", budget=budget):
         if not static_isinstance(part, str):
             return None
         exact = str.__str__(part)
-        if (
-            exact in ("", ".", "..", "/")
-            or "\x00" in exact
-            or "\\" in exact
-            or ":" in exact
-        ):
+        if exact in ("", ".", "..", "/") or "\x00" in exact or "\\" in exact or ":" in exact:
             return None
         if top_name is None:
             top_name = exact
@@ -894,9 +777,7 @@ def _distribution_name(distribution: object) -> str:
         raw_metadata = distribution.metadata
         raw_name = raw_metadata["Name"]
     except Exception:
-        raise ConfigError(
-            "plugins: distribution metadata name inspection failed."
-        ) from None
+        raise ConfigError("plugins: distribution metadata name inspection failed.") from None
     return _normalize_distribution_name(raw_name, require_normalized=False)
 
 
@@ -919,9 +800,7 @@ def _artifact_distribution_candidates(
         try:
             files = distribution.files
         except Exception:
-            raise ConfigError(
-                "plugins: distribution metadata RECORD inspection failed."
-            ) from None
+            raise ConfigError("plugins: distribution metadata RECORD inspection failed.") from None
         if files is None:
             continue
         files = _ordered_metadata_sequence(files, where="RECORD files")
@@ -929,9 +808,7 @@ def _artifact_distribution_candidates(
         base: tuple[Path, Path] | None = None
         rejected_base = False
         roots: dict[str, Path | None] = {}
-        for entry in _protocol_items(
-            files, where="RECORD traversal", budget=budget
-        ):
+        for entry in _protocol_items(files, where="RECORD traversal", budget=budget):
             top_name = _record_parts(entry, budget)
             if top_name is None:
                 continue
@@ -939,18 +816,14 @@ def _artifact_distribution_candidates(
                 break
             if base is None:
                 try:
-                    lexical_base = _lexical_path(
-                        distribution.locate_file(PurePosixPath())
-                    )
+                    lexical_base = _lexical_path(distribution.locate_file(PurePosixPath()))
                     resolved_base = lexical_base.resolve(strict=True)
                 except Exception:
                     raise ConfigError(
-                        "plugins: distribution metadata artifact-root "
-                        "inspection failed."
+                        "plugins: distribution metadata artifact-root inspection failed."
                     ) from None
-                if (
-                    lexical_base == Path(lexical_base.anchor)
-                    or resolved_base == Path(resolved_base.anchor)
+                if lexical_base == Path(lexical_base.anchor) or resolved_base == Path(
+                    resolved_base.anchor
                 ):
                     rejected_base = True
                     break
@@ -959,9 +832,7 @@ def _artifact_distribution_candidates(
             if top_name not in roots:
                 lexical_base, resolved_base = base
                 try:
-                    lexical_root = _lexical_path(
-                        distribution.locate_file(PurePosixPath(top_name))
-                    )
+                    lexical_root = _lexical_path(distribution.locate_file(PurePosixPath(top_name)))
                     if (
                         lexical_root == Path(lexical_root.anchor)
                         or lexical_root != lexical_base / top_name
@@ -978,8 +849,7 @@ def _artifact_distribution_candidates(
                     continue
                 except Exception:
                     raise ConfigError(
-                        "plugins: distribution metadata artifact-root "
-                        "inspection failed."
+                        "plugins: distribution metadata artifact-root inspection failed."
                     ) from None
                 roots[top_name] = artifact_root
 
@@ -1014,12 +884,8 @@ def _safe_exception_text(exc: Exception) -> str:
 
 def _loader_type(loader: object) -> str:
     selected = _loader_class(loader)
-    exact_module = static_class_text(
-        selected, "__module__", fallback="builtins"
-    )
-    exact_qualname = static_class_text(
-        selected, "__qualname__", fallback="unknown"
-    )
+    exact_module = static_class_text(selected, "__module__", fallback="builtins")
+    exact_qualname = static_class_text(selected, "__qualname__", fallback="unknown")
     return f"{exact_module}.{exact_qualname}"
 
 
@@ -1086,9 +952,7 @@ def _static_spec_field(spec: object, field: str) -> object:
     try:
         raw = inspect.getattr_static(spec, field, _MISSING)
     except Exception:
-        raise ConfigError(
-            "plugins: module specification inspection failed."
-        ) from None
+        raise ConfigError("plugins: module specification inspection failed.") from None
     if raw is _MISSING:
         raise ConfigError("plugins: module specification is incomplete.")
     class_value = static_class_attribute(type(spec), field, _MISSING)
@@ -1097,18 +961,12 @@ def _static_spec_field(spec: object, field: str) -> object:
             try:
                 return raw.__get__(spec, type(spec))
             except AttributeError:
-                raise ConfigError(
-                    "plugins: module specification is incomplete."
-                ) from None
+                raise ConfigError("plugins: module specification is incomplete.") from None
             except Exception:
-                raise ConfigError(
-                    "plugins: module specification inspection failed."
-                ) from None
+                raise ConfigError("plugins: module specification inspection failed.") from None
         descriptor_get = static_class_attribute(type(raw), "__get__", _MISSING)
         if descriptor_get is not _MISSING:
-            raise ConfigError(
-                "plugins: module specification inspection failed."
-            )
+            raise ConfigError("plugins: module specification inspection failed.")
     return raw
 
 
@@ -1144,16 +1002,12 @@ def _is_extension_loader(
     resolved_path: str | None,
 ) -> bool:
     if resolved_path is not None and any(
-        str.endswith(resolved_path, suffix)
-        for suffix in _EXTENSION_SUFFIXES
+        str.endswith(resolved_path, suffix) for suffix in _EXTENSION_SUFFIXES
     ):
         return True
     if loader is None or loader_type is None:
         return False
-    return any(
-        base is _EXTENSION_FILE_LOADER
-        for base in static_class_mro(_loader_class(loader))
-    )
+    return any(base is _EXTENSION_FILE_LOADER for base in static_class_mro(_loader_class(loader)))
 
 
 def _hash_plugin_artifact(
@@ -1175,9 +1029,7 @@ def _hash_plugin_artifact(
     try:
         try:
             digest = hashlib.sha256()
-            flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(
-                os, "O_NONBLOCK", 0
-            )
+            flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NONBLOCK", 0)
             flags |= getattr(os, "O_NOFOLLOW", 0)
             path_before = os.lstat(resolved_path)
             descriptor = os.open(resolved_path, flags)
@@ -1195,11 +1047,7 @@ def _hash_plugin_artifact(
                 while remaining:
                     requested_size = min(remaining, 1024 * 1024)
                     chunk = os.read(descriptor, requested_size)
-                    if (
-                        type(chunk) is not bytes
-                        or not chunk
-                        or len(chunk) > requested_size
-                    ):
+                    if type(chunk) is not bytes or not chunk or len(chunk) > requested_size:
                         complete = False
                         break
                     remaining -= len(chunk)
@@ -1234,22 +1082,25 @@ def _hash_plugin_artifact(
 
 
 def _same_snapshot(left: os.stat_result, right: os.stat_result) -> bool:
-    return left.st_dev == right.st_dev and left.st_ino == right.st_ino and (
-        left.st_mode,
-        left.st_size,
-        left.st_mtime_ns,
-        left.st_ctime_ns,
-    ) == (
-        right.st_mode,
-        right.st_size,
-        right.st_mtime_ns,
-        right.st_ctime_ns,
+    return (
+        left.st_dev == right.st_dev
+        and left.st_ino == right.st_ino
+        and (
+            left.st_mode,
+            left.st_size,
+            left.st_mtime_ns,
+            left.st_ctime_ns,
+        )
+        == (
+            right.st_mode,
+            right.st_size,
+            right.st_mtime_ns,
+            right.st_ctime_ns,
+        )
     )
 
 
-def _strict_json_object(
-    text: str, budget: _MetadataBudget
-) -> Mapping[str, JsonValue]:
+def _strict_json_object(text: str, budget: _MetadataBudget) -> Mapping[str, JsonValue]:
     def refuse_constant(_value: str):
         raise ValueError("non-finite JSON number")
 
@@ -1299,9 +1150,7 @@ def _distribution_record(
 
     try:
         raw_version = distribution.version
-        version = _canonical_text(
-            raw_version, where="plugin distribution version"
-        )
+        version = _canonical_text(raw_version, where="plugin distribution version")
         version_reason: PluginVersionReason | None = None
     except Exception:
         version = None
@@ -1355,9 +1204,7 @@ def _distribution_records(
     budget = _MetadataBudget()
     top_level = str.split(module_name, ".", 1)[0]
     names = _top_level_distribution_names(top_level, budget)
-    artifact_candidates = _artifact_distribution_candidates(
-        resolved_path, budget
-    )
+    artifact_candidates = _artifact_distribution_candidates(resolved_path, budget)
     names.update(artifact_candidates)
     for _name in names:
         budget.consume()
@@ -1391,16 +1238,11 @@ def import_plugin(name: str) -> PluginRecord:
         module = importlib.import_module(canonical_name)
     except Exception as exc:
         raise ConfigError(
-            f"plugins: importing {canonical_name!r} raised "
-            f"{_safe_exception_text(exc)}."
+            f"plugins: importing {canonical_name!r} raised {_safe_exception_text(exc)}."
         ) from None
 
-    origin, origin_reason, loader_type, loader_reason, loader = (
-        _origin_and_loader(module)
-    )
-    resolved_path, resolved_path_reason, initial_stat = _resolved_plugin_path(
-        origin, origin_reason
-    )
+    origin, origin_reason, loader_type, loader_reason, loader = _origin_and_loader(module)
+    resolved_path, resolved_path_reason, initial_stat = _resolved_plugin_path(origin, origin_reason)
     code_hash, code_hash_reason = _hash_plugin_artifact(
         resolved_path,
         resolved_path_reason,
@@ -1437,13 +1279,9 @@ def _copy_plugin_record(value: object) -> PluginRecord:
             loader_type=object.__getattribute__(value, "loader_type"),
             loader_type_reason=object.__getattribute__(value, "loader_type_reason"),
             resolved_path=object.__getattribute__(value, "resolved_path"),
-            resolved_path_reason=object.__getattribute__(
-                value, "resolved_path_reason"
-            ),
+            resolved_path_reason=object.__getattribute__(value, "resolved_path_reason"),
             distributions=object.__getattribute__(value, "distributions"),
-            distributions_reason=object.__getattribute__(
-                value, "distributions_reason"
-            ),
+            distributions_reason=object.__getattribute__(value, "distributions_reason"),
             code_hash=object.__getattribute__(value, "code_hash"),
             code_hash_reason=object.__getattribute__(value, "code_hash_reason"),
             unobserved_io=object.__getattribute__(value, "unobserved_io"),

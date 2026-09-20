@@ -159,8 +159,7 @@ def session() -> subprocess.CompletedProcess:
         # `-rs` so skip REASONS are printed: the assertion below has to tell a
         # skip the dtype gate caused from one an optional dependency caused,
         # and only the reason distinguishes them.
-        [sys.executable, "-m", "pytest", "tests/evidence", "--no-cov", "-rs",
-         *_parallel()],
+        [sys.executable, "-m", "pytest", "tests/evidence", "--no-cov", "-rs", *_parallel()],
         cwd=ROOT,
         env={**os.environ, "JAX_ENABLE_X64": "1"},
         capture_output=True,

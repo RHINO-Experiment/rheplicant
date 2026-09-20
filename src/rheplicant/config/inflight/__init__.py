@@ -63,8 +63,16 @@ from rheplicant.config.findings import Report
 from rheplicant.config.passes import Check, Registry, binder, sweep
 from rheplicant.config.preflight import _SECTIONS
 
-__all__ = ["AXIS_CHECKS", "BUILT_CHECKS", "Axes", "Built", "axes", "built",
-           "register_axes", "register_built"]
+__all__ = [
+    "AXIS_CHECKS",
+    "BUILT_CHECKS",
+    "Axes",
+    "Built",
+    "axes",
+    "built",
+    "register_axes",
+    "register_built",
+]
 
 #: The phase word both passes' refusals-about-a-check open with.  ONE word for
 #: two passes, deliberately: a reader who sees it wants to know that the
@@ -172,8 +180,7 @@ def register_axes(*checks: str) -> Callable[[Check], Check]:
     contract are documented there.  The decorated function takes an
     :class:`Axes`.
     """
-    return binder(AXIS_CHECKS, *checks, label=_LABEL,
-                  decorator="register_axes")
+    return binder(AXIS_CHECKS, *checks, label=_LABEL, decorator="register_axes")
 
 
 def register_built(*checks: str) -> Callable[[Check], Check]:
@@ -182,8 +189,7 @@ def register_built(*checks: str) -> Callable[[Check], Check]:
     As :func:`register_axes`, for the later slot.  The decorated function
     takes a :class:`Built`.
     """
-    return binder(BUILT_CHECKS, *checks, label=_LABEL,
-                  decorator="register_built")
+    return binder(BUILT_CHECKS, *checks, label=_LABEL, decorator="register_built")
 
 
 # Importing the check modules is what registers their ids, exactly as
@@ -227,8 +233,7 @@ def axes(facts: Axes) -> Report:
     raised by ``preflight``, so every check here may assume the document's top
     level is well formed.
     """
-    return sweep(AXIS_CHECKS, facts, label=_LABEL,
-                 sections=_DOCUMENT_SECTIONS)
+    return sweep(AXIS_CHECKS, facts, label=_LABEL, sections=_DOCUMENT_SECTIONS)
 
 
 def built(run: Built) -> Report:
@@ -236,5 +241,4 @@ def built(run: Built) -> Report:
 
     ``jax.eval_shape`` is permitted here; evaluating the twin is not.
     """
-    return sweep(BUILT_CHECKS, run, label=_LABEL,
-                 sections=_DOCUMENT_SECTIONS)
+    return sweep(BUILT_CHECKS, run, label=_LABEL, sections=_DOCUMENT_SECTIONS)

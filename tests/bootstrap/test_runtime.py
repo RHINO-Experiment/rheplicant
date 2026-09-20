@@ -61,9 +61,7 @@ def _clean_probe(program: str, *, environment: dict[str, str | None] | None = No
             env.pop(key, None)
         else:
             env[key] = value
-    source = f"import sys; sys.path.insert(0, {str(SRC)!r})\n" + textwrap.dedent(
-        program
-    )
+    source = f"import sys; sys.path.insert(0, {str(SRC)!r})\n" + textwrap.dedent(program)
     completed = subprocess.run(
         [sys.executable, "-I", "-c", source],
         check=False,
@@ -103,7 +101,7 @@ def test_environment_is_set_before_the_import(requested, prior, expected_env):
         from _rheplicant_bootstrap.runtime import establish_runtime
 
         requested = RuntimeSpec(
-            {requested['jax_enable_x64']!r}, {requested['platform']!r}, None, {{}}
+            {requested["jax_enable_x64"]!r}, {requested["platform"]!r}, None, {{}}
         )
         seen = {{}}
         pid = os.getpid()
@@ -170,14 +168,12 @@ def test_platform_auto_preserves_caller_environment():
     assert result == {"platform": "gpu"}
 
 
-@pytest.mark.parametrize(
-    ("existing", "requested"), [(False, True), (True, False)]
-)
+@pytest.mark.parametrize(("existing", "requested"), [(False, True), (True, False)])
 def test_existing_jax_refuses_both_x64_mismatch_directions(existing, requested):
     result = _clean_probe(
         f"""
         import json, os
-        os.environ["JAX_ENABLE_X64"] = {('true' if existing else 'false')!r}
+        os.environ["JAX_ENABLE_X64"] = {("true" if existing else "false")!r}
         os.environ["JAX_PLATFORMS"] = "cpu"
         import jax
         from _rheplicant_bootstrap.errors import ConfigError
@@ -201,8 +197,7 @@ def test_existing_jax_refuses_both_x64_mismatch_directions(existing, requested):
     )
     assert result["called"] is False
     assert result["message"] == (
-        f"runtime.jax_enable_x64: requested {requested!r}, but existing process "
-        f"has {existing!r}."
+        f"runtime.jax_enable_x64: requested {requested!r}, but existing process has {existing!r}."
     )
 
 
@@ -347,9 +342,7 @@ def test_runtime_projection_refuses_an_unverified_or_malformed_session():
         runtime_audit_row(RuntimeSession(requested, PriorEnvironment(None, None)))
 
     malformed_actual = RuntimeActual(False, "cpu")
-    malformed = RuntimeSession(
-        requested, PriorEnvironment(None, None), malformed_actual
-    )
+    malformed = RuntimeSession(requested, PriorEnvironment(None, None), malformed_actual)
     object.__setattr__(malformed.actual, "backend", "")
     with pytest.raises(ConfigError, match="backend"):
         runtime_audit_row(malformed)
@@ -508,9 +501,7 @@ def test_runtime_session_revalidates_forged_nested_records_at_construction():
 
 def test_runtime_projection_rechecks_forged_requested_and_actual_state():
     spec = RuntimeSpec(False, "cpu", None, {})
-    session = RuntimeSession(
-        spec, PriorEnvironment(None, None), RuntimeActual(False, "cpu")
-    )
+    session = RuntimeSession(spec, PriorEnvironment(None, None), RuntimeActual(False, "cpu"))
     object.__setattr__(session.actual, "jax_enable_x64", True)
     with pytest.raises(ConfigError, match="contradicts"):
         runtime_audit_row(session)
@@ -532,9 +523,7 @@ def test_runtime_projection_rechecks_forged_requested_and_actual_state():
 def test_import_main_failures_are_called_once_and_propagate_unchanged(error):
     import jax
 
-    requested = RuntimeSpec(
-        bool(jax.config.read("jax_enable_x64")), "auto", None, {}
-    )
+    requested = RuntimeSpec(bool(jax.config.read("jax_enable_x64")), "auto", None, {})
     calls = []
 
     def fail():
@@ -550,9 +539,7 @@ def test_import_main_failures_are_called_once_and_propagate_unchanged(error):
 def test_noncallable_import_main_retains_direct_python_type_error():
     import jax
 
-    requested = RuntimeSpec(
-        bool(jax.config.read("jax_enable_x64")), "auto", None, {}
-    )
+    requested = RuntimeSpec(bool(jax.config.read("jax_enable_x64")), "auto", None, {})
     with pytest.raises(TypeError):
         establish_runtime(requested, import_main=None)  # type: ignore[arg-type]
 
@@ -591,9 +578,7 @@ def test_main_import_mutation_is_refused_by_the_post_callback_verification():
     )
     assert result == {
         "calls": ["main"],
-        "message": (
-            "runtime.jax_enable_x64: requested False, but main import has True."
-        ),
+        "message": ("runtime.jax_enable_x64: requested False, but main import has True."),
     }
 
 
@@ -769,9 +754,7 @@ def test_establishment_never_calls_an_exec_primitive(monkeypatch):
     for name in dir(runtime_module.os):
         if name.startswith("exec"):
             monkeypatch.setattr(runtime_module.os, name, forbidden)
-    requested = RuntimeSpec(
-        bool(jax.config.read("jax_enable_x64")), "auto", None, {}
-    )
+    requested = RuntimeSpec(bool(jax.config.read("jax_enable_x64")), "auto", None, {})
     establish_runtime(requested, import_main=lambda: object())
     assert calls == []
 
@@ -784,6 +767,4 @@ def test_runtime_modules_remain_jax_free_until_verification_is_called():
         print(json.dumps(sorted({name.split('.')[0] for name in sys.modules})))
         """
     )
-    assert set(result).isdisjoint(
-        {"jax", "jaxlib", "equinox", "numpy", "numpyro", "rheplicant"}
-    )
+    assert set(result).isdisjoint({"jax", "jaxlib", "equinox", "numpy", "numpyro", "rheplicant"})

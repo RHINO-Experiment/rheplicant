@@ -66,9 +66,7 @@ def _reference_workload() -> int:
     its disk is or how warm its caches are.
     """
     table = {
-        f"key{index}": _ReferenceNode(
-            f"key{index}", "leaf" if index % 3 else "branch"
-        )
+        f"key{index}": _ReferenceNode(f"key{index}", "leaf" if index % 3 else "branch")
         for index in range(64)
     }
     total = 0
@@ -182,11 +180,10 @@ def axis_facts(document, *, base_dir=None) -> Axes:
     The pinned positional call ``axis_facts(document)`` is unchanged.
     """
     runtime = build_runtime(document["runtime"])
-    observation, context = build_observation(document["observation"],
-                                             runtime=runtime,
-                                             base_dir=base_dir)
-    return Axes(document=document, runtime=runtime, observation=observation,
-                context=context)
+    observation, context = build_observation(
+        document["observation"], runtime=runtime, base_dir=base_dir
+    )
+    return Axes(document=document, runtime=runtime, observation=observation, context=context)
 
 
 def built_run(document, *, base_dir=None) -> Built:
@@ -277,8 +274,7 @@ def priced_findings(document, *, base_dir=None) -> tuple[Finding, ...]:
 
 def priced_only(document, check: str, *, base_dir=None) -> Finding:
     """The one finding ``check`` produced in the post-flight pass."""
-    return _only(priced_findings(document, base_dir=base_dir), check,
-                 "post-flight")
+    return _only(priced_findings(document, base_dir=base_dir), check, "post-flight")
 
 
 def projector_sections(tmp_path, **overrides) -> dict:
@@ -321,7 +317,14 @@ def projector_sections(tmp_path, **overrides) -> dict:
     }
     projector.update(overrides)
     return {
-        "beams": {"horn": {"format": "npy", "path": "beam.npy", "nside": 4,
-                           "normalize": "pixel_sum", "frame": "beam_local"}},
+        "beams": {
+            "horn": {
+                "format": "npy",
+                "path": "beam.npy",
+                "nside": 4,
+                "normalize": "pixel_sum",
+                "frame": "beam_local",
+            }
+        },
         "projectors": {"drift": projector},
     }

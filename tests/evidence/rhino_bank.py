@@ -56,9 +56,7 @@ class _Normal:
         self.loc, self.scale = loc, scale
 
     def log_prob(self, x):
-        return -0.5 * (
-            ((x - self.loc) / self.scale) ** 2 + jnp.log(2 * jnp.pi * self.scale**2)
-        )
+        return -0.5 * (((x - self.loc) / self.scale) ** 2 + jnp.log(2 * jnp.pi * self.scale**2))
 
 
 class GlobalSkyOperator(AbstractOperator):
@@ -75,12 +73,8 @@ class GlobalSkyOperator(AbstractOperator):
 
     def __call__(self, state: State) -> State:
         log_nu = jnp.log(state.coords.freq / NU_REF)
-        foreground = self.amplitude * jnp.exp(
-            (self.index + self.running * log_nu) * log_nu
-        )
-        trough = jnp.exp(
-            -0.5 * ((state.coords.freq - TROUGH_CENTRE) / TROUGH_WIDTH) ** 2
-        )
+        foreground = self.amplitude * jnp.exp((self.index + self.running * log_nu) * log_nu)
+        trough = jnp.exp(-0.5 * ((state.coords.freq - TROUGH_CENTRE) / TROUGH_WIDTH) ** 2)
         return state.with_data(foreground + self.t21_depth * trough)
 
 
@@ -110,16 +104,13 @@ def space() -> ParameterSpace:
     return ParameterSpace(
         latents=latents,
         bindings=tuple(
-            Bind(latent.name, into=lambda p, n=latent.name: getattr(p, n))
-            for latent in latents
+            Bind(latent.name, into=lambda p, n=latent.name: getattr(p, n)) for latent in latents
         ),
     )
 
 
 def noise() -> RadiometerNoise:
-    return RadiometerNoise(
-        channel_width=CHANNEL_WIDTH, integration_time=INTEGRATION_TIME
-    )
+    return RadiometerNoise(channel_width=CHANNEL_WIDTH, integration_time=INTEGRATION_TIME)
 
 
 def forward():
@@ -132,13 +123,8 @@ def bank(key, n_draws=400):
     predict, values = forward()
     names = tuple(values)
     draws = jax.random.normal(key, (n_draws, len(names)))
-    scaled = {
-        name: TRUTH[name] + PRIOR_STD[name] * draws[:, i]
-        for i, name in enumerate(names)
-    }
-    return jax.vmap(lambda i: predict({n: scaled[n][i] for n in names}))(
-        jnp.arange(n_draws)
-    )
+    scaled = {name: TRUTH[name] + PRIOR_STD[name] * draws[:, i] for i, name in enumerate(names)}
+    return jax.vmap(lambda i: predict({n: scaled[n][i] for n in names}))(jnp.arange(n_draws))
 
 
 def weight():

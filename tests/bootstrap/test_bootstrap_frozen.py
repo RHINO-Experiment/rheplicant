@@ -99,13 +99,9 @@ def test_freeze_evidence_type_checks_do_not_run_metaclass_equality(failure):
         pass
 
     with pytest.raises(ConfigError) as caught:
-        _freeze_evidence(
-            {"unsafe": HostileLeaf()}, where="snapshot.document"
-        )
+        _freeze_evidence({"unsafe": HostileLeaf()}, where="snapshot.document")
 
-    assert str(caught.value) == (
-        "snapshot.document: unsupported evidence leaf type HostileLeaf."
-    )
+    assert str(caught.value) == ("snapshot.document: unsupported evidence leaf type HostileLeaf.")
     assert HostileMeta.equality_calls == 0
 
 
@@ -165,12 +161,8 @@ def test_freeze_evidence_preserves_registered_abc_compatibility_without_class_ho
     Sequence.register(VirtualSequence)
     Mapping.register(VirtualMapping)
 
-    assert _freeze_evidence(
-        VirtualSequence(), where="snapshot.sequence"
-    ) == (1, 2)
-    assert _freeze_evidence(
-        VirtualMapping(), where="snapshot.mapping"
-    ) == {"answer": 42}
+    assert _freeze_evidence(VirtualSequence(), where="snapshot.sequence") == (1, 2)
+    assert _freeze_evidence(VirtualMapping(), where="snapshot.mapping") == {"answer": 42}
     assert VirtualSequence.class_calls == 0
     assert VirtualMapping.class_calls == 0
 
@@ -217,9 +209,7 @@ def test_static_protocol_lookup_preserves_registered_base_subclasses():
 
     Sequence.register(RegisteredBase)
 
-    assert _freeze_evidence(
-        RegisteredChild((1, 2)), where="snapshot.registered_base"
-    ) == (1, 2)
+    assert _freeze_evidence(RegisteredChild((1, 2)), where="snapshot.registered_base") == (1, 2)
 
 
 def test_static_protocol_lookup_accepts_unregistered_mapping_and_sequence_ducks():
@@ -237,12 +227,8 @@ def test_static_protocol_lookup_accepts_unregistered_mapping_and_sequence_ducks(
         def items(self):
             return {"answer": 42}.items()
 
-    assert _freeze_evidence(
-        DuckSequence(), where="snapshot.duck_sequence"
-    ) == (1, 2)
-    assert _freeze_evidence(
-        DuckMapping(), where="snapshot.duck_mapping"
-    ) == {"answer": 42}
+    assert _freeze_evidence(DuckSequence(), where="snapshot.duck_sequence") == (1, 2)
+    assert _freeze_evidence(DuckMapping(), where="snapshot.duck_mapping") == {"answer": 42}
 
 
 @pytest.mark.parametrize("protocol", (Mapping, Sequence))
@@ -259,9 +245,11 @@ def test_static_protocol_lookup_rejects_registry_only_pseudo_protocols(protocol)
 @pytest.mark.parametrize("protocol", ("mapping", "sequence"))
 def test_static_protocol_lookup_rejects_noncallable_members(protocol):
     if protocol == "mapping":
+
         class NonCallable:
             items = None
     else:
+
         class NonCallable:
             __iter__ = None
 
@@ -278,10 +266,12 @@ def test_static_protocol_lookup_rejects_noncallable_members(protocol):
 @pytest.mark.parametrize("protocol", ("mapping", "sequence"))
 def test_static_protocol_lookup_wraps_ordinary_traversal_failures(protocol):
     if protocol == "mapping":
+
         class Failing:
             def items(self):
                 raise ValueError("private mapping failure")
     else:
+
         class Failing:
             def __iter__(self):
                 raise ValueError("private sequence failure")
@@ -307,9 +297,11 @@ def test_static_protocol_lookup_never_binds_hostile_member_descriptors(protocol)
             raise KeyboardInterrupt("descriptor secret")
 
     if protocol == "mapping":
+
         class Hostile:
             items = Descriptor()
     else:
+
         class Hostile:
             __iter__ = Descriptor()
 
@@ -386,9 +378,7 @@ def test_freeze_evidence_canonicalizes_scalar_subclasses_and_mapping_keys():
     number = _StatefulInt(2)
     payload = _StatefulBytes(b"bytes")
 
-    frozen = _freeze_evidence(
-        {key: [text, number, payload]}, where="snapshot.document"
-    )
+    frozen = _freeze_evidence({key: [text, number, payload]}, where="snapshot.document")
     frozen_key = next(iter(frozen))
     frozen_values = frozen[frozen_key]
 
@@ -415,17 +405,15 @@ def test_freeze_evidence_rejects_non_utf8_string_scalars_and_keys(source):
 
 
 def test_freeze_evidence_preserves_valid_unicode_text():
-    assert _freeze_evidence(
-        {"café": "U0001f40d"}, where="snapshot.document"
-    ) == {"café": "U0001f40d"}
+    assert _freeze_evidence({"café": "U0001f40d"}, where="snapshot.document") == {
+        "café": "U0001f40d"
+    }
 
 
 def test_freeze_evidence_validates_each_shared_string_identity_once(monkeypatch):
     shared_key = "".join(("shared", "-key"))
     shared_value = "x" * 4096
-    source = tuple(
-        _ItemsMapping(((shared_key, shared_value),)) for _ in range(128)
-    )
+    source = tuple(_ItemsMapping(((shared_key, shared_value),)) for _ in range(128))
     helper = getattr(frozen_module, "_require_utf8_text", None)
     assert helper is not None, "shared UTF-8 validation helper is missing"
     calls = {id(shared_key): 0, id(shared_value): 0}
@@ -465,9 +453,7 @@ class _ItemsMapping(Mapping):
 
 
 @pytest.mark.parametrize("route", ("entry", "mapping_key", "leaf", "budget", "depth"))
-def test_freeze_evidence_diagnostics_never_call_metaclass_name_descriptors(
-    route, monkeypatch
-):
+def test_freeze_evidence_diagnostics_never_call_metaclass_name_descriptors(route, monkeypatch):
     descriptor_calls = 0
 
     class HostileMeta(type):
@@ -644,9 +630,7 @@ def test_freeze_evidence_preserves_float_bits_during_base_canonicalization():
     )
 
     assert struct.pack("!d", frozen["nan"]) == struct.pack("!d", nan)
-    assert struct.pack("!d", frozen["negative_zero"]) == bytes.fromhex(
-        "8000000000000000"
-    )
+    assert struct.pack("!d", frozen["negative_zero"]) == bytes.fromhex("8000000000000000")
 
 
 @pytest.mark.parametrize("key", [None, True, 1, 1.0, b"key"])
@@ -670,9 +654,7 @@ def test_freeze_evidence_normalizes_a_released_memoryview_without_repr():
 
 def test_thaw_preserves_aliases_while_detaching_from_frozen_evidence():
     shared = {"leaf": [1]}
-    frozen = _freeze_evidence(
-        {"first": shared, "second": shared}, where="snapshot.document"
-    )
+    frozen = _freeze_evidence({"first": shared, "second": shared}, where="snapshot.document")
 
     mutable = thaw(frozen)
 
@@ -783,7 +765,7 @@ def test_public_evidence_freezing_materializes_frozen_concat_to_exact_tuple():
 
 
 def test_frozen_concat_validation_survives_optimized_python():
-    code = r'''
+    code = r"""
 from _rheplicant_bootstrap.frozen import _FrozenConcat
 
 def outcome(call):
@@ -804,7 +786,7 @@ outcome(lambda: _FrozenConcat([], ()))
 outcome(lambda: _FrozenConcat(TupleSubclass(), ()))
 outcome(lambda: _FrozenConcat(ConcatSubclass((), ()), ()))
 outcome(lambda: _FrozenConcat((), TupleSubclass()))
-'''
+"""
     done = subprocess.run(
         [sys.executable, "-O", "-c", code],
         capture_output=True,
@@ -925,9 +907,7 @@ def test_freeze_evidence_checks_cached_subtree_height_at_every_alias():
 def test_freeze_evidence_refuses_unique_node_250001_with_a_controlled_error():
     value = [[] for _ in range(250_000)]
 
-    with pytest.raises(
-        ConfigError, match=r"snapshot\.document.*250001.*list"
-    ):
+    with pytest.raises(ConfigError, match=r"snapshot\.document.*250001.*list"):
         _freeze_evidence(value, where="snapshot.document")
 
 
@@ -936,12 +916,8 @@ def test_freeze_evidence_never_evaluates_an_unsupported_leaf_repr():
         def __repr__(self):
             raise AssertionError("repr must not run")
 
-    with pytest.raises(
-        ConfigError, match=r"snapshot\.document.*HostileRepresentation"
-    ):
-        _freeze_evidence(
-            {"unsafe": HostileRepresentation()}, where="snapshot.document"
-        )
+    with pytest.raises(ConfigError, match=r"snapshot\.document.*HostileRepresentation"):
+        _freeze_evidence({"unsafe": HostileRepresentation()}, where="snapshot.document")
 
 
 def test_freeze_evidence_normalizes_a_nested_recursion_error():
@@ -1020,11 +996,10 @@ class _GenerativeMapping(Mapping):
 
 
 @pytest.mark.parametrize("factory", [_GenerativeSequence, _GenerativeMapping])
-def test_freeze_evidence_strongly_retains_generative_child_identities(
-    factory, monkeypatch
-):
+def test_freeze_evidence_strongly_retains_generative_child_identities(factory, monkeypatch):
     """Catches bare-id memo hits after a protocol releases an emitted child."""
     real_id = id
+
     def colliding_id(value):
         if isinstance(value, _EphemeralChild):
             return 7
@@ -1047,6 +1022,7 @@ def test_freeze_evidence_strongly_retains_generative_child_identities(
 
 def test_freeze_evidence_strongly_retains_seen_scalar_subclasses(monkeypatch):
     """Catches allocator reuse undercounting the unique-node evidence budget."""
+
     class EphemeralInt(int):
         pass
 
@@ -1135,6 +1111,7 @@ class _GenerativeThawMapping(_GenerativeMapping):
 
 def test_thaw_strongly_retains_generative_mapping_identities(monkeypatch):
     real_id = id
+
     def colliding_id(value):
         if isinstance(value, _EphemeralMapping):
             return 13
@@ -1145,9 +1122,7 @@ def test_thaw_strongly_retains_generative_mapping_identities(monkeypatch):
 
     mutable = thaw(source)
 
-    assert mutable == {
-        f"key_{index}": {f"leaf_{index}": index} for index in range(12)
-    }
+    assert mutable == {f"key_{index}": {f"leaf_{index}": index} for index in range(12)}
     assert len({real_id(value) for value in source.thaw_sources}) == 12
 
 
@@ -1228,9 +1203,7 @@ def test_freeze_evidence_replaces_callback_configerror_at_each_mapping_seam(seam
     marker = _ForgedCallbackConfigError("private marker")
 
     with pytest.raises(ConfigError) as caught:
-        _freeze_evidence(
-            _ProtocolMapping(marker, seam), where="snapshot.document"
-        )
+        _freeze_evidence(_ProtocolMapping(marker, seam), where="snapshot.document")
 
     assert caught.value is not marker
     assert str(caught.value).startswith("snapshot.document: evidence protocol failed")
@@ -1241,9 +1214,7 @@ def test_freeze_evidence_replaces_callback_configerror_at_each_sequence_seam(sea
     marker = _ForgedCallbackConfigError("private marker")
 
     with pytest.raises(ConfigError) as caught:
-        _freeze_evidence(
-            _ProtocolSequence(marker, seam), where="snapshot.document"
-        )
+        _freeze_evidence(_ProtocolSequence(marker, seam), where="snapshot.document")
 
     assert caught.value is not marker
     assert str(caught.value).startswith("snapshot.document: evidence protocol failed")
@@ -1350,12 +1321,8 @@ class _RepeatedMapping(_ItemsMapping):
 
 
 @pytest.mark.parametrize("factory", [_RepeatedSequence, _RepeatedMapping])
-def test_protocol_emission_budget_counts_repeated_scalars_incrementally(
-    factory, monkeypatch
-):
-    monkeypatch.setattr(
-        frozen_module, "_EVIDENCE_EDGE_LIMIT", 3, raising=False
-    )
+def test_protocol_emission_budget_counts_repeated_scalars_incrementally(factory, monkeypatch):
+    monkeypatch.setattr(frozen_module, "_EVIDENCE_EDGE_LIMIT", 3, raising=False)
     source = factory(4)
 
     expected = (
@@ -1386,9 +1353,7 @@ def test_protocol_emission_budget_accepts_its_exact_bound_independently(
     shared = EmptyMapping([])
     source = _RepeatedSequence(3, shared)
     monkeypatch.setattr(frozen_module, "_EVIDENCE_NODE_LIMIT", 2)
-    monkeypatch.setattr(
-        frozen_module, "_EVIDENCE_EDGE_LIMIT", 3, raising=False
-    )
+    monkeypatch.setattr(frozen_module, "_EVIDENCE_EDGE_LIMIT", 3, raising=False)
 
     frozen = _freeze_evidence(source, where="snapshot.document")
 
@@ -1482,16 +1447,13 @@ def test_mapping_edge_budget_precedes_unpacking_the_limit_plus_one_pair(
             yield "first", 1
             yield BrokenPair()
 
-    monkeypatch.setattr(
-        frozen_module, "_EVIDENCE_EDGE_LIMIT", 1, raising=False
-    )
+    monkeypatch.setattr(frozen_module, "_EVIDENCE_EDGE_LIMIT", 1, raising=False)
 
     with pytest.raises(ConfigError) as caught:
         _freeze_evidence(Values(), where="snapshot.document")
 
     assert str(caught.value) == (
-        "snapshot.document: evidence protocol emission count 2 exceeds "
-        "limit 1 at type Values."
+        "snapshot.document: evidence protocol emission count 2 exceeds limit 1 at type Values."
     )
     assert BrokenPair.unpack_calls == 0
 
@@ -1507,17 +1469,13 @@ def test_mapping_next_failure_precedes_any_unemitted_edge_charge(monkeypatch):
             yield "first", 1
             raise marker
 
-    monkeypatch.setattr(
-        frozen_module, "_EVIDENCE_EDGE_LIMIT", 1, raising=False
-    )
+    monkeypatch.setattr(frozen_module, "_EVIDENCE_EDGE_LIMIT", 1, raising=False)
 
     with pytest.raises(ConfigError) as caught:
         _freeze_evidence(Values(), where="snapshot.document")
 
     assert id(caught.value) != id(marker)
-    assert str(caught.value) == (
-        "snapshot.document: evidence protocol failed at type Values."
-    )
+    assert str(caught.value) == ("snapshot.document: evidence protocol failed at type Values.")
 
 
 def test_cleanup_mutations_do_not_live_inside_assert_statements():
@@ -1528,9 +1486,7 @@ def test_cleanup_mutations_do_not_live_inside_assert_statements():
         "src/_rheplicant_bootstrap/layering.py",
     ):
         tree = ast.parse((root / relative).read_text())
-        for assertion in (
-            node for node in ast.walk(tree) if isinstance(node, ast.Assert)
-        ):
+        for assertion in (node for node in ast.walk(tree) if isinstance(node, ast.Assert)):
             if any(
                 isinstance(node, ast.Call)
                 and isinstance(node.func, ast.Attribute)
@@ -1555,8 +1511,7 @@ def test_cleanup_mutations_do_not_live_inside_assert_statements():
         for function in (
             node
             for node in ast.walk(tree)
-            if isinstance(node, ast.FunctionDef)
-            and node.name in expected_assignments
+            if isinstance(node, ast.FunctionDef) and node.name in expected_assignments
         ):
             actual_assignments[function.name] = sum(
                 1

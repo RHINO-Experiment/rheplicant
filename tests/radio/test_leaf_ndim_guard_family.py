@@ -213,12 +213,8 @@ class TestLeafRankFamily:
     def test_the_table_is_the_family_and_the_family_is_the_table(self):
         derived = _owners_raising(_LEAF_NDIM)
         assert derived == set(LEAF_RANK_GUARDED), {
-            "carry the guard but are untested": sorted(
-                derived - set(LEAF_RANK_GUARDED)
-            ),
-            "listed but no longer carry it": sorted(
-                set(LEAF_RANK_GUARDED) - derived
-            ),
+            "carry the guard but are untested": sorted(derived - set(LEAF_RANK_GUARDED)),
+            "listed but no longer carry it": sorted(set(LEAF_RANK_GUARDED) - derived),
         }
 
     @pytest.mark.parametrize(
@@ -283,12 +279,8 @@ class TestGainRankFamily:
     def test_the_table_is_the_family_and_the_family_is_the_table(self):
         derived = _owners_raising(_GAIN_NDIM)
         assert derived == set(GAIN_RANK_GUARDED), {
-            "carry the guard but are untested": sorted(
-                derived - set(GAIN_RANK_GUARDED)
-            ),
-            "listed but no longer carry it": sorted(
-                set(GAIN_RANK_GUARDED) - derived
-            ),
+            "carry the guard but are untested": sorted(derived - set(GAIN_RANK_GUARDED)),
+            "listed but no longer carry it": sorted(set(GAIN_RANK_GUARDED) - derived),
         }
 
     @pytest.mark.parametrize("name", sorted(GAIN_RANK_GUARDED))
@@ -372,12 +364,8 @@ class TestDataRankFamily:
     def test_the_table_is_the_family_and_the_family_is_the_table(self):
         derived = _owners_raising(_DATA_2D)
         assert derived == set(DATA_RANK_GUARDED), {
-            "carry the guard but are untested": sorted(
-                derived - set(DATA_RANK_GUARDED)
-            ),
-            "listed but no longer carry it": sorted(
-                set(DATA_RANK_GUARDED) - derived
-            ),
+            "carry the guard but are untested": sorted(derived - set(DATA_RANK_GUARDED)),
+            "listed but no longer carry it": sorted(set(DATA_RANK_GUARDED) - derived),
         }
 
     @pytest.mark.parametrize("name", DATA_RANK_GUARDED)
@@ -408,9 +396,7 @@ class TestDataRankFamily:
         """
         _skip_if_backend_missing(name)
         with pytest.raises(StateValidationError) as excinfo:
-            _construct_and_call(
-                name, _valid_leaves(name), _state(data=jnp.arange(float(N_FREQ)))
-            )
+            _construct_and_call(name, _valid_leaves(name), _state(data=jnp.arange(float(N_FREQ))))
         assert str(excinfo.value).startswith(name), str(excinfo.value)
 
     @pytest.mark.parametrize("name", DATA_RANK_GUARDED)
@@ -477,14 +463,14 @@ class TestCalLoadRankForms:
         """
         spectrum = jnp.linspace(280.0, 320.0, N_FREQ)
         out = radio.CalLoadOperator(t_load=spectrum)(self._state())
-        assert jnp.allclose(out.data[0], spectrum)          # varies along FREQ
-        assert jnp.allclose(out.data[:, 0], spectrum[0])    # flat along TIME
+        assert jnp.allclose(out.data[0], spectrum)  # varies along FREQ
+        assert jnp.allclose(out.data[:, 0], spectrum[0])  # flat along TIME
 
     def test_a_column_is_read_per_SAMPLE(self):
         drift = jnp.linspace(290.0, 300.0, N_TIME)
         out = radio.CalLoadOperator(t_load=drift[:, None])(self._state())
-        assert jnp.allclose(out.data[:, 0], drift)          # varies along TIME
-        assert jnp.allclose(out.data[0], drift[0])          # flat along FREQ
+        assert jnp.allclose(out.data[:, 0], drift)  # varies along TIME
+        assert jnp.allclose(out.data[0], drift[0])  # flat along FREQ
 
     def test_a_bare_1d_of_length_n_time_is_refused_not_guessed(self):
         """The ambiguity this convention exists to remove.
@@ -521,4 +507,3 @@ class TestCalLoadRankForms:
     def test_three_dimensions_is_refused_by_the_final_arm(self):
         with pytest.raises(StateValidationError, match="t_load must be scalar"):
             radio.CalLoadOperator(t_load=jnp.ones((N_TIME, 1, 1)))(self._state())
-

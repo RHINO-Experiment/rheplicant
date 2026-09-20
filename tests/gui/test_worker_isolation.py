@@ -35,20 +35,15 @@ def test_the_worker_is_started_with_safe_path(monkeypatch) -> None:
     monkeypatch.setattr(jobs, "_drained_run", record)
     with pytest.raises(_Stop):
         jobs.run_priced_validation("schema_version: 1\n")
-    assert seen == [
-        [sys.executable, "-P", "-m", "_rheplicant_bootstrap.gui_worker", "validate"]
-    ]
+    assert seen == [[sys.executable, "-P", "-m", "_rheplicant_bootstrap.gui_worker", "validate"]]
 
 
-def test_a_module_in_the_server_cwd_is_not_importable_in_the_worker(
-    tmp_path, monkeypatch
-) -> None:
+def test_a_module_in_the_server_cwd_is_not_importable_in_the_worker(tmp_path, monkeypatch) -> None:
     """The real worker, started from a directory holding a module a document
     names under ``plugins:``. The module only records that it was imported."""
     sentinel = tmp_path / "imported.txt"
     (tmp_path / f"{MARKER}.py").write_text(
-        "from pathlib import Path\n"
-        f"Path({str(sentinel)!r}).write_text('imported')\n",
+        f"from pathlib import Path\nPath({str(sentinel)!r}).write_text('imported')\n",
         encoding="utf-8",
     )
     monkeypatch.chdir(tmp_path)

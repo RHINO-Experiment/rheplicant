@@ -25,10 +25,13 @@ BANDPASS_MODEL = {
 
 def observation(**extras):
     section = {
-        "freq": {"grid": {"linspace": {"start": 60.0, "stop": 85.0, "num": 8,
-                                       "endpoint": True}, "unit": "MHz"}},
-        "time": {"grid": {"arange": {"start": 0.0, "step": 2.0, "num": 16},
-                          "unit": "s"}},
+        "freq": {
+            "grid": {
+                "linspace": {"start": 60.0, "stop": 85.0, "num": 8, "endpoint": True},
+                "unit": "MHz",
+            }
+        },
+        "time": {"grid": {"arange": {"start": 0.0, "step": 2.0, "num": 16}, "unit": "s"}},
     }
     section.update(extras)
     build, _ = build_observation(section, runtime=build_runtime({"seed": 1}))
@@ -37,8 +40,9 @@ def observation(**extras):
 
 def infer(section, model=None, ctx=None):
     ctx = ctx or context()
-    return build_inference(section, twin=twin(model, ctx), state=state(),
-                           observation=observation(), context=ctx)
+    return build_inference(
+        section, twin=twin(model, ctx), state=state(), observation=observation(), context=ctx
+    )
 
 
 PARAMS = {"g": {"init": 1.0, "linear": True, "into": "gain.gain"}}
@@ -77,12 +81,11 @@ class TestValidateRunsAtLoad:
 
         seen = []
         monkeypatch.setattr(
-            ParameterSpace, "validate",
-            lambda self, pipeline: seen.append((self, pipeline)))
+            ParameterSpace, "validate", lambda self, pipeline: seen.append((self, pipeline))
+        )
         return seen
 
-    def test_validate_is_called_exactly_once_on_the_fit_twin(self,
-                                                             monkeypatch):
+    def test_validate_is_called_exactly_once_on_the_fit_twin(self, monkeypatch):
         """R1's mutant, as a test: delete the call and this is what dies.
 
         ``is`` identity, not equality -- two ``eqx.Module`` twins with the
@@ -96,8 +99,7 @@ class TestValidateRunsAtLoad:
         assert space is build.space
         assert pipeline is build.fit_twin
 
-    def test_it_is_handed_the_fit_twin_and_not_the_full_one(self,
-                                                            monkeypatch):
+    def test_it_is_handed_the_fit_twin_and_not_the_full_one(self, monkeypatch):
         """The trap, on a document where the two are DIFFERENT objects.
 
         Measured: handing ``validate`` the full twin raises on every document
@@ -109,29 +111,29 @@ class TestValidateRunsAtLoad:
         seen = self._recorder(monkeypatch)
         ctx = context()
         full = twin(NOISY_MODEL, ctx)
-        build = build_inference({"twin": {"without": ["noise"]},
-                                 "parameters": PARAMS},
-                                twin=full, state=state(),
-                                observation=observation(), context=ctx)
+        build = build_inference(
+            {"twin": {"without": ["noise"]}, "parameters": PARAMS},
+            twin=full,
+            state=state(),
+            observation=observation(),
+            context=ctx,
+        )
         assert len(seen) == 1
         assert seen[0][1] is build.fit_twin
         assert seen[0][1] is not full
 
-    def test_a_document_with_no_parameters_validates_nothing(self,
-                                                             monkeypatch):
+    def test_a_document_with_no_parameters_validates_nothing(self, monkeypatch):
         """The guard the plan names: ``build_space`` may return ``None``.
 
         A document with no ``inference.parameters`` has no space, and a
         ``None.validate`` would take the whole load down.
         """
         seen = self._recorder(monkeypatch)
-        build = infer({"noise": {"kind": "homoscedastic",
-                                 "sigma": {"value": 0.5, "unit": "K"}}})
+        build = infer({"noise": {"kind": "homoscedastic", "sigma": {"value": 0.5, "unit": "K"}}})
         assert build.space is None
         assert seen == []
 
-    def test_it_runs_before_the_builders_that_evaluate_the_twin(self,
-                                                                monkeypatch):
+    def test_it_runs_before_the_builders_that_evaluate_the_twin(self, monkeypatch):
         """3.2(b): the call is placed BEFORE the two real forward passes.
 
         ``build_noise``'s ``source: prediction_at_init`` and
@@ -143,21 +145,24 @@ class TestValidateRunsAtLoad:
         order = []
         from rheplicant.inference import ParameterSpace
 
-        monkeypatch.setattr(ParameterSpace, "validate",
-                            lambda self, pipeline: order.append("validate"))
+        monkeypatch.setattr(
+            ParameterSpace, "validate", lambda self, pipeline: order.append("validate")
+        )
         import rheplicant.config.sections.inference as inference_module
 
         real_observed = inference_module.build_observed
         real_noise = inference_module.build_noise
         monkeypatch.setattr(
-            inference_module, "build_observed",
-            lambda *a, **k: (order.append("observed"),
-                             real_observed(*a, **k))[1])
+            inference_module,
+            "build_observed",
+            lambda *a, **k: (order.append("observed"), real_observed(*a, **k))[1],
+        )
         monkeypatch.setattr(
-            inference_module, "build_noise",
-            lambda *a, **k: (order.append("noise"), real_noise(*a, **k))[1])
-        infer({"parameters": PARAMS,
-               "observed": {"from": "simulation"}})
+            inference_module,
+            "build_noise",
+            lambda *a, **k: (order.append("noise"), real_noise(*a, **k))[1],
+        )
+        infer({"parameters": PARAMS, "observed": {"from": "simulation"}})
         assert order == ["validate", "noise", "observed"]
 
     def test_the_forward_pass_is_never_reached_by_a_refused_space(self):
@@ -173,13 +178,15 @@ class TestValidateRunsAtLoad:
         reached = []
         real = inference_module.build_observed
         try:
-            inference_module.build_observed = (
-                lambda *a, **k: (reached.append(1), real(*a, **k))[1])
+            inference_module.build_observed = lambda *a, **k: (reached.append(1), real(*a, **k))[1]
             with pytest.raises(ConfigError, match="check C17"):
-                infer({"parameters": {"b": {"init": 1.0,
-                                            "into": "bandpass.bandpass"}},
-                       "observed": {"from": "simulation"}},
-                      model=BANDPASS_MODEL)
+                infer(
+                    {
+                        "parameters": {"b": {"init": 1.0, "into": "bandpass.bandpass"}},
+                        "observed": {"from": "simulation"},
+                    },
+                    model=BANDPASS_MODEL,
+                )
         finally:
             inference_module.build_observed = real
         assert reached == []
@@ -203,11 +210,9 @@ class TestValidateRunsAtLoad:
         from rheplicant.inference import ParameterSpace
 
         def explode(self, pipeline):
-            raise AssertionError(
-                "validate entered its allocating branch at load time")
+            raise AssertionError("validate entered its allocating branch at load time")
 
-        monkeypatch.setattr(ParameterSpace,
-                            "_reject_latents_the_raw_bind_ignores", explode)
+        monkeypatch.setattr(ParameterSpace, "_reject_latents_the_raw_bind_ignores", explode)
         assert infer({"parameters": PARAMS}).space is not None
 
     def test_the_refusal_names_the_document_key_and_both_spellings(self):
@@ -222,9 +227,10 @@ class TestValidateRunsAtLoad:
         beside it.
         """
         with pytest.raises(ConfigError) as caught:
-            infer({"parameters": {"b": {"init": 1.0,
-                                        "into": "bandpass.bandpass"}}},
-                  model=BANDPASS_MODEL)
+            infer(
+                {"parameters": {"b": {"init": 1.0, "into": "bandpass.bandpass"}}},
+                model=BANDPASS_MODEL,
+            )
         assert str(caught.value) == (
             "inference: the parameter space this document declares does not "
             "fit the twin it binds into, and the fit would be the first "
@@ -250,10 +256,13 @@ class TestValidateRunsAtLoad:
         *"here is what this document bound"* table was EMPTY.
         """
         with pytest.raises(ConfigError) as caught:
-            infer({"parameters": {"b": {"init": 1.0}},
-                   "bindings": [{"latents": ["b"],
-                                 "into": "bandpass.bandpass"}]},
-                  model=BANDPASS_MODEL)
+            infer(
+                {
+                    "parameters": {"b": {"init": 1.0}},
+                    "bindings": [{"latents": ["b"], "into": "bandpass.bandpass"}],
+                },
+                model=BANDPASS_MODEL,
+            )
         assert str(caught.value) == (
             "inference: the parameter space this document declares does not "
             "fit the twin it binds into, and the fit would be the first "
@@ -277,11 +286,16 @@ class TestValidateRunsAtLoad:
         only, or that drops the ``bindings`` leg, is short exactly one row.
         """
         with pytest.raises(ConfigError) as caught:
-            infer({"parameters": {"b": {"init": 1.0,
-                                        "into": "bandpass.bandpass"},
-                                  "g": {"init": 1.0}},
-                   "bindings": [{"latents": ["g"], "into": "gain.gain"}]},
-                  model=BANDPASS_MODEL)
+            infer(
+                {
+                    "parameters": {
+                        "b": {"init": 1.0, "into": "bandpass.bandpass"},
+                        "g": {"init": 1.0},
+                    },
+                    "bindings": [{"latents": ["g"], "into": "gain.gain"}],
+                },
+                model=BANDPASS_MODEL,
+            )
         assert str(caught.value) == (
             "inference: the parameter space this document declares does not "
             "fit the twin it binds into, and the fit would be the first "
@@ -312,9 +326,9 @@ class TestValidateRunsAtLoad:
 
         original = ParameterSpace.validate
         try:
-            ParameterSpace.validate = (
-                lambda self, pipeline: (_ for _ in ()).throw(
-                    RuntimeError("boom")))
+            ParameterSpace.validate = lambda self, pipeline: (_ for _ in ()).throw(
+                RuntimeError("boom")
+            )
             with pytest.raises(RuntimeError, match="boom"):
                 infer({"parameters": PARAMS})
         finally:
@@ -333,9 +347,10 @@ class TestValidateRunsAtLoad:
 
         assert not issubclass(ParameterSpaceError, ConfigError)
         with pytest.raises(ConfigError) as caught:
-            infer({"parameters": {"b": {"init": 1.0,
-                                        "into": "bandpass.bandpass"}}},
-                  model=BANDPASS_MODEL)
+            infer(
+                {"parameters": {"b": {"init": 1.0, "into": "bandpass.bandpass"}}},
+                model=BANDPASS_MODEL,
+            )
         assert isinstance(caught.value.__cause__, ParameterSpaceError)
 
     def test_applying_the_refusals_own_advice_makes_the_document_build(self):
@@ -345,13 +360,13 @@ class TestValidateRunsAtLoad:
         The sentence names the leaf's shape ``(8,)``; an ``init`` at that
         shape is what it asks for.
         """
-        build = infer({"parameters": {
-            "b": {"init": {"list": [1.0] * 8}, "into": "bandpass.bandpass"}}},
-            model=BANDPASS_MODEL)
+        build = infer(
+            {"parameters": {"b": {"init": {"list": [1.0] * 8}, "into": "bandpass.bandpass"}}},
+            model=BANDPASS_MODEL,
+        )
         assert build.space is not None
 
-    def test_the_stochastic_leg_blames_the_twin_and_names_a_document_remedy(
-            self):
+    def test_the_stochastic_leg_blames_the_twin_and_names_a_document_remedy(self):
         """The OTHER leg C17 delivers, which had no test at all.
 
         §0.3 E.7.4: the call adds exactly two things, ``refuse_stochastic_
@@ -373,8 +388,13 @@ class TestValidateRunsAtLoad:
         with pytest.raises(ParameterSpaceError) as package:
             refuse_stochastic_stages(noisy, "This ParameterSpace")
         with pytest.raises(ConfigError) as caught:
-            build_inference({"parameters": PARAMS}, twin=noisy, state=state(),
-                            observation=observation(), context=ctx)
+            build_inference(
+                {"parameters": PARAMS},
+                twin=noisy,
+                state=state(),
+                observation=observation(),
+                context=ctx,
+            )
         assert str(caught.value) == (
             "inference: the twin this document fits with still draws its own "
             "randomness, so it is the twin at fault here and not the "
@@ -386,8 +406,7 @@ class TestValidateRunsAtLoad:
             "entering the data it was written for (check C17)."
         )
 
-    def test_the_stochastic_leg_says_none_of_the_shape_legs_four_falsehoods(
-            self):
+    def test_the_stochastic_leg_says_none_of_the_shape_legs_four_falsehoods(self):
         """Named individually, because each was separately wrong.
 
         The shape leg's wording claims the space does not fit the twin (it
@@ -399,17 +418,20 @@ class TestValidateRunsAtLoad:
         """
         ctx = context()
         with pytest.raises(ConfigError) as caught:
-            build_inference({"parameters": PARAMS},
-                            twin=twin(NOISY_MODEL, ctx), state=state(),
-                            observation=observation(), context=ctx)
+            build_inference(
+                {"parameters": PARAMS},
+                twin=twin(NOISY_MODEL, ctx),
+                state=state(),
+                observation=observation(),
+                context=ctx,
+            )
         message = str(caught.value)
         assert "does not fit the twin it binds into" not in message
         assert "names latents and selector positions" not in message
         assert "here is what this document bound" not in message
         assert "inference.parameters.g ->" not in message
 
-    def test_applying_the_stochastic_legs_advice_makes_the_document_build(
-            self):
+    def test_applying_the_stochastic_legs_advice_makes_the_document_build(self):
         """R4: the remedy named is one a document can actually write.
 
         The package's surviving advice is ``Assembly.without(node_id)`` and
@@ -419,10 +441,13 @@ class TestValidateRunsAtLoad:
         message names, character for character.
         """
         ctx = context()
-        build = build_inference({"twin": {"without": ["noise"]},
-                                 "parameters": PARAMS},
-                                twin=twin(NOISY_MODEL, ctx), state=state(),
-                                observation=observation(), context=ctx)
+        build = build_inference(
+            {"twin": {"without": ["noise"]}, "parameters": PARAMS},
+            twin=twin(NOISY_MODEL, ctx),
+            state=state(),
+            observation=observation(),
+            context=ctx,
+        )
         assert build.space is not None
         assert "noise" not in build.fit_twin.lit
 
@@ -441,13 +466,18 @@ class TestValidateRunsAtLoad:
 
         ctx = context()
         full = twin(NOISY_MODEL, ctx)
-        build = build_inference({"twin": {"without": ["noise"]},
-                                 "parameters": PARAMS,
-                                 "observed": {"from": "simulation"}},
-                                twin=full, state=state(),
-                                observation=observation(), context=ctx)
-        clean = build.space.bind(
-            build.fit_twin, dict(build.space.initial_values()))(state()).data
+        build = build_inference(
+            {
+                "twin": {"without": ["noise"]},
+                "parameters": PARAMS,
+                "observed": {"from": "simulation"},
+            },
+            twin=full,
+            state=state(),
+            observation=observation(),
+            context=ctx,
+        )
+        clean = build.space.bind(build.fit_twin, dict(build.space.initial_values()))(state()).data
         assert not jnp.allclose(build.observed.entries["primary"], clean)
 
     def test_a_document_wrong_in_a_more_specific_way_hears_that_instead(self):
@@ -459,10 +489,13 @@ class TestValidateRunsAtLoad:
         undeclared -- so it is the sentence the reader gets.
         """
         with pytest.raises(ConfigError) as caught:
-            infer({"parameters": {"b": {"init": 1.0,
-                                        "into": "bandpass.bandpass"}},
-                   "bindings": [{"latents": ["ghost"], "into": "gain.gain"}]},
-                  model=BANDPASS_MODEL)
+            infer(
+                {
+                    "parameters": {"b": {"init": 1.0, "into": "bandpass.bandpass"}},
+                    "bindings": [{"latents": ["ghost"], "into": "gain.gain"}],
+                },
+                model=BANDPASS_MODEL,
+            )
         assert "'ghost' is not a declared latent" in str(caught.value)
         assert "check C17" not in str(caught.value)
 
@@ -489,7 +522,8 @@ class TestValidateRunsAtLoad:
         fit = twin(BANDPASS_MODEL, ctx)
         mismatched = ParameterSpace(
             latents=(Latent("b", init=1.0),),
-            bindings=(Bind("b", into=lambda p: p["bandpass"].bandpass),))
+            bindings=(Bind("b", into=lambda p: p["bandpass"].bandpass),),
+        )
         with pytest.raises(ParameterSpaceError, match="produces shape"):
             mismatched.forward_fn(fit, state())
 
@@ -517,20 +551,19 @@ class TestValidateRunsAtLoad:
 
         document = conjugate_document()
         document["inference"]["checks"] = {
-            "linearity": {"mode": "skip",
-                          "reason": "counted on its own, one test down"}}
+            "linearity": {"mode": "skip", "reason": "counted on its own, one test down"}
+        }
         seen = []
         monkeypatch.setattr(
-            ParameterSpace, "validate",
-            lambda self, pipeline: seen.append((self, pipeline)))
+            ParameterSpace, "validate", lambda self, pipeline: seen.append((self, pipeline))
+        )
         run = load_document(document)
         assert len(seen) == 1
         assert seen[0][0] is run.inference.space
         assert seen[0][1] is run.inference.fit_twin
         assert seen[0][1] is not run.twin
 
-    def test_load_document_validates_once_more_per_linear_latent(
-            self, monkeypatch):
+    def test_load_document_validates_once_more_per_linear_latent(self, monkeypatch):
         """What the priced pass adds, pinned as a NUMBER rather than left
         to drift.
 
@@ -567,19 +600,26 @@ class TestValidateRunsAtLoad:
             ("two linear latents", dict(TWO_LATENTS)),
         ):
             seen = []
-            document = (conjugate_document() if inference is None
-                        else conjugate_document(inference=inference))
+            document = (
+                conjugate_document()
+                if inference is None
+                else conjugate_document(inference=inference)
+            )
             monkeypatch.setattr(
-                ParameterSpace, "validate",
-                lambda self, pipeline, _s=seen: _s.append((self, pipeline)))
+                ParameterSpace,
+                "validate",
+                lambda self, pipeline, _s=seen: _s.append((self, pipeline)),
+            )
             run = load_document(document)
-            linear = [name for name in run.inference.space.names
-                      if run.inference.space.latent(name).linear]
+            linear = [
+                name
+                for name in run.inference.space.names
+                if run.inference.space.latent(name).linear
+            ]
             expected = 1 + DEFAULT_AT_POINTS * len(linear)
             assert len(seen) == expected, label
             assert all(space is run.inference.space for space, _ in seen), label
-            assert all(pipeline is run.inference.fit_twin
-                       for _, pipeline in seen), label
+            assert all(pipeline is run.inference.fit_twin for _, pipeline in seen), label
             assert run.inference.fit_twin is not run.twin, label
 
 
@@ -592,33 +632,39 @@ class TestSequence:
         assert build.observed is None
 
     def test_the_whole_section_composes(self):
-        build = infer({
-            "twin": {"without": ["noise"]},
-            "parameters": PARAMS,
-            "noise": {"kind": "homoscedastic",
-                      "sigma": {"value": 0.5, "unit": "K"}},
-            "observed": {"from": "simulation", "at": {"g": 1.5}},
-        }, model=NOISY_MODEL)
+        build = infer(
+            {
+                "twin": {"without": ["noise"]},
+                "parameters": PARAMS,
+                "noise": {"kind": "homoscedastic", "sigma": {"value": 0.5, "unit": "K"}},
+                "observed": {"from": "simulation", "at": {"g": 1.5}},
+            },
+            model=NOISY_MODEL,
+        )
         assert "noise" not in build.fit_twin.lit
         assert build.space is not None
         assert build.observed.entries["primary"].shape == (16, 8)
 
     def test_bindings_resolve_against_the_repaired_twin(self):
-        build = infer({
-            "twin": {"replace": {"gain": {"gain": {"value": 1.0,
-                                                   "unit": "dimensionless"}}}},
-            "parameters": {"d": {"init": 0.5,
-                                 "into": "global_signal.depth"}},
-        })
+        build = infer(
+            {
+                "twin": {"replace": {"gain": {"gain": {"value": 1.0, "unit": "dimensionless"}}}},
+                "parameters": {"d": {"init": 0.5, "into": "global_signal.depth"}},
+            }
+        )
         assert build.replaced == ("gain",)
 
     def test_a_binding_into_a_removed_node_is_refused(self):
         """Paths resolve against the FIT twin: a latent cannot bind into a
         node the twin repair just removed."""
         with pytest.raises(ConfigError, match=r"noise\.sigma"):
-            infer({"twin": {"without": ["noise"]},
-                   "parameters": {"s": {"init": 0.1, "into": "noise.sigma"}}},
-                  model=NOISY_MODEL)
+            infer(
+                {
+                    "twin": {"without": ["noise"]},
+                    "parameters": {"s": {"init": 0.1, "into": "noise.sigma"}},
+                },
+                model=NOISY_MODEL,
+            )
 
     def test_a_non_list_bindings_section_is_refused(self):
         """bindings: is a LIST -- a scalar or a dashless single mapping both
@@ -626,8 +672,12 @@ class TestSequence:
         with pytest.raises(ConfigError, match="LIST"):
             infer({"parameters": {"g": {"init": 1.0}}, "bindings": 42})
         with pytest.raises(ConfigError, match="LIST"):
-            infer({"parameters": {"g": {"init": 1.0}},
-                   "bindings": {"latents": ["g"], "into": "gain.gain"}})
+            infer(
+                {
+                    "parameters": {"g": {"init": 1.0}},
+                    "bindings": {"latents": ["g"], "into": "gain.gain"},
+                }
+            )
 
     def test_npe_parses_rather_than_being_deferred_by_name(self):
         """The 2D deferral is gone: the section is grammar now.
@@ -642,9 +692,7 @@ class TestSequence:
         build = infer({"npe": NPE})
         assert build.npe is not None
         assert build.npe.bank["n_simulations"] == 8
-        with pytest.raises(
-                ConfigError,
-                match=r"inference\.npe\.bank: 'seed' is required"):
+        with pytest.raises(ConfigError, match=r"inference\.npe\.bank: 'seed' is required"):
             infer({"npe": {**NPE, "bank": {"n_simulations": 8}}})
 
     def test_unknown_inference_keys_are_swept(self):
@@ -653,13 +701,17 @@ class TestSequence:
 
 
 class TestFrozenSequencing:
-    NOISE = {"kind": "radiometer_frozen", "source": "observed",
-             "channel_width": {"value": 4.0, "unit": "Hz"},
-             "integration_time": {"value": 4.0, "unit": "s"}}
+    NOISE = {
+        "kind": "radiometer_frozen",
+        "source": "observed",
+        "channel_width": {"value": 4.0, "unit": "Hz"},
+        "integration_time": {"value": 4.0, "unit": "s"},
+    }
 
     def test_source_observed_freezes_from_the_primary(self):
-        build = infer({"parameters": PARAMS, "noise": self.NOISE,
-                       "observed": {"from": "simulation"}})
+        build = infer(
+            {"parameters": PARAMS, "noise": self.NOISE, "observed": {"from": "simulation"}}
+        )
         assert build.noise.sigma is not None
         assert build.noise.sigma.shape == (16, 8)
 
@@ -668,9 +720,9 @@ class TestFrozenSequencing:
             infer({"parameters": PARAMS, "noise": self.NOISE})
 
     def test_source_prediction_at_init_evaluates_the_fit_twin_once(self):
-        build = infer({"parameters": PARAMS,
-                       "noise": {**self.NOISE,
-                                 "source": "prediction_at_init"}})
+        build = infer(
+            {"parameters": PARAMS, "noise": {**self.NOISE, "source": "prediction_at_init"}}
+        )
         assert build.noise.sigma is not None
 
     def test_prediction_at_init_evaluates_the_repaired_twin(self):
@@ -678,13 +730,15 @@ class TestFrozenSequencing:
         the FIT twin's deterministic prediction -- |prediction|/sqrt(w*tau)."""
         import jax.numpy as jnp
 
-        build = infer({"twin": {"without": ["noise"]},
-                       "parameters": PARAMS,
-                       "noise": {**self.NOISE,
-                                 "source": "prediction_at_init"}},
-                      model=NOISY_MODEL)
-        bound = build.space.bind(build.fit_twin,
-                                 dict(build.space.initial_values()))
+        build = infer(
+            {
+                "twin": {"without": ["noise"]},
+                "parameters": PARAMS,
+                "noise": {**self.NOISE, "source": "prediction_at_init"},
+            },
+            model=NOISY_MODEL,
+        )
+        bound = build.space.bind(build.fit_twin, dict(build.space.initial_values()))
         expected = jnp.abs(bound(state()).data) * 0.25  # 1/sqrt(4 Hz * 4 s)
         assert jnp.allclose(build.noise.sigma, expected)
 
@@ -693,10 +747,16 @@ class TestFrozenSequencing:
         NAMED primary, not whichever the document happened to list first."""
         import jax.numpy as jnp
 
-        build = infer({"parameters": PARAMS, "noise": self.NOISE,
-                       "observed": {"other": {"from": "simulation"},
-                                    "primary": {"from": "simulation",
-                                                "at": {"g": 1.5}}}})
+        build = infer(
+            {
+                "parameters": PARAMS,
+                "noise": self.NOISE,
+                "observed": {
+                    "other": {"from": "simulation"},
+                    "primary": {"from": "simulation", "at": {"g": 1.5}},
+                },
+            }
+        )
         assert build.observed.primary == "primary"
         expected = jnp.abs(build.observed.entries["primary"]) * 0.25
         decoy = jnp.abs(build.observed.entries["other"]) * 0.25
@@ -710,8 +770,10 @@ class TestFrozenSequencing:
     #: module imports nothing from ``exit_helpers`` -- and the name is
     #: different anyway so that the day it does, it is a NameError and not a
     #: wrong array.
-    OBSERVED_PAIR = {"primary": {"from": "simulation", "at": {"g": 1.5}},
-                     "night": {"from": "simulation", "at": {"g": 3.0}}}
+    OBSERVED_PAIR = {
+        "primary": {"from": "simulation", "at": {"g": 1.5}},
+        "night": {"from": "simulation", "at": {"g": 3.0}},
+    }
 
     def test_source_observed_freezes_one_sigma_per_observation(self):
         """Two observations, two sigmas, each decided from its OWN data.
@@ -724,8 +786,7 @@ class TestFrozenSequencing:
         """
         import jax.numpy as jnp
 
-        build = infer({"parameters": PARAMS, "noise": self.NOISE,
-                       "observed": self.OBSERVED_PAIR})
+        build = infer({"parameters": PARAMS, "noise": self.NOISE, "observed": self.OBSERVED_PAIR})
         entries = build.observed.entries
         per = build.noise.by_observation
         assert sorted(per) == ["night", "primary"]
@@ -747,19 +808,19 @@ class TestFrozenSequencing:
         """
         import jax.numpy as jnp
 
-        build = infer({"parameters": PARAMS,
-                       "noise": {**self.NOISE,
-                                 "source": "prediction_at_init"},
-                       "observed": self.OBSERVED_PAIR})
+        build = infer(
+            {
+                "parameters": PARAMS,
+                "noise": {**self.NOISE, "source": "prediction_at_init"},
+                "observed": self.OBSERVED_PAIR,
+            }
+        )
         entries = build.observed.entries
         assert build.noise.by_observation is None
         assert build.noise.sigma is not None
-        assert jnp.allclose(build.noise.sigma,
-                            jnp.abs(entries["primary"]) * 0.25 / 1.5)
-        assert jnp.allclose(build.noise.sigma,
-                            jnp.abs(entries["night"]) * 0.25 / 3.0)
-        assert not jnp.allclose(build.noise.sigma,
-                                jnp.abs(entries["primary"]) * 0.25)
+        assert jnp.allclose(build.noise.sigma, jnp.abs(entries["primary"]) * 0.25 / 1.5)
+        assert jnp.allclose(build.noise.sigma, jnp.abs(entries["night"]) * 0.25 / 3.0)
+        assert not jnp.allclose(build.noise.sigma, jnp.abs(entries["primary"]) * 0.25)
 
     def test_several_observations_with_no_primary_are_still_refused(self):
         """The fan does not make a primary optional.
@@ -772,20 +833,29 @@ class TestFrozenSequencing:
         it.
         """
         with pytest.raises(ConfigError, match="or several with no primary"):
-            infer({"parameters": PARAMS, "noise": self.NOISE,
-                   "observed": {"day": {"from": "simulation"},
-                                "night": {"from": "simulation"}}})
+            infer(
+                {
+                    "parameters": PARAMS,
+                    "noise": self.NOISE,
+                    "observed": {"day": {"from": "simulation"}, "night": {"from": "simulation"}},
+                }
+            )
 
 
 class TestChecks:
     def test_modes_and_reasons(self):
-        build = infer({"checks": {
-            "identifiability": {"mode": "refuse", "rtol": 1.0e-8,
-                                "report": True},
-            "linearity": {"mode": "refuse"},
-            "prior_sensitivity": {"mode": "skip", "reason": "campaign"}}})
+        build = infer(
+            {
+                "checks": {
+                    "identifiability": {"mode": "refuse", "rtol": 1.0e-8, "report": True},
+                    "linearity": {"mode": "refuse"},
+                    "prior_sensitivity": {"mode": "skip", "reason": "campaign"},
+                }
+            }
+        )
         assert build.checks["identifiability"] == CheckSpec(
-            mode="refuse", report=True, reason=None, rtol=1.0e-8)
+            mode="refuse", report=True, reason=None, rtol=1.0e-8
+        )
         assert build.checks["prior_sensitivity"].reason == "campaign"
 
     def test_skip_without_its_reason_is_check_a37(self):
@@ -819,8 +889,7 @@ class TestTrainable:
 
         build = infer({"trainable": {"nodes": ["global_signal"]}})
         params, _ = eqx.partition(build.fit_twin, build.trainable)
-        assert len([x for x in jax.tree.leaves(params)
-                    if x is not None]) == 3
+        assert len([x for x in jax.tree.leaves(params) if x is not None]) == 3
 
     def test_all_true_is_every_inexact_array(self):
         import equinox as eqx
@@ -838,13 +907,15 @@ class TestTrainable:
         import equinox as eqx
         import jax
 
-        build = infer({"twin": {"without": ["noise"]},
-                       "trainable": {"nodes": ["global_signal"],
-                                     "leaves": ["gain.gain"]}},
-                      model=NOISY_MODEL)
+        build = infer(
+            {
+                "twin": {"without": ["noise"]},
+                "trainable": {"nodes": ["global_signal"], "leaves": ["gain.gain"]},
+            },
+            model=NOISY_MODEL,
+        )
         params, _ = eqx.partition(build.fit_twin, build.trainable)
-        assert len([x for x in jax.tree.leaves(params)
-                    if x is not None]) == 4
+        assert len([x for x in jax.tree.leaves(params) if x is not None]) == 4
 
     def test_an_unknown_node_or_leaf_fails_fast(self):
         with pytest.raises(KeyError, match="rfi_field"):
@@ -855,21 +926,22 @@ class TestTrainable:
 
 class TestTruth:
     def test_at_wins_and_identity_leaves_derive(self):
-        build = infer({
-            "parameters": {**PARAMS,
-                           "d": {"init": 0.1,
-                                 "into": "global_signal.depth"}},
-            "observed": {"from": "simulation", "at": {"g": 1.5}},
-        })
+        build = infer(
+            {
+                "parameters": {**PARAMS, "d": {"init": 0.1, "into": "global_signal.depth"}},
+                "observed": {"from": "simulation", "at": {"g": 1.5}},
+            }
+        )
         assert float(build.truth["g"]) == pytest.approx(1.5)
         assert float(build.truth["d"]) == pytest.approx(0.5)  # the leaf value
 
     def test_a_transformed_latent_is_omitted_with_its_reason(self):
-        build = infer({
-            "parameters": {"log_g": {"init": 0.0, "into": "gain.gain",
-                                     "transform": "exp"}},
-            "observed": {"from": "simulation"},
-        })
+        build = infer(
+            {
+                "parameters": {"log_g": {"init": 0.0, "into": "gain.gain", "transform": "exp"}},
+                "observed": {"from": "simulation"},
+            }
+        )
         assert "log_g" not in build.truth
         assert "transform" in build.truth_omitted["log_g"]
 
@@ -877,32 +949,35 @@ class TestTruth:
         """One latent tied identically into two leaves: no single leaf holds
         its truth, and the omission says so rather than blaming transform
         None."""
-        build = infer({
-            "parameters": {"d": {"init": 0.5,
-                                 "into": ["global_signal.depth",
-                                          "gain.gain"]}},
-            "observed": {"from": "simulation"},
-        })
+        build = infer(
+            {
+                "parameters": {"d": {"init": 0.5, "into": ["global_signal.depth", "gain.gain"]}},
+                "observed": {"from": "simulation"},
+            }
+        )
         assert "d" not in build.truth
         assert "several leaves" in build.truth_omitted["d"]
 
     def test_the_truth_section_overrides_everything(self):
-        build = infer({
-            "parameters": PARAMS,
-            "observed": {"from": "simulation", "at": {"g": 1.5}},
-            "truth": {"g": 1.7},
-        })
+        build = infer(
+            {
+                "parameters": PARAMS,
+                "observed": {"from": "simulation", "at": {"g": 1.5}},
+                "truth": {"g": 1.7},
+            }
+        )
         assert float(build.truth["g"]) == pytest.approx(1.7)
 
     def test_a_truth_override_clears_the_omission_record(self):
         """A latent omitted for its transform stops being omitted the moment
         truth: declares it -- one name never sits in both dicts."""
-        build = infer({
-            "parameters": {"log_g": {"init": 0.1, "into": "gain.gain",
-                                     "transform": "exp"}},
-            "observed": {"from": "simulation"},
-            "truth": {"log_g": 0.3},
-        })
+        build = infer(
+            {
+                "parameters": {"log_g": {"init": 0.1, "into": "gain.gain", "transform": "exp"}},
+                "observed": {"from": "simulation"},
+                "truth": {"log_g": 0.3},
+            }
+        )
         assert float(build.truth["log_g"]) == pytest.approx(0.3)
         assert "log_g" not in build.truth_omitted
 

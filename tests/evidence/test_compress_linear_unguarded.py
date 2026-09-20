@@ -64,16 +64,21 @@ def test_the_offset_prediction_is_subtracted_from_the_data():
     probe = {"x": jnp.array([0.3, -0.2, 0.9])}
 
     with_offset = compress_linear(
-        design={"x": design}, observed=observed, noise_std=0.1,
-        shapes={"x": (3,)}, epoch_id="e0", offset_prediction=offset,
+        design={"x": design},
+        observed=observed,
+        noise_std=0.1,
+        shapes={"x": (3,)},
+        epoch_id="e0",
+        offset_prediction=offset,
     )
     pre_subtracted = compress_linear(
-        design={"x": design}, observed=observed - offset, noise_std=0.1,
-        shapes={"x": (3,)}, epoch_id="e0",
+        design={"x": design},
+        observed=observed - offset,
+        noise_std=0.1,
+        shapes={"x": (3,)},
+        epoch_id="e0",
     )
-    assert float(with_offset(probe)) == pytest.approx(
-        float(pre_subtracted(probe)), rel=1e-12
-    )
+    assert float(with_offset(probe)) == pytest.approx(float(pre_subtracted(probe)), rel=1e-12)
 
 
 def test_the_offset_prediction_actually_changes_the_answer():
@@ -88,8 +93,11 @@ def test_the_offset_prediction_actually_changes_the_answer():
     offset = jnp.asarray(np.random.default_rng(2).normal(size=(40,))) * 0.7
     probe = {"x": jnp.array([0.3, -0.2, 0.9])}
     common = dict(
-        design={"x": design}, observed=observed, noise_std=0.1,
-        shapes={"x": (3,)}, epoch_id="e0",
+        design={"x": design},
+        observed=observed,
+        noise_std=0.1,
+        shapes={"x": (3,)},
+        epoch_id="e0",
     )
     without = float(compress_linear(**common)(probe))
     with_it = float(compress_linear(**common, offset_prediction=offset)(probe))
@@ -112,13 +120,15 @@ def test_a_non_zero_nuisance_prior_mean_reaches_the_density():
     mean = jnp.array([0.3, -0.2, 0.9])
     probe = {"x": jnp.array([0.4, -1.1])}
     common = dict(
-        design={"x": design}, nuisance_design={"p": nuisance},
-        nuisance_prior_std={"p": 0.7}, noise_std=0.1,
-        shapes={"x": (2,)}, nuisance_shapes={"p": (3,)}, epoch_id="e0",
+        design={"x": design},
+        nuisance_design={"p": nuisance},
+        nuisance_prior_std={"p": 0.7},
+        noise_std=0.1,
+        shapes={"x": (2,)},
+        nuisance_shapes={"p": (3,)},
+        epoch_id="e0",
     )
-    with_mean = compress_linear(
-        observed=observed, nuisance_prior_mean={"p": mean}, **common
-    )
+    with_mean = compress_linear(observed=observed, nuisance_prior_mean={"p": mean}, **common)
     absorbed = compress_linear(observed=observed - nuisance @ mean, **common)
     # The two differ by the prior's own normalisation only, which is the same
     # constant in both, so the densities coincide.
@@ -142,16 +152,22 @@ def test_the_two_refusals_this_function_raises_itself():
     """
     with pytest.raises(StateValidationError, match="at least one design block"):
         compress_linear(
-            design={}, observed=jnp.zeros(4), noise_std=0.1,
-            shapes={}, epoch_id="e0",
+            design={},
+            observed=jnp.zeros(4),
+            noise_std=0.1,
+            shapes={},
+            epoch_id="e0",
         )
 
     with pytest.raises(StateValidationError, match="nuisance_prior_std"):
         compress_linear(
             design={"x": _design(0, n=4, width=2)},
             nuisance_design={"p": _design(1, n=4, width=1)},
-            observed=jnp.zeros(4), noise_std=0.1,
-            shapes={"x": (2,)}, nuisance_shapes={"p": (1,)}, epoch_id="e0",
+            observed=jnp.zeros(4),
+            noise_std=0.1,
+            shapes={"x": (2,)},
+            nuisance_shapes={"p": (1,)},
+            epoch_id="e0",
         )
 
 
@@ -169,8 +185,11 @@ def test_the_stored_shapes_are_the_callers_own_objects_not_normalised_tuples():
     rather than widen it.
     """
     term = compress_linear(
-        design={"x": _design(0, width=2)}, observed=jnp.zeros(40), noise_std=0.1,
-        shapes={"x": [2]}, epoch_id="e0",
+        design={"x": _design(0, width=2)},
+        observed=jnp.zeros(40),
+        noise_std=0.1,
+        shapes={"x": [2]},
+        epoch_id="e0",
     )
     assert term.info.shapes == ([2],), (
         f"stored shapes are {term.info.shapes!r}. If this is now ((2,),) the "

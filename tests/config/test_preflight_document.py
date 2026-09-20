@@ -31,8 +31,7 @@ from rheplicant.config.sections.model import _pick_class
 from rheplicant.config.sections.parameters import parse_latents
 from tests.config.preflight_helpers import UNREADABLE_BEAM, preflight_document
 
-_CTX = ResolutionContext(freq=jnp.linspace(60e6, 85e6, 8),
-                         time=jnp.arange(16.0), dtype="float32")
+_CTX = ResolutionContext(freq=jnp.linspace(60e6, 85e6, 8), time=jnp.arange(16.0), dtype="float32")
 
 
 #: The five ids this module's checks are registered under.  ``A1`` is three
@@ -48,17 +47,22 @@ def _findings(document, check):
 
 def _layer_prefixes(document) -> list[str]:
     merged = initial_merge(document, origin=Origin("user"))
-    enumeration = enumerate_layers_once(
-        merged.document, merged.origins, merged.deletions
-    )
+    enumeration = enumerate_layers_once(merged.document, merged.origins, merged.deletions)
     return [layer.prefix for layer in enumeration.layers]
 
 
 def _beam_entry(name, **horizon):
     """One named ``resources.beams`` entry.  Named, so a test can declare two."""
-    return {name: {"format": "npy", "path": "beam.npy", "nside": 4,
-                   "normalize": "pixel_sum", "frame": "beam_local",
-                   "horizon": {"mode": "truncate_map", **horizon}}}
+    return {
+        name: {
+            "format": "npy",
+            "path": "beam.npy",
+            "nside": 4,
+            "normalize": "pixel_sum",
+            "frame": "beam_local",
+            "horizon": {"mode": "truncate_map", **horizon},
+        }
+    }
 
 
 def _a_beam(**horizon):
@@ -67,8 +71,10 @@ def _a_beam(**horizon):
 
 
 def _latent(**extra):
-    return {"twin": {"without": ["noise"]},
-            "parameters": {"g": {"init": 1.0, "into": "gain.gain", **extra}}}
+    return {
+        "twin": {"without": ["noise"]},
+        "parameters": {"g": {"init": 1.0, "into": "gain.gain", **extra}},
+    }
 
 
 def _allowed_set(node, scope):
@@ -84,10 +90,10 @@ def _allowed_set(node, scope):
     if isinstance(node, ast.Name):
         return frozenset(scope[node.id])
     if isinstance(node, ast.IfExp):
-        return _allowed_set(
-            node.body if scope[node.test.id] else node.orelse, scope)
+        return _allowed_set(node.body if scope[node.test.id] else node.orelse, scope)
     assert isinstance(node, ast.Call) and node.func.id == "frozenset", (
-        f"unhandled _sweep argument shape {ast.unparse(node)!r}")
+        f"unhandled _sweep argument shape {ast.unparse(node)!r}"
+    )
     return frozenset(ast.literal_eval(node.args[0]) if node.args else ())
 
 
@@ -107,17 +113,24 @@ def _swept_by(kind: str) -> frozenset[str]:
     tree = ast.parse(textwrap.dedent(inspect.getsource(fn)))
     scope = dict(vars(sys.modules[fn.__module__]))
     for node in ast.walk(tree):
-        if (isinstance(node, ast.Assign) and len(node.targets) == 1
-                and isinstance(node.targets[0], ast.Name)
-                and isinstance(node.value, ast.Compare)
-                and len(node.value.ops) == 1
-                and isinstance(node.value.ops[0], ast.Eq)
-                and ast.unparse(node.value.left) in ("run.kind", "spec.kind")
-                and isinstance(node.value.comparators[0], ast.Constant)):
+        if (
+            isinstance(node, ast.Assign)
+            and len(node.targets) == 1
+            and isinstance(node.targets[0], ast.Name)
+            and isinstance(node.value, ast.Compare)
+            and len(node.value.ops) == 1
+            and isinstance(node.value.ops[0], ast.Eq)
+            and ast.unparse(node.value.left) in ("run.kind", "spec.kind")
+            and isinstance(node.value.comparators[0], ast.Constant)
+        ):
             scope[node.targets[0].id] = kind == node.value.comparators[0].value
-    calls = [node for node in ast.walk(tree)
-             if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
-             and node.func.id == "_sweep"]
+    calls = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "_sweep"
+    ]
     assert len(calls) == 1, f"{kind}: {len(calls)} _sweep calls, expected one"
     return _allowed_set(calls[0].args[1], scope)
 
@@ -137,11 +150,11 @@ class TestRegistration:
         document = preflight_document(
             runs=[{"kind": "forward", "tpyo": 1}],
             resources=_a_beam(apod_deg={"value": 1.0, "unit": "deg"}),
-            variants={"bad": {"campaign": {}}})
+            variants={"bad": {"campaign": {}}},
+        )
         emitted = {f.check for f in preflight(document).findings}
         assert "A1" in emitted
-        assert not any(f.check.startswith("A1.")
-                       for f in preflight(document).findings)
+        assert not any(f.check.startswith("A1.") for f in preflight(document).findings)
 
     def test_every_finding_this_module_emits_ends_with_its_check_tag(self):
         """`Finding`'s own docstring: a message "ends with `(check A30).` when
@@ -156,14 +169,14 @@ class TestRegistration:
         document = preflight_document(
             runs=[{"kind": "forward", "tpyo": 1}],
             resources=_a_beam(apod_deg={"value": 1.0, "unit": "deg"}),
-            inference={"twin": {"without": ["noise"]},
-                       "transitions": {},
-                       "parameters": {"d": {"init": 0.5,
-                                            "into": ["global_signal.depth",
-                                                     "gain.gain"]}}},
-            variants={"bad": {"campaign": {}}})
-        found = [f for f in preflight(document).findings
-                 if f.check in ("A1", "A38", "A39")]
+            inference={
+                "twin": {"without": ["noise"]},
+                "transitions": {},
+                "parameters": {"d": {"init": 0.5, "into": ["global_signal.depth", "gain.gain"]}},
+            },
+            variants={"bad": {"campaign": {}}},
+        )
+        found = [f for f in preflight(document).findings if f.check in ("A1", "A38", "A39")]
         assert {f.check for f in found} == {"A1", "A38", "A39"}
         assert len(found) == 5
         for one in found:
@@ -174,8 +187,7 @@ class TestRunOptionKeys:
     def test_an_unknown_run_option_is_refused(self):
         """Kills the whole check: today load_document PASSES this document
         and only execute_run refuses it, after every earlier run has run."""
-        found = _findings(preflight_document(
-            runs=[{"kind": "forward", "tpyo_key": 3}]), "A1")
+        found = _findings(preflight_document(runs=[{"kind": "forward", "tpyo_key": 3}]), "A1")
         assert [f.where for f in found] == ["runs[0]"]
         assert "tpyo_key" in found[0].message
 
@@ -185,32 +197,35 @@ class TestRunOptionKeys:
         reader to edit a run that is correct.  Both the document path and the
         run's own name are pinned, and the innocent run's name is pinned
         ABSENT."""
-        found = _findings(preflight_document(runs=[
-            {"name": "innocent", "kind": "forward"},
-            {"name": "guilty", "kind": "nuts", "num_smaples": 4}]), "A1")
+        found = _findings(
+            preflight_document(
+                runs=[
+                    {"name": "innocent", "kind": "forward"},
+                    {"name": "guilty", "kind": "nuts", "num_smaples": 4},
+                ]
+            ),
+            "A1",
+        )
         assert [f.where for f in found] == ["runs[1]"]
         assert "runs['guilty']" in found[0].message
         assert "innocent" not in found[0].message
 
     def test_a_legal_option_is_silent(self):
         """Kills `return [refuse(...)]` -- a check that refuses every run."""
-        assert _findings(preflight_document(
-            runs=[{"kind": "nuts", "num_samples": 4}]), "A1") == []
+        assert _findings(preflight_document(runs=[{"kind": "nuts", "num_samples": 4}]), "A1") == []
 
     def test_a_single_mapping_runs_section_is_swept_too(self):
         """`runs:` may be one mapping (parse_runs wraps it, runs.py::_one).
         Kills a check written `for entry in document["runs"]`, which iterates
         that mapping's KEYS and finds nothing."""
-        found = _findings(preflight_document(
-            runs={"kind": "forward", "tpyo": 1}), "A1")
+        found = _findings(preflight_document(runs={"kind": "forward", "tpyo": 1}), "A1")
         assert [f.where for f in found] == ["runs[0]"]
 
     def test_an_unparseable_runs_section_yields_nothing_here(self):
         """`kind: not_an_exit` is parse_runs' refusal and run_document's to
         report.  Kills a check that re-implements the kind enum and hands the
         user two refusals, in two voices, for one typo."""
-        assert _findings(preflight_document(
-            runs=[{"kind": "not_an_exit", "tpyo": 1}]), "A1") == []
+        assert _findings(preflight_document(runs=[{"kind": "not_an_exit", "tpyo": 1}]), "A1") == []
 
     def test_every_registered_handler_has_a_table_entry(self):
         """Kills a kind dropped from the table -- which would make its
@@ -263,13 +278,15 @@ class TestRunOptionKeys:
         `test_config_exits_predict.py`, one in `test_config_exits_npe.py` and
         one in `test_config_exits_plan.py` -- and every one of them is a
         document carrying one of the five keys."""
-        assert _findings(preflight_document(
-            runs=[{"kind": "condition", "prior_mean": {"g": 1.0}}]),
-            "A1") == []
+        assert (
+            _findings(
+                preflight_document(runs=[{"kind": "condition", "prior_mean": {"g": 1.0}}]), "A1"
+            )
+            == []
+        )
         # ...and the stand-down is for a run that CARRIES such a key, not for
         # the kind: an ordinary typo on a run with no spoken-for key is ours.
-        found = _findings(preflight_document(
-            runs=[{"kind": "condition", "tpyo": 1}]), "A1")
+        found = _findings(preflight_document(runs=[{"kind": "condition", "tpyo": 1}]), "A1")
         assert [f.where for f in found] == ["runs[0]"]
 
     def test_the_stand_down_is_for_the_whole_run_and_not_for_the_key_alone(self):
@@ -288,9 +305,15 @@ class TestRunOptionKeys:
 
         The test above cannot see it: its spoken-for document carries no
         second key, so both implementations are silent on it."""
-        assert _findings(preflight_document(runs=[
-            {"kind": "condition", "prior_mean": {"g": 1.0}, "tol": 1.0e-9}]),
-            "A1") == []
+        assert (
+            _findings(
+                preflight_document(
+                    runs=[{"kind": "condition", "prior_mean": {"g": 1.0}, "tol": 1.0e-9}]
+                ),
+                "A1",
+            )
+            == []
+        )
 
     def test_the_spoken_for_table_is_every_handler_that_raises_first(self):
         """DERIVED, not restated.  Each registered PARSER is read with `ast`:
@@ -337,8 +360,7 @@ class TestRunOptionKeys:
                     continue
                 if not isinstance(node.left, ast.Constant):
                     continue
-                if not any(ast.unparse(one).endswith("options")
-                           for one in node.comparators):
+                if not any(ast.unparse(one).endswith("options") for one in node.comparators):
                     continue
                 keys.add(node.left.value)
             return keys
@@ -346,38 +368,42 @@ class TestRunOptionKeys:
         derived: dict[str, frozenset[str]] = {}
         for kind, fn in PARSERS.items():
             tree = ast.parse(textwrap.dedent(inspect.getsource(fn)))
-            sweeps = [node.lineno for node in ast.walk(tree)
-                      if isinstance(node, ast.Call)
-                      and isinstance(node.func, ast.Name)
-                      and node.func.id == "_sweep"]
+            sweeps = [
+                node.lineno
+                for node in ast.walk(tree)
+                if isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id == "_sweep"
+            ]
             assert sweeps, f"{kind}: no _sweep call"
             cut = min(sweeps)
             keys = options_membership(tree, cut)
             for node in ast.walk(tree):
-                if not (isinstance(node, ast.Call)
-                        and isinstance(node.func, ast.Name)
-                        and node.lineno < cut):
+                if not (
+                    isinstance(node, ast.Call)
+                    and isinstance(node.func, ast.Name)
+                    and node.lineno < cut
+                ):
                     continue
                 helper = fn.__globals__.get(node.func.id)
-                if (not inspect.isfunction(helper)
-                        or helper.__module__ != fn.__module__):
+                if not inspect.isfunction(helper) or helper.__module__ != fn.__module__:
                     continue
                 keys |= options_membership(
-                    ast.parse(textwrap.dedent(inspect.getsource(helper))),
-                    None)
+                    ast.parse(textwrap.dedent(inspect.getsource(helper))), None
+                )
             if keys:
                 derived[kind] = frozenset(keys)
         assert derived == _TASK3_SPOKEN_FOR, (
             "a handler parser's pre-sweep refusal changed; update "
-            "_TASK3_SPOKEN_FOR in preflight/document.py")
+            "_TASK3_SPOKEN_FOR in preflight/document.py"
+        )
 
 
 class TestUnselectedVariants:
     def test_a_variant_that_would_be_refused_is_reported_now(self):
         """Measured: this document loads clean today and the refusal waits
         for the run that selects the variant.  Kills the whole check."""
-        found = _findings(preflight_document(
-            variants={"sneaky": {"campaign": {}}}), "A1")
+        found = _findings(preflight_document(variants={"sneaky": {"campaign": {}}}), "A1")
         assert [f.where for f in found] == ["variants.sneaky.campaign"]
         assert "capability 4" in found[0].message
 
@@ -385,10 +411,12 @@ class TestUnselectedVariants:
         """Shape 1.  Two variants, one bad: a check reporting `variants.good`
         or bare `variants` passes any membership test on the message and sends
         the reader to the wrong block."""
-        document = preflight_document(variants={
-            "good": {"model": {"gain": {"gain": {"value": 1.0,
-                                                 "unit": "dimensionless"}}}},
-            "bad": {"schema_version": 2}})
+        document = preflight_document(
+            variants={
+                "good": {"model": {"gain": {"gain": {"value": 1.0, "unit": "dimensionless"}}}},
+                "bad": {"schema_version": 2},
+            }
+        )
         with pytest.raises(ConfigError) as caught:
             preflight(document)
         assert str(caught.value) == (
@@ -401,40 +429,50 @@ class TestUnselectedVariants:
     def test_a_variant_deleting_a_required_section_is_caught(self):
         """`~model: null` is the delete form (_rheplicant_bootstrap/layering.py).  Kills a
         check that only looks at the patch's own keys and never merges."""
-        found = _findings(preflight_document(
-            variants={"nomodel": {"~model": None}}), "A1")
+        found = _findings(preflight_document(variants={"nomodel": {"~model": None}}), "A1")
         assert [f.where for f in found] == ["variants.nomodel.model"]
         assert "missing ['model']" in found[0].message
 
-    @pytest.mark.parametrize(("variants", "kind"), [
-        (["a"], "tuple"),
-        ([], "tuple"),
-        (0, "int"),
-        ("", "str"),
-        (None, "NoneType"),
-    ], ids=["a-list", "an-empty-list", "a-zero", "an-empty-string",
-            "an-explicit-null"])
+    @pytest.mark.parametrize(
+        ("variants", "kind"),
+        [
+            (["a"], "tuple"),
+            ([], "tuple"),
+            (0, "int"),
+            ("", "str"),
+            (None, "NoneType"),
+        ],
+        ids=["a-list", "an-empty-list", "a-zero", "an-empty-string", "an-explicit-null"],
+    )
     def test_a_non_mapping_variants_section_is_rejected(self, variants, kind):
         """Presence is significant: null and omission are not equivalent."""
         document = preflight_document()
         document["variants"] = variants
         with pytest.raises(ConfigError) as caught:
             preflight(document)
-        assert str(caught.value) == (
-            "variants: is a mapping of name -> patch; got " f"{kind}."
-        )
+        assert str(caught.value) == (f"variants: is a mapping of name -> patch; got {kind}.")
 
     def test_a_legal_variant_is_silent(self):
         """Kills a check that reports every variant it merges."""
-        assert _findings(preflight_document(variants={
-            "unity": {"model": {"gain": {"gain": {"value": 1.0,
-                                                  "unit": "dimensionless"}}}}}),
-            "A1") == []
+        assert (
+            _findings(
+                preflight_document(
+                    variants={
+                        "unity": {
+                            "model": {"gain": {"gain": {"value": 1.0, "unit": "dimensionless"}}}
+                        }
+                    }
+                ),
+                "A1",
+            )
+            == []
+        )
 
     def test_the_interior_of_an_unselected_variant_is_out_of_scope_here(self):
         """A1 owns grammar only; the pass driver sends A2 over this layer."""
-        assert _findings(preflight_document(
-            variants={"unused": {"model": {"ghost": {}}}}), "A1") == []
+        assert (
+            _findings(preflight_document(variants={"unused": {"model": {"ghost": {}}}}), "A1") == []
+        )
 
 
 class TestHorizonNumbers:
@@ -443,19 +481,19 @@ class TestHorizonNumbers:
         the user as `TypeError: float() argument must be a string or a real
         number, not 'dict'` from inside build_beam, after the beam file has
         been read.  Kills the whole check."""
-        found = _findings(preflight_document(
-            resources=_a_beam(apod_deg={"value": 0.1, "unit": "rad"})), "A1")
-        assert [f.where for f in found] == [
-            "resources.beams.horn.horizon.apod_deg"]
+        found = _findings(
+            preflight_document(resources=_a_beam(apod_deg={"value": 0.1, "unit": "rad"})), "A1"
+        )
+        assert [f.where for f in found] == ["resources.beams.horn.horizon.apod_deg"]
 
     def test_el_deg_is_the_twin_and_is_refused_the_same_way(self):
         """Shape 4.  `kinds/beams.py::_uvbeam_maps` is `float(horizon.get("el_deg", 90.0))` --
         the same line, one key over -- and the survey named only `apod_deg`.
         A check written for one key alone passes every apod_deg test."""
-        found = _findings(preflight_document(
-            resources=_a_beam(el_deg={"value": 90.0, "unit": "deg"})), "A1")
-        assert [f.where for f in found] == [
-            "resources.beams.horn.horizon.el_deg"]
+        found = _findings(
+            preflight_document(resources=_a_beam(el_deg={"value": 90.0, "unit": "deg"})), "A1"
+        )
+        assert [f.where for f in found] == ["resources.beams.horn.horizon.el_deg"]
 
     def test_the_angle_is_attributed_to_the_beam_that_carries_it(self):
         """Shape 1 -- attribution, not presence, and the twin of
@@ -466,12 +504,18 @@ class TestHorizonNumbers:
         form that names A beam rather than THE beam: both satisfy every
         assertion in this class, and both send a reader to edit the innocent
         entry.  The innocent name is pinned absent from the message too."""
-        found = _findings(preflight_document(resources={"beams": {
-            **_beam_entry("good", apod_deg=0.0),
-            **_beam_entry("bad", apod_deg={"value": 0.1, "unit": "rad"})}}),
-            "A1")
-        assert [f.where for f in found] == [
-            "resources.beams.bad.horizon.apod_deg"]
+        found = _findings(
+            preflight_document(
+                resources={
+                    "beams": {
+                        **_beam_entry("good", apod_deg=0.0),
+                        **_beam_entry("bad", apod_deg={"value": 0.1, "unit": "rad"}),
+                    }
+                }
+            ),
+            "A1",
+        )
+        assert [f.where for f in found] == ["resources.beams.bad.horizon.apod_deg"]
         assert "good" not in found[0].message
 
     def test_the_key_is_checked_even_where_the_mode_never_reads_it(self):
@@ -480,21 +524,21 @@ class TestHorizonNumbers:
         Kills a check gated on `mode == "truncate_map"`."""
         section = _a_beam()
         section["beams"]["horn"]["horizon"] = {
-            "mode": "none", "apod_deg": {"value": 0.1, "unit": "rad"}}
+            "mode": "none",
+            "apod_deg": {"value": 0.1, "unit": "rad"},
+        }
         assert len(_findings(preflight_document(resources=section), "A1")) == 1
 
     @pytest.mark.parametrize("value", [0.0, 20, 90.0])
     def test_a_plain_number_is_accepted(self, value):
         """Kills a check that refuses the form the code actually takes."""
-        assert _findings(preflight_document(
-            resources=_a_beam(apod_deg=value)), "A1") == []
+        assert _findings(preflight_document(resources=_a_beam(apod_deg=value)), "A1") == []
 
     def test_a_bool_is_not_a_number_here(self):
         """`float(True)` is 1.0, so a bool builds a 1-degree taper out of a
         typo.  Kills `isinstance(value, (int, float))` written without the
         bool exclusion -- which passes every other test in this class."""
-        assert len(_findings(preflight_document(
-            resources=_a_beam(apod_deg=True)), "A1")) == 1
+        assert len(_findings(preflight_document(resources=_a_beam(apod_deg=True)), "A1")) == 1
 
 
 class TestProjectorMaskAngles:
@@ -505,8 +549,7 @@ class TestProjectorMaskAngles:
     @staticmethod
     def _masked(**angles):
         section = _a_beam()
-        section["beams"]["horn"]["horizon"] = {"mode": "projector_mask",
-                                               **angles}
+        section["beams"]["horn"]["horizon"] = {"mode": "projector_mask", **angles}
         return preflight_document(resources=section)
 
     def test_it_is_the_builders_sentence_one_phase_early(self):
@@ -515,24 +558,30 @@ class TestProjectorMaskAngles:
         found = _findings(self._masked(apod_deg=5.0), "A1")
         assert [f.where for f in found] == ["resources.beams.horn.horizon"]
         assert found[0].message == _unread_horizon_angles(
-            "resources.beams.horn", {"mode": "projector_mask", "apod_deg": 5.0},
-            "projector_mask", inherited={})
+            "resources.beams.horn",
+            {"mode": "projector_mask", "apod_deg": 5.0},
+            "projector_mask",
+            inherited={},
+        )
         assert "is read only by horizon.mode: truncate_map" in found[0].message
 
     def test_it_pre_empts_the_number_check_on_the_same_key(self):
         """A value-node angle under projector_mask is one fault, not two: the
         key should not be there at all, whatever its shape."""
-        found = _findings(self._masked(el_deg={"value": 90.0, "unit": "deg"}),
-                          "A1")
+        found = _findings(self._masked(el_deg={"value": 90.0, "unit": "deg"}), "A1")
         assert [f.where for f in found] == ["resources.beams.horn.horizon"]
 
     def test_projector_mask_without_the_angles_is_silent(self):
         assert _findings(self._masked(), "A1") == []
 
-    @pytest.mark.parametrize("horizon", [
-        {"mode": "none", "el_deg": 90.0},
-        {"el_deg": 90.0},
-    ], ids=["mode-none", "mode-defaulted"])
+    @pytest.mark.parametrize(
+        "horizon",
+        [
+            {"mode": "none", "el_deg": 90.0},
+            {"el_deg": 90.0},
+        ],
+        ids=["mode-none", "mode-defaulted"],
+    )
     def test_mode_none_refuses_them_too(self, horizon):
         """``none`` reads neither angle either, and it is the default."""
         from rheplicant.config.kinds.beams import _unread_horizon_angles
@@ -542,14 +591,14 @@ class TestProjectorMaskAngles:
         found = _findings(preflight_document(resources=section), "A1")
         assert [f.where for f in found] == ["resources.beams.horn.horizon"]
         assert found[0].message == _unread_horizon_angles(
-            "resources.beams.horn", horizon, "none", inherited={})
+            "resources.beams.horn", horizon, "none", inherited={}
+        )
         assert "Under horizon.mode: none" in found[0].message
 
     @staticmethod
     def _extending(child_horizon):
         section = _a_beam(el_deg=90.0)
-        section["beams"]["child"] = {"extends": "horn",
-                                     "horizon": child_horizon}
+        section["beams"]["child"] = {"extends": "horn", "horizon": child_horizon}
         return preflight_document(resources=section)
 
     def test_an_inherited_angle_is_read_off_the_resolved_spec(self):
@@ -563,16 +612,18 @@ class TestProjectorMaskAngles:
         assert [f.where for f in found] == ["resources.beams.child.horizon"]
         assert found[0].message == _unread_horizon_angles(
             "resources.beams.child",
-            {"mode": "projector_mask", "el_deg": 90.0}, "projector_mask",
-            inherited={"el_deg": "resources.beams.horn"})
-        assert ("horizon.el_deg is inherited from resources.beams.horn through "
-                "extends:; delete it there, or write ~el_deg: null under this "
-                "entry's horizon: to drop it from this entry alone."
-                ) in found[0].message
+            {"mode": "projector_mask", "el_deg": 90.0},
+            "projector_mask",
+            inherited={"el_deg": "resources.beams.horn"},
+        )
+        assert (
+            "horizon.el_deg is inherited from resources.beams.horn through "
+            "extends:; delete it there, or write ~el_deg: null under this "
+            "entry's horizon: to drop it from this entry alone."
+        ) in found[0].message
 
     def test_the_tilde_remedy_clears_it(self):
-        assert _findings(self._extending(
-            {"mode": "projector_mask", "~el_deg": None}), "A1") == []
+        assert _findings(self._extending({"mode": "projector_mask", "~el_deg": None}), "A1") == []
 
     def test_a_written_angle_is_still_deleted_here(self):
         found = _findings(self._masked(apod_deg=5.0), "A1")
@@ -591,22 +642,33 @@ class TestFanPresence:
         """Measured: this builds today with `Bind.fan = None`.  Kills the
         whole presence half; the registry-consistency half already exists at
         transforms.py::parse_transform and is untouched."""
-        found = _findings(preflight_document(inference={
-            "twin": {"without": ["noise"]},
-            "parameters": {"d": {"init": 0.5, "into": ["global_signal.depth",
-                                                       "gain.gain"]}}}), "A38")
+        found = _findings(
+            preflight_document(
+                inference={
+                    "twin": {"without": ["noise"]},
+                    "parameters": {
+                        "d": {"init": 0.5, "into": ["global_signal.depth", "gain.gain"]}
+                    },
+                }
+            ),
+            "A38",
+        )
         assert [f.where for f in found] == ["inference.parameters.d"]
 
     def test_two_targets_with_no_fan_are_refused_in_the_bindings_spelling(self):
         """Shape 4.  transforms.py calls `_merged_fan` from TWO loops (:356
         and :395); a check written over `inference.parameters` alone leaves
         the longhand open, and measured, the longhand builds too."""
-        found = _findings(preflight_document(inference={
-            "twin": {"without": ["noise"]},
-            "parameters": {"g": {"init": 1.0}},
-            "bindings": [{"latents": ["g"], "into": ["gain.gain",
-                                                     "global_signal.depth"]}]}),
-            "A38")
+        found = _findings(
+            preflight_document(
+                inference={
+                    "twin": {"without": ["noise"]},
+                    "parameters": {"g": {"init": 1.0}},
+                    "bindings": [{"latents": ["g"], "into": ["gain.gain", "global_signal.depth"]}],
+                }
+            ),
+            "A38",
+        )
         assert [f.where for f in found] == ["inference.bindings[0]"]
 
     def test_the_binding_index_is_the_one_that_carries_it(self):
@@ -618,12 +680,19 @@ class TestFanPresence:
         bindings sends the reader to edit the correct one, and every other
         assertion in this class -- all of which declare ONE binding -- stays
         green."""
-        found = _findings(preflight_document(inference={
-            "twin": {"without": ["noise"]},
-            "parameters": {"g": {"init": 1.0}, "d": {"init": 0.5}},
-            "bindings": [{"latents": ["g"], "into": ["gain.gain"]},
-                         {"latents": ["d"], "into": ["global_signal.depth",
-                                                     "gain.gain"]}]}), "A38")
+        found = _findings(
+            preflight_document(
+                inference={
+                    "twin": {"without": ["noise"]},
+                    "parameters": {"g": {"init": 1.0}, "d": {"init": 0.5}},
+                    "bindings": [
+                        {"latents": ["g"], "into": ["gain.gain"]},
+                        {"latents": ["d"], "into": ["global_signal.depth", "gain.gain"]},
+                    ],
+                }
+            ),
+            "A38",
+        )
         assert [f.where for f in found] == ["inference.bindings[1]"]
         assert "inference.bindings[1]" in found[0].message
 
@@ -634,15 +703,21 @@ class TestFanPresence:
         be implemented without changing `_names` -- §2.6 item 5 decides for
         §2.2's.  This test is that decision, and it goes red if someone
         implements the other reading."""
-        assert _findings(preflight_document(inference={
-            "twin": {"without": ["noise"]},
-            "parameters": {"g": {"init": 1.0, "into": ["gain.gain"]}}}),
-            "A38") == []
+        assert (
+            _findings(
+                preflight_document(
+                    inference={
+                        "twin": {"without": ["noise"]},
+                        "parameters": {"g": {"init": 1.0, "into": ["gain.gain"]}},
+                    }
+                ),
+                "A38",
+            )
+            == []
+        )
 
-    @pytest.mark.parametrize("transform", ["exp", "split_rows",
-                                           {"affine": {"scale": 2.0}}])
-    def test_a_transform_that_carries_its_own_fan_is_not_refused(self,
-                                                                 transform):
+    @pytest.mark.parametrize("transform", ["exp", "split_rows", {"affine": {"scale": 2.0}}])
+    def test_a_transform_that_carries_its_own_fan_is_not_refused(self, transform):
         """Measured: every transform form except None and "identity" returns
         a non-None canonical fan, and `_merged_fan(None, canonical)` returns
         it -- so there is no guess left to refuse.  Kills a literal
@@ -651,31 +726,67 @@ class TestFanPresence:
         and turn
         test_config_transforms.py::TestBeamAnalysisBandLimit.test_an_lmax_above_the_band_limit_is_legal
         red."""
-        assert _findings(preflight_document(inference={
-            "twin": {"without": ["noise"]},
-            "parameters": {"d": {"init": 0.5, "transform": transform,
-                                 "into": ["global_signal.depth",
-                                          "gain.gain"]}}}), "A38") == []
+        assert (
+            _findings(
+                preflight_document(
+                    inference={
+                        "twin": {"without": ["noise"]},
+                        "parameters": {
+                            "d": {
+                                "init": 0.5,
+                                "transform": transform,
+                                "into": ["global_signal.depth", "gain.gain"],
+                            }
+                        },
+                    }
+                ),
+                "A38",
+            )
+            == []
+        )
 
     def test_transform_identity_is_not_a_transform_for_this_purpose(self):
         """`parse_transform("identity")` returns `(None, None)` -- measured --
         so the ambiguity is exactly the same as writing no transform at all.
         Kills `if "transform" in spec: return`."""
-        found = _findings(preflight_document(inference={
-            "twin": {"without": ["noise"]},
-            "parameters": {"d": {"init": 0.5, "transform": "identity",
-                                 "into": ["global_signal.depth",
-                                          "gain.gain"]}}}), "A38")
+        found = _findings(
+            preflight_document(
+                inference={
+                    "twin": {"without": ["noise"]},
+                    "parameters": {
+                        "d": {
+                            "init": 0.5,
+                            "transform": "identity",
+                            "into": ["global_signal.depth", "gain.gain"],
+                        }
+                    },
+                }
+            ),
+            "A38",
+        )
         assert [f.where for f in found] == ["inference.parameters.d"]
 
     @pytest.mark.parametrize("fan", ["broadcast", "distribute"])
     def test_a_declared_fan_silences_it(self, fan):
         """Kills a check that ignores the key it exists to require."""
-        assert _findings(preflight_document(inference={
-            "twin": {"without": ["noise"]},
-            "parameters": {"d": {"init": 0.5, "fan": fan,
-                                 "into": ["global_signal.depth",
-                                          "gain.gain"]}}}), "A38") == []
+        assert (
+            _findings(
+                preflight_document(
+                    inference={
+                        "twin": {"without": ["noise"]},
+                        "parameters": {
+                            "d": {
+                                "init": 0.5,
+                                "fan": fan,
+                                "into": ["global_signal.depth", "gain.gain"],
+                            }
+                        },
+                    }
+                ),
+                "A38",
+            )
+            == []
+        )
 
     def test_fan_written_as_an_explicit_null_is_no_fan_at_all(self):
         """`fan: ~` is YAML for None, and `parse_transform`/`_merged_fan` see
@@ -686,21 +797,38 @@ class TestFanPresence:
         Kills `if "fan" in spec: return` -- membership rather than value --
         which passes every other test in this class, because every one of them
         either omits the key or gives it a real mode."""
-        found = _findings(preflight_document(inference={
-            "twin": {"without": ["noise"]},
-            "parameters": {"d": {"init": 0.5, "fan": None,
-                                 "into": ["global_signal.depth",
-                                          "gain.gain"]}}}), "A38")
+        found = _findings(
+            preflight_document(
+                inference={
+                    "twin": {"without": ["noise"]},
+                    "parameters": {
+                        "d": {
+                            "init": 0.5,
+                            "fan": None,
+                            "into": ["global_signal.depth", "gain.gain"],
+                        }
+                    },
+                }
+            ),
+            "A38",
+        )
         assert [f.where for f in found] == ["inference.parameters.d"]
 
     def test_the_message_names_the_targets_in_the_written_order(self):
         """Shape 1.  `distribute` writes the k-th value into the k-th target,
         so a message that lists them in the wrong order tells the reader the
         opposite of what their document does."""
-        found = _findings(preflight_document(inference={
-            "twin": {"without": ["noise"]},
-            "parameters": {"d": {"init": 0.5, "into": ["global_signal.depth",
-                                                       "gain.gain"]}}}), "A38")
+        found = _findings(
+            preflight_document(
+                inference={
+                    "twin": {"without": ["noise"]},
+                    "parameters": {
+                        "d": {"init": 0.5, "into": ["global_signal.depth", "gain.gain"]}
+                    },
+                }
+            ),
+            "A38",
+        )
         assert "['global_signal.depth', 'gain.gain']" in found[0].message
 
 
@@ -711,18 +839,12 @@ class TestCapabilityKeys:
     SCHEMA_8 = {
         "campaign": ("capability 4 (streaming evidence)", "§8.2"),
         "inference.transitions": ("capability 4 (streaming evidence)", "§8.2"),
-        "inference.parameters.<name>.scope":
-            ("capability 4 (streaming evidence)", "§8.2"),
-        "inference.parameters.<name>.support":
-            ("capability 4 (streaming evidence)", "§8.2"),
-        "inference.parameters.<name>.hyper":
-            ("capability 4 (streaming evidence)", "§8.2"),
-        "model.<node>.type: NeuralOperator":
-            ("capability 3 (neural surrogates)", "§8.1"),
-        "outputs.write.memory_archive":
-            ("capability 4 (streaming evidence)", "§8.2"),
-        "outputs.write.posterior_net":
-            ("capability 3 (neural surrogates)", "§8.1"),
+        "inference.parameters.<name>.scope": ("capability 4 (streaming evidence)", "§8.2"),
+        "inference.parameters.<name>.support": ("capability 4 (streaming evidence)", "§8.2"),
+        "inference.parameters.<name>.hyper": ("capability 4 (streaming evidence)", "§8.2"),
+        "model.<node>.type: NeuralOperator": ("capability 3 (neural surrogates)", "§8.1"),
+        "outputs.write.memory_archive": ("capability 4 (streaming evidence)", "§8.2"),
+        "outputs.write.posterior_net": ("capability 3 (neural surrogates)", "§8.1"),
     }
 
     def test_the_table_is_schema_8s_eight_keys_and_their_capabilities(self):
@@ -744,23 +866,27 @@ class TestCapabilityKeys:
         """The measured hole: today this falls to `inference:`'s generic
         unknown-key sweep -- "inference: does not take ['transitions']" --
         which reads as a typo rather than as a reserved key."""
-        found = _findings(preflight_document(inference={
-            "twin": {"without": ["noise"]}, "transitions": {"g": {"ou": {}}}}),
-            "A39")
+        found = _findings(
+            preflight_document(
+                inference={"twin": {"without": ["noise"]}, "transitions": {"g": {"ou": {}}}}
+            ),
+            "A39",
+        )
         assert [f.where for f in found] == ["inference.transitions"]
         assert "capability 4" in found[0].message
         assert "§8.2" in found[0].message
 
-    @pytest.mark.parametrize("section,where", [
-        ({"twin": {"without": ["noise"]}, "transitions": {}},
-         "inference.transitions"),
-        (_latent(support=[0.0, 1.0]), "inference.parameters.g.support"),
-        (_latent(hyper={"of": ["x"]}), "inference.parameters.g.hyper"),
-        (_latent(scope="per_epoch"), "inference.parameters.g.scope"),
-        (_latent(scope="linked"), "inference.parameters.g.scope"),
-    ])
-    def test_each_inference_key_is_refused_by_capability_name(self, section,
-                                                              where):
+    @pytest.mark.parametrize(
+        "section,where",
+        [
+            ({"twin": {"without": ["noise"]}, "transitions": {}}, "inference.transitions"),
+            (_latent(support=[0.0, 1.0]), "inference.parameters.g.support"),
+            (_latent(hyper={"of": ["x"]}), "inference.parameters.g.hyper"),
+            (_latent(scope="per_epoch"), "inference.parameters.g.scope"),
+            (_latent(scope="linked"), "inference.parameters.g.scope"),
+        ],
+    )
+    def test_each_inference_key_is_refused_by_capability_name(self, section, where):
         """Shape 1 again: `where` is pinned per key, so a check that reported
         every one of them against `inference` -- which satisfies any
         "capability 4 in message" test -- goes red."""
@@ -773,31 +899,51 @@ class TestCapabilityKeys:
         """The one capability-3 key a v1 document can write.  Today it is
         refused correctly but at model-build time, i.e. after every beam in
         the document has been read."""
-        found = _findings(preflight_document(model={
-            "gain": {"gain": {"value": 1.0, "unit": "dimensionless"}},
-            "bandpass": {"type": "NeuralOperator"}}), "A39")
+        found = _findings(
+            preflight_document(
+                model={
+                    "gain": {"gain": {"value": 1.0, "unit": "dimensionless"}},
+                    "bandpass": {"type": "NeuralOperator"},
+                }
+            ),
+            "A39",
+        )
         assert [f.where for f in found] == ["model.bandpass.type"]
         assert "capability 3" in found[0].message
         assert "§8.1" in found[0].message
 
-    @pytest.mark.parametrize("patch,expected", [
-        ({"inference": _latent(support=[0.0, 1.0])},
-         "inference.parameters.g.support: is reserved with capability 4 "
-         "(streaming evidence), schema §8.2, and refused in v1 (check A39)."),
-        ({"inference": _latent(hyper={"of": ["x"]})},
-         "inference.parameters.g.hyper: is reserved with capability 4 "
-         "(streaming evidence), schema §8.2, and refused in v1 (check A39)."),
-        ({"inference": _latent(scope="per_epoch")},
-         "inference.parameters.g.scope: 'per_epoch' is reserved with "
-         "capability 4 (streaming evidence), schema §8.2, and refused in v1 "
-         "(check A39)."),
-        ({"model": {"bandpass": {"type": "NeuralOperator"}}},
-         "model.bandpass.type: NeuralOperator is reserved with capability 3 "
-         "(neural surrogates), schema §8.1, and refused in v1 (check A39)."),
-        ({"inference": {"twin": {"without": ["noise"]}, "transitions": {}}},
-         "inference.transitions: is reserved with capability 4 (streaming "
-         "evidence), schema §8.2, and refused in v1 (check A39)."),
-    ], ids=["support", "hyper", "scope", "neural-operator", "transitions"])
+    @pytest.mark.parametrize(
+        "patch,expected",
+        [
+            (
+                {"inference": _latent(support=[0.0, 1.0])},
+                "inference.parameters.g.support: is reserved with capability 4 "
+                "(streaming evidence), schema §8.2, and refused in v1 (check A39).",
+            ),
+            (
+                {"inference": _latent(hyper={"of": ["x"]})},
+                "inference.parameters.g.hyper: is reserved with capability 4 "
+                "(streaming evidence), schema §8.2, and refused in v1 (check A39).",
+            ),
+            (
+                {"inference": _latent(scope="per_epoch")},
+                "inference.parameters.g.scope: 'per_epoch' is reserved with "
+                "capability 4 (streaming evidence), schema §8.2, and refused in v1 "
+                "(check A39).",
+            ),
+            (
+                {"model": {"bandpass": {"type": "NeuralOperator"}}},
+                "model.bandpass.type: NeuralOperator is reserved with capability 3 "
+                "(neural surrogates), schema §8.1, and refused in v1 (check A39).",
+            ),
+            (
+                {"inference": {"twin": {"without": ["noise"]}, "transitions": {}}},
+                "inference.transitions: is reserved with capability 4 (streaming "
+                "evidence), schema §8.2, and refused in v1 (check A39).",
+            ),
+        ],
+        ids=["support", "hyper", "scope", "neural-operator", "transitions"],
+    )
     def test_each_corrected_message_is_pinned_verbatim(self, patch, expected):
         """§2.3 grants A39's correction exception "each with its own test
         pinning the new text", and this is that test.
@@ -832,24 +978,34 @@ class TestCapabilityKeys:
         thing one phase earlier; the wrong thing itself is unchanged and is
         outside every task's Files list here.
         """
-        assert _findings(preflight_document(
-            inference=_latent(scope="glboal")), "A39") == []
+        assert _findings(preflight_document(inference=_latent(scope="glboal")), "A39") == []
 
-    @pytest.mark.parametrize("key,provoke", [
-        ("campaign",
-         lambda: _document_sweep({"schema_version": 1, "campaign": {}})),
-        ("inference.parameters.<name>.support",
-         lambda: parse_latents({"g": {"init": 1.0, "into": "gain.gain",
-                                      "support": [0.0, 1.0]}}, _CTX)),
-        ("inference.parameters.<name>.hyper",
-         lambda: parse_latents({"g": {"init": 1.0, "into": "gain.gain",
-                                      "hyper": {}}}, _CTX)),
-        ("inference.parameters.<name>.scope",
-         lambda: parse_latents({"g": {"init": 1.0, "into": "gain.gain",
-                                      "scope": "per_epoch"}}, _CTX)),
-        ("model.<node>.type: NeuralOperator",
-         lambda: _pick_class("bandpass", (), {"type": "NeuralOperator"})),
-    ])
+    @pytest.mark.parametrize(
+        "key,provoke",
+        [
+            ("campaign", lambda: _document_sweep({"schema_version": 1, "campaign": {}})),
+            (
+                "inference.parameters.<name>.support",
+                lambda: parse_latents(
+                    {"g": {"init": 1.0, "into": "gain.gain", "support": [0.0, 1.0]}}, _CTX
+                ),
+            ),
+            (
+                "inference.parameters.<name>.hyper",
+                lambda: parse_latents({"g": {"init": 1.0, "into": "gain.gain", "hyper": {}}}, _CTX),
+            ),
+            (
+                "inference.parameters.<name>.scope",
+                lambda: parse_latents(
+                    {"g": {"init": 1.0, "into": "gain.gain", "scope": "per_epoch"}}, _CTX
+                ),
+            ),
+            (
+                "model.<node>.type: NeuralOperator",
+                lambda: _pick_class("bandpass", (), {"type": "NeuralOperator"}),
+            ),
+        ],
+    )
     def test_the_sections_own_refusal_agrees_with_the_table(self, key, provoke):
         """§2.2 says one property gets one binding.  These five refusals stay
         where they are (this task edits no section module), so the two places
@@ -873,8 +1029,7 @@ class TestCapabilityKeys:
         Task 2's file.  §6 carries it."""
         for key in ("memory_archive", "posterior_net"):
             with pytest.raises(ConfigError, match="command line"):
-                _document_sweep({"schema_version": 1,
-                                 "outputs": {"write": {key: {}}}})
+                _document_sweep({"schema_version": 1, "outputs": {"write": {key: {}}}})
 
 
 class TestTheVariantRoute:
@@ -882,9 +1037,19 @@ class TestTheVariantRoute:
         """Shape 4, and the brief's own warning: these keys arrive through
         `variants:` as well as through the base.  Kills a check that reads
         only `document[...]`."""
-        found = _findings(preflight_document(variants={"v": {
-            "inference": {"twin": {"without": ["noise"]},
-                          "transitions": {"g": {"ou": {}}}}}}), "A39")
+        found = _findings(
+            preflight_document(
+                variants={
+                    "v": {
+                        "inference": {
+                            "twin": {"without": ["noise"]},
+                            "transitions": {"g": {"ou": {}}},
+                        }
+                    }
+                }
+            ),
+            "A39",
+        )
         assert [f.where for f in found] == ["variants.v.inference.transitions"]
 
     def test_a_run_option_typo_inside_an_unselected_variant_is_refused(self):
@@ -892,8 +1057,9 @@ class TestTheVariantRoute:
         which runs execute (runs.py), but it does change what
         `load_document(variant=...)` accepts -- so the typo is real and today
         nothing sees it at all."""
-        found = _findings(preflight_document(
-            variants={"v": {"runs": [{"kind": "forward", "tpyo": 1}]}}), "A1")
+        found = _findings(
+            preflight_document(variants={"v": {"runs": [{"kind": "forward", "tpyo": 1}]}}), "A1"
+        )
         assert [f.where for f in found] == ["variants.v.runs[0]"]
 
     def test_a_variant_layer_finding_says_so_in_its_own_sentence(self):
@@ -905,44 +1071,89 @@ class TestTheVariantRoute:
         Kills the layer walk that rewrites `where` and leaves the sentence
         alone, which every other test in this class passes: they all read
         `where`."""
-        found = _findings(preflight_document(variants={"v": {
-            "inference": {"twin": {"without": ["noise"]},
-                          "transitions": {}}}}), "A39")
+        found = _findings(
+            preflight_document(
+                variants={"v": {"inference": {"twin": {"without": ["noise"]}, "transitions": {}}}}
+            ),
+            "A39",
+        )
         assert found[0].message.startswith("variants.v: ")
 
-    @pytest.mark.parametrize("patch,where,named", [
-        ({"variants": {"unity-gain": {"campaign": {}}}},
-         "variants", "variants.unity-gain"),
-        ({"variants": {"unity-gain": {
-            "inference": {"twin": {"without": ["noise"]},
-                          "transitions": {}}}}},
-         "variants", "variants.unity-gain"),
-        ({"inference": {"twin": {"without": ["noise"]},
-                        "parameters": {"d-1": {"init": 0.5,
-                                               "into": ["global_signal.depth",
-                                                        "gain.gain"]}}}},
-         "inference.parameters", "inference.parameters.d-1"),
-        ({"resources": {"beams": _beam_entry(
-            "horn-a", apod_deg={"value": 0.1, "unit": "rad"})}},
-         "resources.beams", "resources.beams.horn-a.horizon.apod_deg"),
-        ({"inference": {"twin": {"without": ["noise"]},
-                        "parameters": {"d-1": {"init": 0.5,
-                                               "into": "gain.gain",
-                                               "support": [0.0, 1.0]}}}},
-         "inference.parameters", "inference.parameters.d-1.support"),
-        ({"inference": {"twin": {"without": ["noise"]},
-                        "parameters": {"d-1": {"init": 0.5,
-                                               "into": "gain.gain",
-                                               "scope": "per_epoch"}}}},
-         "inference.parameters", "inference.parameters.d-1.scope"),
-        ({"model": {"band-pass": {"type": "NeuralOperator"}}},
-         "model", "model.band-pass.type"),
-    ], ids=["a-variant-name", "a-variant-name-carrying-a-key", "a-latent-name",
+    @pytest.mark.parametrize(
+        "patch,where,named",
+        [
+            ({"variants": {"unity-gain": {"campaign": {}}}}, "variants", "variants.unity-gain"),
+            (
+                {
+                    "variants": {
+                        "unity-gain": {
+                            "inference": {"twin": {"without": ["noise"]}, "transitions": {}}
+                        }
+                    }
+                },
+                "variants",
+                "variants.unity-gain",
+            ),
+            (
+                {
+                    "inference": {
+                        "twin": {"without": ["noise"]},
+                        "parameters": {
+                            "d-1": {"init": 0.5, "into": ["global_signal.depth", "gain.gain"]}
+                        },
+                    }
+                },
+                "inference.parameters",
+                "inference.parameters.d-1",
+            ),
+            (
+                {
+                    "resources": {
+                        "beams": _beam_entry("horn-a", apod_deg={"value": 0.1, "unit": "rad"})
+                    }
+                },
+                "resources.beams",
+                "resources.beams.horn-a.horizon.apod_deg",
+            ),
+            (
+                {
+                    "inference": {
+                        "twin": {"without": ["noise"]},
+                        "parameters": {
+                            "d-1": {"init": 0.5, "into": "gain.gain", "support": [0.0, 1.0]}
+                        },
+                    }
+                },
+                "inference.parameters",
+                "inference.parameters.d-1.support",
+            ),
+            (
+                {
+                    "inference": {
+                        "twin": {"without": ["noise"]},
+                        "parameters": {
+                            "d-1": {"init": 0.5, "into": "gain.gain", "scope": "per_epoch"}
+                        },
+                    }
+                },
+                "inference.parameters",
+                "inference.parameters.d-1.scope",
+            ),
+            ({"model": {"band-pass": {"type": "NeuralOperator"}}}, "model", "model.band-pass.type"),
+        ],
+        ids=[
+            "a-variant-name",
+            "a-variant-name-carrying-a-key",
+            "a-latent-name",
             "a-beam-name",
-            "a-latent-name-under-a-capability-key", "a-latent-name-under-scope",
-            "a-model-node-name"])
+            "a-latent-name-under-a-capability-key",
+            "a-latent-name-under-scope",
+            "a-model-node-name",
+        ],
+    )
     def test_a_name_the_path_grammar_cannot_spell_does_not_crash_the_pass(
-            self, patch, where, named):
+        self, patch, where, named
+    ):
         """A user's own names are not identifiers.  `variants: {unity-gain:
         ...}` and `parameters: {d-1: ...}` both load today -- apply_variant
         and parse_latents validate no name -- while `Finding.where` must
@@ -965,20 +1176,20 @@ class TestTheVariantRoute:
         `support:`/`scope:`, a hyphenated model node under `type:`) whose
         user then gets `pre-flight check 'A39' emitted where=... which is not
         a document path` and loses every other finding."""
-        found = [f for f in preflight(preflight_document(**patch)).findings
-                 if f.check in ("A1", "A38", "A39")]
+        found = [
+            f
+            for f in preflight(preflight_document(**patch)).findings
+            if f.check in ("A1", "A38", "A39")
+        ]
         assert [f.where for f in found] == [where]
         assert named in found[0].message
 
     @pytest.mark.parametrize("unknown", ["bad-name", ".", "雪！"])
-    def test_a_variant_unknown_top_key_is_cut_back_only_after_attribution(
-            self, unknown):
+    def test_a_variant_unknown_top_key_is_cut_back_only_after_attribution(self, unknown):
         """Keep the raw key until the variant prefix makes a legal path."""
         found = [
             finding
-            for finding in preflight(
-                preflight_document(variants={"x": {unknown: {}}})
-            ).findings
+            for finding in preflight(preflight_document(variants={"x": {unknown: {}}})).findings
             if finding.check == "A1"
         ]
 
@@ -997,13 +1208,18 @@ class TestTheVariantRoute:
         with the same A38 violation would hand the user the same sentence
         three times, in three `where`s, two of which name a variant that did
         not introduce it."""
-        found = _findings(preflight_document(
-            inference={"twin": {"without": ["noise"]},
-                       "parameters": {"d": {"init": 0.5,
-                                            "into": ["global_signal.depth",
-                                                     "gain.gain"]}}},
-            variants={"a": {"runtime": {"seed": 1}},
-                      "b": {"runtime": {"seed": 2}}}), "A38")
+        found = _findings(
+            preflight_document(
+                inference={
+                    "twin": {"without": ["noise"]},
+                    "parameters": {
+                        "d": {"init": 0.5, "into": ["global_signal.depth", "gain.gain"]}
+                    },
+                },
+                variants={"a": {"runtime": {"seed": 1}}, "b": {"runtime": {"seed": 2}}},
+            ),
+            "A38",
+        )
         assert [f.where for f in found] == ["inference.parameters.d"]
 
     def test_a_variant_that_breaks_the_rule_DIFFERENTLY_is_still_reported(self):
@@ -1018,16 +1234,30 @@ class TestTheVariantRoute:
         check rather than a duplicated sentence.
 
         Measured: shipped code reports both, in layer order."""
-        found = _findings(preflight_document(
-            inference={"twin": {"without": ["noise"]},
-                       "parameters": {"d": {"init": 0.5,
-                                            "into": ["global_signal.depth",
-                                                     "gain.gain"]}}},
-            variants={"v": {"inference": {"parameters": {"d": {"into": [
-                "gain.gain", "global_signal.depth", "noise.sigma"]}}}}}),
-            "A38")
-        assert [f.where for f in found] == ["inference.parameters.d",
-                                            "variants.v.inference.parameters.d"]
+        found = _findings(
+            preflight_document(
+                inference={
+                    "twin": {"without": ["noise"]},
+                    "parameters": {
+                        "d": {"init": 0.5, "into": ["global_signal.depth", "gain.gain"]}
+                    },
+                },
+                variants={
+                    "v": {
+                        "inference": {
+                            "parameters": {
+                                "d": {"into": ["gain.gain", "global_signal.depth", "noise.sigma"]}
+                            }
+                        }
+                    }
+                },
+            ),
+            "A38",
+        )
+        assert [f.where for f in found] == [
+            "inference.parameters.d",
+            "variants.v.inference.parameters.d",
+        ]
         assert "3 targets" in found[1].message
 
     def test_the_walk_is_one_layer_per_declared_variant(self):
@@ -1039,12 +1269,12 @@ class TestTheVariantRoute:
         `preflight_document` MERGES one level deep (§3.2(b)) and the base
         document already declares `variants: {unity_gain: ...}` -- so the walk
         is the base plus EVERY declared variant, this patch's two included."""
-        document = preflight_document(variants={
-            "a": {"runtime": {"seed": 1}}, "b": {"runtime": {"seed": 2}}})
+        document = preflight_document(
+            variants={"a": {"runtime": {"seed": 1}}, "b": {"runtime": {"seed": 2}}}
+        )
         prefixes = _layer_prefixes(document)
         assert prefixes[0] == ""
-        assert prefixes[1:] == [f"variants.{name}"
-                                for name in document["variants"]]
+        assert prefixes[1:] == [f"variants.{name}" for name in document["variants"]]
         assert {"variants.a", "variants.b"} <= set(prefixes)
 
     def test_a_variant_apply_variant_refuses_is_a_controlled_pass_refusal(self):
@@ -1061,21 +1291,31 @@ class TestTheVariantRoute:
 
 
 class TestASectionThisPassCannotRead:
-    @pytest.mark.parametrize("patch", [
-        {"inference": None},
-        {"inference": "nope"},
-        {"inference": {"twin": {"without": ["noise"]},
-                       "parameters": {"g": "nope"}}},
-        {"inference": {"twin": {"without": ["noise"]}, "bindings": "nope"}},
-        {"inference": {"twin": {"without": ["noise"]}, "bindings": ["nope"]}},
-        {"resources": {"beams": "nope"}},
-        {"resources": {"beams": {"horn": "nope"}}},
-        {"resources": {"beams": {"horn": {"horizon": "el_deg: 90"}}}},
-        {"runs": "nope"},
-    ], ids=["no-inference", "inference-not-a-mapping", "a-latent-that-is-not",
-            "bindings-not-a-list", "a-binding-that-is-not",
-            "beams-not-a-mapping", "a-beam-that-is-not",
-            "horizon-not-a-mapping", "runs-not-a-list"])
+    @pytest.mark.parametrize(
+        "patch",
+        [
+            {"inference": None},
+            {"inference": "nope"},
+            {"inference": {"twin": {"without": ["noise"]}, "parameters": {"g": "nope"}}},
+            {"inference": {"twin": {"without": ["noise"]}, "bindings": "nope"}},
+            {"inference": {"twin": {"without": ["noise"]}, "bindings": ["nope"]}},
+            {"resources": {"beams": "nope"}},
+            {"resources": {"beams": {"horn": "nope"}}},
+            {"resources": {"beams": {"horn": {"horizon": "el_deg: 90"}}}},
+            {"runs": "nope"},
+        ],
+        ids=[
+            "no-inference",
+            "inference-not-a-mapping",
+            "a-latent-that-is-not",
+            "bindings-not-a-list",
+            "a-binding-that-is-not",
+            "beams-not-a-mapping",
+            "a-beam-that-is-not",
+            "horizon-not-a-mapping",
+            "runs-not-a-list",
+        ],
+    )
     def test_a_section_this_pass_cannot_read_yields_nothing_here(self, patch):
         """Every check in this module is a TEXT check on a WELL-FORMED
         section.  The refusal for a malformed one belongs to the section that
@@ -1095,8 +1335,11 @@ class TestASectionThisPassCannotRead:
         non-mapping that does not contain "el_deg" as a substring (`"el_deg"
         not in "nope"` is True and the loop simply skips), and raises
         `TypeError: string indices must be integers` on this one."""
-        found = [f for f in preflight(preflight_document(**patch)).findings
-                 if f.check in ("A1", "A38", "A39")]
+        found = [
+            f
+            for f in preflight(preflight_document(**patch)).findings
+            if f.check in ("A1", "A38", "A39")
+        ]
         assert found == []
 
 
@@ -1113,8 +1356,8 @@ class TestThePhase:
         from rheplicant.config.document import load_document
 
         document = preflight_document(
-            runs=[{"kind": "forward", "tpyo_key": 3}],
-            resources=UNREADABLE_BEAM)
+            runs=[{"kind": "forward", "tpyo_key": 3}], resources=UNREADABLE_BEAM
+        )
         with pytest.raises(ConfigError) as excinfo:
             load_document(document)
         assert "tpyo_key" in str(excinfo.value)

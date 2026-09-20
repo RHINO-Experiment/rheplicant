@@ -58,10 +58,7 @@ def _ragged(n_epochs=4, seed=11):
         varied.append(
             type(term)(
                 **{
-                    **{
-                        f.name: getattr(term, f.name)
-                        for f in dataclasses.fields(term)
-                    },
+                    **{f.name: getattr(term, f.name) for f in dataclasses.fields(term)},
                     "residual_dof": int(term.residual_dof) - index,
                 }
             )
@@ -97,8 +94,7 @@ def test_the_dof_is_summed_per_epoch_not_read_off_the_first():
     wrong_total = stored[0] * len(stored)
     wrong = (chi2_sum - wrong_total) / np.sqrt(2.0 * wrong_total)
     assert report["chi2_z"] != pytest.approx(wrong, rel=1e-6), (
-        "the ragged and uniform spellings coincide on this fixture, so it "
-        "cannot tell them apart"
+        "the ragged and uniform spellings coincide on this fixture, so it cannot tell them apart"
     )
 
 
@@ -120,9 +116,7 @@ def test_the_template_scatter_is_the_population_spread():
     terms = camp.terms(3, biased=False)
     report = coherent_mode(terms)
     scatter = report["templates"]["gain_ripple"]["scatter"]
-    projections = np.array(
-        [float(np.asarray(t.template_projections)[0]) for t in terms]
-    )
+    projections = np.array([float(np.asarray(t.template_projections)[0]) for t in terms])
     assert scatter == pytest.approx(float(projections.std(ddof=0)), rel=1e-12)
     assert scatter != pytest.approx(float(projections.std(ddof=1)), rel=1e-6), (
         "the population and sample spreads coincide on this fixture, so it "
@@ -137,9 +131,7 @@ def test_a_zero_dof_epoch_reports_nan_rather_than_a_perfect_fit():
     ``0.0`` is the most misleading value available, because it is what a
     flawless fit looks like.
     """
-    row = EpochResidual(
-        epoch_id="e0", chi2=0.0, dof=0, reduced_chi2=float("nan"), templates={}
-    )
+    row = EpochResidual(epoch_id="e0", chi2=0.0, dof=0, reduced_chi2=float("nan"), templates={})
     assert np.isnan(row.reduced_chi2)
 
     terms = list(camp.terms(1, biased=False))
@@ -176,12 +168,8 @@ class _Quartic:
 
 
 def _quartic_memory(n_epochs=4, init=1.0):
-    latent = Latent(
-        "x", init=jnp.full((camp.N_THETA,), init), prior=_Quartic()
-    )
-    space = ParameterSpace(
-        latents=(latent,), bindings=(Bind("x", into=lambda p: p.x),)
-    )
+    latent = Latent("x", init=jnp.full((camp.N_THETA,), init), prior=_Quartic())
+    space = ParameterSpace(latents=(latent,), bindings=(Bind("x", into=lambda p: p.x),))
     memory = BayesMemory(Factorization(space))
     for term in camp.terms(n_epochs, biased=False):
         memory = memory.remember(term)
@@ -281,9 +269,7 @@ class _Inverted:
 
 def _memory_with(prior, n_epochs=4, init=0.0):
     latent = Latent("x", init=jnp.full((camp.N_THETA,), init), prior=prior)
-    space = ParameterSpace(
-        latents=(latent,), bindings=(Bind("x", into=lambda p: p.x),)
-    )
+    space = ParameterSpace(latents=(latent,), bindings=(Bind("x", into=lambda p: p.x),))
     memory = BayesMemory(Factorization(space))
     for term in camp.terms(n_epochs, biased=False):
         memory = memory.remember(term)

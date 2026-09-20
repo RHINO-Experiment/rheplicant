@@ -47,9 +47,11 @@ from tests.config.preflight_helpers import (
 #: its ceiling (7.14 MHz), so a test about a TEXT leg is never answered by the
 #: grid leg Task 1 shipped -- which is the collision this fixture exists to
 #: keep out of every case below.
-TONE = {"amplitude": 5000.0,
-        "tone_freq": {"value": 70.0, "unit": "MHz"},
-        "line_width": {"value": 5.0, "unit": "MHz"}}
+TONE = {
+    "amplitude": 5000.0,
+    "tone_freq": {"value": 70.0, "unit": "MHz"},
+    "line_width": {"value": 5.0, "unit": "MHz"},
+}
 
 #: A well-formed array-producing value node.  ``endpoint:`` is required and has
 #: no default (``config/arrays.py::_ones``), so omitting it earns ``linspace``'s own
@@ -91,8 +93,7 @@ def replace_document(patch, model=None):
     level further in edits the repaired block instead of replacing it.
     """
     doc = preflight_document(model=model if model is not None else {"cw_tone": TONE})
-    doc["inference"]["twin"] = {**(doc["inference"].get("twin") or {}),
-                                "replace": patch}
+    doc["inference"]["twin"] = {**(doc["inference"].get("twin") or {}), "replace": patch}
     return doc
 
 
@@ -114,8 +115,7 @@ def variant_document(section, patch):
     Each test below says which of the two it proves.
     """
     doc = preflight_document()
-    doc["variants"] = {**(doc.get("variants") or {}),
-                       "twin_route": {section: patch}}
+    doc["variants"] = {**(doc.get("variants") or {}), "twin_route": {section: patch}}
     return doc
 
 
@@ -328,8 +328,7 @@ class TestTheModuleIsWiredIn:
         package = sys.modules["rheplicant.config.preflight"]
         assert package._instrument_checks is instrument_module
         assert package.instrument is instrument_module
-        assert instrument_module is sys.modules[
-            "rheplicant.config.preflight.instrument"]
+        assert instrument_module is sys.modules["rheplicant.config.preflight.instrument"]
 
 
 class TestThePhaseActuallyMoved:
@@ -347,20 +346,24 @@ class TestThePhaseActuallyMoved:
     under test.  If the refusal names it, the check ran too late.
     """
 
-    @pytest.mark.parametrize("model, expected", [
-        pytest.param({"cw_tone": {k: v for k, v in TONE.items()
-                                  if k != "line_width"}},
-                     A13_PRESENCE, id="A13-presence"),
-        pytest.param({"cw_tone": {**TONE,
-                                  "line_width": {"value": -1.0, "unit": "MHz"}}},
-                     A13_WIDTH, id="A13-line_width"),
-        pytest.param({"cw_tone": {**TONE, "line_width": LINSPACE}},
-                     A40, id="A40"),
-        pytest.param({"bandpass": dict(PY_GAIN, at=["gain", "noise"])},
-                     A47, id="A47"),
-    ])
-    def test_the_violation_outranks_a_beam_that_cannot_be_read(
-            self, model, expected):
+    @pytest.mark.parametrize(
+        "model, expected",
+        [
+            pytest.param(
+                {"cw_tone": {k: v for k, v in TONE.items() if k != "line_width"}},
+                A13_PRESENCE,
+                id="A13-presence",
+            ),
+            pytest.param(
+                {"cw_tone": {**TONE, "line_width": {"value": -1.0, "unit": "MHz"}}},
+                A13_WIDTH,
+                id="A13-line_width",
+            ),
+            pytest.param({"cw_tone": {**TONE, "line_width": LINSPACE}}, A40, id="A40"),
+            pytest.param({"bandpass": dict(PY_GAIN, at=["gain", "noise"])}, A47, id="A47"),
+        ],
+    )
+    def test_the_violation_outranks_a_beam_that_cannot_be_read(self, model, expected):
         doc = preflight_document(model=model, resources=UNREADABLE_BEAM)
         with pytest.raises(ConfigError) as caught:
             _load(doc)
@@ -438,7 +441,8 @@ class TestA13IsPinnedWholeAndSaysTheRightSection:
         doc = tone_document()
         del doc["model"]["cw_tone"][field]
         assert only(doc, "A13").message.startswith(
-            f"model.cw_tone: a CW calibration tone declares ['{field}'] nowhere,")
+            f"model.cw_tone: a CW calibration tone declares ['{field}'] nowhere,"
+        )
 
     def test_the_replace_route_is_walked_and_names_ITS_OWN_section(self):
         """§0.3 E.10's ruling and its stop-and-ask, in one assertion.
@@ -451,19 +455,16 @@ class TestA13IsPinnedWholeAndSaysTheRightSection:
         phase earlier.  This is the assertion that a rewrite back to the
         shipped wording cannot pass.
         """
-        doc = replace_document({"cw_tone": {k: v for k, v in TONE.items()
-                                            if k != "line_width"}})
+        doc = replace_document({"cw_tone": {k: v for k, v in TONE.items() if k != "line_width"}})
         found = only(doc, "A13")
         assert found.where == "inference.twin.replace.cw_tone"
         assert found.message.startswith(
-            "inference.twin.replace.cw_tone: a CW calibration tone declares "
-            "['line_width'] nowhere,")
+            "inference.twin.replace.cw_tone: a CW calibration tone declares ['line_width'] nowhere,"
+        )
         assert "model.cw_tone" not in found.message
 
     def test_the_replace_route_is_walked_for_the_value_bounds_too(self):
-        doc = replace_document({"cw_tone": {**TONE,
-                                            "line_width": {"value": -1.0,
-                                                           "unit": "MHz"}}})
+        doc = replace_document({"cw_tone": {**TONE, "line_width": {"value": -1.0, "unit": "MHz"}}})
         assert only(doc, "A13").where == "inference.twin.replace.cw_tone.line_width"
 
     def test_the_python_spelling_of_the_tone_is_reached_as_well_as_type(self):
@@ -471,22 +472,33 @@ class TestA13IsPinnedWholeAndSaysTheRightSection:
         the ``python:`` target are two spellings of one class object, and a
         check keyed on the literal ``type:`` misses the one 3A's own tests
         exercise."""
-        entry = {"python": "rheplicant.radio:CWCalibrationOperator",
-                 **{k: v for k, v in TONE.items() if k != "line_width"}}
+        entry = {
+            "python": "rheplicant.radio:CWCalibrationOperator",
+            **{k: v for k, v in TONE.items() if k != "line_width"},
+        }
         assert "A13" in ids(preflight_document(model={"cw_tone": entry}))
 
-    @pytest.mark.parametrize("entry, expected_where", [
-        pytest.param({**PY_TONE, **{k: v for k, v in TONE.items()
-                                    if k != "line_width"}},
-                     "model.bandpass", id="presence"),
-        pytest.param({**PY_TONE, **TONE,
-                      "line_width": {"value": -1.0, "unit": "MHz"}},
-                     "model.bandpass.line_width", id="line_width"),
-        pytest.param({**PY_TONE, **TONE, "lineshape": "nope"},
-                     "model.bandpass.lineshape", id="lineshape"),
-    ])
+    @pytest.mark.parametrize(
+        "entry, expected_where",
+        [
+            pytest.param(
+                {**PY_TONE, **{k: v for k, v in TONE.items() if k != "line_width"}},
+                "model.bandpass",
+                id="presence",
+            ),
+            pytest.param(
+                {**PY_TONE, **TONE, "line_width": {"value": -1.0, "unit": "MHz"}},
+                "model.bandpass.line_width",
+                id="line_width",
+            ),
+            pytest.param(
+                {**PY_TONE, **TONE, "lineshape": "nope"}, "model.bandpass.lineshape", id="lineshape"
+            ),
+        ],
+    )
     def test_a_tone_placed_at_a_FOREIGN_key_through_python_is_still_read(
-            self, entry, expected_where):
+        self, entry, expected_where
+    ):
         """The check is keyed on the CLASS ALONE, with no ``cw_tone`` gate.
 
         The ``python:`` hatch places a ``CWCalibrationOperator`` at any node
@@ -498,8 +510,7 @@ class TestA13IsPinnedWholeAndSaysTheRightSection:
         reached it.  A40 never had a node-id gate and always covered that
         document; this is A13 agreeing with it inside one file.
         """
-        assert only(preflight_document(model={"bandpass": entry}),
-                    "A13").where == expected_where
+        assert only(preflight_document(model={"bandpass": entry}), "A13").where == expected_where
 
     def test_a_tone_at_a_foreign_key_that_is_WELL_FORMED_stays_clean(self):
         """The widening's own anti-vacuity: dropping the key gate must not
@@ -508,8 +519,7 @@ class TestA13IsPinnedWholeAndSaysTheRightSection:
         assert ids(doc) & MINE == frozenset()
         assert _load(doc) is not None
 
-    def test_a_NON_tone_class_under_the_cw_tone_key_is_not_given_the_tones_legs(
-            self):
+    def test_a_NON_tone_class_under_the_cw_tone_key_is_not_given_the_tones_legs(self):
         """The other polarity of the same gate, and the one the class check
         buys.  A ``GainOperator`` written under ``cw_tone:`` declares none of
         the tone's required fields; keying on the KEY would hand it *"declares
@@ -538,8 +548,10 @@ class TestA13IsPinnedWholeAndSaysTheRightSection:
         ``line_width`` at all, so a walk that read it would find the tone's
         fields missing on every composed document -- or, reading the node
         spec, find nothing to check."""
-        entry = {"compose": "pipeline",
-                 "stages": [{k: v for k, v in TONE.items() if k != "amplitude"}]}
+        entry = {
+            "compose": "pipeline",
+            "stages": [{k: v for k, v in TONE.items() if k != "amplitude"}],
+        }
         found = only(preflight_document(model={"cw_tone": entry}), "A13")
         assert found.where == "model.cw_tone.stages[0]"
 
@@ -552,8 +564,9 @@ class TestA13IsPinnedWholeAndSaysTheRightSection:
         ``_task3_over_layers`` merged the layer itself, and it names the layer
         in its own sentence because ``raise_if_refused`` quotes the MESSAGE.
         """
-        doc = variant_document("model", {"cw_tone": {k: v for k, v in TONE.items()
-                                                     if k != "line_width"}})
+        doc = variant_document(
+            "model", {"cw_tone": {k: v for k, v in TONE.items() if k != "line_width"}}
+        )
         found = only(doc, "A13")
         assert found.message.startswith("variants.twin_route: model.cw_tone: ")
 
@@ -566,8 +579,9 @@ class TestA13IsPinnedWholeAndSaysTheRightSection:
         own walk -- the sentence carries no ``variants.`` prefix.  Measured;
         an earlier reading of plan §0.3 F.5(1) had the layer walk buying both.
         """
-        doc = variant_document("model", {"cw_tone": {k: v for k, v in TONE.items()
-                                                     if k != "line_width"}})
+        doc = variant_document(
+            "model", {"cw_tone": {k: v for k, v in TONE.items() if k != "line_width"}}
+        )
         with pytest.raises(ConfigError) as caught:
             _load(doc, variant="twin_route")
         assert str(caught.value).startswith(A13_PRESENCE)
@@ -577,21 +591,26 @@ class TestA13IsPinnedWholeAndSaysTheRightSection:
         a document with one fault and one variant that does not touch it must
         hand the reader ONE sentence, and ``only`` is what asserts that."""
         doc = variant_document("runtime", {"seed": 7})
-        doc["model"] = {**doc["model"], "cw_tone": {k: v for k, v in TONE.items()
-                                                    if k != "line_width"}}
+        doc["model"] = {
+            **doc["model"],
+            "cw_tone": {k: v for k, v in TONE.items() if k != "line_width"},
+        }
         assert only(doc, "A13").message == A13_PRESENCE
 
 
 class TestA13ReadsTheNumberTheBuildWouldSee:
     """``_text_number``: the three text spellings, the unit, and the declines."""
 
-    @pytest.mark.parametrize("node, expected", [
-        (-1.0, -1.0),
-        (-1, -1.0),
-        ("-1 MHz", -1e6),
-        ({"value": -1.0, "unit": "MHz"}, -1e6),
-        ({"value": -1.0}, -1.0),
-    ])
+    @pytest.mark.parametrize(
+        "node, expected",
+        [
+            (-1.0, -1.0),
+            (-1, -1.0),
+            ("-1 MHz", -1e6),
+            ({"value": -1.0, "unit": "MHz"}, -1e6),
+            ({"value": -1.0}, -1.0),
+        ],
+    )
     def test_the_unit_is_applied_and_not_dropped(self, node, expected):
         """Kills ``return float(raw)`` written without the conversion.  It is
         not only a magnitude: ``convert_to_canonical`` handles AFFINE units,
@@ -606,20 +625,23 @@ class TestA13ReadsTheNumberTheBuildWouldSee:
         that only scaled would too."""
         assert _text_number("-1 celsius") == pytest.approx(272.15)
 
-    @pytest.mark.parametrize("node", [
-        {"ref": "resources.arrays.w"},
-        {"from": "channel_spacing"},
-        {"linspace": {"start": 1.0, "stop": 2.0, "num": 4, "endpoint": True}},
-        {"value": 1.0, "linspace": {}},
-        {"value": 1.0, "as": "traced"},
-        {"value": 1.0, "unit": 7},
-        "not a shorthand",
-        True,
-        False,
-        {"value": True},
-        None,
-        [1.0],
-    ])
+    @pytest.mark.parametrize(
+        "node",
+        [
+            {"ref": "resources.arrays.w"},
+            {"from": "channel_spacing"},
+            {"linspace": {"start": 1.0, "stop": 2.0, "num": 4, "endpoint": True}},
+            {"value": 1.0, "linspace": {}},
+            {"value": 1.0, "as": "traced"},
+            {"value": 1.0, "unit": 7},
+            "not a shorthand",
+            True,
+            False,
+            {"value": True},
+            None,
+            [1.0],
+        ],
+    )
     def test_everything_it_cannot_read_from_text_is_a_stand_down(self, node):
         """§3.2(c): refusing on "I could not tell" refuses documents that
         build.  ``True`` is here twice on purpose -- ``isinstance(True, int)``
@@ -642,8 +664,7 @@ class TestA13ReadsTheNumberTheBuildWouldSee:
         with pytest.raises(ConfigError, match="Unknown unit 'banana'"):
             _load(doc)
 
-    def test_a_lineshape_this_pass_cannot_read_is_not_quoted_back_at_the_user(
-            self):
+    def test_a_lineshape_this_pass_cannot_read_is_not_quoted_back_at_the_user(self):
         """The `isinstance(shape, str)` guard.  Without it a
         ``lineshape: {ref: …}`` earns A13 *"{'ref': …} is not a lineshape"*,
         quoting a mapping at a reader who wrote a reference — and pre-empting
@@ -657,7 +678,8 @@ class TestA13ReadsTheNumberTheBuildWouldSee:
         document the layer refuses anyway, in its own words."""
         doc = preflight_document(
             model={"cw_tone": {**TONE, "line_width": {"ref": "resources.arrays.w"}}},
-            resources={"arrays": {"w": {"list": [1.0e6, 2.0e6]}}})
+            resources={"arrays": {"w": {"list": [1.0e6, 2.0e6]}}},
+        )
         assert "A13" not in ids(doc)
         assert "A40" not in ids(doc)
 
@@ -687,22 +709,28 @@ class TestA40IsHoistedAndBoundOnce:
         with pytest.raises(ConfigError, match="produces an array"):
             deliver([1.0, 2.0], spec, dtype="float32", source="linspace")
 
-    @pytest.mark.parametrize("node_id, cls_name, field, entry", [
-        ("adc", "ADCOperator", "n_bits", {"n_bits": LINSPACE, "scale": 1.0}),
-        ("cw_tone", "CWCalibrationOperator", "lineshape",
-         {**TONE, "lineshape": LINSPACE}),
-        ("flagging", "MomentRFIFlaggingOperator", "kernel_shapes",
-         {"type": "MomentRFIFlaggingOperator", "kernel_shapes": {"list": [[1, 3]]}}),
-    ])
+    @pytest.mark.parametrize(
+        "node_id, cls_name, field, entry",
+        [
+            ("adc", "ADCOperator", "n_bits", {"n_bits": LINSPACE, "scale": 1.0}),
+            ("cw_tone", "CWCalibrationOperator", "lineshape", {**TONE, "lineshape": LINSPACE}),
+            (
+                "flagging",
+                "MomentRFIFlaggingOperator",
+                "kernel_shapes",
+                {"type": "MomentRFIFlaggingOperator", "kernel_shapes": {"list": [[1, 3]]}},
+            ),
+        ],
+    )
     def test_every_static_field_of_every_node_and_not_only_the_tones(
-            self, node_id, cls_name, field, entry):
+        self, node_id, cls_name, field, entry
+    ):
         """S3's named twin for A40.  Measured over all 28 shipped operator
         classes with ``field_specs`` + ``mode_of``: 28 fields are static (15
         float, 6 int, 5 str, 1 tuple, 1 mapping) and **zero** are
         ``static_bool``.  The three here are an int, a str and a tuple, so a
         check written for ``static_float`` alone dies on two of them."""
-        cls = next(one for one in operator_table()[node_id]
-                   if one.__name__ == cls_name)
+        cls = next(one for one in operator_table()[node_id] if one.__name__ == cls_name)
         assert mode_of(field_specs(cls)[field]) != "traced"
         found = only(preflight_document(model={node_id: entry}), "A40")
         assert found.where == f"model.{node_id}.{field}"
@@ -711,19 +739,25 @@ class TestA40IsHoistedAndBoundOnce:
         """The other polarity, and the one an over-eager A40 breaks.
         ``ForegroundOperator.amplitude`` is traced, so ``{linspace: ...}`` on
         it is the grammar working."""
-        entry = {"foregrounds": [{"type": "ForegroundOperator",
-                                  "amplitude": LINSPACE,
-                                  "spectral_index": -2.5,
-                                  "ref_freq": {"value": 70.0, "unit": "MHz"}}]}
+        entry = {
+            "foregrounds": [
+                {
+                    "type": "ForegroundOperator",
+                    "amplitude": LINSPACE,
+                    "spectral_index": -2.5,
+                    "ref_freq": {"value": 70.0, "unit": "MHz"},
+                }
+            ]
+        }
         assert "A40" not in ids(preflight_document(model=entry))
 
     def test_a_many_nodes_third_entry_is_reached_at_its_own_index(self):
         """S3, and §0.3 E.10's fourth route.  A ``many`` node is a LIST, so
         the reader is sent to the line to edit rather than to the node."""
-        chain = [{"type": "FourierBandFilter", "mode": "extract",
-                  "low": 0.0, "high": 0.25},
-                 {"type": "FourierBandFilter", "mode": LINSPACE,
-                  "low": 0.0, "high": 0.25}]
+        chain = [
+            {"type": "FourierBandFilter", "mode": "extract", "low": 0.0, "high": 0.25},
+            {"type": "FourierBandFilter", "mode": LINSPACE, "low": 0.0, "high": 0.25},
+        ]
         found = only(preflight_document(model={"filters": chain}), "A40")
         assert found.where == "model.filters[1].mode"
 
@@ -731,8 +765,7 @@ class TestA40IsHoistedAndBoundOnce:
         doc = replace_document({"cw_tone": {**TONE, "line_width": LINSPACE}})
         assert only(doc, "A40").where == "inference.twin.replace.cw_tone.line_width"
 
-    def test_a_node_holding_two_form_keys_is_left_to_resolve_values_own_count(
-            self):
+    def test_a_node_holding_two_form_keys_is_left_to_resolve_values_own_count(self):
         """`_array_form`'s ``len(forms) != 1``, driven.
 
         ``resolve_value`` refuses zero and several form keys by name, and
@@ -747,8 +780,7 @@ class TestA40IsHoistedAndBoundOnce:
         with pytest.raises(ConfigError, match="holds 2 form keys"):
             _load(doc)
 
-    def test_a_compose_block_under_twin_replace_is_not_expanded_into_stages(
-            self):
+    def test_a_compose_block_under_twin_replace_is_not_expanded_into_stages(self):
         """`_routes`' third member, driven.
 
         ``compose:`` is honoured only by ``compose._single``, which the replace
@@ -758,25 +790,27 @@ class TestA40IsHoistedAndBoundOnce:
         constructor, and could answer A40 about it on a document refused for
         the composing key itself.
         """
-        doc = replace_document({"cw_tone": {"compose": "pipeline",
-                                            "stages": [{**TONE,
-                                                        "line_width": LINSPACE}]}})
+        doc = replace_document(
+            {"cw_tone": {"compose": "pipeline", "stages": [{**TONE, "line_width": LINSPACE}]}}
+        )
         assert ids(doc) & MINE == frozenset()
-        with pytest.raises(ConfigError,
-                           match=r"does not take \['compose', 'stages'\]"):
+        with pytest.raises(ConfigError, match=r"does not take \['compose', 'stages'\]"):
             _load(doc)
 
     def test_a_variant_that_breaks_it_is_reported_with_its_layer(self):
-        doc = variant_document("model", {"cw_tone": {**TONE,
-                                                     "line_width": LINSPACE}})
+        doc = variant_document("model", {"cw_tone": {**TONE, "line_width": LINSPACE}})
         assert only(doc, "A40").message.startswith(
-            "variants.twin_route: model.cw_tone.line_width: ")
+            "variants.twin_route: model.cw_tone.line_width: "
+        )
 
-    @pytest.mark.parametrize("node", [
-        {"value": 5.0e6},
-        {"ref": "resources.arrays.w"},
-        {"from": "channel_spacing"},
-    ])
+    @pytest.mark.parametrize(
+        "node",
+        [
+            {"value": 5.0e6},
+            {"ref": "resources.arrays.w"},
+            {"from": "channel_spacing"},
+        ],
+    )
     def test_the_five_forms_outside_ARRAY_FORMS_are_not_A40(self, node):
         """Measured, ``set(VALUE_FORMS) - ARRAY_FORMS == {'from',
         'from_switch_order', 'python', 'ref', 'value'}``.  ``{value:}``
@@ -787,7 +821,8 @@ class TestA40IsHoistedAndBoundOnce:
         negative recorded in the plan's §7."""
         doc = preflight_document(
             model={"cw_tone": {**TONE, "line_width": node}},
-            resources={"arrays": {"w": {"list": [1.0e6, 2.0e6]}}})
+            resources={"arrays": {"w": {"list": [1.0e6, 2.0e6]}}},
+        )
         assert "A40" not in ids(doc)
 
 
@@ -795,8 +830,7 @@ class TestA47IsDecidedThroughT5ClaimsAndNotOffARawAt:
     """§2.3's first named stand-down, and the four shapes it protects."""
 
     def test_a_misaddressed_region_earns_A47_whole(self):
-        doc = preflight_document(model={"bandpass": dict(PY_GAIN,
-                                                         at=["gain", "noise"])})
+        doc = preflight_document(model={"bandpass": dict(PY_GAIN, at=["gain", "noise"])})
         found = only(doc, "A47")
         assert found.message == A47
         assert found.where == "model.bandpass"
@@ -811,16 +845,21 @@ class TestA47IsDecidedThroughT5ClaimsAndNotOffARawAt:
         with pytest.raises(ConfigError, match="is addressed in the assembly"):
             refuse_misaddressed_region("bandpass", ["gain", "noise"])
 
-    @pytest.mark.parametrize("spec, why", [
-        ({"at": ["gain", "noise"]},
-         "at: with no python: -- compose.py:296 says it better"),
-        ({**PY_GAIN, "at": ["gain", "noise"], "snapshot_before": "tap"},
-         "at: beside snapshot_before: -- compose.py:289 refuses the PAIR"),
-        ({**PY_GAIN, "at": "gain"},
-         "the STRING spelling must restate its own key -- compose.py:303"),
-    ])
-    def test_the_three_shapes_single_refuses_better_are_not_pre_empted(
-            self, spec, why):
+    @pytest.mark.parametrize(
+        "spec, why",
+        [
+            ({"at": ["gain", "noise"]}, "at: with no python: -- compose.py:296 says it better"),
+            (
+                {**PY_GAIN, "at": ["gain", "noise"], "snapshot_before": "tap"},
+                "at: beside snapshot_before: -- compose.py:289 refuses the PAIR",
+            ),
+            (
+                {**PY_GAIN, "at": "gain"},
+                "the STRING spelling must restate its own key -- compose.py:303",
+            ),
+        ],
+    )
+    def test_the_three_shapes_single_refuses_better_are_not_pre_empted(self, spec, why):
         """The whole reason A47 goes through ``_t5_claims``.  A P-1 check
         reading ``model.<n>.at`` raw answers about a region on all three, and
         every one of them has a refusal that names the real fault.  This is
@@ -837,8 +876,7 @@ class TestA47IsDecidedThroughT5ClaimsAndNotOffARawAt:
         assert "A47" not in ids(doc)
 
     def test_a_region_written_under_its_LAST_node_is_legal(self):
-        doc = preflight_document(model={"noise": dict(PY_GAIN,
-                                                      at=["gain", "noise"])})
+        doc = preflight_document(model={"noise": dict(PY_GAIN, at=["gain", "noise"])})
         assert "A47" not in ids(doc)
 
     def test_an_at_on_a_many_node_is_a_switch_label_and_not_a_relocation(self):
@@ -862,10 +900,8 @@ class TestA47IsDecidedThroughT5ClaimsAndNotOffARawAt:
         assert "A47" not in ids(doc)
 
     def test_a_variant_that_breaks_it_is_reported_with_its_layer(self):
-        doc = variant_document("model", {"bandpass": dict(PY_GAIN,
-                                                          at=["gain", "noise"])})
-        assert only(doc, "A47").message.startswith(
-            "variants.twin_route: model.bandpass: ")
+        doc = variant_document("model", {"bandpass": dict(PY_GAIN, at=["gain", "noise"])})
+        assert only(doc, "A47").message.startswith("variants.twin_route: model.bandpass: ")
 
 
 class TestTheStandDowns:
@@ -877,12 +913,10 @@ class TestTheStandDowns:
         ['nope']"* today.  A13 arriving one phase earlier with *"declares
         ['line_width'] nowhere"* would answer a question the user has not got
         to yet.  Kills ``_unknown_field`` deleted."""
-        doc = preflight_document(model={"cw_tone": {"amplitude": 5000.0,
-                                                    "nope": 1}})
+        doc = preflight_document(model={"cw_tone": {"amplitude": 5000.0, "nope": 1}})
         assert "A13" not in ids(doc)
 
-    def test_an_at_on_the_replace_route_is_left_to_construct_which_names_the_key(
-            self):
+    def test_an_at_on_the_replace_route_is_left_to_construct_which_names_the_key(self):
         """The route flag, and the advice loop it exists to stop.
 
         ``sections/twin.py::build_fit_twin`` calls ``build_node_operator`` directly, so on
@@ -894,8 +928,7 @@ class TestTheStandDowns:
         case below is that document, and it must earn nothing from this pass.
         """
         missing = {k: v for k, v in TONE.items() if k != "line_width"}
-        pre_empted = replace_document({"cw_tone": {**missing,
-                                                   "at": ["gain", "noise"]}})
+        pre_empted = replace_document({"cw_tone": {**missing, "at": ["gain", "noise"]}})
         assert ids(pre_empted) & MINE == frozenset()
         with pytest.raises(ConfigError, match=r"does not take \['at'\]"):
             _load(pre_empted)
@@ -909,8 +942,9 @@ class TestTheStandDowns:
     def test_an_at_on_the_replace_route_stands_A40_down_too(self):
         """A40 had the identical hole and the identical fix — the flag is
         threaded once and read by both rules."""
-        doc = replace_document({"cw_tone": {**TONE, "line_width": LINSPACE,
-                                            "at": ["gain", "noise"]}})
+        doc = replace_document(
+            {"cw_tone": {**TONE, "line_width": LINSPACE, "at": ["gain", "noise"]}}
+        )
         assert ids(doc) & MINE == frozenset()
 
     def test_an_at_on_the_MODEL_route_is_popped_and_does_not_stand_A13_down(self):
@@ -923,14 +957,13 @@ class TestTheStandDowns:
         at `ea4839b`, which is exactly the row A13.text moves.
         """
         missing = {k: v for k, v in TONE.items() if k != "line_width"}
-        doc = preflight_document(model={"bandpass": {**PY_TONE, **missing,
-                                                     "at": ["gain", "noise"]}})
+        doc = preflight_document(
+            model={"bandpass": {**PY_TONE, **missing, "at": ["gain", "noise"]}}
+        )
         assert only(doc, "A13").where == "model.bandpass"
 
     def test_an_unknown_key_beside_an_array_form_is_not_A40(self):
-        doc = preflight_document(model={"cw_tone": {**TONE,
-                                                    "line_width": LINSPACE,
-                                                    "nope": 1}})
+        doc = preflight_document(model={"cw_tone": {**TONE, "line_width": LINSPACE, "nope": 1}})
         assert "A40" not in ids(doc)
 
     @pytest.mark.parametrize("declared", ["traced", "banana"])
@@ -948,8 +981,7 @@ class TestTheStandDowns:
         ``as:``, not about the key being present.  Without this a
         ``_a40_stands_down`` that returned True for any ``as:`` passes."""
         node = {**LINSPACE, "as": "static_float"}
-        assert only(tone_document(line_width=node), "A40").where == \
-            "model.cw_tone.line_width"
+        assert only(tone_document(line_width=node), "A40").where == "model.cw_tone.line_width"
 
     def test_a_negative_tone_freq_is_left_to_the_grid_leg_that_names_the_band(self):
         """The stand-down §0.3 E.8 does not name and this task measured.
@@ -996,8 +1028,7 @@ class TestApplyingTheAdviceMakesTheDocumentPass:
 
     def test_A13s_lineshape_advice_one_of_the_two_it_names(self):
         assert "A13" in ids(tone_document(lineshape="nope"))
-        assert _load(tone_document(lineshape="gaussian",
-                                   line_width={"value": 5.0, "unit": "MHz"}))
+        assert _load(tone_document(lineshape="gaussian", line_width={"value": 5.0, "unit": "MHz"}))
 
     def test_A40s_advice_write_a_single_number_here(self):
         assert "A40" in ids(tone_document(line_width=LINSPACE))
@@ -1007,34 +1038,37 @@ class TestApplyingTheAdviceMakesTheDocumentPass:
         """The message says *"Name the entry 'noise'"*; this writes that
         document and asserts it is accepted.  Three of 3A's checks shipped a
         remedy another check refuses, which is what R4 exists to catch."""
-        bad = preflight_document(model={"bandpass": dict(PY_GAIN,
-                                                         at=["gain", "noise"])})
+        bad = preflight_document(model={"bandpass": dict(PY_GAIN, at=["gain", "noise"])})
         assert "A47" in ids(bad)
-        good = preflight_document(model={"noise": dict(PY_GAIN,
-                                                       at=["gain", "noise"])})
+        good = preflight_document(model={"noise": dict(PY_GAIN, at=["gain", "noise"])})
         assert "A47" not in ids(good)
 
 
 class TestTheEntryWalkResolvesTheClassRatherThanTheToken:
     """``_entry_class``: the three routes, and the two declines."""
 
-    @pytest.mark.parametrize("entry, expected", [
-        ({"type": "CWCalibrationOperator"}, "CWCalibrationOperator"),
-        ({"python": "rheplicant.radio:CWCalibrationOperator"},
-         "CWCalibrationOperator"),
-        ({}, "CWCalibrationOperator"),
-    ])
+    @pytest.mark.parametrize(
+        "entry, expected",
+        [
+            ({"type": "CWCalibrationOperator"}, "CWCalibrationOperator"),
+            ({"python": "rheplicant.radio:CWCalibrationOperator"}, "CWCalibrationOperator"),
+            ({}, "CWCalibrationOperator"),
+        ],
+    )
     def test_the_three_routes_reach_one_class(self, entry, expected):
         table = operator_table()
         assert _entry_class("cw_tone", entry, table).__name__ == expected
 
-    @pytest.mark.parametrize("node_id, entry", [
-        ("noise", {}),
-        ("cw_tone", {"type": "NoSuchOperator"}),
-        ("cw_tone", {"python": "some.foreign.module:Thing"}),
-        ("beam_spill", {"from": "projector"}),
-        ("cw_tone", "not a mapping"),
-    ])
+    @pytest.mark.parametrize(
+        "node_id, entry",
+        [
+            ("noise", {}),
+            ("cw_tone", {"type": "NoSuchOperator"}),
+            ("cw_tone", {"python": "some.foreign.module:Thing"}),
+            ("beam_spill", {"from": "projector"}),
+            ("cw_tone", "not a mapping"),
+        ],
+    )
     def test_the_declines(self, node_id, entry):
         """Each decline hands the question to a check that answers it better:
         A7 for a node registering several classes and naming none, A7 again
@@ -1070,9 +1104,12 @@ class TestTheRulesAreThreeAndTheyStayThree:
         """The three names plan §3.1 pins each still decide one check.
         Driven, not asserted from the source: each rule is called with a bare
         LAYER and must answer about its own id and no other."""
-        layer = preflight_document(model={
-            "cw_tone": {**TONE, "protect_floor": 2.0, "lineshape": LINSPACE},
-            "bandpass": dict(PY_GAIN, at=["gain", "noise"])})
+        layer = preflight_document(
+            model={
+                "cw_tone": {**TONE, "protect_floor": 2.0, "lineshape": LINSPACE},
+                "bandpass": dict(PY_GAIN, at=["gain", "noise"]),
+            }
+        )
         assert {one.check for one in _tone_text(layer)} == {"A13"}
         assert {one.check for one in _static_fields(layer)} == {"A40"}
         assert {one.check for one in _region_key(layer)} == {"A47"}
@@ -1081,8 +1118,11 @@ class TestTheRulesAreThreeAndTheyStayThree:
         """Anti-vacuity for the chain: a document breaking all three must earn
         all three, or the ``for rule in _RULES`` loop could drop one in
         silence and every single-fault test above would still pass."""
-        doc = preflight_document(model={
-            "cw_tone": {**TONE, "protect_floor": 2.0, "lineshape": LINSPACE},
-            "bandpass": dict(PY_GAIN, at=["gain", "noise"])})
+        doc = preflight_document(
+            model={
+                "cw_tone": {**TONE, "protect_floor": 2.0, "lineshape": LINSPACE},
+                "bandpass": dict(PY_GAIN, at=["gain", "noise"]),
+            }
+        )
         mine = frozenset({"A13", "A40", "A47"})
         assert preflight(doc).checks() & mine == mine

@@ -208,9 +208,9 @@ def test_a_non_positive_campaign_size_is_refused():
         with pytest.raises(ValueError, match="not positive"):
             shrinkage_power(broken)
     # The nearest legitimate case: the smallest campaign there is.
-    assert shrinkage_power(
-        {1: np.array([2.0]), 4: np.array([1.0])}
-    ) == pytest.approx(-0.5, rel=1e-12)
+    assert shrinkage_power({1: np.array([2.0]), 4: np.array([1.0])}) == pytest.approx(
+        -0.5, rel=1e-12
+    )
 
 
 def test_a_non_finite_or_non_positive_sigma_is_refused_rather_than_logged():

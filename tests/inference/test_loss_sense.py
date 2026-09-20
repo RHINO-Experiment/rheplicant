@@ -187,9 +187,7 @@ class TestRefusedByMeasurement:
                 return -0.5 * jnp.sum((prediction - observed) ** 2)
 
         with pytest.raises(ParameterSpaceError, match=r"scores a PERFECT prediction"):
-            GradientCalibrator(n_steps=5).fit(
-                forward, PARAMS0, OBSERVED, loss_fn=UserLikelihood()
-            )
+            GradientCalibrator(n_steps=5).fit(forward, PARAMS0, OBSERVED, loss_fn=UserLikelihood())
 
     def test_a_non_finite_score_is_refused_rather_than_judged(self):
         """NaN compares False against everything, including ``>``.
@@ -228,9 +226,7 @@ class TestTheWrapperSaysThisPackagesRoutes:
     def _refusal(self):
         likelihood = GaussianLikelihood(jnp.array(1.0))
         with pytest.raises(ParameterSpaceError) as caught:
-            GradientCalibrator(n_steps=5).fit(
-                forward, PARAMS0, OBSERVED, loss_fn=likelihood
-            )
+            GradientCalibrator(n_steps=5).fit(forward, PARAMS0, OBSERVED, loss_fn=likelihood)
         return str(caught.value)
 
     def test_it_names_this_packages_routes(self):

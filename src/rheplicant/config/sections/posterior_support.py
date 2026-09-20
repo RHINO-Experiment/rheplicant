@@ -78,9 +78,11 @@ def _sampled_space(run: Any, built: Any, *, route: str) -> Any:
     joint = space.joint_prior
     where = f"runs[{run.name!r}]"
     if route == "nuts":
-        missing = [latent.name for latent in space.latents
-                   if latent.prior is None
-                   and not (joint is not None and joint.covers(latent.name))]
+        missing = [
+            latent.name
+            for latent in space.latents
+            if latent.prior is None and not (joint is not None and joint.covers(latent.name))
+        ]
         if missing:
             raise ConfigError(
                 f"{where}: kind: nuts draws a POSTERIOR, and "
@@ -92,11 +94,9 @@ def _sampled_space(run: Any, built: Any, *, route: str) -> Any:
                 "inference.joint_prior, or run one of those."
             )
         return space
-    missing = [latent.name for latent in space.latents
-               if latent.prior is None]
+    missing = [latent.name for latent in space.latents if latent.prior is None]
     if missing:
-        covered = sorted(name for name in missing
-                         if joint is not None and joint.covers(name))
+        covered = sorted(name for name in missing if joint is not None and joint.covers(name))
         # BOTH clauses below are conditional on `covered`, and BOTH are
         # load-bearing.  The joint-prior branch of `instead` is ADVICE, and on
         # a document with no joint_prior at all it is FALSE advice: measured,
@@ -132,14 +132,18 @@ def _sampled_space(run: Any, built: Any, *, route: str) -> Any:
         # verbatim, this one included: a comment hit holds the count at four
         # while the code being counted is gone, which is the failure the
         # tripwire exists to catch.
-        because = (f"; inference.joint_prior covers {covered}, "
-                   "which is why kind: nuts accepts this space and this "
-                   "exit does not"
-                   if covered else "")
-        instead = (" -- or run kind: nuts, which takes joint-prior coverage"
-                   if covered else
-                   ". kind: nuts refuses this document too, for the same "
-                   "missing prior")
+        because = (
+            f"; inference.joint_prior covers {covered}, "
+            "which is why kind: nuts accepts this space and this "
+            "exit does not"
+            if covered
+            else ""
+        )
+        instead = (
+            " -- or run kind: nuts, which takes joint-prior coverage"
+            if covered
+            else ". kind: nuts refuses this document too, for the same missing prior"
+        )
         raise ConfigError(
             f"{where}: kind: npe SIMULATES a bank from each latent's OWN "
             f"prior, and inference.parameters declares {missing} with no "
@@ -150,8 +154,7 @@ def _sampled_space(run: Any, built: Any, *, route: str) -> Any:
     return space
 
 
-def _unravel(space: Any, flat: Any, *, where: str | None = None
-             ) -> dict[str, Any]:
+def _unravel(space: Any, flat: Any, *, where: str | None = None) -> dict[str, Any]:
     """``(n_draws, n_params)`` -> ``{latent name: (n_draws, *shape)}``.
 
     Ordered by ``space.names`` -- DECLARATION order, not sorted -- and sized
@@ -178,8 +181,7 @@ def _unravel(space: Any, flat: Any, *, where: str | None = None
     import jax.numpy as jnp
 
     initial = space.initial_values()
-    shapes = {name: tuple(int(size) for size in jnp.shape(initial[name]))
-              for name in space.names}
+    shapes = {name: tuple(int(size) for size in jnp.shape(initial[name])) for name in space.names}
     widths = {name: math.prod(shape) for name, shape in shapes.items()}
     n_draws, width = (int(size) for size in jnp.shape(flat))
     accounted = sum(widths.values())
@@ -196,14 +198,12 @@ def _unravel(space: Any, flat: Any, *, where: str | None = None
     unravelled: dict[str, Any] = {}
     cut = 0
     for name in space.names:
-        unravelled[name] = jnp.reshape(flat[:, cut:cut + widths[name]],
-                                       (n_draws, *shapes[name]))
+        unravelled[name] = jnp.reshape(flat[:, cut : cut + widths[name]], (n_draws, *shapes[name]))
         cut += widths[name]
     return unravelled
 
 
-def _draw_key(run: Any, where: str, built: Any,
-              spec: Mapping | None = None) -> Any:
+def _draw_key(run: Any, where: str, built: Any, spec: Mapping | None = None) -> Any:
     """A jax PRNG key from a ``{from: runtime.seeds.<name>}`` declaration.
 
     ``spec`` defaults to ``dict(run.options)`` -- the run-level form

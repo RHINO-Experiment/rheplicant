@@ -14,10 +14,7 @@ PATH_STEP = re.compile(
 
 def _canonical_label(label: object) -> str:
     if not isinstance(label, str):
-        raise ConfigError(
-            "document path label must be a string; got "
-            f"{type(label).__name__}."
-        )
+        raise ConfigError(f"document path label must be a string; got {type(label).__name__}.")
     return str.__str__(label)
 
 
@@ -43,9 +40,7 @@ def longest_legal_prefix(label: str) -> str:
     legal: list[str] = []
     for piece in str.split(text, "."):
         match = PATH_STEP.fullmatch(piece)
-        if match is None or (
-            match.group("name") is None and match.group("index") is None
-        ):
+        if match is None or (match.group("name") is None and match.group("index") is None):
             break
         legal.append(piece)
     if legal:

@@ -43,100 +43,145 @@ LARGE: dict[str, tuple[str, str]] = {
     # --- Stage 1's A1 audit ruled these nine should be split (evidence:
     # .agents/evidence/T-002/audit/ledger_raw.md, "Large files: 9 split").
     "_rheplicant_bootstrap/layering.py": (
-        SPLIT, "document layering, per-value origin evidence and the variant "
+        SPLIT,
+        "document layering, per-value origin evidence and the variant "
         "merge are three subjects in one file; the origin record alone is a "
-        "module"),
+        "module",
+    ),
     "rheplicant/config/preflight/fitting.py": (
-        SPLIT, "the checks needing runs[] and inference: together, which is a "
-        "join rather than a subject -- the per-run and per-block halves split"),
+        SPLIT,
+        "the checks needing runs[] and inference: together, which is a "
+        "join rather than a subject -- the per-run and per-block halves split",
+    ),
     "rheplicant/inference/linear.py": (
-        SPLIT, "checking a linearity claim and exporting the operator are two "
-        "jobs; the solve helpers are a third"),
+        SPLIT,
+        "checking a linearity claim and exporting the operator are two "
+        "jobs; the solve helpers are a third",
+    ),
     "_rheplicant_bootstrap/plugins.py": (
-        SPLIT, "audited import, the closed JSON projection and the refusal "
-        "vocabulary are separable, and only the first needs the audit trail"),
+        SPLIT,
+        "audited import, the closed JSON projection and the refusal "
+        "vocabulary are separable, and only the first needs the audit trail",
+    ),
     "rheplicant/config/preflight/model.py": (
-        SPLIT, "schema §6's model checks are a dozen independent passes sharing "
-        "one node walk; the walk is the module and the passes are not"),
+        SPLIT,
+        "schema §6's model checks are a dozen independent passes sharing "
+        "one node walk; the walk is the module and the passes are not",
+    ),
     "rheplicant/inference/chain.py": (
-        SPLIT, "the drift model and the recursion that integrates it are "
-        "different subjects with different test shapes"),
+        SPLIT,
+        "the drift model and the recursion that integrates it are "
+        "different subjects with different test shapes",
+    ),
     "rheplicant/config/dimensions.py": (
-        SPLIT, "the normalized signature and the closed A9 registries are "
-        "related by use, not by subject"),
+        SPLIT,
+        "the normalized signature and the closed A9 registries are related by use, not by subject",
+    ),
     "rheplicant/core/graph.py": (
-        SPLIT, "the template grammar and graph-guided assembly are two halves "
-        "that only meet at the compiled result"),
+        SPLIT,
+        "the template grammar and graph-guided assembly are two halves "
+        "that only meet at the compiled result",
+    ),
     "_rheplicant_bootstrap/output/manager.py": (
-        SPLIT, "the output grammar, descriptor preflight and A34 lease "
-        "management are three, and the lease is the one with its own lifecycle"),
-
+        SPLIT,
+        "the output grammar, descriptor preflight and A34 lease "
+        "management are three, and the lease is the one with its own lifecycle",
+    ),
     # --- Grew past the threshold AFTER the audit drew its list.
     "rheplicant/inference/plan.py": (
-        SPLIT, "crossed 800 with the G1 estimate work and was never assessed "
-        "by A1; the point-estimate and draw exits are the natural seam"),
-
+        SPLIT,
+        "crossed 800 with the G1 estimate work and was never assessed "
+        "by A1; the point-estimate and draw exits are the natural seam",
+    ),
     # --- One file on purpose.
     "_rheplicant_bootstrap/output/transaction.py": (
-        SINGLE, "one recovery protocol: every step exists to make the others "
+        SINGLE,
+        "one recovery protocol: every step exists to make the others "
         "undoable, and a reader following a failed publication needs all of it "
-        "on one screen"),
+        "on one screen",
+    ),
     "rheplicant/config/orchestration.py": (
-        SINGLE, "the load is ONE ordered pipeline and its order is the "
+        SINGLE,
+        "the load is ONE ordered pipeline and its order is the "
         "subject; splitting it would put the sequence in a fourth place that "
-        "no test reads"),
+        "no test reads",
+    ),
     "rheplicant/inference/memory.py": (
-        SINGLE, "the stored form and what may be asked of it are one contract "
-        "-- a reader of either needs the other to know what survives archiving"),
+        SINGLE,
+        "the stored form and what may be asked of it are one contract "
+        "-- a reader of either needs the other to know what survives archiving",
+    ),
     "_rheplicant_bootstrap/audit/trace.py": (
-        SINGLE, "append-only storage with a threading contract; the locking "
-        "argument is the file and cannot be half-read"),
+        SINGLE,
+        "append-only storage with a threading contract; the locking "
+        "argument is the file and cannot be half-read",
+    ),
     "rheplicant/inference/compress.py": (
-        SINGLE, "one epoch to one likelihood factor, in four routes that share "
-        "the same QR and differ only in what they whiten by"),
+        SINGLE,
+        "one epoch to one likelihood factor, in four routes that share "
+        "the same QR and differ only in what they whiten by",
+    ),
     "_rheplicant_bootstrap/entry.py": (
-        SINGLE, "one ordered entry pipeline shared by the CLI and generated "
-        "programs; its ORDER is the guarantee, same argument as orchestration"),
+        SINGLE,
+        "one ordered entry pipeline shared by the CLI and generated "
+        "programs; its ORDER is the guarantee, same argument as orchestration",
+    ),
     "rheplicant/config/sections/diagnostics.py": (
-        SINGLE, "the cheap diagnostics are one family with one gating rule, "
-        "and the per-check parsers are short"),
+        SINGLE,
+        "the cheap diagnostics are one family with one gating rule, "
+        "and the per-check parsers are short",
+    ),
     "rheplicant/gui/form_catalog.py": (
-        SINGLE, "the gateway file: its length IS the config-layer boundary, "
+        SINGLE,
+        "the gateway file: its length IS the config-layer boundary, "
         "because every other GUI module takes its vocabulary from this "
-        "__all__ rather than from config (CLAUDE.md)"),
+        "__all__ rather than from config (CLAUDE.md)",
+    ),
     "rheplicant/config/sections/conjugate.py": (
-        SINGLE, "one shared opening and one exit per family member; the "
-        "opening is what makes the exits comparable"),
+        SINGLE,
+        "one shared opening and one exit per family member; the "
+        "opening is what makes the exits comparable",
+    ),
     "_rheplicant_bootstrap/process.py": (
-        SINGLE, "the process-entry and runtime grammar is one closed "
-        "vocabulary read before anything is importable"),
+        SINGLE,
+        "the process-entry and runtime grammar is one closed "
+        "vocabulary read before anything is importable",
+    ),
     "rheplicant/radio/instrument/calibration.py": (
-        SINGLE, "the tone, the switched load and the applied solution are one "
-        "calibration story and share the lineshape algebra"),
+        SINGLE,
+        "the tone, the switched load and the applied solution are one "
+        "calibration story and share the lineshape algebra",
+    ),
     "rheplicant/inference/graph_bridge.py": (
-        SINGLE, "the adapter to bayesmith is one seam; splitting it would put "
-        "half a translation in each of two files"),
+        SINGLE,
+        "the adapter to bayesmith is one seam; splitting it would put "
+        "half a translation in each of two files",
+    ),
     "rheplicant/inference/engines.py": (
-        SINGLE, "the engines and the conditioning they share -- separating "
-        "them would duplicate the conditioning or export it privately"),
+        SINGLE,
+        "the engines and the conditioning they share -- separating "
+        "them would duplicate the conditioning or export it privately",
+    ),
     "rheplicant/inference/uncertainty.py": (
-        SINGLE, "one propagation argument carried end to end; the intermediate "
-        "forms are not independently meaningful"),
+        SINGLE,
+        "one propagation argument carried end to end; the intermediate "
+        "forms are not independently meaningful",
+    ),
     "rheplicant/config/kinds/beams.py": (
-        SINGLE, "a beam resource is the array plus everything the file cannot "
-        "say about it, and the second half only makes sense beside the first"),
+        SINGLE,
+        "a beam resource is the array plus everything the file cannot "
+        "say about it, and the second half only makes sense beside the first",
+    ),
     "rheplicant/radio/sky/driftscan.py": (
-        SINGLE, "the m-mode derivation is one argument from geometry to the "
-        "fast path, and its constants are meaningless apart from it"),
+        SINGLE,
+        "the m-mode derivation is one argument from geometry to the "
+        "fast path, and its constants are meaningless apart from it",
+    ),
     "rheplicant/inference/parameters.py": (
-        SINGLE, "what is inferred and how it enters the model are two sides of "
-        "one declaration and are read together"),
-    "rheplicant/inference/reduced_basis.py": (
-        SINGLE, "a basis over PARAMETER space, with the selection strategies "
-        "that only apply to it"),
-    "rheplicant/radio/rhino.py": (
-        SINGLE, "one file format read two ways, as a recording and as a State; "
-        "the second is defined by the first"),
+        SINGLE,
+        "what is inferred and how it enters the model are two sides of "
+        "one declaration and are read together",
+    ),
 }
 
 

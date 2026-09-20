@@ -84,10 +84,13 @@ SRC = ROOT / "src"
 # The corpus: tracked markdown, minus the one file that is history by design.
 # --------------------------------------------------------------------------
 
+
 def _tracked() -> frozenset[str]:
     out = subprocess.run(
         ["git", "-C", str(ROOT), "ls-files"],
-        capture_output=True, text=True, check=True,
+        capture_output=True,
+        text=True,
+        check=True,
     ).stdout.split()
     return frozenset(out)
 
@@ -132,6 +135,7 @@ def _sites(pattern: re.Pattern[str]):
 # --------------------------------------------------------------------------
 # What src/ actually declares, walked once.
 # --------------------------------------------------------------------------
+
 
 def _class_table() -> tuple[dict[str, set[str]], dict[str, set[str]]]:
     """``(class -> members declared, class -> base names)`` over ``src/``.
@@ -196,7 +200,9 @@ def _parameter_names() -> set[str]:
                 found.update(
                     argument.arg
                     for argument in (
-                        *arguments.posonlyargs, *arguments.args, *arguments.kwonlyargs,
+                        *arguments.posonlyargs,
+                        *arguments.args,
+                        *arguments.kwonlyargs,
                     )
                 )
                 for slot in (arguments.vararg, arguments.kwarg):
@@ -220,7 +226,7 @@ def _member_sites():
     for page, number, found in _sites(_MEMBER):
         owner, member = found.group(1), found.group(2)
         if owner not in members:
-            continue          # not ours -- jax's, rhino-cal's, a builtin's
+            continue  # not ours -- jax's, rhino-cal's, a builtin's
         yield page, number, owner, member, _reachable(owner, members, bases)
 
 
@@ -279,7 +285,8 @@ def test_every_keyword_argument_the_docs_quote_is_one() -> None:
         if keyword not in accepted
     ]
     assert offenders == [], (
-        "no function or field in src/ takes these:\n  " + "\n  ".join(offenders)
+        "no function or field in src/ takes these:\n  "
+        + "\n  ".join(offenders)
         + "\nThe page tells a reader to pass an argument the package does not "
         "have. Rename it in the prose, or the parameter back."
     )
@@ -333,7 +340,8 @@ def test_every_repository_file_the_docs_cite_is_in_the_repository() -> None:
     ]
     assert offenders == [], (
         "these cite a file this repository does not have, in a directory it "
-        "does:\n  " + "\n  ".join(offenders)
+        "does:\n  "
+        + "\n  ".join(offenders)
         + "\nIf the file belongs to another project, its directory should not "
         "look like one of ours -- name the project in the path."
     )
@@ -388,11 +396,11 @@ def test_every_test_the_docs_name_by_id_can_be_found() -> None:
         missing = [part for part in identifier.split("::") if part not in declared]
         if missing:
             offenders.append(
-                f"{page}:{number}: `{path}::{identifier}` -- "
-                f"{path} declares no {missing}"
+                f"{page}:{number}: `{path}::{identifier}` -- {path} declares no {missing}"
             )
     assert offenders == [], (
-        "these node ids select nothing:\n  " + "\n  ".join(offenders)
+        "these node ids select nothing:\n  "
+        + "\n  ".join(offenders)
         + "\npytest exits 4 on an unmatched id and prints no tests ran, which "
         "reads like a passing selection to anyone skimming."
     )
@@ -410,6 +418,7 @@ def test_the_node_id_scan_still_reads_the_pages() -> None:
 # --------------------------------------------------------------------------
 # 5. The working notes exist twice, and the copies drift
 # --------------------------------------------------------------------------
+
 
 def test_the_working_notes_are_one_document_and_not_two() -> None:
     """``CLAUDE.md`` and ``AGENTS.md`` are the same document for two tools.
@@ -437,15 +446,19 @@ def test_the_working_notes_are_one_document_and_not_two() -> None:
     if claude == agents:
         return
     import difflib
+
     diff = "\n".join(
         difflib.unified_diff(
-            agents.splitlines(), claude.splitlines(),
-            fromfile="AGENTS.md", tofile="CLAUDE.md", lineterm="", n=1,
+            agents.splitlines(),
+            claude.splitlines(),
+            fromfile="AGENTS.md",
+            tofile="CLAUDE.md",
+            lineterm="",
+            n=1,
         )
     )
     pytest.fail(
         "CLAUDE.md and AGENTS.md are two copies of one document and they "
         "disagree. Decide which reading is measured on THIS tree -- neither "
-        "copy is authoritative by being newer -- and write it into both:\n"
-        + diff
+        "copy is authoritative by being newer -- and write it into both:\n" + diff
     )

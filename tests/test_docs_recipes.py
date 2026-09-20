@@ -65,9 +65,7 @@ def test_every_documented_shell_recipe_parses(name, index, source):
     bash = shutil.which("bash")
     if bash is None:  # pragma: no cover - bash is present on every dev box
         pytest.skip("no bash on PATH, so a shell recipe cannot be parsed")
-    done = subprocess.run(
-        [bash, "-n"], input=source, capture_output=True, text=True, check=False
-    )
+    done = subprocess.run([bash, "-n"], input=source, capture_output=True, text=True, check=False)
     assert done.returncode == 0, (
         f"{name}, bash block {index}, does not parse:\n{done.stderr}\n"
         f"--- the block as the file holds it ---\n{source}"

@@ -117,10 +117,12 @@ _MESSAGE_FLOOR = 40
 #: decision that belongs to whichever task hoists that rule -- not something
 #: this walker should force by going red.
 _EXEMPT: dict[str, frozenset[str]] = {
-    "coords.time is stored as": frozenset({
-        "core/coordinates.py",
-        "radio/instrument/calibration.py",
-    }),
+    "coords.time is stored as": frozenset(
+        {
+            "core/coordinates.py",
+            "radio/instrument/calibration.py",
+        }
+    ),
 }
 
 
@@ -138,12 +140,13 @@ def _message_texts(source: str) -> set[str]:
     tree = ast.parse(source)
     docstrings = set()
     for node in ast.walk(tree):
-        if isinstance(node, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef,
-                             ast.ClassDef)):
+        if isinstance(node, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
             first = node.body[0] if node.body else None
-            if (isinstance(first, ast.Expr)
-                    and isinstance(first.value, ast.Constant)
-                    and isinstance(first.value.value, str)):
+            if (
+                isinstance(first, ast.Expr)
+                and isinstance(first.value, ast.Constant)
+                and isinstance(first.value.value, str)
+            ):
                 docstrings.add(id(first.value))
     found = set()
     for node in ast.walk(tree):
@@ -153,9 +156,11 @@ def _message_texts(source: str) -> set[str]:
             text = node.value
         elif isinstance(node, ast.JoinedStr):
             text = "".join(
-                part.value if (isinstance(part, ast.Constant)
-                               and isinstance(part.value, str)) else _HOLE
-                for part in node.values)
+                part.value
+                if (isinstance(part, ast.Constant) and isinstance(part.value, str))
+                else _HOLE
+                for part in node.values
+            )
         else:
             continue
         flat = _flat(text)
@@ -214,5 +219,4 @@ def exempt_pairs_still_hold() -> dict[str, tuple[tuple[str, ...], frozenset[str]
     the day a pair becomes one module (delete the row) or grows a third
     (decide it).
     """
-    return {literal: (modules_carrying(literal), allowed)
-            for literal, allowed in _EXEMPT.items()}
+    return {literal: (modules_carrying(literal), allowed) for literal, allowed in _EXEMPT.items()}

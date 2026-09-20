@@ -16,8 +16,9 @@ from rheplicant.config.sections.observation import (
     _time_facts,
 )
 
-FREQ = {"grid": {"linspace": {"start": 60.0, "stop": 85.0, "num": 8, "endpoint": True},
-                 "unit": "MHz"}}
+FREQ = {
+    "grid": {"linspace": {"start": 60.0, "stop": 85.0, "num": 8, "endpoint": True}, "unit": "MHz"}
+}
 TIME = {"grid": {"arange": {"start": 0.0, "step": 2.0, "num": 16}, "unit": "s"}}
 
 
@@ -33,8 +34,12 @@ class TestTheGrids:
         assert float(grid[0]) == pytest.approx(60e6)
 
     def test_freq_requires_a_frequency_unit(self, context):
-        bad = {"grid": {"linspace": {"start": 60.0, "stop": 85.0, "num": 8,
-                                     "endpoint": True}, "unit": "K"}}
+        bad = {
+            "grid": {
+                "linspace": {"start": 60.0, "stop": 85.0, "num": 8, "endpoint": True},
+                "unit": "K",
+            }
+        }
         with pytest.raises(ConfigError, match="frequency"):
             _freq_grid(bad, context)
         with pytest.raises(ConfigError, match="frequency"):
@@ -54,10 +59,12 @@ class TestTheGrids:
 
     def test_time_facts(self, context):
         facts = _time_facts(
-            {**TIME,
-             "epoch": {"value": 1785312000.0, "unit": "unix_s"},
-             "integration_time": {"value": 2.0, "unit": "s"},
-             "channel_width": {"value": 3.125, "unit": "MHz"}},
+            {
+                **TIME,
+                "epoch": {"value": 1785312000.0, "unit": "unix_s"},
+                "integration_time": {"value": 2.0, "unit": "s"},
+                "channel_width": {"value": 3.125, "unit": "MHz"},
+            },
             context,
         )
         time_s, epoch, integration, width = facts
@@ -93,14 +100,18 @@ class TestMeta:
 class TestSite:
     def test_the_three_facts(self, context):
         site = _site(
-            {"lat_deg": {"value": 53.2367, "unit": "deg"},
-             "lon_deg": {"value": -2.3085, "unit": "deg"},
-             "alt_m": {"value": 78.0, "unit": "m"}},
+            {
+                "lat_deg": {"value": 53.2367, "unit": "deg"},
+                "lon_deg": {"value": -2.3085, "unit": "deg"},
+                "alt_m": {"value": 78.0, "unit": "m"},
+            },
             context,
         )
-        assert site == SiteFacts(lat_deg=pytest.approx(53.2367),
-                                 lon_deg=pytest.approx(-2.3085),
-                                 alt_m=pytest.approx(78.0))
+        assert site == SiteFacts(
+            lat_deg=pytest.approx(53.2367),
+            lon_deg=pytest.approx(-2.3085),
+            alt_m=pytest.approx(78.0),
+        )
 
     def test_everything_is_optional(self, context):
         assert _site({}, context) == SiteFacts(None, None, None)
@@ -118,17 +129,13 @@ class TestEnvironment:
         assert float(env.temperature) == pytest.approx(293.15)
 
     def test_humidity_declares_its_unit(self, context):
-        env = _environment(
-            {"humidity": {"value": 0.4, "unit": "dimensionless"}}, context
-        )
+        env = _environment({"humidity": {"value": 0.4, "unit": "dimensionless"}}, context)
         assert float(env.humidity) == pytest.approx(0.4)
         with pytest.raises(ConfigError, match="humidity"):
             _environment({"humidity": 0.4}, context)
 
     def test_extra_arrays_are_carried(self, context):
-        env = _environment(
-            {"extra": {"wind": {"list": [1.0, 2.0]}}}, context
-        )
+        env = _environment({"extra": {"wind": {"list": [1.0, 2.0]}}}, context)
         assert env.extra["wind"].shape == (2,)
 
     def test_no_section_means_no_environment(self, context):
@@ -148,20 +155,21 @@ class TestExtraAuxData:
         """The array forms cast to the run dtype (arrays.py `_finish`), so a
         0/1 float array is what a document can actually write; the loader
         casts exact 0/1 to bool and refuses anything else."""
-        flags = _aux({"flags": {"full": {"shape": [4, 8], "value": 1.0}}},
-                     context, n_time=4, n_freq=8)
+        flags = _aux(
+            {"flags": {"full": {"shape": [4, 8], "value": 1.0}}}, context, n_time=4, n_freq=8
+        )
         assert flags["flags"].dtype == jnp.bool_
         assert bool(flags["flags"][0, 0])
         with pytest.raises(ConfigError, match=r"\['banner'\]"):
             _aux({"banner": 1}, context, n_time=4, n_freq=8)
         with pytest.raises(ConfigError, match="TRUE = BAD"):
-            _aux({"flags": {"full": {"shape": [4, 8], "value": 0.5}}},
-                 context, n_time=4, n_freq=8)
+            _aux({"flags": {"full": {"shape": [4, 8], "value": 0.5}}}, context, n_time=4, n_freq=8)
 
     def test_flags_shape_is_checked(self, context):
         with pytest.raises(ConfigError, match=r"\(n_time, n_freq\)"):
-            _aux({"flags": {"full": {"shape": [3, 8], "value": False}}},
-                 context, n_time=4, n_freq=8)
+            _aux(
+                {"flags": {"full": {"shape": [3, 8], "value": False}}}, context, n_time=4, n_freq=8
+            )
 
     def test_data_shape_is_checked(self, context):
         data = _data({"zeros": [4, 8]}, context, n_time=4, n_freq=8)
@@ -183,16 +191,19 @@ class TestBuildObservation:
             "meta": {"telescope": "RHINO"},
             "freq": dict(FREQ),
             "time": {**TIME, "epoch": {"value": 1.7e9, "unit": "unix_s"}},
-            "site": {"lat_deg": {"value": 53.2367, "unit": "deg"},
-                     "lon_deg": {"value": -2.3085, "unit": "deg"},
-                     "alt_m": {"value": 78.0, "unit": "m"}},
-            "pointing": {"mode": "drift",
-                         "az_deg": {"value": 0.0, "unit": "deg"},
-                         "el_deg": {"value": 90.0, "unit": "deg"},
-                         "materialise": ["pointing", "selfrot_deg"],
-                         "lst": {"mode": "from_site"}},
-            "switching": {"mode": "cycle",
-                          "order": ["antenna", "ambient", "hot", "ns"]},
+            "site": {
+                "lat_deg": {"value": 53.2367, "unit": "deg"},
+                "lon_deg": {"value": -2.3085, "unit": "deg"},
+                "alt_m": {"value": 78.0, "unit": "m"},
+            },
+            "pointing": {
+                "mode": "drift",
+                "az_deg": {"value": 0.0, "unit": "deg"},
+                "el_deg": {"value": 90.0, "unit": "deg"},
+                "materialise": ["pointing", "selfrot_deg"],
+                "lst": {"mode": "from_site"},
+            },
+            "switching": {"mode": "cycle", "order": ["antenna", "ambient", "hot", "ns"]},
             "environment": {"temperature": {"value": 280.0, "unit": "K"}},
             "extra": {"my_side_channel": {"list": [1.0] * 16}},
         }
@@ -200,15 +211,13 @@ class TestBuildObservation:
     def test_the_synthetic_form_end_to_end(self):
         from rheplicant.config.sections.observation import build_observation
 
-        build, context = build_observation(self.synthetic(),
-                                           runtime=self._runtime())
+        build, context = build_observation(self.synthetic(), runtime=self._runtime())
         assert build.freq_hz.shape == (8,)
         assert build.time_s.shape == (16,)
         assert build.epoch_unix_s == pytest.approx(1.7e9)
         assert build.switch_order == ("antenna", "ambient", "hot", "ns")
         assert build.pointing.shape == (16, 2)
-        assert set(build.extra) == {"selfrot_deg", "lst_deg", "my_side_channel",
-                                    "receiver_input"}
+        assert set(build.extra) == {"selfrot_deg", "lst_deg", "my_side_channel", "receiver_input"}
         assert build.ingest is None
         assert context.switch_order == build.switch_order
         assert float(context.freq[0]) == pytest.approx(60e6)
@@ -232,7 +241,6 @@ class TestBuildObservation:
         from rheplicant.config.sections.observation import build_observation
 
         section = self.synthetic()
-        section["pointing"] = {"mode": "baked",
-                               "provenance": {"cfg": {"x": 1}}}
+        section["pointing"] = {"mode": "baked", "provenance": {"cfg": {"x": 1}}}
         with pytest.raises(ConfigError, match="pointing/cfg"):
             build_observation(section, runtime=self._runtime())

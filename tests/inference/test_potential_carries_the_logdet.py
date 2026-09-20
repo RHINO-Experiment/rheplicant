@@ -62,9 +62,7 @@ PRIOR_STD = 100.0
 
 #: ``RadiometerNoise`` gives ``sigma = prediction / sqrt(channel_width *
 #: integration_time)``, so this is the ``sigma = KAPPA * |mu|`` of §三 B1.
-PREDICTION_DEPENDENT = RadiometerNoise(
-    channel_width=1.0 / KAPPA**2, integration_time=1.0
-)
+PREDICTION_DEPENDENT = RadiometerNoise(channel_width=1.0 / KAPPA**2, integration_time=1.0)
 
 
 class _Exponential(AbstractOperator):
@@ -163,9 +161,7 @@ class TestThePotentialIsTheNegativeLogJoint:
         cond, values = _conditioning(noise)
         potential = conditional_potential(cond, ("w",), values)
         theirs = float(potential(PROBE_A)) - float(potential(PROBE_B))
-        ours = float(_negative_log_joint(cond, PROBE_A)) - float(
-            _negative_log_joint(cond, PROBE_B)
-        )
+        ours = float(_negative_log_joint(cond, PROBE_A)) - float(_negative_log_joint(cond, PROBE_B))
         assert ours == pytest.approx(theirs, rel=RTOL), label
 
     def test_the_two_probes_actually_separate_the_omitted_term(self):
@@ -176,9 +172,7 @@ class TestThePotentialIsTheNegativeLogJoint:
         in this file would be decorative.
         """
         cond, _ = _conditioning(PREDICTION_DEPENDENT)
-        gap = float(
-            jnp.sum(jnp.log(cond.sigma(PROBE_A))) - jnp.sum(jnp.log(cond.sigma(PROBE_B)))
-        )
+        gap = float(jnp.sum(jnp.log(cond.sigma(PROBE_A))) - jnp.sum(jnp.log(cond.sigma(PROBE_B))))
         assert abs(gap) > 1.0, f"the two probes differ by only {gap} nats of log-det"
 
 
@@ -189,18 +183,14 @@ class TestBothPotentialBuildersTargetOneDistribution:
     other would reproduce it one layer down rather than close it.
     """
 
-    @pytest.mark.parametrize(
-        "noise", [PREDICTION_DEPENDENT, HomoscedasticNoise(2.5)]
-    )
+    @pytest.mark.parametrize("noise", [PREDICTION_DEPENDENT, HomoscedasticNoise(2.5)])
     def test_they_agree_value_for_value(self, noise):
         cond, values = _conditioning(noise)
         closed = conditional_potential(cond, ("w",), values)
         lifted = _potential_of(cond, ("w",))
         others = {k: v for k, v in values.items() if k != "w"}
         for probe in (PROBE_A, PROBE_B):
-            assert float(lifted(others, probe)) == pytest.approx(
-                float(closed(probe)), rel=1e-6
-            )
+            assert float(lifted(others, probe)) == pytest.approx(float(closed(probe)), rel=1e-6)
 
 
 class TestAFlaggedSampleContributesNothing:
@@ -327,9 +317,7 @@ class TestTheGradientBlockAndTheBridgeAgree:
         )
         ours = float(conditional_potential(cond, ("w",), {"w": jnp.array(1.0)})(probe))
         model = to_numpyro_model(pipeline, template, space, noise_std=noise)
-        theirs = -float(
-            log_density(model, (), {"observed": data[None, :]}, probe)[0]
-        )
+        theirs = -float(log_density(model, (), {"observed": data[None, :]}, probe)[0])
         return ours, theirs
 
     @pytest.mark.parametrize(
@@ -342,9 +330,7 @@ class TestTheGradientBlockAndTheBridgeAgree:
     def test_the_two_routes_differ_by_a_constant(self, noise, label):
         ours_a, theirs_a = self._both(noise, PROBE_A)
         ours_b, theirs_b = self._both(noise, PROBE_B)
-        assert (ours_a - ours_b) == pytest.approx(
-            theirs_a - theirs_b, rel=RTOL
-        ), label
+        assert (ours_a - ours_b) == pytest.approx(theirs_a - theirs_b, rel=RTOL), label
 
     def test_and_that_constant_is_the_2pi_the_potential_drops(self):
         """Pinning the offset too, so "a constant" cannot hide a second term.
@@ -354,6 +340,4 @@ class TestTheGradientBlockAndTheBridgeAgree:
         and fail here.
         """
         ours, theirs = self._both(PREDICTION_DEPENDENT, PROBE_A)
-        assert theirs - ours == pytest.approx(
-            0.5 * N * float(np.log(2.0 * np.pi)), rel=1e-4
-        )
+        assert theirs - ours == pytest.approx(0.5 * N * float(np.log(2.0 * np.pi)), rel=1e-4)

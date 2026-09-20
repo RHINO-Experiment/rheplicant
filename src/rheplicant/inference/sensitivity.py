@@ -461,9 +461,7 @@ class PriorSensitivityReport:
         start, stop = self.spans[index]
         shape = self.shapes[index]
         try:
-            replacement = np.broadcast_to(
-                np.asarray(prior_std, dtype=np.float64), shape
-            ).ravel()
+            replacement = np.broadcast_to(np.asarray(prior_std, dtype=np.float64), shape).ravel()
         except (TypeError, ValueError) as error:
             raise StateValidationError(
                 f"prior_std={prior_std!r} does not broadcast to {name!r}'s shape "
@@ -606,9 +604,7 @@ def prior_sensitivity(
         # Before the graph, because this package's wording for it is pinned and
         # `to_graph`'s is its own. Same principle as P1: a refusal the seam
         # would re-word lives in front of the seam.
-        check_observed_shape(
-            jnp.shape(forward(values0)), data, predictor="this forward model"
-        )
+        check_observed_shape(jnp.shape(forward(values0)), data, predictor="this forward model")
         _refuse_a_prior_this_cannot_read(space, selected)
         noise = as_noise_model(
             noise_std,
@@ -616,9 +612,7 @@ def prior_sensitivity(
             prediction_shape=jnp.shape(data),
             caller="prior_sensitivity",
         )
-        graph = _graph_for_sensitivity(
-            space, pipeline, state_template, data, noise
-        )
+        graph = _graph_for_sensitivity(space, pipeline, state_template, data, noise)
         try:
             found = _bayesmith_prior_sensitivity(graph, names=selected, at=values0)
         except BayesmithError as error:

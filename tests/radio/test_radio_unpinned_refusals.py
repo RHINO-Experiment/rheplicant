@@ -116,9 +116,7 @@ class TestGroundPickupAmbientTemperature:
         )
 
     def test_a_temperature_log_of_the_wrong_length_is_refused(self):
-        operator = GroundPickupOperator(
-            coupling=jnp.array(0.05), t_ground=jnp.array(290.0)
-        )
+        operator = GroundPickupOperator(coupling=jnp.array(0.05), t_ground=jnp.array(290.0))
         with pytest.raises(StateValidationError, match=r"has 5 samples but coords.time has 4"):
             operator(self._state(jnp.linspace(280.0, 300.0, 5)))
 
@@ -126,9 +124,7 @@ class TestGroundPickupAmbientTemperature:
     def test_the_two_legal_lengths_pass(self, n):
         """Both accepted branches, because the guard's condition is a 2-tuple
         membership test and dropping either element is a one-character edit."""
-        operator = GroundPickupOperator(
-            coupling=jnp.array(0.05), t_ground=jnp.array(290.0)
-        )
+        operator = GroundPickupOperator(coupling=jnp.array(0.05), t_ground=jnp.array(290.0))
         out = operator(self._state(jnp.linspace(280.0, 300.0, n)))
         assert out.data.shape == (self.N_TIME, self.N_FREQ)
         assert jnp.all(jnp.isfinite(out.data))

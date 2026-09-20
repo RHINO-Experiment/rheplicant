@@ -43,16 +43,14 @@ class TestTheGrid:
         assert np.all((lst >= 0.0) & (lst < 360.0))
 
     def test_half_a_sidereal_day_advances_lst_by_180_degrees(self):
-        lst = lst_grid_deg(**SITE, time_s=np.array([0.0, SIDEREAL_S / 2.0]),
-                           epoch_unix_s=EPOCH)
+        lst = lst_grid_deg(**SITE, time_s=np.array([0.0, SIDEREAL_S / 2.0]), epoch_unix_s=EPOCH)
         delta = (lst[1] - lst[0]) % 360.0
         assert delta == pytest.approx(180.0, abs=0.05)
 
     def test_the_rate_is_sidereal_not_solar(self):
         """One SOLAR day advances LST by ~0.9856 deg; a solar-rate
         implementation would return exactly 0 here."""
-        lst = lst_grid_deg(**SITE, time_s=np.array([0.0, 86400.0]),
-                           epoch_unix_s=EPOCH)
+        lst = lst_grid_deg(**SITE, time_s=np.array([0.0, 86400.0]), epoch_unix_s=EPOCH)
         delta = (lst[1] - lst[0]) % 360.0
         assert delta == pytest.approx(360.0 / 365.2422, abs=0.05)
 

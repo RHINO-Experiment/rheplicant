@@ -186,6 +186,7 @@ class DriftScanProjector(AbstractSkyProjector):
             what makes an attempt to re-anchor the phases against a stale
             cached rotation fail loudly instead of silently.
     """
+
     maturity: ClassVar[Maturity] = Maturity.MAINTAINED
 
     beam_alms: jax.Array
@@ -214,8 +215,7 @@ class DriftScanProjector(AbstractSkyProjector):
             )
         if self.beam_frame not in ("local", "reference"):
             raise StateValidationError(
-                f'beam_frame must be "local" or "reference", got '
-                f"{self.beam_frame!r}."
+                f'beam_frame must be "local" or "reference", got {self.beam_frame!r}.'
             )
         if self.beam_frame == "reference":
             if self.lst_ref_deg is None:
@@ -289,23 +289,28 @@ class DriftScanProjector(AbstractSkyProjector):
         """
         if beam_maps.ndim != 2:
             raise StateValidationError(
-                f"beam_maps must be (n_freq, n_pix) HEALPix maps, got shape "
-                f"{beam_maps.shape}."
+                f"beam_maps must be (n_freq, n_pix) HEALPix maps, got shape {beam_maps.shape}."
             )
         n_pix = beam_maps.shape[-1]
         nside = math.isqrt(n_pix // 12)
         if 12 * nside**2 != n_pix:
             raise StateValidationError(
                 f"beam_maps has {n_pix} pixels, which is not a valid HEALPix "
-                f"map length (12·nside²).")
+                f"map length (12·nside²)."
+            )
         _refuse_a_band_s2fft_cannot_carry(nside, lmax, "from_beam_maps()")
         ltj = _limtod_jax(bool(kwargs.get("uniform_sampling", False)))
         alms = jax.vmap(
             lambda m: ltj.map2alm_iter(m, nside=nside, lmax=lmax, iterations=iterations)
         )(beam_maps)
         return cls(
-            beam_alms=alms, lat_deg=lat_deg, az_deg=az_deg, el_deg=el_deg,
-            lmax=lmax, nside=nside, **kwargs,
+            beam_alms=alms,
+            lat_deg=lat_deg,
+            az_deg=az_deg,
+            el_deg=el_deg,
+            lmax=lmax,
+            nside=nside,
+            **kwargs,
         )
 
     def horizon_fraction(self) -> jax.Array:
@@ -364,8 +369,12 @@ class DriftScanProjector(AbstractSkyProjector):
                 "have it."
             )
         return ltj.horizon_beam_fraction(
-            self.beam_alms, self.az_deg, self.el_deg, self.selfrot_deg,
-            nside=self.nside, lmax=self.lmax,
+            self.beam_alms,
+            self.az_deg,
+            self.el_deg,
+            self.selfrot_deg,
+            nside=self.nside,
+            lmax=self.lmax,
         )
 
     @staticmethod
@@ -412,13 +421,12 @@ class DriftScanProjector(AbstractSkyProjector):
 
         checks = []
         if coords.pointing is not None:
-            checks.append(("coords.pointing[:, 0] (azimuth)", coords.pointing[:, 0],
-                           self.az_deg))
-            checks.append(("coords.pointing[:, 1] (elevation)", coords.pointing[:, 1],
-                           self.el_deg))
+            checks.append(("coords.pointing[:, 0] (azimuth)", coords.pointing[:, 0], self.az_deg))
+            checks.append(("coords.pointing[:, 1] (elevation)", coords.pointing[:, 1], self.el_deg))
         if coords.extra.get("selfrot_deg") is not None:
-            checks.append(('coords.extra["selfrot_deg"]',
-                           coords.extra["selfrot_deg"], self.selfrot_deg))
+            checks.append(
+                ('coords.extra["selfrot_deg"]', coords.extra["selfrot_deg"], self.selfrot_deg)
+            )
         for label, values, expected in checks:
             try:
                 got = np.asarray(values)
@@ -515,7 +523,10 @@ class DriftScanProjector(AbstractSkyProjector):
         if hasattr(ltj, "dl_plane_for_pointing"):
             with jax.ensure_compile_time_eval():
                 extra["dl_array"] = ltj.dl_plane_for_pointing(
-                    self.lat_deg, self.az_deg, self.el_deg, self.selfrot_deg,
+                    self.lat_deg,
+                    self.az_deg,
+                    self.el_deg,
+                    self.selfrot_deg,
                     lmax=self.lmax,
                 )
         return jax.vmap(
@@ -605,9 +616,7 @@ class DriftScanProjector(AbstractSkyProjector):
         """
         self._validate_sky(sky)
         ltj = _s2fft_limtod(self, "sky_to_alms(), which forward() and mmodes() call,")
-        return jax.vmap(
-            lambda m: ltj.map2alm_quad(m, nside=self.nside, lmax=self.lmax)
-        )(sky)
+        return jax.vmap(lambda m: ltj.map2alm_quad(m, nside=self.nside, lmax=self.lmax))(sky)
 
     # ------------------------------------------------------------- interface
     def forward(self, sky: jax.Array, coords: Coordinates) -> jax.Array:
@@ -634,8 +643,12 @@ class DriftScanProjector(AbstractSkyProjector):
 
         def one_freq(beam_ref, sky_alm):
             return ltj.driftscan_tod(
-                beam_ref, sky_alm, dphi,
-                lmax=self.lmax, normalize=self.normalize_beam, ones_alm=ones_alm,
+                beam_ref,
+                sky_alm,
+                dphi,
+                lmax=self.lmax,
+                normalize=self.normalize_beam,
+                ones_alm=ones_alm,
                 uniform=self.uniform_sampling,
             )
 
@@ -655,8 +668,12 @@ class DriftScanProjector(AbstractSkyProjector):
 
         def one_freq(beam_ref, tod_t):
             alm = ltj.driftscan_tod_adjoint(
-                tod_t, beam_ref, dphi,
-                lmax=self.lmax, normalize=self.normalize_beam, ones_alm=ones_alm,
+                tod_t,
+                beam_ref,
+                dphi,
+                lmax=self.lmax,
+                normalize=self.normalize_beam,
+                ones_alm=ones_alm,
                 uniform=self.uniform_sampling,
             )
             return ltj.alm2map(alm, nside=self.nside, lmax=self.lmax)
@@ -709,9 +726,7 @@ class DriftScanProjector(AbstractSkyProjector):
 
         return self._map_freqs(one_freq, beam_refs, sky_alms)
 
-    def to_reference_frame(
-        self, lst_ref_deg: float | None = None
-    ) -> "DriftScanProjector":
+    def to_reference_frame(self, lst_ref_deg: float | None = None) -> "DriftScanProjector":
         """Precompute the beam rotation once; return an equivalent projector.
 
         The returned projector holds the celestial-frame beam alms at
@@ -775,7 +790,8 @@ def _n_alm_checked(projector: DriftScanProjector) -> int:
     for flag in ("normalize_beam", "horizon_mask"):
         if getattr(projector, flag):
             _refuse_a_band_s2fft_cannot_carry(
-                projector.nside, projector.lmax,
+                projector.nside,
+                projector.lmax,
                 f"with {flag}=True, which runs one on every call,",
             )
     return (projector.lmax + 1) * (projector.lmax + 2) // 2
@@ -783,9 +799,7 @@ def _n_alm_checked(projector: DriftScanProjector) -> int:
 
 def _s2fft_limtod(projector: DriftScanProjector, operation: str, *, analysis: bool = True):
     """``limtod_jax``, for a call about to run an s2fft transform on this band."""
-    _refuse_a_band_s2fft_cannot_carry(
-        projector.nside, projector.lmax, operation, analysis=analysis
-    )
+    _refuse_a_band_s2fft_cannot_carry(projector.nside, projector.lmax, operation, analysis=analysis)
     return _limtod_jax(projector.uniform_sampling)
 
 

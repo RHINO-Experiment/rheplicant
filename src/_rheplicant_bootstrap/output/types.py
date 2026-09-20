@@ -175,9 +175,7 @@ class OutputPathInspection:
     ancestry: tuple[AncestorEntryInspection, ...]
     recovery: RecoveryInspection
     component_limit: int
-    binding: OutputBinding = field(
-        default_factory=OutputBinding, compare=False, repr=False
-    )
+    binding: OutputBinding = field(default_factory=OutputBinding, compare=False, repr=False)
 
 
 @dataclass(frozen=True, slots=True)
@@ -191,9 +189,7 @@ class OutputLease:
     journal_name: str
     ancestry: tuple[AncestorEntryInspection, ...]
     component_limit: int
-    binding: OutputBinding = field(
-        default_factory=OutputBinding, compare=False, repr=False
-    )
+    binding: OutputBinding = field(default_factory=OutputBinding, compare=False, repr=False)
 
     def __enter__(self) -> OutputLease:
         from .manager import require_open_output_lease

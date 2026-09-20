@@ -79,7 +79,7 @@ def _require_h5py():
         import h5py
     except ImportError as exc:  # pragma: no cover - exercised by the import guard
         raise ImportError(
-            "rheplicant.radio.rhino needs h5py: pip install \"rheplicant[rhino]\""
+            'rheplicant.radio.rhino needs h5py: pip install "rheplicant[rhino]"'
         ) from exc
     return h5py
 
@@ -434,8 +434,7 @@ def _check_waterfall(waterfall: np.ndarray, freq_hz: np.ndarray) -> None:
     """
     if waterfall.ndim != 2:
         raise DataIngestionError(
-            "/sdr/sdr_waterfall must be 2-D (n_time, n_freq); got shape "
-            f"{waterfall.shape}."
+            f"/sdr/sdr_waterfall must be 2-D (n_time, n_freq); got shape {waterfall.shape}."
         )
     if waterfall.shape[1] != freq_hz.size:
         raise DataIngestionError(
@@ -794,9 +793,6 @@ def cal_load_operators(
             f"which is not the same as the log being unread."
         )
     return {
-        label: CalLoadOperator(
-            t_load=jnp.asarray(obs.thermistor_k[label], dtype=float)[:, None]
-        )
+        label: CalLoadOperator(t_load=jnp.asarray(obs.thermistor_k[label], dtype=float)[:, None])
         for label in wanted
     }
-

@@ -364,9 +364,7 @@ def build_projector(name: str, spec: dict, context: ResolutionContext) -> Any:
                 "resource_field",
                 "rheplicant.config.kinds.projectors.build_projector.general_pointing.beam_alms",
             )
-            resolved = resolve_value(
-                spec["beam_alms"], context, destination=alms_destination
-            )
+            resolved = resolve_value(spec["beam_alms"], context, destination=alms_destination)
             beam_alms = jnp.asarray(resolved.value)
             record_resolved_delivery(context, alms_destination, resolved.unit)
         if beam_alms is None:
@@ -454,9 +452,7 @@ def build_projector(name: str, spec: dict, context: ResolutionContext) -> Any:
                 "iteration count was used there. Delete it, or switch to beam: "
                 "and let the transform run here."
             )
-        _require(
-            name, spec, "nside", "driftscan", "the HEALPix resolution the alms are used at"
-        )
+        _require(name, spec, "nside", "driftscan", "the HEALPix resolution the alms are used at")
         projector = DriftScanProjector(
             beam_alms=beam_alms,
             lmax=int(spec["lmax"]),

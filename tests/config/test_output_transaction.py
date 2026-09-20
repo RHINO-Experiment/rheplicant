@@ -87,9 +87,7 @@ def staging_path(lease, handle):
     return Path(lease.parent_path) / handle.staging_name
 
 
-def test_prejournal_candidate_collision_selects_a_fresh_transaction_id(
-    tmp_path, monkeypatch
-):
+def test_prejournal_candidate_collision_selects_a_fresh_transaction_id(tmp_path, monkeypatch):
     _target, platform, lease, _publication, verified = lease_for(tmp_path)
     first = "0" * 32
     second = "1" * 32
@@ -101,27 +99,19 @@ def test_prejournal_candidate_collision_selects_a_fresh_transaction_id(
         )
     )
     monkeypatch.setattr(transaction.uuid, "uuid4", lambda: next(ids))
-    collision = tmp_path / journal_temp_name(
-        lease.request.target_path, first, "prepared"
-    )
+    collision = tmp_path / journal_temp_name(lease.request.target_path, first, "prepared")
     collision.write_bytes(b"foreign")
     try:
-        handle, _materialized = stage_bundle(
-            verified, bundle(), platform, publication="success"
-        )
+        handle, _materialized = stage_bundle(verified, bundle(), platform, publication="success")
         assert handle.transaction_id == second
         assert collision.read_bytes() == b"foreign"
-        assert staging_path(lease, handle).name == staging_name(
-            lease.request.target_path, second
-        )
+        assert staging_path(lease, handle).name == staging_name(lease.request.target_path, second)
         discard_staging(handle, platform)
     finally:
         close_output_lease(lease)
 
 
-def test_two_colliding_failure_first_choices_still_publish_distinct_siblings(
-    tmp_path, monkeypatch
-):
+def test_two_colliding_failure_first_choices_still_publish_distinct_siblings(tmp_path, monkeypatch):
     """A7.6: a collision on the failure sibling's name must not repeat itself.
 
     ``publish_name`` for a refused/error sibling used to be built from a
@@ -156,9 +146,7 @@ def test_two_colliding_failure_first_choices_still_publish_distinct_siblings(
 
     try:
         first_candidate = bundle("error")
-        first_handle, _ = stage_bundle(
-            publication, first_candidate, platform, publication="error"
-        )
+        first_handle, _ = stage_bundle(publication, first_candidate, platform, publication="error")
         replace_staged_metadata(first_handle, first_candidate, platform)
         first_path = Path(publish_failure(first_handle, platform))
 
@@ -195,14 +183,10 @@ def test_staging_requires_a_typed_view_and_the_lease_platform(tmp_path):
         close_output_lease(lease)
 
 
-def test_exact_success_budget_passes_and_one_byte_short_failure_budget_is_pure(
-    tmp_path
-):
+def test_exact_success_budget_passes_and_one_byte_short_failure_budget_is_pure(tmp_path):
     target = tmp_path / ("r" * 120)
     platform = SafePlatform()
-    lease = acquire_output_lease(
-        inspect_output_path(run_request(target), platform), platform
-    )
+    lease = acquire_output_lease(inspect_output_path(run_request(target), platform), platform)
     publication = verify_publication_under_lease(lease, platform)
     verified = verify_a34_under_lease(publication, platform)
     identifier = "f" * 32
@@ -220,14 +204,10 @@ def test_exact_success_budget_passes_and_one_byte_short_failure_budget_is_pure(
     object.__setattr__(publication, "component_limit", success_limit)
     try:
         candidate = bundle()
-        handle, _ = stage_bundle(
-            verified, candidate, platform, publication="success"
-        )
+        handle, _ = stage_bundle(verified, candidate, platform, publication="success")
         replace_staged_metadata(handle, candidate, platform)
         publish_success(handle, platform)
-        worst_case_failure_name = failure_name(
-            lease.request.target_path, "error", identifier
-        )
+        worst_case_failure_name = failure_name(lease.request.target_path, "error", identifier)
         failure_limit = len(os.fsencode(worst_case_failure_name)) - 1
         assert failure_limit >= success_limit
         object.__setattr__(lease, "component_limit", failure_limit)
@@ -268,9 +248,11 @@ def test_stage_bundle_has_exact_modes_bytes_and_events(tmp_path, mask):
         assert stat.S_IMODE(marker.stat().st_mode) == 0o600
         assert tuple(event.ordinal for event in events) == tuple(range(len(events)))
         assert {event.label for event in events} <= set(TRANSACTION_BOUNDARIES)
-        metadata = {row.slot: row for row in materialized if row.slot in {
-            "lock", "journal", "marker", "provenance", "diagnostics"
-        }}
+        metadata = {
+            row.slot: row
+            for row in materialized
+            if row.slot in {"lock", "journal", "marker", "provenance", "diagnostics"}
+        }
         assert set(metadata) == {"lock", "journal", "marker", "provenance", "diagnostics"}
         assert all((row.bytes, row.sha256) == (None, None) for row in metadata.values())
         assert any(row.slot == "input" and row.sha256 == INPUT_SHA for row in materialized)
@@ -297,9 +279,7 @@ def test_products_share_staging_modes_and_do_not_extend_the_fixed_audit_table(
         assert (target / "runs/n-666f7277617264/arrays.npz").read_bytes() == b"science"
         assert (target / "products.json").read_bytes() == b"manifest"
         assert stat.S_IMODE((target / "runs").stat().st_mode) == 0o700
-        assert stat.S_IMODE(
-            (target / "runs/n-666f7277617264/arrays.npz").stat().st_mode
-        ) == 0o600
+        assert stat.S_IMODE((target / "runs/n-666f7277617264/arrays.npz").stat().st_mode) == 0o600
         assert {row.slot for row in materialized} == {
             "lock",
             "journal",
@@ -315,9 +295,7 @@ def test_products_share_staging_modes_and_do_not_extend_the_fixed_audit_table(
 def test_two_materialization_replaces_only_metadata_and_retains_written_history(tmp_path):
     _target, platform, lease, _publication, verified = lease_for(tmp_path)
     candidate = bundle()
-    handle, _events = stage_bundle(
-        verified, candidate, platform, publication="success"
-    )
+    handle, _events = stage_bundle(verified, candidate, platform, publication="success")
 
     def metadata(path):
         return ArtefactRecord(path, True, None, None, "metadata_envelope")
@@ -430,9 +408,7 @@ def test_prepublication_failure_preserves_old_target(tmp_path, monkeypatch):
         close_output_lease(lease)
 
 
-def test_cleanup_checks_the_opened_root_before_removing_contents(
-    tmp_path, monkeypatch
-):
+def test_cleanup_checks_the_opened_root_before_removing_contents(tmp_path, monkeypatch):
     _target, platform, lease, _publication, verified = lease_for(tmp_path)
     handle, _ = stage_bundle(verified, bundle(), platform, publication="success")
     original_open = transaction._open_directory
@@ -473,9 +449,7 @@ def test_cleanup_checks_the_opened_root_before_removing_contents(
         close_output_lease(lease)
 
 
-def test_publication_revalidates_ancestry_immediately_before_rename(
-    tmp_path, monkeypatch
-):
+def test_publication_revalidates_ancestry_immediately_before_rename(tmp_path, monkeypatch):
     parent = tmp_path / "private"
     parent.mkdir(mode=0o700)
     target, platform, lease, _publication, verified = lease_for(parent)
@@ -493,9 +467,7 @@ def test_publication_revalidates_ancestry_immediately_before_rename(
             parent.rename(tmp_path / "held-private")
             parent.mkdir(mode=0o700)
 
-    monkeypatch.setattr(
-        transaction, "_verify_target_identity", verify_then_replace_ancestor
-    )
+    monkeypatch.setattr(transaction, "_verify_target_identity", verify_then_replace_ancestor)
     try:
         with pytest.raises(TransactionInterrupted, match="ancestry was replaced"):
             publish_success(handle, platform)

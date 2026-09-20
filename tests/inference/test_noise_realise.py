@@ -84,8 +84,10 @@ def test_the_radiometer_draw_is_not_the_additive_abs_sigma_form(prediction):
 
 @pytest.mark.parametrize(
     "inner",
-    [HomoscedasticNoise(sigma=jnp.array(2.0)),
-     RadiometerNoise(channel_width=1e6, integration_time=1.0)],
+    [
+        HomoscedasticNoise(sigma=jnp.array(2.0)),
+        RadiometerNoise(channel_width=1e6, integration_time=1.0),
+    ],
     ids=["homoscedastic", "radiometer"],
 )
 def test_flagged_delegates_to_the_wrapped_model(prediction, inner):
@@ -98,15 +100,12 @@ def test_flagged_delegates_to_the_wrapped_model(prediction, inner):
     flags = jnp.zeros((N_TIME, N_FREQ), dtype=bool).at[0].set(True)
     wrapped = FlaggedNoise(inner, flags=flags)
     key = jax.random.key(3)
-    assert jnp.array_equal(wrapped.realise(prediction, key=key),
-                           inner.realise(prediction, key=key))
+    assert jnp.array_equal(wrapped.realise(prediction, key=key), inner.realise(prediction, key=key))
 
 
 def test_realise_survives_jit(prediction):
     import equinox as eqx
 
     noise = RadiometerNoise(channel_width=1e6, integration_time=1.0)
-    out = eqx.filter_jit(lambda n, p, k: n.realise(p, key=k))(
-        noise, prediction, jax.random.key(0)
-    )
+    out = eqx.filter_jit(lambda n, p, k: n.realise(p, key=k))(noise, prediction, jax.random.key(0))
     assert out.shape == prediction.shape

@@ -132,9 +132,24 @@ def _ref(
         )
     if source is not None and token is None:
         for candidate in (
-            "Hz", "s", "unix_s", "K", "deg", "m", "ohm", "dimensionless",
-            "count", "samples", "bits", "channels", "cycles", "adc_count",
-            "adc_count/K", "Hz/s", "dimensionless/s", "cycles/samples",
+            "Hz",
+            "s",
+            "unix_s",
+            "K",
+            "deg",
+            "m",
+            "ohm",
+            "dimensionless",
+            "count",
+            "samples",
+            "bits",
+            "channels",
+            "cycles",
+            "adc_count",
+            "adc_count/K",
+            "Hz/s",
+            "dimensionless/s",
+            "cycles/samples",
         ):
             unit = canonical_unit(candidate)
             if dimension_of(unit) == source:

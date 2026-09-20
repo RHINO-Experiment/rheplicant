@@ -374,10 +374,15 @@ def test_invocation_write_names_a_known_plan4b_selector(name, source):
 def test_invocation_write_refuses_a_repeat_and_an_empty_set(source):
     with pytest.raises(ConfigError, match="requested twice"):
         resolve_output_request(
-            parse_output_grammar({}), source=source, command="run",
+            parse_output_grammar({}),
+            source=source,
+            command="run",
             invocation_write=("draws", "draws"),
         )
     with pytest.raises(ConfigError, match="at least one selector"):
         resolve_output_request(
-            parse_output_grammar({}), source=source, command="run", invocation_write=(),
+            parse_output_grammar({}),
+            source=source,
+            command="run",
+            invocation_write=(),
         )

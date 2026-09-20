@@ -20,9 +20,7 @@ from tests.evidence.test_memory import _factorization
 
 def _linear_oracle(design, observed, sigma, x):
     resid = np.asarray(observed) - np.asarray(design) @ np.asarray(x)
-    return -0.5 * float(
-        np.sum(resid**2) / sigma**2 + len(resid) * np.log(2 * np.pi * sigma**2)
-    )
+    return -0.5 * float(np.sum(resid**2) / sigma**2 + len(resid) * np.log(2 * np.pi * sigma**2))
 
 
 def _term(design, observed, sigma, epoch_id="e0", **kwargs):
@@ -53,8 +51,11 @@ def test_t0_and_t2_agree_absolutely_on_a_linear_model():
     observed = jax.random.normal(jax.random.key(3), (40,))
     raw = _term(design, observed, 0.1)
     quadratic = compress_linear(
-        design={"x": design}, observed=observed, noise_std=0.1,
-        shapes={"x": (3,)}, epoch_id="e0",
+        design={"x": design},
+        observed=observed,
+        noise_std=0.1,
+        shapes={"x": (3,)},
+        epoch_id="e0",
     )
     for seed in range(4):
         probe = {"x": jax.random.normal(jax.random.key(seed + 10), (3,))}
@@ -130,8 +131,11 @@ def test_the_archive_refuses_a_term_it_cannot_describe(tmp_path):
 
     memory = BayesMemory(_factorization())
     term = RawLikelihood(
-        predict=lambda values: jnp.zeros(4), observed=jnp.zeros(4),
-        sigma=jnp.full(4, 0.1), names=("depth", "width"), epoch_id="e0",
+        predict=lambda values: jnp.zeros(4),
+        observed=jnp.zeros(4),
+        sigma=jnp.full(4, 0.1),
+        names=("depth", "width"),
+        epoch_id="e0",
     )
     memory = BayesMemory(memory.factorization, memory.accumulated, (term,))
     with pytest.raises(StateValidationError, match="reconstruction spec"):

@@ -65,6 +65,7 @@ MIN_REWEIGHTS: int = 5
 #: so through ``converged`` rather than spinning.
 MAX_REWEIGHTS: int = 100
 
+
 class GLSResult(NamedTuple):
     """What a reweighting run produced.
 
@@ -222,9 +223,7 @@ def iterative_gls(
         return {_OBSERVED: noise.std(block.forward(latent) + block.offset)}
 
     far = _far_iterative_gls(
-        _as_far_block(
-            block, observed=observed, prior_mean=prior_mean, prior_std=prior_std
-        ),
+        _as_far_block(block, observed=observed, prior_mean=prior_mean, prior_std=prior_std),
         sigma_of,
         depends_on_prediction=noise.depends_on_prediction,
         tol=tol,

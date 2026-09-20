@@ -91,9 +91,11 @@ def test_darwin_adapter_reads_access_metadata_from_fd(tmp_path):
 # inode has an ACL" as "this inode is unverifiable" refused every project
 # under `~` while accepting `/tmp`.
 
+
 def _add_ace(path, ace: str) -> bool:
     """Add one ACE, or report that this host cannot."""
     import subprocess
+
     try:
         subprocess.run(["chmod", "+a", ace, str(path)], check=True, capture_output=True)
     except (OSError, subprocess.CalledProcessError):

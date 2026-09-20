@@ -50,8 +50,7 @@ class PriorEnvironment:
                 continue
             if not static_isinstance(value, str):
                 raise ConfigError(
-                    f"runtime prior_environment.{field_name} must be a "
-                    "string or null."
+                    f"runtime prior_environment.{field_name} must be a string or null."
                 )
             canonical = str.__str__(value)
             _validate_utf8_text(
@@ -93,11 +92,7 @@ class RuntimeSession:
             raise ConfigError("runtime session is malformed.") from None
         requested = _copy_requested(raw_requested, where="runtime")
         prior = _copy_prior_environment(raw_prior, where="runtime")
-        actual = (
-            None
-            if raw_actual is None
-            else _copy_actual(raw_actual, where="runtime")
-        )
+        actual = None if raw_actual is None else _copy_actual(raw_actual, where="runtime")
         self.requested = requested
         self.prior_environment = prior
         self.actual = actual
@@ -112,11 +107,7 @@ class RuntimeSession:
             raise ConfigError("runtime session is malformed.") from None
         requested = _copy_requested(raw_requested, where="runtime")
         prior = _copy_prior_environment(raw_prior, where="runtime")
-        previous_actual = (
-            None
-            if raw_actual is None
-            else _copy_actual(raw_actual, where="runtime")
-        )
+        previous_actual = None if raw_actual is None else _copy_actual(raw_actual, where="runtime")
         if not static_isinstance(boundary, str) or not str.__str__(boundary):
             raise ConfigError("runtime: verification boundary must be non-empty.")
         exact_boundary = str.__str__(boundary)
@@ -130,9 +121,7 @@ class RuntimeSession:
 
                 raw_x64 = config.read("jax_enable_x64")
                 if not static_isinstance(raw_x64, bool):
-                    raise TypeError(
-                        "jax_enable_x64 inspection did not return a bool"
-                    )
+                    raise TypeError("jax_enable_x64 inspection did not return a bool")
                 raw_backend = default_backend()
                 if not static_isinstance(raw_backend, str) or not str.__str__(raw_backend):
                     raise TypeError("backend inspection did not return a name")
@@ -169,10 +158,7 @@ class RuntimeSession:
                 f"{requested.jax_enable_x64!r}, but {exact_boundary} has "
                 f"{actual.jax_enable_x64!r}."
             )
-        if (
-            requested.platform != "auto"
-            and actual.backend != requested.platform
-        ):
+        if requested.platform != "auto" and actual.backend != requested.platform:
             raise ConfigError(
                 f"runtime.platform: requested {requested.platform!r}, "
                 f"but {exact_boundary} selected {actual.backend!r}."
@@ -197,9 +183,7 @@ def establish_runtime(
     if "jax" in sys.modules:
         session.verify(boundary="existing process")
     else:
-        os.environ["JAX_ENABLE_X64"] = (
-            "true" if stable_requested.jax_enable_x64 else "false"
-        )
+        os.environ["JAX_ENABLE_X64"] = "true" if stable_requested.jax_enable_x64 else "false"
         if stable_requested.platform != "auto":
             os.environ["JAX_PLATFORMS"] = stable_requested.platform
     main = import_main()
@@ -212,9 +196,7 @@ def runtime_audit_row(session: RuntimeSession) -> Mapping[str, JsonValue]:
     if type(session) is not RuntimeSession:
         raise ConfigError("runtime audit row requires a RuntimeSession.")
     _validate_requested(session.requested, where="runtime audit")
-    _validate_prior_environment(
-        session.prior_environment, where="runtime audit"
-    )
+    _validate_prior_environment(session.prior_environment, where="runtime audit")
     if session.actual is None:
         raise ConfigError("runtime session has not been verified.")
     _validate_actual(session.actual, where="runtime audit")
@@ -222,16 +204,9 @@ def runtime_audit_row(session: RuntimeSession) -> Mapping[str, JsonValue]:
     prior = session.prior_environment
     actual = session.actual
     if actual.jax_enable_x64 is not session.requested.jax_enable_x64:
-        raise ConfigError(
-            "runtime audit actual jax_enable_x64 contradicts the requested state."
-        )
-    if (
-        session.requested.platform != "auto"
-        and actual.backend != session.requested.platform
-    ):
-        raise ConfigError(
-            "runtime audit actual backend contradicts the requested platform."
-        )
+        raise ConfigError("runtime audit actual jax_enable_x64 contradicts the requested state.")
+    if session.requested.platform != "auto" and actual.backend != session.requested.platform:
+        raise ConfigError("runtime audit actual backend contradicts the requested platform.")
 
     projected = {
         "requested": {
@@ -244,14 +219,10 @@ def runtime_audit_row(session: RuntimeSession) -> Mapping[str, JsonValue]:
         },
         "prior_environment": {
             "jax_enable_x64": (
-                None
-                if prior.jax_enable_x64 is None
-                else str.__str__(prior.jax_enable_x64)
+                None if prior.jax_enable_x64 is None else str.__str__(prior.jax_enable_x64)
             ),
             "jax_platforms": (
-                None
-                if prior.jax_platforms is None
-                else str.__str__(prior.jax_platforms)
+                None if prior.jax_platforms is None else str.__str__(prior.jax_platforms)
             ),
         },
     }
@@ -325,15 +296,11 @@ def _copy_actual(actual: object, *, where: str) -> RuntimeActual:
 
 def _validate_prior_environment(prior: object, *, where: str) -> None:
     if type(prior) is not PriorEnvironment:
-        raise ConfigError(
-            f"{where}: prior environment must be a PriorEnvironment."
-        )
+        raise ConfigError(f"{where}: prior environment must be a PriorEnvironment.")
     for field_name in ("jax_enable_x64", "jax_platforms"):
         value = object.__getattribute__(prior, field_name)
         if value is not None and type(value) is not str:
-            raise ConfigError(
-                f"{where} prior_environment.{field_name} must be a string or null."
-            )
+            raise ConfigError(f"{where} prior_environment.{field_name} must be a string or null.")
         if value is not None:
             _validate_utf8_text(
                 value,
@@ -349,9 +316,7 @@ def _validate_actual(actual: object, *, where: str) -> None:
     if type(x64) is not bool:
         raise ConfigError(f"{where} actual jax_enable_x64 must be a bool.")
     if type(backend) is not str or not backend:
-        raise ConfigError(
-            f"{where} actual backend must be a non-empty string."
-        )
+        raise ConfigError(f"{where} actual backend must be a non-empty string.")
     _validate_utf8_text(backend, where=f"{where} actual backend")
 
 

@@ -20,11 +20,15 @@ def _memory_with_non_default_provenance():
             factor=jnp.array([[1.5, 0.25], [0.0, 0.75]]),
             target=jnp.array([0.5, -0.25]),
             offset=jnp.array(-3.25),
-            names=("depth", "width"), shapes=((), ()),
+            names=("depth", "width"),
+            shapes=((), ()),
         ),
-        epoch_id="night-042", n_observed=777,
-        exact=False, support={"depth": (-2.0, 2.0), "width": (-1.0, 3.0)},
-        include_logdet=False, noise_frozen_at="gls",
+        epoch_id="night-042",
+        n_observed=777,
+        exact=False,
+        support={"depth": (-2.0, 2.0), "width": (-1.0, 3.0)},
+        include_logdet=False,
+        noise_frozen_at="gls",
         # Format 3's five. Every one non-default, and the two static ones
         # deliberately unguessable from anything else in this term: a template
         # built from a convention rather than from the manifest would reproduce
@@ -64,12 +68,8 @@ def test_every_static_field_survives_a_round_trip(tmp_path):
         ("cal_solution", "sha256:0f17"),
     )
     assert float(after.residual_chi2) == 7.5
-    np.testing.assert_array_equal(
-        np.asarray(after.template_projections), np.asarray([1.25, -0.5])
-    )
-    np.testing.assert_array_equal(
-        np.asarray(after.info.factor), np.asarray(before.info.factor)
-    )
+    np.testing.assert_array_equal(np.asarray(after.template_projections), np.asarray([1.25, -0.5]))
+    np.testing.assert_array_equal(np.asarray(after.info.factor), np.asarray(before.info.factor))
     assert after.info.factor.dtype == jnp.float64
 
 
@@ -133,8 +133,7 @@ def test_a_memory_whose_latents_changed_is_refused(tmp_path):
         ParameterSpace(
             latents=latents,
             bindings=tuple(
-                Bind(lat.name, into=lambda p, n=lat.name: getattr(p, n))
-                for lat in latents
+                Bind(lat.name, into=lambda p, n=lat.name: getattr(p, n)) for lat in latents
             ),
         )
     )
@@ -260,9 +259,11 @@ class TestTheProvenanceRuleIsReRunOnLoadToo:
                         factor=jnp.array([[1.5, 0.25], [0.0, 0.75]]),
                         target=jnp.array([0.5, -0.25]),
                         offset=jnp.array(-3.25),
-                        names=("depth", "width"), shapes=((), ()),
+                        names=("depth", "width"),
+                        shapes=((), ()),
                     ),
-                    epoch_id=epoch_id, n_observed=64,
+                    epoch_id=epoch_id,
+                    n_observed=64,
                     inputs=(("beam_map", digest),),
                 )
             )
@@ -352,8 +353,7 @@ class TestTheManifestIsWrittenLastBecauseItIsTheCommit:
         with pytest.raises(OSError, match="disk full"):
             save_memory(_memory_with_non_default_provenance(), path)
         assert not path.with_suffix(".json").exists(), (
-            "a manifest survived a failed save, so it describes an archive that "
-            "does not exist"
+            "a manifest survived a failed save, so it describes an archive that does not exist"
         )
 
     def test_a_binary_without_its_manifest_is_refused_by_name(self, tmp_path):

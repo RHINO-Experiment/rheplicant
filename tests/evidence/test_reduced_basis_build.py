@@ -59,9 +59,7 @@ def bank():
 
 @pytest.fixture(scope="module")
 def scores():
-    return score_directions(
-        rhino_bank.space(), rhino_bank.pipeline(), rhino_bank.state()
-    )
+    return score_directions(rhino_bank.space(), rhino_bank.pipeline(), rhino_bank.state())
 
 
 def _build(bank, n_basis, **kwargs):
@@ -163,9 +161,7 @@ def test_four_vectors_recover_it_unseeded_which_is_why_three_is_pinned(bank, sco
     test of the headline written at this fixture's operating point would assert
     nothing, and would go on passing after the seeding was deleted.
     """
-    residual_at_four = float(
-        _plain_svd_basis(bank, 4).residual_fraction(scores["t21_depth"][0])
-    )
+    residual_at_four = float(_plain_svd_basis(bank, 4).residual_fraction(scores["t21_depth"][0]))
     assert residual_at_four < 1e-2
     residual_at_thirteen = float(
         _plain_svd_basis(bank, 13).residual_fraction(scores["t21_depth"][0])
@@ -185,9 +181,7 @@ def test_greedy_selection_spans_the_bank_to_a_declared_tolerance(bank):
     weight = rhino_bank.weight()
     predict, _ = rhino_bank.forward()
     chosen = select_greedy(bank * weight, 8)
-    basis = _wrap(
-        orthonormalise(chosen) / weight, weight, predict, jnp.zeros(rhino_bank.N_FREQ)
-    )
+    basis = _wrap(orthonormalise(chosen) / weight, weight, predict, jnp.zeros(rhino_bank.N_FREQ))
     assert basis.n_basis == BANK_RANK
     worst = max(float(basis.residual_fraction(draw)) for draw in bank[:20])
     assert worst < 1e-6

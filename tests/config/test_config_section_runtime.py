@@ -41,9 +41,7 @@ def _clean_build_runtime(section, *, x64: bool, platform: str = "cpu"):
 class TestBuildRuntime:
     def test_defaults(self):
         facts = build_runtime({})
-        assert facts == RuntimeFacts(
-            jax_enable_x64=False, platform="auto", seed=None, seeds={}
-        )
+        assert facts == RuntimeFacts(jax_enable_x64=False, platform="auto", seed=None, seeds={})
         assert facts.dtype == "float32"
 
     def test_the_full_section(self):
@@ -103,12 +101,8 @@ class TestBuildRuntime:
         assert "before any array exists" in message
 
     def test_declaring_float32_in_a_float64_process_is_also_refused(self):
-        message = _clean_build_runtime(
-            {"jax_enable_x64": False}, x64=True
-        )
-        assert message == (
-            "runtime.jax_enable_x64: requested False, but current process has True."
-        )
+        message = _clean_build_runtime({"jax_enable_x64": False}, x64=True)
+        assert message == ("runtime.jax_enable_x64: requested False, but current process has True.")
 
     def test_explicit_platform_is_verified_in_the_direct_mapping_api(self):
         message = _clean_build_runtime(
@@ -116,17 +110,14 @@ class TestBuildRuntime:
             x64=False,
             platform="cpu",
         )
-        assert message == (
-            "runtime.platform: requested 'gpu', but current process selected 'cpu'."
-        )
+        assert message == ("runtime.platform: requested 'gpu', but current process selected 'cpu'.")
 
 
 class TestRuntimeFacts:
     def test_x64_facts_declare_float64(self):
         """Directly constructed (bypassing the process guard): the one reason
         .dtype exists is that x64 physics means float64 deliveries."""
-        facts = RuntimeFacts(jax_enable_x64=True, platform="auto", seed=None,
-                             seeds={})
+        facts = RuntimeFacts(jax_enable_x64=True, platform="auto", seed=None, seeds={})
         assert facts.dtype == "float64"
 
 

@@ -108,9 +108,7 @@ def test_many_fan_field_runs_required_unit_validation_at_its_actual_path():
         },
         model={
             **BASE_MODEL,
-            "cal_loads": {
-                "ambient": {"t_load": {"value": 300.0, "unit": "Hz"}}
-            },
+            "cal_loads": {"ambient": {"t_load": {"value": 300.0, "unit": "Hz"}}},
         },
     )
 
@@ -189,8 +187,7 @@ def test_pipeline_stage_field_runs_required_unit_validation_at_its_actual_path()
     findings = _a9(preflight(document))
 
     assert any(
-        finding.where == "model.stages[1].gain"
-        and "model.stages[1].gain" in finding.message
+        finding.where == "model.stages[1].gain" and "model.stages[1].gain" in finding.message
         for finding in findings
     )
     document["model"]["stages"][1]["gain"] = {
@@ -283,13 +280,9 @@ def test_non_operator_python_target_stands_down_without_crashing_a9(route):
 
     target = {"python": "builtins:dict"}
     if route == "graph":
-        document = preflight_document(
-            model={**BASE_MODEL, "gain": target}
-        )
+        document = preflight_document(model={**BASE_MODEL, "gain": target})
     elif route == "many":
-        document = preflight_document(
-            model={**BASE_MODEL, "filters": [target]}
-        )
+        document = preflight_document(model={**BASE_MODEL, "filters": [target]})
     elif route == "pipeline":
         document = preflight_document(inference=None)
         document["model"] = {
@@ -356,9 +349,7 @@ def test_a9_never_imports_an_unloaded_python_target(monkeypatch):
         pytest.param([], "model: is a mapping", id="non-mapping"),
     ],
 )
-def test_twin_replacement_stands_down_until_a_graph_model_builds(
-    model, owner_pattern
-):
+def test_twin_replacement_stands_down_until_a_graph_model_builds(model, owner_pattern):
     from rheplicant.config.context import ResolutionContext
     from rheplicant.config.errors import ConfigError
     from rheplicant.config.sections.compose import build_model
@@ -370,10 +361,7 @@ def test_twin_replacement_stands_down_until_a_graph_model_builds(
 
     report = preflight(document)
 
-    assert not any(
-        finding.where.startswith("inference.twin.replace")
-        for finding in _a9(report)
-    )
+    assert not any(finding.where.startswith("inference.twin.replace") for finding in _a9(report))
     with pytest.raises(ConfigError, match=owner_pattern):
         twin = build_model(model, ResolutionContext(), switch_order=())
         build_fit_twin(twin_spec, twin, ResolutionContext())
@@ -443,9 +431,7 @@ def test_stage_name_grammar_is_owned_by_the_model_builder(shape):
 
     report = preflight(document)
 
-    assert not any(
-        finding.where.startswith(stage_prefix) for finding in _a9(report)
-    )
+    assert not any(finding.where.startswith(stage_prefix) for finding in _a9(report))
     with pytest.raises(ConfigError, match="mapping with a name"):
         build_model(model, ResolutionContext(), switch_order=())
 
@@ -470,10 +456,7 @@ def test_wrong_many_shape_is_owned_by_a6_before_dimension_fields():
     report = preflight(document)
 
     assert "A6" in report.checks()
-    assert not any(
-        finding.where.startswith("model.filters.not_a_fan")
-        for finding in _a9(report)
-    )
+    assert not any(finding.where.startswith("model.filters.not_a_fan") for finding in _a9(report))
     with pytest.raises(ConfigError, match="non-empty list"):
         build_model(model, ResolutionContext(), switch_order=())
 
@@ -548,9 +531,7 @@ def test_invalid_compose_stands_down_model_context_until_its_builder_refuses(
     assert environment.model_input_dimension is None
     assert environment.prediction_dimension is None
     assert environment.latent_dimensions["declared"] == signature("Hz")
-    assert not any(
-        finding.where == "inference.noise.sigma" for finding in _a9(report)
-    )
+    assert not any(finding.where == "inference.noise.sigma" for finding in _a9(report))
     with pytest.raises(ConfigError, match="every stage is a mapping with a name"):
         build_model(model, ResolutionContext(), switch_order=())
 
@@ -648,9 +629,7 @@ def test_compound_plugin_signature_is_compared_without_string_round_trip(monkeyp
     saved_formulas = dict(dimension_module._FORMULA_REGISTRY)
     monkeypatch.setattr(check, "operator_table", lambda: {"plugin": (_PluginOperator,)})
     try:
-        register_dimension(
-            f"{qualified}.level", domain="model_field", dimension="K/s"
-        )
+        register_dimension(f"{qualified}.level", domain="model_field", dimension="K/s")
         register_dimension_formula(
             "compound_plugin_output",
             rule="fixed",
@@ -658,9 +637,7 @@ def test_compound_plugin_signature_is_compared_without_string_round_trip(monkeyp
             operands=(),
             producers=(qualified,),
         )
-        document = {
-            "model": {"plugin": {"level": {"value": 1.0, "unit": "K/s"}}}
-        }
+        document = {"model": {"plugin": {"level": {"value": 1.0, "unit": "K/s"}}}}
         assert not tuple(check._dimensions(document))
 
         document["model"]["plugin"]["level"]["unit"] = "K"
@@ -677,9 +654,7 @@ def test_compound_plugin_signature_is_compared_without_string_round_trip(monkeyp
 def test_python_plugin_omitted_default_field_runs_completeness():
     from rheplicant.config.preflight import dimensions as check
 
-    qualified = (
-        f"{_PythonPluginOperator.__module__}.{_PythonPluginOperator.__qualname__}"
-    )
+    qualified = f"{_PythonPluginOperator.__module__}.{_PythonPluginOperator.__qualname__}"
     saved_formulas = dict(dimension_module._FORMULA_REGISTRY)
     try:
         register_dimension_formula(
@@ -693,8 +668,7 @@ def test_python_plugin_omitted_default_field_runs_completeness():
             "model": {
                 "gain": {
                     "python": (
-                        f"{_PythonPluginOperator.__module__}:"
-                        f"{_PythonPluginOperator.__qualname__}"
+                        f"{_PythonPluginOperator.__module__}:{_PythonPluginOperator.__qualname__}"
                     )
                 }
             }
@@ -709,19 +683,13 @@ def test_python_plugin_omitted_default_field_runs_completeness():
 def test_plugin_with_multiple_disjoint_formulas_refuses_ambiguous_output():
     from rheplicant.config.preflight import dimensions as check
 
-    qualified = (
-        f"{_PythonPluginOperator.__module__}.{_PythonPluginOperator.__qualname__}"
-    )
+    qualified = f"{_PythonPluginOperator.__module__}.{_PythonPluginOperator.__qualname__}"
     saved_dimensions = dict(dimension_module._DIMENSION_REGISTRY)
     saved_formulas = dict(dimension_module._FORMULA_REGISTRY)
     fixed_k = DimensionSpec("fixed", signature("K"), unit_policy="inherited")
-    fixed_count = DimensionSpec(
-        "fixed", signature("adc_count"), unit_policy="inherited"
-    )
+    fixed_count = DimensionSpec("fixed", signature("adc_count"), unit_policy="inherited")
     try:
-        register_dimension(
-            f"{qualified}.level", domain="model_field", dimension="K"
-        )
+        register_dimension(f"{qualified}.level", domain="model_field", dimension="K")
         register_dimension_formula(
             "ambiguous_plugin_signal",
             rule="fixed",
@@ -740,8 +708,7 @@ def test_plugin_with_multiple_disjoint_formulas_refuses_ambiguous_output():
             "model": {
                 "gain": {
                     "python": (
-                        f"{_PythonPluginOperator.__module__}:"
-                        f"{_PythonPluginOperator.__qualname__}"
+                        f"{_PythonPluginOperator.__module__}:{_PythonPluginOperator.__qualname__}"
                     ),
                     "level": {"value": 1.0, "unit": "K"},
                 }
@@ -770,14 +737,8 @@ def test_a9_resolves_config_destinations_from_the_live_registry():
 
     saved = dict(dimension_module._DIMENSION_REGISTRY)
     try:
-        register_dimension(
-            "observation.site.*", domain="config_path", dimension="Hz"
-        )
-        document = {
-            "observation": {
-                "site": {"lat_deg": {"value": 51.0, "unit": "deg"}}
-            }
-        }
+        register_dimension("observation.site.*", domain="config_path", dimension="Hz")
+        document = {"observation": {"site": {"lat_deg": {"value": 51.0, "unit": "deg"}}}}
         findings = tuple(check._dimensions(document))
         assert any(
             finding.where == "observation.site.lat_deg"
@@ -792,12 +753,8 @@ def test_a9_resolves_config_destinations_from_the_live_registry():
 def test_multilayer_preflight_evaluates_each_selector_match_once(monkeypatch):
     document = preflight_document()
     document["variants"] = {
-        "higher_gain": {
-            "model": {"gain": {"gain": {"value": 2.0, "unit": "dimensionless"}}}
-        },
-        "lower_gain": {
-            "model": {"gain": {"gain": {"value": 0.5, "unit": "dimensionless"}}}
-        },
+        "higher_gain": {"model": {"gain": {"gain": {"value": 2.0, "unit": "dimensionless"}}}},
+        "lower_gain": {"model": {"gain": {"gain": {"value": 0.5, "unit": "dimensionless"}}}},
     }
     calls = Counter()
     selector_matches = dimension_module._selector_matches
@@ -828,10 +785,7 @@ def test_a9_resolves_plugin_resource_fields_from_the_live_registry():
     from rheplicant.config import resources
     from rheplicant.config.preflight import dimensions as check
 
-    qualified = (
-        f"{_build_plugin_resource.__module__}."
-        f"{_build_plugin_resource.__qualname__}.level"
-    )
+    qualified = f"{_build_plugin_resource.__module__}.{_build_plugin_resource.__qualname__}.level"
     saved_dimensions = dict(dimension_module._DIMENSION_REGISTRY)
     saved_kinds = dict(resources._KINDS)
     try:
@@ -839,19 +793,10 @@ def test_a9_resolves_plugin_resource_fields_from_the_live_registry():
         register_dimension(qualified, domain="resource_field", dimension="Hz")
         findings = tuple(
             check._dimensions(
-                {
-                    "resources": {
-                        "plugin_dimension": {
-                            "p": {"level": {"value": 1.0, "unit": "K"}}
-                        }
-                    }
-                }
+                {"resources": {"plugin_dimension": {"p": {"level": {"value": 1.0, "unit": "K"}}}}}
             )
         )
-        assert any(
-            finding.where == "resources.plugin_dimension.p.level"
-            for finding in findings
-        )
+        assert any(finding.where == "resources.plugin_dimension.p.level" for finding in findings)
     finally:
         resources._KINDS.clear()
         resources._KINDS.update(saved_kinds)
@@ -873,10 +818,7 @@ def test_latent_declaration_unit_is_the_authority_over_prior_operands():
         "into": "gain.gain",
     }
     findings = _a9(preflight(document))
-    assert any(
-        finding.where == "inference.parameters.g.prior.normal.loc"
-        for finding in findings
-    )
+    assert any(finding.where == "inference.parameters.g.prior.normal.loc" for finding in findings)
 
 
 def test_latent_declaration_prior_and_binding_must_agree():

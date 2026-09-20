@@ -342,9 +342,7 @@ def _text_cost(text: str) -> int:
     return len(json.dumps(text))
 
 
-def _bounded_value(
-    value: object, *, depth: int, budget: int
-) -> tuple[object, int]:
+def _bounded_value(value: object, *, depth: int, budget: int) -> tuple[object, int]:
     """Bound one node, returning it with the budget its subtree left over."""
     if budget <= 0:
         return TRUNCATION_MARKER, 0
@@ -433,11 +431,7 @@ def _stored_check(name: str) -> str:
     in the reserved check always gains exactly one escape, and one that does
     not is stored unchanged, so no escaped name can equal an unescaped one.
     """
-    return (
-        f"{_KEY_ESCAPE}{name}"
-        if name.endswith(TRUNCATED_FINDING_CHECK)
-        else name
-    )
+    return f"{_KEY_ESCAPE}{name}" if name.endswith(TRUNCATED_FINDING_CHECK) else name
 
 
 def _marked_mapping(bounded: dict[str, object], omitted: int) -> dict[str, object]:

@@ -252,8 +252,7 @@ def _t2c_generated(document: Mapping[str, Any]) -> bool:
     if "from" in observed or "file" in observed:
         record: Any = observed
     else:
-        named = {name: spec for name, spec in observed.items()
-                 if isinstance(spec, Mapping)}
+        named = {name: spec for name, spec in observed.items() if isinstance(spec, Mapping)}
         if "primary" in named:
             record = named["primary"]
         elif len(named) == 1:
@@ -263,8 +262,7 @@ def _t2c_generated(document: Mapping[str, Any]) -> bool:
     return _t2c_record_generated(record, section)
 
 
-def _t2c_record_generated(record: Mapping[str, Any],
-                          section: Mapping[str, Any]) -> bool:
+def _t2c_record_generated(record: Mapping[str, Any], section: Mapping[str, Any]) -> bool:
     """Did the TWIN generate THIS record specifically?
 
     The per-record half of :func:`_t2c_generated`'s own test (``from:
@@ -281,8 +279,7 @@ def _t2c_record_generated(record: Mapping[str, Any],
     return not _t2c_repaired(section)
 
 
-def _t2c_generating_records(
-        document: Mapping[str, Any]) -> tuple[str | None, ...]:
+def _t2c_generating_records(document: Mapping[str, Any]) -> tuple[str | None, ...]:
     """Which record(s) :func:`_sigma_families` must check -- BLOCKER 2's own
     fix, threaded WITHOUT changing :func:`_t2c_generated`'s contract (see its
     docstring for why that function itself stays untouched).
@@ -315,12 +312,10 @@ def _t2c_generating_records(
         return ()
     if "from" in observed or "file" in observed:
         return (None,) if _t2c_generated(document) else ()
-    named = {name: spec for name, spec in observed.items()
-             if isinstance(spec, Mapping)}
+    named = {name: spec for name, spec in observed.items() if isinstance(spec, Mapping)}
     if "primary" in named or len(named) == 1:
         return (None,) if _t2c_generated(document) else ()
-    return tuple(name for name, record in named.items()
-                 if _t2c_record_generated(record, section))
+    return tuple(name for name, record in named.items() if _t2c_record_generated(record, section))
 
 
 def _t2c_repaired(section: Mapping[str, Any]) -> bool:
@@ -437,19 +432,25 @@ def _sigma_families(document: Mapping[str, Any]) -> Iterable[Finding]:
         fitting = _a30_exits(document)
         if not fitting:
             return ()
-        return tuple(warn("C18", where, (
-            f"model.{_T2C_NOISE_NODE} draws {_t2c_subject(name)} with "
-            f"{drawn}, and inference.noise: says nothing -- so {list(fitting)} "
-            "weighs every channel equally over data that carries noise. The "
-            "fit still returns a finite, correctly-shaped answer; its error "
-            "bars are the ones an unweighted least squares gives. Declare "
-            f"inference.noise: {{kind: {sorted(agrees)[0]}}} to weigh what "
-            f"you draw, or drop model.{_T2C_NOISE_NODE} -- and the "
-            f"inference.twin.without: [{_T2C_NOISE_NODE}] that repairs it -- "
-            "if this data is meant to be noise-free (check C18)."))
-            for name in subjects)
-    other = sorted(
-        name for name, kinds in _DRAWING_TYPES.items() if weighed in kinds)
+        return tuple(
+            warn(
+                "C18",
+                where,
+                (
+                    f"model.{_T2C_NOISE_NODE} draws {_t2c_subject(name)} with "
+                    f"{drawn}, and inference.noise: says nothing -- so {list(fitting)} "
+                    "weighs every channel equally over data that carries noise. The "
+                    "fit still returns a finite, correctly-shaped answer; its error "
+                    "bars are the ones an unweighted least squares gives. Declare "
+                    f"inference.noise: {{kind: {sorted(agrees)[0]}}} to weigh what "
+                    f"you draw, or drop model.{_T2C_NOISE_NODE} -- and the "
+                    f"inference.twin.without: [{_T2C_NOISE_NODE}] that repairs it -- "
+                    "if this data is meant to be noise-free (check C18)."
+                ),
+            )
+            for name in subjects
+        )
+    other = sorted(name for name, kinds in _DRAWING_TYPES.items() if weighed in kinds)
     if not other:
         # A kind no operator in `_DRAWING_TYPES` produces.  Today that is only
         # a kind `build_noise` itself refuses -- `inference.noise.kind:
@@ -460,17 +461,24 @@ def _sigma_families(document: Mapping[str, Any]) -> Iterable[Finding]:
         # turns into "check 'C18.kind' RAISED" and which discards every other
         # finding in the report.
         return ()
-    return tuple(refuse("C18", where, (
-        f"model.{_T2C_NOISE_NODE} draws {_t2c_subject(name)} with {drawn}, "
-        f"and inference.noise.kind: {weighed} weighs the likelihood with a "
-        "different noise model. They are not two spellings of one sigma, so "
-        "there is no number to compare: the fit is weighted against a scatter "
-        "its own data does not have, and it returns a finite, "
-        "correctly-shaped answer whose error bars are wrong by whatever the "
-        f"two models differ by. Write model.{_T2C_NOISE_NODE}.type: "
-        f"{other[0]} to draw what you weigh, or inference.noise.kind: "
-        f"{sorted(agrees)[0]} to weigh what you draw (check C18)."))
-        for name in subjects)
+    return tuple(
+        refuse(
+            "C18",
+            where,
+            (
+                f"model.{_T2C_NOISE_NODE} draws {_t2c_subject(name)} with {drawn}, "
+                f"and inference.noise.kind: {weighed} weighs the likelihood with a "
+                "different noise model. They are not two spellings of one sigma, so "
+                "there is no number to compare: the fit is weighted against a scatter "
+                "its own data does not have, and it returns a finite, "
+                "correctly-shaped answer whose error bars are wrong by whatever the "
+                f"two models differ by. Write model.{_T2C_NOISE_NODE}.type: "
+                f"{other[0]} to draw what you weigh, or inference.noise.kind: "
+                f"{sorted(agrees)[0]} to weigh what you draw (check C18)."
+            ),
+        )
+        for name in subjects
+    )
 
 
 # `_A30_NOT_FITTING` is imported rather than re-derived (§3.1's one-name-one-

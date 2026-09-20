@@ -455,8 +455,7 @@ def _prior_at_points(
         # Gaussian draw. Measured: `jax.random.normal` refuses an int32 dtype
         # outright, so without this an entirely valid document dies here with
         # a message about dtypes rather than a verdict about linearity.
-        if n not in chosen
-        and jnp.issubdtype(jnp.asarray(space.latent(n).init).dtype, jnp.inexact)
+        if n not in chosen and jnp.issubdtype(jnp.asarray(space.latent(n).init).dtype, jnp.inexact)
     ]
     points = [dict(at)]
     for index in range(1, max(count, 1)):
@@ -535,8 +534,12 @@ def _single_probe(
     magnitude = _probe_anchor(latent)
 
     def probe_at(index: int, scale: float) -> jax.Array:
-        return magnitude * scale * jax.random.normal(
-            jax.random.fold_in(key, index), latent.init.shape, dtype=latent.init.dtype
+        return (
+            magnitude
+            * scale
+            * jax.random.normal(
+                jax.random.fold_in(key, index), latent.init.shape, dtype=latent.init.dtype
+            )
         )
 
     return probe_at
@@ -555,7 +558,9 @@ def _group_probe(
     def probe_at(index: int, scale: float) -> dict[str, jax.Array]:
         root = jax.random.fold_in(key, index)
         return {
-            member: _probe_anchor(space.latent(member)) * scale * jax.random.normal(
+            member: _probe_anchor(space.latent(member))
+            * scale
+            * jax.random.normal(
                 jax.random.fold_in(root, position),
                 space.latent(member).init.shape,
                 dtype=space.latent(member).init.dtype,
@@ -566,9 +571,7 @@ def _group_probe(
     return probe_at
 
 
-def _reported(
-    values: jax.Array, kept: jax.Array, departure: jax.Array, threshold: float
-) -> float:
+def _reported(values: jax.Array, kept: jax.Array, departure: jax.Array, threshold: float) -> float:
     """The worst of ``values`` among the elements the roundoff floor kept.
 
     That is the number the criterion actually JUDGED, so it is the number a
@@ -666,9 +669,7 @@ def _affinity_errors(
         # the dilution above.
         judged = departure > RELATIVE_FLOOR_FACTOR * epsilon * magnitude
         finite = bool(jnp.all(jnp.isfinite(relative)))
-        errors[scale] = _reported(relative, judged, departure, rtol) if finite else (
-            float("nan")
-        )
+        errors[scale] = _reported(relative, judged, departure, rtol) if finite else (float("nan"))
         # NaN must count as a FAILURE, not a pass: `nan > rtol` is False, so a
         # naive comparison treats an unusable probe as evidence of linearity.
         refused = (not finite) or bool(jnp.any(judged & (relative > rtol)))
@@ -687,8 +688,10 @@ def _affinity_errors(
                 if weighted_finite
                 else float("nan")
             )
-            refused = refused or (not weighted_finite) or bool(
-                jnp.any(above & (in_sigma > WEIGHTED_RTOL))
+            refused = (
+                refused
+                or (not weighted_finite)
+                or bool(jnp.any(above & (in_sigma > WEIGHTED_RTOL)))
             )
         verdicts[scale] = refused
 
@@ -797,10 +800,7 @@ def check_linearity(
         def isolate_at(point, _n=name):
             return _isolate(space, pipeline, state_template, _n, point)
 
-        subject = (
-            f"Latent {name!r} is declared linear=True, but the prediction is not affine "
-            "in it"
-        )
+        subject = f"Latent {name!r} is declared linear=True, but the prediction is not affine in it"
         scale_of = "the latent's scale"
         remedy = (
             "Either drop the declaration, or re-parameterize so the model really is "
@@ -835,27 +835,23 @@ def check_linearity(
     points = (
         list(at_points)
         if at_points is not None
-        else _prior_at_points(
-            space, selected, _values_at(space, {}, at), DEFAULT_AT_POINTS, key
-        )
+        else _prior_at_points(space, selected, _values_at(space, {}, at), DEFAULT_AT_POINTS, key)
     )
     merged: dict[float, float] = {}
     merged_weighted: dict[float, float] | None = None
     failed_scales: list[float] = []
     for point in points:
         g, zero = isolate_at(point)
-        errors, weighted, failed, rtol = _affinity_errors(
-            g, zero, probe_at, scales, rtol, noise
-        )
+        errors, weighted, failed, rtol = _affinity_errors(g, zero, probe_at, scales, rtol, noise)
         for scale, value in errors.items():
-            merged[scale] = value if scale not in merged else _worse(
-                merged[scale], value
-            )
+            merged[scale] = value if scale not in merged else _worse(merged[scale], value)
         if weighted is not None:
             merged_weighted = merged_weighted or {}
             for scale, value in weighted.items():
-                merged_weighted[scale] = value if scale not in merged_weighted else (
-                    _worse(merged_weighted[scale], value)
+                merged_weighted[scale] = (
+                    value
+                    if scale not in merged_weighted
+                    else (_worse(merged_weighted[scale], value))
                 )
         failed_scales.extend(f for f in failed if f not in failed_scales)
     errors, weighted, failed = merged, merged_weighted, sorted(failed_scales)
@@ -866,10 +862,14 @@ def check_linearity(
         # one threshold is unreadable half the time, since a reader sees a
         # value under the tolerance printed beside a refusal and concludes the
         # guard is broken.
-        weighted_detail = "" if weighted is None else (
-            "; in units of sigma against weighted_rtol="
-            f"{WEIGHTED_RTOL:.2e}: "
-            + ", ".join(f"{scale:g}x -> {err:.2e}" for scale, err in weighted.items())
+        weighted_detail = (
+            ""
+            if weighted is None
+            else (
+                "; in units of sigma against weighted_rtol="
+                f"{WEIGHTED_RTOL:.2e}: "
+                + ", ".join(f"{scale:g}x -> {err:.2e}" for scale, err in weighted.items())
+            )
         )
         # The subclass, and the SAME sentence: `detail` renders the numbers for
         # a reader, and `errors=` hands the same numbers to a caller that has
@@ -945,8 +945,7 @@ def linear_operator(
     if names is None:
         name = _resolve_name(space, name)
         if check:
-            check_linearity(space, pipeline, state_template, name, at=at,
-                            scales=scales, rtol=rtol)
+            check_linearity(space, pipeline, state_template, name, at=at, scales=scales, rtol=rtol)
         g, zero = _isolate(space, pipeline, state_template, name, at)
         latent = space.latent(name)
 
@@ -965,8 +964,9 @@ def linear_operator(
 
     selected = _resolve_names(space, names)
     if check:
-        check_linearity(space, pipeline, state_template, names=selected, at=at,
-                        scales=scales, rtol=rtol)
+        check_linearity(
+            space, pipeline, state_template, names=selected, at=at, scales=scales, rtol=rtol
+        )
     g, zero = _isolate_group(space, pipeline, state_template, selected, at)
 
     offset, tangent = jax.linearize(g, zero)
@@ -1141,6 +1141,7 @@ def _far_precision(noise_std: Any) -> Any:
     from bayesmith.exact.precision import diagonal_from
 
     return diagonal_from({_OBSERVED: jnp.asarray(noise_std)})
+
 
 def _numpyro_distributions() -> Any:
     """numpyro's distribution module, or ``None`` when it is not installed.
@@ -1657,9 +1658,7 @@ def wiener_solve(
         block, observed, prior_mean, prior_std, "wiener_solve", noise_std=noise_std
     )
     solution, residual = _far_wiener_solve(
-        _as_far_block(
-            block, observed=observed, prior_mean=prior_mean, prior_std=prior_std
-        ),
+        _as_far_block(block, observed=observed, prior_mean=prior_mean, prior_std=prior_std),
         precision=_far_precision(noise_std),
         tol=tol,
         maxiter=maxiter,
@@ -1722,7 +1721,6 @@ def condition_bound(
         iterations=iterations,
         key=key,
     )
-
 
 
 def condition_estimate(
@@ -1808,8 +1806,6 @@ def condition_estimate(
         iterations=iterations,
         key=key,
     )
-
-
 
 
 def gcr_sample(
@@ -1907,9 +1903,7 @@ def gcr_sample(
         block, observed, prior_mean, prior_std, "gcr_sample", noise_std=noise_std
     )
     solution, residual = _far_gcr_sample(
-        _as_far_block(
-            block, observed=observed, prior_mean=prior_mean, prior_std=prior_std
-        ),
+        _as_far_block(block, observed=observed, prior_mean=prior_mean, prior_std=prior_std),
         precision=_far_precision(noise_std),
         key=key,
         tol=tol,

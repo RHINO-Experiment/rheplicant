@@ -42,9 +42,7 @@ def test_wait_for_url_rejects_a_200_after_the_owned_process_exits():
 
     with patch.object(wheel_support.urllib.request, "urlopen", return_value=response):
         with pytest.raises(RuntimeError, match="GUI exited with 17"):
-            wheel_support.wait_for_url(
-                "http://127.0.0.1:8123/api/starter", process, timeout=30
-            )
+            wheel_support.wait_for_url("http://127.0.0.1:8123/api/starter", process, timeout=30)
 
 
 def test_wait_for_url_reports_an_early_owned_process_exit():
@@ -58,9 +56,7 @@ def test_wait_for_url_reports_an_early_owned_process_exit():
         side_effect=urllib.error.URLError("not ready"),
     ):
         with pytest.raises(RuntimeError, match="GUI exited with 9"):
-            wheel_support.wait_for_url(
-                "http://127.0.0.1:8123/api/starter", process, timeout=30
-            )
+            wheel_support.wait_for_url("http://127.0.0.1:8123/api/starter", process, timeout=30)
 
 
 def test_wait_for_url_stops_at_the_bounded_deadline():
@@ -187,9 +183,7 @@ def test_running_gui_uses_the_starter_boundary_and_bounded_cleanup(tmp_path):
         with wheel_support.running_gui(install) as base_url:
             assert base_url == "http://127.0.0.1:43123"
 
-    wait_for_url.assert_called_once_with(
-        "http://127.0.0.1:43123/api/starter", process, timeout=30
-    )
+    wait_for_url.assert_called_once_with("http://127.0.0.1:43123/api/starter", process, timeout=30)
     stop_process.assert_called_once_with(process)
 
 
@@ -378,7 +372,7 @@ def test_a_child_in_its_own_session_is_the_group_we_signal():
 #: ``wait_for_url`` polls.  The pid file is written and fsynced BEFORE the bind,
 #: which is what lets the test read it the moment ``/api/starter`` answers,
 #: instead of sleeping and hoping.
-_FAKE_GUI = '''
+_FAKE_GUI = """
 import http.server
 import json
 import os
@@ -407,7 +401,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
 
 http.server.HTTPServer((host, port), Handler).serve_forever()
-'''
+"""
 
 #: Every descendant below announces itself only once its SIGTERM disposition
 #: is installed, and the tests wait for that announcement before they let the
@@ -420,7 +414,7 @@ http.server.HTTPServer((host, port), Handler).serve_forever()
 #: silent -- the ignores-TERM case dies on the TERM it was written to ignore,
 #: so the escalation to a group KILL is never exercised at all and the test
 #: passes having measured nothing.
-_DESCENDANT_READY = '''
+_DESCENDANT_READY = """
 import os
 
 
@@ -430,11 +424,13 @@ def _ready():
     os.write(handle, b"ready")
     os.fsync(handle)
     os.close(handle)
-'''
+"""
 
 #: Records that it was ASKED to stop before stopping, so the group TERM is
 #: observable and not merely inferred from the descendant being gone.
-_DESCENDANT_HONOURS_TERM = _DESCENDANT_READY + '''
+_DESCENDANT_HONOURS_TERM = (
+    _DESCENDANT_READY
+    + """
 import signal
 import time
 
@@ -451,18 +447,22 @@ def _record(*_ignored):
 signal.signal(signal.SIGTERM, _record)
 _ready()
 time.sleep(3600)
-'''
+"""
+)
 
 #: The worst case a scientific worker really presents: TERM does not end it, so
 #: only the escalation to a group KILL can.
-_DESCENDANT_IGNORES_TERM = _DESCENDANT_READY + '''
+_DESCENDANT_IGNORES_TERM = (
+    _DESCENDANT_READY
+    + """
 import signal
 import time
 
 signal.signal(signal.SIGTERM, signal.SIG_IGN)
 _ready()
 time.sleep(3600)
-'''
+"""
+)
 
 
 def _alive(pid: int) -> bool:
@@ -560,9 +560,7 @@ def fake_gui(tmp_path):
     [_DESCENDANT_HONOURS_TERM, _DESCENDANT_IGNORES_TERM],
     ids=["honours-term", "ignores-term"],
 )
-def test_running_gui_kills_the_descendants_the_server_spawned(
-    fake_gui, monkeypatch, descendant
-):
+def test_running_gui_kills_the_descendants_the_server_spawned(fake_gui, monkeypatch, descendant):
     """The defect this pins: the GUI server spawns a scientific worker for the
     life of every job, and a teardown that signals only the DIRECT child leaves
     that worker running -- holding its outputs, its memory and its CPU -- long
@@ -590,9 +588,7 @@ def test_running_gui_kills_the_descendants_the_server_spawned(
 
 
 @_POSIX_ONLY
-def test_the_group_is_swept_even_when_stopping_the_child_raises(
-    fake_gui, monkeypatch
-):
+def test_the_group_is_swept_even_when_stopping_the_child_raises(fake_gui, monkeypatch):
     """The sweep is in a ``finally`` rather than on the success path. A child
     stop that blew up would otherwise strand every descendant, which is the
     same leak wearing a different hat."""
@@ -617,12 +613,8 @@ def test_the_group_is_swept_even_when_stopping_the_child_raises(
     assert _gone(child), "the descendant outlived a failed child stop"
 
 
-def test_fresh_gui_wheel_passes_playwright(
-    packaged_distributions, packaged_install
-):
-    install = packaged_install(
-        packaged_distributions["direct-wheel"], extras=("gui",)
-    )
+def test_fresh_gui_wheel_passes_playwright(packaged_distributions, packaged_install):
+    install = packaged_install(packaged_distributions["direct-wheel"], extras=("gui",))
     assert "PYTHONPATH" not in install.env
     assert "PYTHONHOME" not in install.env
     with wheel_support.running_gui(install) as base_url:

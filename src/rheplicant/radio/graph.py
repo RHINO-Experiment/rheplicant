@@ -121,21 +121,15 @@ RADIO_GRAPH = register_graph(
             # No shipped operator: the beam belongs to the sky projector, which
             # applies it while producing `observed_astro_sky`. The node stays as a
             # slot for a beam coupling on a path that skipped the projector.
-            "beam": NodeSpec(
-                _T, "shared chromatic beam (the pain point)", reserved=True
-            ),
+            "beam": NodeSpec(_T, "shared chromatic beam (the pain point)", reserved=True),
             "observed_astro_sky": NodeSpec(_S, "pre-convolved astro sky (SkySource)"),
             "ground_pickup": NodeSpec(_S, "effective ground-spill temperature"),
             # Not `reserved`: BasisTemperatureOperator declares this node, so
             # the leaf has a shipped operator and must not render dashed.
-            "t_sys_extra": NodeSpec(
-                _S, "generic effective T_sys contribution", many=True
-            ),
+            "t_sys_extra": NodeSpec(_S, "generic effective T_sys contribution", many=True),
             "atmosphere": NodeSpec(_S, "beam-averaged atmospheric emission"),
             "astro_ant_sum": NodeSpec(_J, "beam-convolved astro sky, either entrance"),
-            "beam_spill": NodeSpec(
-                _T, "horizon split: f_sky * sky + (1-f_sky) * ground"
-            ),
+            "beam_spill": NodeSpec(_T, "horizon split: f_sky * sky + (1-f_sky) * ground"),
             "t_ant_sum": NodeSpec(_J, "antenna-temperature assembly"),
             "antenna_loss": NodeSpec(
                 _T, "antenna ohmic loss: eta T + (1-eta) T_phys (before the switch)"
@@ -145,9 +139,7 @@ RADIO_GRAPH = register_graph(
                 "switched calibration loads; one switch position per instance",
                 many=True,
             ),
-            "receiver_input": NodeSpec(
-                "selector", "antenna/load switch (cycle in coords.extra)"
-            ),
+            "receiver_input": NodeSpec("selector", "antenna/load switch (cycle in coords.extra)"),
             "noise_wave": NodeSpec(_T, "reflection loss + noise-wave T terms"),
             "cw_tone": NodeSpec(_T, "CW calibration tone (before bandpass/gain)"),
             "bandpass": NodeSpec(_T, "receiver bandpass"),
@@ -164,8 +156,10 @@ RADIO_GRAPH = register_graph(
             "averaging": NodeSpec(_T, "time integration", segment="processing"),
             "apply_cal": NodeSpec(_T, "apply gain solution", segment="processing"),
             "filters": NodeSpec(
-                _T, "sidereal / sky-space / Fourier filters",
-                many=True, segment="processing",
+                _T,
+                "sidereal / sky-space / Fourier filters",
+                many=True,
+                segment="processing",
             ),
         },
         [
@@ -219,6 +213,4 @@ def _validate_registrations():
         obj = getattr(radio, name)
         node = getattr(obj, "graph_node", None)
         if isinstance(node, str) and node not in RADIO_GRAPH.nodes:
-            raise AssertionError(
-                f"{name}.graph_node = {node!r} is not a node of RADIO_GRAPH."
-            )
+            raise AssertionError(f"{name}.graph_node = {node!r} is not a node of RADIO_GRAPH.")

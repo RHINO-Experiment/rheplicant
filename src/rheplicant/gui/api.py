@@ -181,9 +181,7 @@ class SessionStore:
             if type(expected_revision) is not int or expected_revision != current.revision:
                 raise RevisionConflict(expected_revision, current.revision)
             if snapshot(current.yaml_text).validation.run_blocked:
-                raise ConfigError(
-                    "Execution jobs are disabled while text-level refusals exist."
-                )
+                raise ConfigError("Execution jobs are disabled while text-level refusals exist.")
             row = self.jobs.submit(session_id, kind, current.revision, current.yaml_text)
             return current, row.job_id
 
@@ -206,10 +204,7 @@ def _session_body(
         "validation_stale": session.validation_stale,
         "can_undo": session.can_undo,
         "can_redo": session.can_redo,
-        "jobs": [
-            projection_body(row)
-            for row in store.jobs.project(session_id, digest)
-        ],
+        "jobs": [projection_body(row) for row in store.jobs.project(session_id, digest)],
         "outputs": dataclasses.asdict(project_output_workflow(session.yaml_text)),
         "document": _snapshot_body(snapshot(session.yaml_text)),
     }
@@ -231,10 +226,7 @@ def _jobs_body(
         "session_id": session_id,
         "revision": session.revision,
         "yaml_digest": digest,
-        "jobs": [
-            projection_body(row)
-            for row in store.jobs.project(session_id, digest)
-        ],
+        "jobs": [projection_body(row) for row in store.jobs.project(session_id, digest)],
     }
 
 

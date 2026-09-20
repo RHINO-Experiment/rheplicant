@@ -85,12 +85,8 @@ class TestImmutability:
 class TestPRNGProtocol:
     def test_next_key_advances(self, state):
         subkey, s2 = state.next_key()
-        assert not jnp.array_equal(
-            jax.random.key_data(s2.key), jax.random.key_data(state.key)
-        )
-        assert not jnp.array_equal(
-            jax.random.key_data(subkey), jax.random.key_data(state.key)
-        )
+        assert not jnp.array_equal(jax.random.key_data(s2.key), jax.random.key_data(state.key))
+        assert not jnp.array_equal(jax.random.key_data(subkey), jax.random.key_data(state.key))
 
     def test_next_key_deterministic(self):
         k1, _ = State(key=jax.random.key(42)).next_key()

@@ -67,9 +67,7 @@ def test_the_construction_guard_is_not_the_coords_guard(coords):
     with pytest.raises(StateValidationError) as construction:
         IonosphereOperator(delta=jnp.array(0.05), ref_freq=0.0)
     with pytest.raises(StateValidationError) as call_time:
-        IonosphereOperator(delta=jnp.array(0.05), ref_freq=70e6)(
-            State(data=jnp.zeros((8, 4)))
-        )
+        IonosphereOperator(delta=jnp.array(0.05), ref_freq=70e6)(State(data=jnp.zeros((8, 4))))
 
     assert "ref_freq must be > 0" in str(construction.value)
     assert "ref_freq must be > 0" not in str(call_time.value)
@@ -109,9 +107,7 @@ def test_a_cg_iteration_cap_that_is_not_a_positive_int_is_refused(cg_maxiter):
     would reach ``jax.scipy.sparse.linalg.cg`` as a float ``maxiter``.
     """
     with pytest.raises(StateValidationError) as excinfo:
-        SkySpaceFilter(
-            projector=PROJECTOR, regularization=jnp.array(1e-3), cg_maxiter=cg_maxiter
-        )
+        SkySpaceFilter(projector=PROJECTOR, regularization=jnp.array(1e-3), cg_maxiter=cg_maxiter)
     assert "cg_maxiter must be a positive int" in str(excinfo.value)
 
 
@@ -214,14 +210,25 @@ def test_several_pixels_stay_distinguishable(coords):
 @pytest.mark.parametrize(
     ("label", "build"),
     [
-        ("IonosphereOperator", lambda: IonosphereOperator(
-            delta=jnp.array(0.5), ref_freq=float("nan"))),
-        ("ForegroundOperator", lambda: ForegroundOperator(
-            amplitude=jnp.array(120.0), spectral_index=jnp.array(-2.6),
-            ref_freq=float("nan"))),
-        ("PowerLawSkyModel", lambda: PowerLawSkyModel(
-            amplitude=jnp.arange(1.0, 4.0), spectral_index=jnp.array(-2.6),
-            ref_freq=float("nan"), n_pix=3)),
+        (
+            "IonosphereOperator",
+            lambda: IonosphereOperator(delta=jnp.array(0.5), ref_freq=float("nan")),
+        ),
+        (
+            "ForegroundOperator",
+            lambda: ForegroundOperator(
+                amplitude=jnp.array(120.0), spectral_index=jnp.array(-2.6), ref_freq=float("nan")
+            ),
+        ),
+        (
+            "PowerLawSkyModel",
+            lambda: PowerLawSkyModel(
+                amplitude=jnp.arange(1.0, 4.0),
+                spectral_index=jnp.array(-2.6),
+                ref_freq=float("nan"),
+                n_pix=3,
+            ),
+        ),
     ],
 )
 def test_a_nan_reference_frequency_is_refused_at_every_copy(label, build):
@@ -305,6 +312,9 @@ def test_no_target_is_the_default_and_stays_legal():
     filt = SkySpaceFilter(projector=PROJECTOR, regularization=jnp.array(1e-3))
 
     assert filt.require_convergence is None
-    assert SkySpaceFilter(
-        projector=PROJECTOR, regularization=jnp.array(1e-3), require_convergence=1e-6
-    ).require_convergence == 1e-6
+    assert (
+        SkySpaceFilter(
+            projector=PROJECTOR, regularization=jnp.array(1e-3), require_convergence=1e-6
+        ).require_convergence
+        == 1e-6
+    )

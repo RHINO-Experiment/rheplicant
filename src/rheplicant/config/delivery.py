@@ -228,7 +228,11 @@ def deliver(
 ) -> Any:
     """Public compatibility wrapper for destination-aware delivery."""
     return deliver_checked(
-        value, spec, dtype=dtype, source=source, declared_as=declared_as,
+        value,
+        spec,
+        dtype=dtype,
+        source=source,
+        declared_as=declared_as,
         destination=destination,
     )
 
@@ -260,9 +264,24 @@ def origin_for_delivery(
 
 
 _CANONICAL_AUDIT_UNITS = (
-    "Hz", "s", "unix_s", "K", "deg", "m", "ohm", "dimensionless",
-    "count", "samples", "bits", "channels", "cycles", "adc_count",
-    "Hz/s", "adc_count/K", "dimensionless/s", "cycles/samples",
+    "Hz",
+    "s",
+    "unix_s",
+    "K",
+    "deg",
+    "m",
+    "ohm",
+    "dimensionless",
+    "count",
+    "samples",
+    "bits",
+    "channels",
+    "cycles",
+    "adc_count",
+    "Hz/s",
+    "adc_count/K",
+    "dimensionless/s",
+    "cycles/samples",
 )
 _EXPECTED_FROM_DESTINATION = object()
 
@@ -288,9 +307,7 @@ def canonical_unit_for_delivery(
         unit = canonical_unit(token)
         if dimension_of(unit) == signature:
             return unit.canonical
-    raise ConfigError(
-        f"audit: no canonical unit represents {destination.document_path!r}"
-    )
+    raise ConfigError(f"audit: no canonical unit represents {destination.document_path!r}")
 
 
 def record_resolved_delivery(
@@ -312,12 +329,8 @@ def record_resolved_delivery(
         context.layer,
         destination,
         dtype=context.dtype,
-        origin=origin_for_delivery(
-            context, destination, defaulted=defaulted, authority=authority
-        ),
-        unit=canonical_unit_for_delivery(
-            context, destination, unit, expected=expected
-        ),
+        origin=origin_for_delivery(context, destination, defaulted=defaulted, authority=authority),
+        unit=canonical_unit_for_delivery(context, destination, unit, expected=expected),
     )
 
 

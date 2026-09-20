@@ -255,9 +255,7 @@ class TestToGraphBuildsThreeLayersAndNothingElse:
     def test_an_undeclared_linear_latent_makes_no_claim(
         self, instrument, data, noise, template_state
     ):
-        graph = to_graph(
-            gain_space(linear=False), instrument, template_state, data, noise
-        )
+        graph = to_graph(gain_space(linear=False), instrument, template_state, data, noise)
         prediction = next(node for node in graph.nodes if node.name == PREDICTION)
         assert tuple(prediction.linear_in) == ()
 
@@ -311,9 +309,7 @@ class TestToGraphBuildsThreeLayersAndNothingElse:
 
 
 class TestToGraphRefusesWhatTheGraphCannotSpell:
-    def test_a_sigma_vector_with_more_than_one_reading(
-        self, instrument, space, template_state
-    ):
+    def test_a_sigma_vector_with_more_than_one_reading(self, instrument, space, template_state):
         """The founding pre-validation, on a square prediction grid.
 
         Past ``to_graph`` the vector has been broadcast into a distribution and
@@ -339,9 +335,7 @@ class TestToGraphRefusesWhatTheGraphCannotSpell:
         with pytest.raises(StateValidationError, match="more than one legitimate reading"):
             to_graph(square_space, instrument, square_state, prediction, ambiguous)
 
-    def test_observed_of_the_wrong_shape(
-        self, instrument, space, data, noise, template_state
-    ):
+    def test_observed_of_the_wrong_shape(self, instrument, space, data, noise, template_state):
         with pytest.raises(ParameterSpaceError):
             to_graph(space, instrument, template_state, data[0], noise)
 
@@ -349,9 +343,7 @@ class TestToGraphRefusesWhatTheGraphCannotSpell:
         with pytest.raises(StateValidationError, match="complex `observed`"):
             to_graph(space, instrument, template_state, data + 0j, noise)
 
-    def test_a_thing_that_is_not_a_noise_model(
-        self, instrument, space, data, template_state
-    ):
+    def test_a_thing_that_is_not_a_noise_model(self, instrument, space, data, template_state):
         """A bare array reaches ``jnp.asarray`` deep inside and comes back as a
         dtype-object ``TypeError`` naming the wrong layer.
 
@@ -362,9 +354,7 @@ class TestToGraphRefusesWhatTheGraphCannotSpell:
             to_graph(space, instrument, template_state, data, jnp.array(0.5))
 
     @pytest.mark.parametrize("scope", ["per_epoch", "linked"])
-    def test_a_scope_with_no_graph_spelling(
-        self, instrument, data, noise, template_state, scope
-    ):
+    def test_a_scope_with_no_graph_spelling(self, instrument, data, noise, template_state, scope):
         """Refused by NAME, with the wave that will spell it.
 
         Emitting the graph anyway would marginalise a per-epoch quantity as
@@ -398,9 +388,7 @@ class TestToGraphRefusesWhatTheGraphCannotSpell:
         with pytest.raises(ParameterSpaceError, match="internal node names"):
             to_graph(space, instrument, template_state, data, noise)
 
-    def test_a_latent_with_no_prior_anywhere(
-        self, instrument, data, noise, template_state
-    ):
+    def test_a_latent_with_no_prior_anywhere(self, instrument, data, noise, template_state):
         with pytest.raises(ParameterSpaceError, match="declares no prior"):
             to_graph(gain_space(prior=None), instrument, template_state, data, noise)
 
@@ -525,16 +513,9 @@ def test_importing_the_adapter_does_not_import_jax_eagerly():
     import rheplicant.inference.graph_bridge as module
 
     tree = ast.parse(pathlib.Path(module.__file__).read_text())
-    top_level = [
-        node
-        for node in tree.body
-        if isinstance(node, (ast.Import, ast.ImportFrom))
-    ]
-    named = {
-        getattr(node, "module", None) or "" for node in top_level
-    } | {
-        alias.name for node in top_level if isinstance(node, ast.Import)
-        for alias in node.names
+    top_level = [node for node in tree.body if isinstance(node, (ast.Import, ast.ImportFrom))]
+    named = {getattr(node, "module", None) or "" for node in top_level} | {
+        alias.name for node in top_level if isinstance(node, ast.Import) for alias in node.names
     }
     assert not any(name.startswith("bayesmith") for name in named if name)
     assert not any(name.startswith("numpyro") for name in named if name)
@@ -561,9 +542,7 @@ class TestFlaggedNoiseCrossesAsADeclaredMask:
             flags=jnp.zeros(data.shape, dtype=bool).at[:, channel].set(True),
         )
 
-    def test_the_mask_is_the_negation_of_the_flags(
-        self, instrument, space, data, template_state
-    ):
+    def test_the_mask_is_the_negation_of_the_flags(self, instrument, space, data, template_state):
         """Polarity, against the flagged CHANNEL rather than against a count.
 
         ``FlaggedNoise.flags`` is True where a sample was FLAGGED; the graph's
@@ -572,9 +551,7 @@ class TestFlaggedNoiseCrossesAsADeclaredMask:
         every shape and dtype check there is. A count would not catch it either
         unless the flagged fraction happened not to be half.
         """
-        graph = to_graph(
-            space, instrument, template_state, data, self._flagged(data, 2)
-        )
+        graph = to_graph(space, instrument, template_state, data, self._flagged(data, 2))
         mask = np.asarray(graph.node("__data__").observed_mask)
         assert mask.shape == tuple(data.shape)
         assert not mask[:, 2].any(), "the flagged channel came through as TAKEN"
@@ -591,9 +568,7 @@ class TestFlaggedNoiseCrossesAsADeclaredMask:
         own sigma rather than a placeholder -- it cannot reach any answer, and
         using the instrument's number means the graph reads as the model.
         """
-        graph = to_graph(
-            space, instrument, template_state, data, self._flagged(data, 2)
-        )
+        graph = to_graph(space, instrument, template_state, data, self._flagged(data, 2))
         node = graph.node("__data__")
         env = {name: value for name, value in space.initial_values().items()}
         from bayesmith.exact.gaussian import gaussian_parts
@@ -681,12 +656,8 @@ class TestAJointPriorCrossesAsADeclaredFactor:
             joint_prior=JeffreysPrior(over=over),
         )
 
-    def test_the_graph_carries_the_declaration(
-        self, instrument, data, noise, template_state
-    ):
-        graph = to_graph(
-            self._covered_space(), instrument, template_state, data, noise
-        )
+    def test_the_graph_carries_the_declaration(self, instrument, data, noise, template_state):
+        graph = to_graph(self._covered_space(), instrument, template_state, data, noise)
         assert isinstance(graph.joint_prior, bayesmith.JeffreysPrior)
         assert graph.joint_prior.over == ("gains",)
 
@@ -703,9 +674,7 @@ class TestAJointPriorCrossesAsADeclaredFactor:
         and D24 is a registered difference about exactly this axis, so the seam
         must not be quietly choosing an order of its own.
         """
-        graph = to_graph(
-            self._two_latent_space(over), instrument, template_state, data, noise
-        )
+        graph = to_graph(self._two_latent_space(over), instrument, template_state, data, noise)
         assert graph.joint_prior.over == over
 
     def test_an_explicit_rank_rtol_crosses_rather_than_defaulting(
@@ -724,9 +693,7 @@ class TestAJointPriorCrossesAsADeclaredFactor:
         )
         assert graph.joint_prior.rank_rtol == 1e-5
 
-    def test_the_covered_latent_is_declared_flat(
-        self, instrument, data, noise, template_state
-    ):
+    def test_the_covered_latent_is_declared_flat(self, instrument, data, noise, template_state):
         """Improper, and improper by the exact type the far side checks for.
 
         A covered latent still needs a node — a sampler needs the coordinate —
@@ -735,15 +702,11 @@ class TestAJointPriorCrossesAsADeclaredFactor:
         that is not an ``ImproperUniform`` here, so the spelling is part of the
         contract and not a stylistic choice.
         """
-        graph = to_graph(
-            self._covered_space(), instrument, template_state, data, noise
-        )
+        graph = to_graph(self._covered_space(), instrument, template_state, data, noise)
         from bayesmith.graph.evaluate import apply_probabilistic, evaluate
 
         values = dict(self._covered_space().initial_values())
-        distribution = apply_probabilistic(
-            graph, graph.node("gains"), evaluate(graph, values)
-        )
+        distribution = apply_probabilistic(graph, graph.node("gains"), evaluate(graph, values))
         assert isinstance(distribution, dist.ImproperUniform)
 
     def test_a_space_with_no_joint_prior_declares_none(
@@ -754,9 +717,7 @@ class TestAJointPriorCrossesAsADeclaredFactor:
         from bayesmith.graph.evaluate import apply_probabilistic, evaluate
 
         values = dict(space.initial_values())
-        distribution = apply_probabilistic(
-            graph, graph.node("gains"), evaluate(graph, values)
-        )
+        distribution = apply_probabilistic(graph, graph.node("gains"), evaluate(graph, values))
         assert isinstance(distribution, dist.Normal)
         assert graph.joint_prior is None
 
@@ -857,8 +818,13 @@ class TestTheNodeNamesAreTheCallersToChoose:
         self, space, instrument, data, noise, template_state
     ):
         graph = to_graph(
-            space, instrument, template_state, data, noise,
-            prediction_name="prediction", observation_name="obs",
+            space,
+            instrument,
+            template_state,
+            data,
+            noise,
+            prediction_name="prediction",
+            observation_name="obs",
         )
         assert {node.name for node in graph.nodes} == {"gains", "prediction", "obs"}
 
@@ -875,16 +841,17 @@ class TestTheNodeNamesAreTheCallersToChoose:
                     prior=dist.Normal(jnp.full((N_TIME,), GAIN), 5.0),
                 ),
             ),
-            bindings=(
-                type(colliding.bindings[0])(
-                    "prediction", into=lambda p: p["gain"].gain
-                ),
-            ),
+            bindings=(type(colliding.bindings[0])("prediction", into=lambda p: p["gain"].gain),),
         )
         with pytest.raises(ParameterSpaceError, match="internal node names"):
             to_graph(
-                colliding, instrument, template_state, data, noise,
-                prediction_name="prediction", observation_name="obs",
+                colliding,
+                instrument,
+                template_state,
+                data,
+                noise,
+                prediction_name="prediction",
+                observation_name="obs",
             )
 
     def test_that_same_latent_is_fine_under_the_default_names(
@@ -936,14 +903,17 @@ class TestASampledScaleCrossesAsALatent:
         if flags is not None:
             noise = FlaggedNoise(base=noise, flags=flags)
         return to_graph(
-            space, instrument, template_state, data, noise,
-            prediction_name="prediction", observation_name="obs",
+            space,
+            instrument,
+            template_state,
+            data,
+            noise,
+            prediction_name="prediction",
+            observation_name="obs",
             scale_prior=("noise_std", dist.HalfNormal(1.0)),
         )
 
-    def test_the_scale_is_a_latent_of_the_graph(
-        self, space, instrument, data, template_state
-    ):
+    def test_the_scale_is_a_latent_of_the_graph(self, space, instrument, data, template_state):
         graph = self._scaled(space, instrument, data, template_state)
         assert list(graph.latents) == ["gains", "noise_std"]
         assert graph.node("obs").parents == ("prediction", "noise_std")
@@ -964,9 +934,7 @@ class TestASampledScaleCrossesAsALatent:
         huge = self._scaled(space, instrument, data, template_state, placeholder=1e9)
         assert float(log_joint(one, values)) == float(log_joint(huge, values))
 
-    def test_the_flags_still_become_the_mask(
-        self, space, instrument, data, template_state
-    ):
+    def test_the_flags_still_become_the_mask(self, space, instrument, data, template_state):
         """The one thing the placeholder noise model IS read for."""
         flags = jnp.zeros(data.shape, dtype=bool).at[:, 2].set(True)
         graph = self._scaled(space, instrument, data, template_state, flags=flags)
@@ -981,14 +949,15 @@ class TestASampledScaleCrossesAsALatent:
 
         with pytest.raises(ParameterSpaceError, match="scale_prior"):
             to_graph(
-                space, instrument, template_state, data,
+                space,
+                instrument,
+                template_state,
+                data,
                 RadiometerNoise(channel_width=1e6, integration_time=1.0),
                 scale_prior=("noise_std", dist.HalfNormal(1.0)),
             )
 
-    def test_the_scale_latent_name_is_reserved_too(
-        self, instrument, data, template_state
-    ):
+    def test_the_scale_latent_name_is_reserved_too(self, instrument, data, template_state):
         """The declared scale takes a name, so a latent cannot also have it.
 
         Same rule as the two node names, and it has to be the same rule: the

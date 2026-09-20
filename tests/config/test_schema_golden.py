@@ -58,7 +58,8 @@ def test_the_published_schema_matches_its_golden():
     added = sorted(set(live_object) - set(stored_object))
     removed = sorted(set(stored_object) - set(live_object))
     changed = sorted(
-        key for key in set(live_object) & set(stored_object)
+        key
+        for key in set(live_object) & set(stored_object)
         if live_object[key] != stored_object[key]
     )
     raise AssertionError(

@@ -48,9 +48,7 @@ class RFIOperator(AbstractOperator):
 
     def __call__(self, state: State) -> State:
         if state.coords is None or state.coords.time is None or state.coords.freq is None:
-            raise StateValidationError(
-                "RFIOperator requires state.coords with time and freq axes."
-            )
+            raise StateValidationError("RFIOperator requires state.coords with time and freq axes.")
         shape = (state.coords.time.shape[0], state.coords.freq.shape[0])
         subkey, state = state.next_key()
         mask = jax.random.bernoulli(subkey, self.occupancy, shape)

@@ -415,9 +415,7 @@ class RawLikelihood(eqx.Module):
         quadratic = -0.5 * jnp.sum(residual**2)
         if not self.include_logdet:
             return quadratic
-        return quadratic - 0.5 * jnp.sum(
-            jnp.where(seen, jnp.log(2.0 * jnp.pi * safe**2), 0.0)
-        )
+        return quadratic - 0.5 * jnp.sum(jnp.where(seen, jnp.log(2.0 * jnp.pi * safe**2), 0.0))
 
 
 #: The name the coefficient vector is carried under inside a T1 term's

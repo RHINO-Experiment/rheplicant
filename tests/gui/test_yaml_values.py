@@ -50,9 +50,7 @@ def test_numeric_keys_are_kept_apart(label, left, right):
 
 
 @pytest.mark.parametrize(("label", "left", "right"), COLLAPSING)
-def test_a_dict_lookup_comparator_would_have_said_these_are_the_same(
-    label, left, right
-):
+def test_a_dict_lookup_comparator_would_have_said_these_are_the_same(label, left, right):
     """The counterfactual, computed rather than asserted in prose.
 
     This is the lax comparator that used to live in ``validation.py``,

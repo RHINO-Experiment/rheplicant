@@ -453,9 +453,7 @@ def register_formula_checked(registration: FormulaRegistration) -> None:
         if set(by_role) != {"value", "scale", "offset"}:
             raise ConfigError("dimensions: affine requires value, scale, and offset roles")
         scale = by_role["scale"]
-        if scale.spec.disposition != "fixed" or scale.spec.signature != signature(
-            "dimensionless"
-        ):
+        if scale.spec.disposition != "fixed" or scale.spec.signature != signature("dimensionless"):
             raise ConfigError("dimensions: affine scale must be fixed dimensionless")
         if (
             registration.result.disposition != "contextual"
@@ -471,9 +469,8 @@ def register_formula_checked(registration: FormulaRegistration) -> None:
             "channel_width": signature("Hz"),
             "integration_time": signature("s"),
         }
-        if (
-            registration.result.disposition != "fixed"
-            or registration.result.signature != signature("dimensionless")
+        if registration.result.disposition != "fixed" or registration.result.signature != signature(
+            "dimensionless"
         ):
             raise ConfigError("dimensions: radiometer requires a fixed dimensionless result")
         if set(by_role) != set(expected):
@@ -497,9 +494,7 @@ def register_formula_checked(registration: FormulaRegistration) -> None:
             if operand.spec.disposition == "fixed"
         ]
         if any(value is not None and value.quantity for value in fixed_signatures):
-            raise ConfigError(
-                "dimensions: ordinary product formulas cannot combine quantity tags"
-            )
+            raise ConfigError("dimensions: ordinary product formulas cannot combine quantity tags")
     for existing in _FORMULA_REGISTRY.values():
         for producer in set(existing.producers) & set(registration.producers):
             existing_roles = {operand.role: operand.spec for operand in existing.operands}
@@ -555,9 +550,7 @@ def _expect(role: str, actual: DimensionSignature | None, spec: DimensionSpec) -
 
 def evaluate_formula(
     name: str,
-    values: Mapping[
-        str, DimensionSignature | None | Sequence[DimensionSignature | None]
-    ],
+    values: Mapping[str, DimensionSignature | None | Sequence[DimensionSignature | None]],
     *,
     result: DimensionSignature | None = None,
 ) -> DimensionSignature | None:
@@ -663,11 +656,7 @@ def _loaded_operator_target(
     target: object,
 ) -> type | None:
     """Resolve an already-loaded ``python:`` operator without importing code."""
-    if (
-        not isinstance(target, str)
-        or target.count(":") != 1
-        or not all(target.split(":"))
-    ):
+    if not isinstance(target, str) or target.count(":") != 1 or not all(target.split(":")):
         return None
     module_name, attribute = target.split(":")
     module = sys.modules.get(module_name)
@@ -785,9 +774,7 @@ def _selected_model_classes(
                 assert isinstance(raw, list)
                 entries = list(raw)
         elif isinstance(raw, Mapping) and "compose" in raw:
-            entries = list(
-                _compose_stage_specs(raw, node_spec.kind, str(node_id))
-            )
+            entries = list(_compose_stage_specs(raw, node_spec.kind, str(node_id)))
             if not entries:
                 incomplete = True
                 continue
@@ -812,9 +799,7 @@ def _plugin_formulas_for_class(cls: type) -> tuple[FormulaRegistration, ...]:
     """Every live formula naming an unbound plugin class as its producer."""
     qualified = f"{cls.__module__}.{cls.__qualname__}"
     return tuple(
-        formula
-        for formula in _FORMULA_REGISTRY.values()
-        if qualified in formula.producers
+        formula for formula in _FORMULA_REGISTRY.values() if qualified in formula.producers
     )
 
 
@@ -843,9 +828,7 @@ def _operator_dimensions(
     formula = _formula_for_class(cls)
     if formula is None:
         return None, None
-    input_operand = next(
-        (operand for operand in formula.operands if operand.role == "input"), None
-    )
+    input_operand = next((operand for operand in formula.operands if operand.role == "input"), None)
     operator_input = incoming
     if (
         operator_input is None
@@ -853,11 +836,7 @@ def _operator_dimensions(
         and input_operand.spec.disposition == "fixed"
     ):
         operator_input = input_operand.spec.signature
-    output = (
-        formula.result.signature
-        if formula.result.disposition == "fixed"
-        else operator_input
-    )
+    output = formula.result.signature if formula.result.disposition == "fixed" else operator_input
     return operator_input, output
 
 
@@ -978,9 +957,7 @@ def _latent_candidates(
     parameters = inference.get("parameters")
     if not isinstance(parameters, Mapping):
         return {}
-    candidates: dict[str, list[DimensionSignature]] = {
-        str(name): [] for name in parameters
-    }
+    candidates: dict[str, list[DimensionSignature]] = {str(name): [] for name in parameters}
     for name, declaration in parameters.items():
         if not isinstance(declaration, Mapping):
             continue
@@ -1031,9 +1008,7 @@ def dimension_environment_and_conflicts_for(
 ) -> tuple[DimensionEnvironment, dict[str, tuple[DimensionSignature, ...]]]:
     """Infer one document's environment and conflicting latent evidence once."""
     table = operator_table()
-    selected, incomplete = _selected_model_classes(
-        effective_document, table=table
-    )
+    selected, incomplete = _selected_model_classes(effective_document, table=table)
     model = effective_document.get("model")
     if isinstance(model, Mapping) and model.get("kind", "graph") == "pipeline":
         model_input, prediction = _pipeline_dimensions(model, table)
@@ -1043,9 +1018,7 @@ def dimension_environment_and_conflicts_for(
         model_input, prediction = _graph_dimensions(selected)
     candidates = _latent_candidates(effective_document, selected)
     environment = DimensionEnvironment(
-        latent_dimensions={
-            name: values[0] for name, values in candidates.items() if values
-        },
+        latent_dimensions={name: values[0] for name, values in candidates.items() if values},
         prediction_dimension=prediction,
         model_input_dimension=model_input,
     )

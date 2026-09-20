@@ -213,11 +213,14 @@ def populated_snapshot():
         },
     )
     trace.record_seed(base, {"root": 11, "named": {"noise": 12, "sky": 13}})
-    trace.record_variant(variant, {
-        "encoded_name": encode_name("v"),
-        "status": "ok",
-        "resolved_sha256": VARIANT_SHA,
-    })
+    trace.record_variant(
+        variant,
+        {
+            "encoded_name": encode_name("v"),
+            "status": "ok",
+            "resolved_sha256": VARIANT_SHA,
+        },
+    )
     trace.record_resource(
         base,
         {
@@ -422,9 +425,7 @@ def test_serialized_bundle_validation_refuses_noncanonical_or_disagreeing_metada
     files = dict(bundle.files)
     files["diagnostics.json"] = forged
     with pytest.raises(ConfigError, match="statuses disagree"):
-        validate_serialized_bundle(
-            dataclasses.replace(bundle, diagnostics=forged, files=files)
-        )
+        validate_serialized_bundle(dataclasses.replace(bundle, diagnostics=forged, files=files))
 
 
 def test_every_path_the_transaction_writes_is_reserved_against_merged_files():
@@ -703,6 +704,7 @@ def test_semantic_rows_preserve_layers_order_and_closed_diagnostics():
         "predict.product_supported",
         "predict.draw_count_available",
     )
+
     def unwritten(path, reason):
         return ArtefactRecord(path, False, None, None, reason)
 
@@ -784,9 +786,7 @@ def test_semantic_rows_preserve_layers_order_and_closed_diagnostics():
     assert provenance["artefacts"] == diagnostics["artefacts"]
     assert provenance["artefacts"]["lock"]["written"] is True
     assert provenance["artefacts"]["journal"]["written"] is True
-    assert provenance["artefacts"]["resolved_variants"][0]["reason"] == (
-        "layer_not_complete"
-    )
+    assert provenance["artefacts"]["resolved_variants"][0]["reason"] == ("layer_not_complete")
     assert "deletions" not in provenance and "deletions" not in diagnostics
 
 
@@ -807,9 +807,7 @@ def test_envelope_refuses_invalid_typed_rows_and_content_digest():
             input_bytes=INPUT,
             resolved=(),
         )
-    bad_metadata = ArtefactRecord(
-        "provenance.json", True, 4, "0" * 64, "metadata_envelope"
-    )
+    bad_metadata = ArtefactRecord("provenance.json", True, 4, "0" * 64, "metadata_envelope")
     with pytest.raises(ConfigError, match="metadata cannot claim bytes"):
         serialize_bundle(
             dataclasses.replace(

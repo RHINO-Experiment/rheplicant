@@ -39,9 +39,7 @@ def test_the_kernel_and_the_checked_path_return_the_same_numbers():
     """One copy of the constant, verified rather than asserted in a docstring."""
     info = _info()
     checked = marginalise(info, ("block",))
-    factor, target, offset, _ = marginalise_arrays(
-        info.factor, info.target, info.offset, 2
-    )
+    factor, target, offset, _ = marginalise_arrays(info.factor, info.target, info.offset, 2)
     np.testing.assert_array_equal(np.asarray(checked.factor), np.asarray(factor))
     np.testing.assert_array_equal(np.asarray(checked.target), np.asarray(target))
     assert float(checked.offset) == float(offset)
@@ -72,9 +70,7 @@ def test_the_kernel_reproduces_a_dense_gaussian_integral_absolutely():
         - 0.5 * kept @ schur @ kept
         + shift @ kept
     )
-    factor, target, offset, _ = marginalise_arrays(
-        info.factor, info.target, info.offset, n_block
-    )
+    factor, target, offset, _ = marginalise_arrays(info.factor, info.target, info.offset, n_block)
     got = float(offset - 0.5 * jnp.sum((factor @ kept - target) ** 2))
     assert got == pytest.approx(expected, abs=1e-9)
 
@@ -84,9 +80,7 @@ def test_the_kernel_survives_jit_grad_and_scan():
     info = _info(seed=5)
 
     def density(scale):
-        _, _, offset, _ = marginalise_arrays(
-            info.factor * scale, info.target, info.offset, 2
-        )
+        _, _, offset, _ = marginalise_arrays(info.factor * scale, info.target, info.offset, 2)
         return offset
 
     assert np.isfinite(float(jax.jit(density)(1.0)))
@@ -97,9 +91,7 @@ def test_the_kernel_survives_jit_grad_and_scan():
 
     def scanned(scale):
         def body(carry, _):
-            _, _, offset, _ = marginalise_arrays(
-                info.factor * scale, info.target, carry, 2
-            )
+            _, _, offset, _ = marginalise_arrays(info.factor * scale, info.target, carry, 2)
             return offset, None
 
         total, _ = jax.lax.scan(body, jnp.zeros(()), None, length=4)
@@ -147,12 +139,8 @@ def test_the_checked_path_refuses_under_a_trace_rather_than_skipping_its_guard()
 def test_the_kernel_returns_the_pivots_the_checked_path_judges():
     info = _info(seed=9)
     _, _, _, pivots = marginalise_arrays(info.factor, info.target, info.offset, 2)
-    upper = jnp.linalg.qr(
-        jnp.concatenate([info.factor, info.target[:, None]], axis=1), mode="r"
-    )
-    np.testing.assert_allclose(
-        np.asarray(pivots), np.abs(np.asarray(jnp.diag(upper))), atol=0.0
-    )
+    upper = jnp.linalg.qr(jnp.concatenate([info.factor, info.target[:, None]], axis=1), mode="r")
+    np.testing.assert_allclose(np.asarray(pivots), np.abs(np.asarray(jnp.diag(upper))), atol=0.0)
 
 
 def _block_scaled(scale, seed=11):
@@ -177,9 +165,7 @@ def _block_scaled(scale, seed=11):
 def test_an_unconstrained_block_is_still_refused_by_name():
     """The nearest legitimate case is a factor of 1e10 away, and it passes."""
     for scale in (0.0, 1e-10):
-        with pytest.raises(
-            StateValidationError, match="does not constrain one of its own"
-        ):
+        with pytest.raises(StateValidationError, match="does not constrain one of its own"):
             marginalise(_block_scaled(scale), ("block",))
     # ...and the same term with a healthy block column is accepted: measured
     # +0.2028 nats, against the +23.23 the 1e-10 version would have returned.
@@ -238,16 +224,12 @@ def test_the_kernel_cannot_see_what_the_checked_path_refuses():
     neither owns the gap.
     """
     zero = _block_scaled(0.0)
-    _, _, offset, pivots = marginalise_arrays(
-        zero.factor, zero.target, zero.offset, 1
-    )
+    _, _, offset, pivots = marginalise_arrays(zero.factor, zero.target, zero.offset, 1)
     assert float(offset) == np.inf
     assert float(pivots[0]) == 0.0
 
     tiny = _block_scaled(1e-10)
-    _, _, offset, pivots = marginalise_arrays(
-        tiny.factor, tiny.target, tiny.offset, 1
-    )
+    _, _, offset, pivots = marginalise_arrays(tiny.factor, tiny.target, tiny.offset, 1)
     # Finite and plausible -- the whole complaint. Bands are wide because the
     # value is -log(pivot) and the pivot is a scaled column norm.
     assert np.isfinite(float(offset))

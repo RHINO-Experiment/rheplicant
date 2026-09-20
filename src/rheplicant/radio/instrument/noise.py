@@ -102,8 +102,7 @@ class RadiometerNoiseOperator(AbstractOperator):
         ):
             if not value > 0.0:
                 raise StateValidationError(
-                    f"RadiometerNoiseOperator.{name} must be positive, got "
-                    f"{value!r}."
+                    f"RadiometerNoiseOperator.{name} must be positive, got {value!r}."
                 )
 
     @property

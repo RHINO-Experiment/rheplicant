@@ -33,9 +33,7 @@ class _PreparedConfigStub:
     layer_deletions: object
 
 
-def _prepared_config_stub(
-    tmp_path, *, plugins: tuple[str, ...] = ()
-) -> _PreparedConfigStub:
+def _prepared_config_stub(tmp_path, *, plugins: tuple[str, ...] = ()) -> _PreparedConfigStub:
     return _PreparedConfigStub(
         process=_ProcessStub(runtime=object(), plugins=plugins),
         source=_SourceStub(layered_document={}, base_dir=str(tmp_path)),
@@ -96,13 +94,9 @@ def _event_names(events: list[tuple[object, ...]]) -> list[object]:
     return [row[0] for row in events]
 
 
-def test_prepared_environment_orders_runtime_plugins_and_all_layer_metadata(
-    tmp_path, monkeypatch
-):
+def test_prepared_environment_orders_runtime_plugins_and_all_layer_metadata(tmp_path, monkeypatch):
     events: list[tuple[object, ...]] = []
-    prepared = _prepared_config_stub(
-        tmp_path, plugins=("tests.fake_a", "tests.fake_b")
-    )
+    prepared = _prepared_config_stub(tmp_path, plugins=("tests.fake_a", "tests.fake_b"))
     orchestration = SimpleNamespace(
         prepare_document=lambda document, **kwargs: (
             events.append(("prepare_document", document, kwargs)),
@@ -164,9 +158,7 @@ def test_prepared_environment_orders_runtime_plugins_and_all_layer_metadata(
 
 
 def test_prepared_execution_close_is_idempotent():
-    capture = _RecordingCapture(
-        object(), on_verified=object(), events=[]
-    )
+    capture = _RecordingCapture(object(), on_verified=object(), events=[])
     row = environment.PreparedExecution(
         runtime=object(),
         orchestration=object(),
@@ -184,9 +176,7 @@ def test_prepared_execution_close_is_idempotent():
 
 def test_prepare_failure_closes_capture(tmp_path, monkeypatch):
     events: list[tuple[object, ...]] = []
-    capture = _RecordingCapture(
-        object(), on_verified=object(), events=events
-    )
+    capture = _RecordingCapture(object(), on_verified=object(), events=events)
 
     def raising_prepare(*_args, **_kwargs):
         raise ConfigError("probe refusal")

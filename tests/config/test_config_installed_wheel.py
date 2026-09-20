@@ -42,7 +42,9 @@ def fresh_install(tmp_path):
 
 
 def _resource_probe(install: Install) -> dict[str, object]:
-    program = f"SCHEMA_FILES = {list(SCHEMAS)!r}\n" + """
+    program = (
+        f"SCHEMA_FILES = {list(SCHEMAS)!r}\n"
+        + """
 import base64
 import importlib.util
 import json
@@ -63,6 +65,7 @@ print(json.dumps({
     "schemas": schemas,
 }))
 """
+    )
     return json.loads(install.python_run(program).stdout)
 
 
@@ -118,9 +121,7 @@ def test_installed_wheel_exposes_cli_presets_schemas_and_scripts(
     direct = install.run(["run", str(direct_config)])
     assert direct.returncode == 0, direct.stderr
     assert (direct_target / "products.json").read_bytes() == generated_manifest
-    assert (
-        direct_target / "runs/n-666f7277617264/arrays.npz"
-    ).read_bytes() == generated_arrays
+    assert (direct_target / "runs/n-666f7277617264/arrays.npz").read_bytes() == generated_arrays
     assert (direct_target / "layers/base/assembly.json").read_bytes() == generated_assembly
 
     resources = _resource_probe(install)
@@ -213,17 +214,13 @@ def test_fresh_gui_wheel_contains_and_runs_the_scientific_worker(
             "_rheplicant_bootstrap.gui_worker",
             "validate",
         ],
-        input=yaml.safe_dump(worker_document, sort_keys=False).encode(
-            "utf-8", "strict"
-        ),
+        input=yaml.safe_dump(worker_document, sort_keys=False).encode("utf-8", "strict"),
         cwd=install.cwd,
         env=install.env,
         capture_output=True,
         check=False,
     )
-    assert completed.returncode == 0, completed.stderr.decode(
-        "utf-8", "replace"
-    )
+    assert completed.returncode == 0, completed.stderr.decode("utf-8", "replace")
     prefix = b"\x1eRHEPLICANT_GUI_JOB "
     encoded = completed.stdout.rsplit(prefix, 1)[1].split(b"\n", 1)[0]
     frame = json.loads(encoded.decode("utf-8", "strict"))
@@ -233,14 +230,12 @@ def test_fresh_gui_wheel_contains_and_runs_the_scientific_worker(
     # dropped them would answer differently from the source tree.
     assert frame["status"] == "ok"
     assert frame["result"]["layers"] == 2
-    assert [
-        (one["check"], one["severity"]) for one in frame["result"]["findings"]
-    ] == [("A53", "report")]
+    assert [(one["check"], one["severity"]) for one in frame["result"]["findings"]] == [
+        ("A53", "report")
+    ]
 
 
-def test_wheel_and_editable_preset_discovery_are_byte_identical(
-    fresh_install, built_distributions
-):
+def test_wheel_and_editable_preset_discovery_are_byte_identical(fresh_install, built_distributions):
     wheel = fresh_install(built_distributions["direct-wheel"])
     editable = fresh_install(PROJECT_ROOT, editable=True)
     wheel_row = _resource_probe(wheel)

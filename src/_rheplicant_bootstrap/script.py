@@ -112,13 +112,9 @@ def _walk_parent(path: str, platform: OutputPlatform) -> tuple[int, str, str]:
             before = os.lstat(component, dir_fd=current_fd)
             if stat.S_ISLNK(before.st_mode) or not stat.S_ISDIR(before.st_mode):
                 raise ConfigError("script output parent contains a symlink or non-directory.")
-            entry = platform.inspect_ancestor_entry(
-                current_fd, current_path, component, before
-            )
+            entry = platform.inspect_ancestor_entry(current_fd, current_path, component, before)
             if not entry.reliable or not entry.rename_protected:
-                raise ConfigError(
-                    entry.reason or "script output ancestor is not rename-protected."
-                )
+                raise ConfigError(entry.reason or "script output ancestor is not rename-protected.")
             child_fd = os.open(component, _OPEN_DIRECTORY, dir_fd=current_fd)
             after = os.fstat(child_fd)
             if (before.st_dev, before.st_ino) != (after.st_dev, after.st_ino):
@@ -135,9 +131,7 @@ def _walk_parent(path: str, platform: OutputPlatform) -> tuple[int, str, str]:
             or access.access_acl_grants_others
             or not access.default_acl_is_trivial
         ):
-            raise ConfigError(
-                access.reason or "script output parent has insecure access control."
-            )
+            raise ConfigError(access.reason or "script output parent has insecure access control.")
         return current_fd, leaf, absolute
     except BaseException:
         os.close(current_fd)
@@ -159,9 +153,10 @@ def publish_script(
     temporary_created = False
     try:
         limit = os.fpathconf(parent_fd, "PC_NAME_MAX")
-        if type(limit) is not int or max(
-            len(os.fsencode(leaf)), len(os.fsencode(temporary))
-        ) > limit:
+        if (
+            type(limit) is not int
+            or max(len(os.fsencode(leaf)), len(os.fsencode(temporary))) > limit
+        ):
             raise ConfigError("script output component exceeds filesystem NAME_MAX.")
         fd = os.open(
             temporary,

@@ -34,7 +34,7 @@ def test_call_returns_the_maps_unchanged(grid, maps):
 def test_call_ignores_its_freq_argument_when_the_shape_agrees(grid, maps):
     """Documented behaviour: the argument is not consulted, only shape-checked."""
     sky = MapSky(maps=maps, freq=grid)
-    other = grid + 1e6          # same length, different values
+    other = grid + 1e6  # same length, different values
     assert jnp.array_equal(sky(other), maps)
 
 

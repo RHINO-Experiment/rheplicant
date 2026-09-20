@@ -63,9 +63,7 @@ def test_projection_previews_injective_product_report_and_audit_paths():
     encoded_run = "n-" + b"fit / one".hex()
     encoded_variant = "n-" + b"alternate".hex()
 
-    assert _product(found, "arrays").expected_paths == (
-        f"runs/{encoded_run}/arrays.npz",
-    )
+    assert _product(found, "arrays").expected_paths == (f"runs/{encoded_run}/arrays.npz",)
     assert _product(found, "signal_paths").expected_paths == (
         "layers/base/signal-path-light.svg",
         "layers/base/signal-path-dark.svg",

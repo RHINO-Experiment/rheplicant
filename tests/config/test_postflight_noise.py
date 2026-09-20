@@ -67,9 +67,12 @@ from tests.config.test_config_fixture_contract import _builders
 #: one takes two.
 def _pair(model_noise, inference_noise, **more):
     base = preflight_document()
-    return repatch(base, model={**base["model"], "noise": model_noise},
-                   inference={**base["inference"], "noise": inference_noise},
-                   **more)
+    return repatch(
+        base,
+        model={**base["model"], "noise": model_noise},
+        inference={**base["inference"], "noise": inference_noise},
+        **more,
+    )
 
 
 class TestTheRadiometerFamily:
@@ -127,8 +130,7 @@ class TestTheRadiometerFamily:
         assert "floor" in found.message
         assert "0.01" in found.message
 
-    def test_the_tolerance_admits_the_same_number_in_two_units_radiometer_family_only(
-            self):
+    def test_the_tolerance_admits_the_same_number_in_two_units_radiometer_family_only(self):
         """``1 MHz`` against ``1000 kHz`` -- radiometer family only (D-21):
         the homoscedastic route's only second spelling, ``celsius``, is
         measured to agree just as exactly and is not worth a document of its
@@ -139,9 +141,12 @@ class TestTheRadiometerFamily:
         conversion through float32 modifiers would occasionally miss even
         though this exact pair measures ``rel = 0.0`` (see ``_T6_RTOL``'s own
         comment)."""
-        weighed = {"kind": "radiometer", "include_logdet": True,
-                   "channel_width": {"value": 1000.0, "unit": "kHz"},
-                   "integration_time": {"value": 2.0, "unit": "s"}}
+        weighed = {
+            "kind": "radiometer",
+            "include_logdet": True,
+            "channel_width": {"value": 1000.0, "unit": "kHz"},
+            "integration_time": {"value": 2.0, "unit": "s"},
+        }
         document = _pair(RADIOMETER_DRAWN, weighed)
         assert priced_findings(document) == ()
 
@@ -174,10 +179,13 @@ class TestTheHomoscedasticFamily:
         ``if`` on more than one element raises
         ``ValueError: The truth value of an array...`` -- exactly the
         failure ``jnp.allclose`` avoids."""
-        document = _pair({"type": "NoiseOperator",
-                          "sigma": {"value": HOMOSCEDASTIC["sigma"]["value"],
-                                   "unit": "K"}},
-                         SIGMA_BROADCAST_FREQ)
+        document = _pair(
+            {
+                "type": "NoiseOperator",
+                "sigma": {"value": HOMOSCEDASTIC["sigma"]["value"], "unit": "K"},
+            },
+            SIGMA_BROADCAST_FREQ,
+        )
         assert priced_findings(document) == ()
 
 
@@ -197,12 +205,14 @@ class TestStandsDown:
         document = repatch(
             base,
             model={**base["model"], "noise": SIGMA_MISMATCHED_K},
-            inference={**base["inference"],
-                      "observed": {"file": {"format": "npy", "path": str(path)}}})
+            inference={
+                **base["inference"],
+                "observed": {"file": {"format": "npy", "path": str(path)}},
+            },
+        )
         assert priced_findings(document) == ()
 
-    def test_stands_down_on_observed_from_file_with_no_twin_repair_at_all(
-            self, tmp_path):
+    def test_stands_down_on_observed_from_file_with_no_twin_repair_at_all(self, tmp_path):
         """**Kills M24** (the ``from: simulation`` clause in
         :func:`~rheplicant.config.postflight.noise._t6_generating_twin`
         deleted): the shipped test above keeps ``inference.twin.without:
@@ -223,16 +233,18 @@ class TestStandsDown:
         path = tmp_path / "d.npy"
         np.save(path, np.zeros((16, 8), dtype=np.float32))
         base = preflight_document()
-        inference = {key: value for key, value in base["inference"].items()
-                    if key not in ("twin", "parameters")}
+        inference = {
+            key: value
+            for key, value in base["inference"].items()
+            if key not in ("twin", "parameters")
+        }
         inference["observed"] = {"file": {"format": "npy", "path": str(path)}}
         document = repatch(
-            base, model={**base["model"], "noise": SIGMA_MISMATCHED_K},
-            inference=inference)
+            base, model={**base["model"], "noise": SIGMA_MISMATCHED_K}, inference=inference
+        )
         assert priced_findings(document) == ()
 
-    def test_stands_down_when_inference_noise_is_none_even_though_model_noise_disagrees(
-            self):
+    def test_stands_down_when_inference_noise_is_none_even_though_model_noise_disagrees(self):
         """Contract step 3, as a document rather than a sentence -- **kills
         M22** (the ``kind: "none"`` stand-down in
         :func:`~rheplicant.config.postflight.noise._t6_sigma_agreement`
@@ -246,10 +258,10 @@ class TestStandsDown:
         (:data:`~tests.config.preflight_helpers.preflight_document`'s own
         default run)."""
         base = preflight_document()
-        inference = {key: value for key, value in base["inference"].items()
-                    if key != "noise"}
-        document = repatch(base, model={**base["model"], "noise": SIGMA_MISMATCHED_K},
-                           inference=inference)
+        inference = {key: value for key, value in base["inference"].items() if key != "noise"}
+        document = repatch(
+            base, model={**base["model"], "noise": SIGMA_MISMATCHED_K}, inference=inference
+        )
         assert priced_findings(document) == ()
 
     def test_stands_down_when_inference_noise_is_none(self):
@@ -263,13 +275,11 @@ class TestStandsDown:
         things at once (drops ``inference.noise`` AND disagrees
         ``model.noise``); this one changes only the absence."""
         base = preflight_document()
-        inference = {key: value for key, value in base["inference"].items()
-                    if key != "noise"}
+        inference = {key: value for key, value in base["inference"].items() if key != "noise"}
         document = repatch(base, inference=inference)
         assert priced_findings(document) == ()
 
-    def test_a_radiometer_draw_declines_a_homoscedastic_weigh_even_when_forced(
-            self):
+    def test_a_radiometer_draw_declines_a_homoscedastic_weigh_even_when_forced(self):
         """**Kills M31** (the radiometer-side family guard,
         ``weighed.kind not in _T6_RADIOMETER_KINDS``, deleted).
         ``preflight/gated.py::_sigma_families`` already REFUSES a
@@ -285,28 +295,36 @@ class TestStandsDown:
         document = _pair(RADIOMETER_DRAWN, RADIOMETER)
         payload = priced_run(document)
         mismatched = payload.run.inference.noise._replace(
-            kind="homoscedastic", model=HomoscedasticNoise(jnp.asarray(0.05)))
-        swapped = dataclasses.replace(payload, run=payload.run._replace(
-            inference=payload.run.inference._replace(noise=mismatched)))
+            kind="homoscedastic", model=HomoscedasticNoise(jnp.asarray(0.05))
+        )
+        swapped = dataclasses.replace(
+            payload,
+            run=payload.run._replace(inference=payload.run.inference._replace(noise=mismatched)),
+        )
         assert tuple(_t6_sigma_agreement(swapped)) == ()
 
-    def test_a_homoscedastic_draw_declines_a_radiometer_weigh_even_when_forced(
-            self):
+    def test_a_homoscedastic_draw_declines_a_radiometer_weigh_even_when_forced(self):
         """**Kills M32** (the homoscedastic-side family guard,
         ``weighed.kind != "homoscedastic"``, deleted) -- the twin of the test
         above, forcing a ``NoiseOperator`` draw against a ``radiometer``
         weigh, which :func:`~rheplicant.config.postflight.noise._t6_radiometer`
         would read ``.fractional`` off a ``HomoscedasticNoise`` that has
         none."""
-        document = _pair({"type": "NoiseOperator",
-                          "sigma": {"value": HOMOSCEDASTIC["sigma"]["value"],
-                                   "unit": "K"}},
-                         HOMOSCEDASTIC)
+        document = _pair(
+            {
+                "type": "NoiseOperator",
+                "sigma": {"value": HOMOSCEDASTIC["sigma"]["value"], "unit": "K"},
+            },
+            HOMOSCEDASTIC,
+        )
         payload = priced_run(document)
         mismatched = payload.run.inference.noise._replace(
-            kind="radiometer", model=RadiometerNoise(1.0e6, 2.0))
-        swapped = dataclasses.replace(payload, run=payload.run._replace(
-            inference=payload.run.inference._replace(noise=mismatched)))
+            kind="radiometer", model=RadiometerNoise(1.0e6, 2.0)
+        )
+        swapped = dataclasses.replace(
+            payload,
+            run=payload.run._replace(inference=payload.run.inference._replace(noise=mismatched)),
+        )
         assert tuple(_t6_sigma_agreement(swapped)) == ()
 
     def test_stands_down_when_the_model_lights_no_noise(self):
@@ -319,12 +337,11 @@ class TestStandsDown:
         it is an ``AssemblyError`` (there is nothing left for ``without:`` to
         remove)."""
         base = preflight_document()
-        model_without_noise = {key: value for key, value in base["model"].items()
-                               if key != "noise"}
-        inference_without_twin = {key: value for key, value in base["inference"].items()
-                                  if key != "twin"}
-        document = repatch(base, model=model_without_noise,
-                           inference=inference_without_twin)
+        model_without_noise = {key: value for key, value in base["model"].items() if key != "noise"}
+        inference_without_twin = {
+            key: value for key, value in base["inference"].items() if key != "twin"
+        }
+        document = repatch(base, model=model_without_noise, inference=inference_without_twin)
         assert "noise" not in load_document(document).twin.lit
         assert priced_findings(document) == ()
 
@@ -342,8 +359,11 @@ class TestStandsDown:
         frozenset and cannot see that: this counts ``report.findings``
         (D-10's own correction)."""
         base = preflight_document()
-        document = repatch(base, model={**base["model"], "noise": RADIOMETER_DRAWN},
-                           inference={**base["inference"], "noise": HOMOSCEDASTIC})
+        document = repatch(
+            base,
+            model={**base["model"], "noise": RADIOMETER_DRAWN},
+            inference={**base["inference"], "noise": HOMOSCEDASTIC},
+        )
         found = text_findings(document)
         assert [one.check for one in found].count("C18") == 1
         with pytest.raises(ConfigError):
@@ -358,8 +378,7 @@ class TestStandsDown:
 #: wrap without changing which of the compared numbers is finite.
 def _flagged_observation():
     base = preflight_document()
-    return {**base["observation"],
-           "aux": {"flags": {"zeros": ["n_time", "n_freq"]}}}
+    return {**base["observation"], "aux": {"flags": {"zeros": ["n_time", "n_freq"]}}}
 
 
 class TestFlaggedNoiseIsUnwrapped:
@@ -379,31 +398,38 @@ class TestFlaggedNoiseIsUnwrapped:
 
     def test_a_flagged_homoscedastic_pair_that_agrees_is_silent(self):
         document = _pair(
-            {"type": "NoiseOperator", "sigma": {"value": HOMOSCEDASTIC["sigma"]["value"],
-                                                 "unit": "K"}},
+            {
+                "type": "NoiseOperator",
+                "sigma": {"value": HOMOSCEDASTIC["sigma"]["value"], "unit": "K"},
+            },
             {**HOMOSCEDASTIC, "flags": {"from": "observation"}},
-            observation=_flagged_observation())
+            observation=_flagged_observation(),
+        )
         assert priced_findings(document) == ()
 
     def test_a_flagged_homoscedastic_pair_that_disagrees_refuses(self):
         document = _pair(
             SIGMA_MISMATCHED_K,
             {**HOMOSCEDASTIC, "flags": {"from": "observation"}},
-            observation=_flagged_observation())
+            observation=_flagged_observation(),
+        )
         found = priced_only(document, "C18")
         assert found.severity == "refuse"
 
     def test_a_flagged_radiometer_pair_that_agrees_is_silent(self):
         document = _pair(
-            RADIOMETER_DRAWN, {**RADIOMETER, "flags": {"from": "observation"}},
-            observation=_flagged_observation())
+            RADIOMETER_DRAWN,
+            {**RADIOMETER, "flags": {"from": "observation"}},
+            observation=_flagged_observation(),
+        )
         assert priced_findings(document) == ()
 
     def test_a_flagged_radiometer_pair_that_disagrees_refuses(self):
         document = _pair(
             RADIOMETER_DRAWN,
             {**T6_RADIOMETER_TEN_FOLD, "flags": {"from": "observation"}},
-            observation=_flagged_observation())
+            observation=_flagged_observation(),
+        )
         found = priced_only(document, "C18")
         assert found.severity == "refuse"
 
@@ -420,8 +446,8 @@ class TestFlaggedNoiseIsUnwrapped:
         prediction = jnp.ones((2, 3))
         key = jax.random.PRNGKey(0)
         assert jnp.array_equal(
-            flagged.realise(prediction, key=key),
-            base.realise(prediction, key=key))
+            flagged.realise(prediction, key=key), base.realise(prediction, key=key)
+        )
 
 
 class TestTheReplacedNoiseNodeIsNotBlamed:
@@ -452,8 +478,9 @@ class TestTheReplacedNoiseNodeIsNotBlamed:
         base = preflight_document()
         inference = dict(base["inference"])
         inference.pop("parameters", None)
-        inference["twin"] = {"replace": {"noise": {
-            "type": "NoiseOperator", "sigma": {"value": 0.5, "unit": "K"}}}}
+        inference["twin"] = {
+            "replace": {"noise": {"type": "NoiseOperator", "sigma": {"value": 0.5, "unit": "K"}}}
+        }
         inference["observed"] = {"from": "simulation", "twin": "fit"}
         # model.noise and inference.noise AGREE (both SIGMA_K) -- the
         # replacement (0.5) is the only thing that disagrees with anything,
@@ -499,12 +526,18 @@ class TestTheReplacedNoiseNodeIsNotBlamed:
         base = preflight_document()
         inference = dict(base["inference"])
         inference.pop("parameters", None)
-        inference["twin"] = {"replace": {"noise": {
-            "type": "NoiseOperator", "sigma": {"value": 0.5, "unit": "K"}}}}
+        inference["twin"] = {
+            "replace": {"noise": {"type": "NoiseOperator", "sigma": {"value": 0.5, "unit": "K"}}}
+        }
         inference["observed"] = {"from": "simulation", "twin": "fit"}
-        document = repatch(base, model={**base["model"], "noise": {
-            "type": "NoiseOperator", "sigma": {"value": 5.0, "unit": "K"}}},
-            inference=inference)
+        document = repatch(
+            base,
+            model={
+                **base["model"],
+                "noise": {"type": "NoiseOperator", "sigma": {"value": 5.0, "unit": "K"}},
+            },
+            inference=inference,
+        )
         run = load_document(document)
         assert "C18" not in run.report.checks()
 
@@ -527,8 +560,9 @@ class TestATwinFitFitTwinCanStillBeTheGenerator:
         inference.pop("parameters", None)
         inference["observed"] = {"from": "simulation", "twin": "fit"}
         inference["noise"] = T6_RADIOMETER_TEN_FOLD
-        document = repatch(base, model={**base["model"], "noise": RADIOMETER_DRAWN},
-                           inference=inference)
+        document = repatch(
+            base, model={**base["model"], "noise": RADIOMETER_DRAWN}, inference=inference
+        )
         payload = priced_run(document)
         drawn = _t6_drawn(payload)
         assert drawn is not None
@@ -642,23 +676,24 @@ class TestTheExceptClauseIsExactlyTwoMembers:
         def __getitem__(self, node_id):
             raise self._exc
 
-    def test_an_assemblyerror_subclass_stands_down_not_only_a_bare_one(
-            self, monkeypatch):
+    def test_an_assemblyerror_subclass_stands_down_not_only_a_bare_one(self, monkeypatch):
         """**Kills M21** (``except (KeyError, AssemblyError)`` narrowed to
         ``except KeyError``): ``AmbiguousNodeError`` -- or any other
         ``AssemblyError`` subclass -- must stand down, not propagate."""
+
         class _SomeAssemblyError(AssemblyError):
             pass
 
         import rheplicant.config.postflight.noise as noise_mod
 
         monkeypatch.setattr(
-            noise_mod, "_t6_generating_twin",
-            lambda payload: self._FakeTwin(_SomeAssemblyError("boom")))
+            noise_mod,
+            "_t6_generating_twin",
+            lambda payload: self._FakeTwin(_SomeAssemblyError("boom")),
+        )
         assert noise_mod._t6_drawn(None) is None
 
-    def test_an_unrelated_exception_propagates_rather_than_stands_down(
-            self, monkeypatch):
+    def test_an_unrelated_exception_propagates_rather_than_stands_down(self, monkeypatch):
         """**Kills M20** (``except (KeyError, AssemblyError)`` widened to
         ``except Exception``): a failure with nothing to do with a missing or
         ambiguous node must NOT be laundered into a silent stand-down --
@@ -669,8 +704,10 @@ class TestTheExceptClauseIsExactlyTwoMembers:
         import rheplicant.config.postflight.noise as noise_mod
 
         monkeypatch.setattr(
-            noise_mod, "_t6_generating_twin",
-            lambda payload: self._FakeTwin(ValueError("unrelated")))
+            noise_mod,
+            "_t6_generating_twin",
+            lambda payload: self._FakeTwin(ValueError("unrelated")),
+        )
         with pytest.raises(ValueError):
             noise_mod._t6_drawn(None)
 
@@ -707,8 +744,7 @@ class TestTheStandDownRuleAgreesWithTask2:
     found is a narrower, single-document one, closed below without breaking
     the thirteen shipped documents that already worked."""
 
-    def test_the_built_rule_agrees_with_t2c_generated_on_every_shipped_builder(
-            self):
+    def test_the_built_rule_agrees_with_t2c_generated_on_every_shipped_builder(self):
         """Driven over all THIRTEEN ``*_document`` builders under
         ``tests/config/*_helpers.py`` -- the same set
         ``test_config_fixture_contract.py`` discovers and drives, so this
@@ -764,8 +800,9 @@ class TestTheStandDownRuleAgreesWithTask2:
         base = preflight_document()
         inference = dict(base["inference"])
         inference.pop("parameters", None)
-        inference["twin"] = {"replace": {"noise": {
-            "type": "NoiseOperator", "sigma": {"value": 0.5, "unit": "K"}}}}
+        inference["twin"] = {
+            "replace": {"noise": {"type": "NoiseOperator", "sigma": {"value": 0.5, "unit": "K"}}}
+        }
         inference["observed"] = {"from": "simulation", "twin": "fit"}
         return repatch(base, inference=inference)
 
@@ -774,7 +811,8 @@ class TestTheStandDownRuleAgreesWithTask2:
         inference = dict(base["inference"])
         inference["observed"] = {
             "primary": {"from": "simulation", "twin": "full", "at": {"g": 1.5}},
-            "second": {"from": "simulation", "twin": "full", "at": {"g": 1.2}}}
+            "second": {"from": "simulation", "twin": "full", "at": {"g": 1.2}},
+        }
         return repatch(base, inference=inference)
 
     def _multi_record_without_primary(self):
@@ -782,22 +820,27 @@ class TestTheStandDownRuleAgreesWithTask2:
         inference = dict(base["inference"])
         inference["observed"] = {
             "alpha": {"from": "simulation", "twin": "full", "at": {"g": 1.5}},
-            "beta": {"from": "simulation", "twin": "full", "at": {"g": 1.2}}}
+            "beta": {"from": "simulation", "twin": "full", "at": {"g": 1.2}},
+        }
         return repatch(base, inference=inference)
 
     def _no_observed(self):
         base = preflight_document()
-        inference = {key: value for key, value in base["inference"].items()
-                    if key != "observed"}
+        inference = {key: value for key, value in base["inference"].items() if key != "observed"}
         return repatch(base, inference=inference)
 
-    @pytest.mark.parametrize("label", [
-        "fit_without_uniform_sky", "fit_zero_latents_unrepaired",
-        "fit_replace_noise", "multi_record_with_primary",
-        "multi_record_without_primary", "no_observed",
-    ])
-    def test_the_built_rule_agrees_on_documents_no_shipped_builder_makes(
-            self, label):
+    @pytest.mark.parametrize(
+        "label",
+        [
+            "fit_without_uniform_sky",
+            "fit_zero_latents_unrepaired",
+            "fit_replace_noise",
+            "multi_record_with_primary",
+            "multi_record_without_primary",
+            "no_observed",
+        ],
+    )
+    def test_the_built_rule_agrees_on_documents_no_shipped_builder_makes(self, label):
         """Six of the seven non-builder rows MAJOR 1 names, all of which
         agree under ``_t6_drawn`` (``fit_replace_noise`` only after
         BLOCKER 3; before it, that row was ITS OWN disagreement -- ``text``
@@ -816,8 +859,10 @@ class TestTheStandDownRuleAgreesWithTask2:
         path = tmp_path / "d.npy"
         np.save(path, np.zeros((16, 8), dtype=np.float32))
         base = preflight_document()
-        inference = {**base["inference"],
-                    "observed": {"file": {"format": "npy", "path": str(path)}}}
+        inference = {
+            **base["inference"],
+            "observed": {"file": {"format": "npy", "path": str(path)}},
+        }
         document = repatch(base, inference=inference)
         payload = priced_run(document)
         assert _t2c_generated(document) == (_t6_drawn(payload) is not None)
@@ -844,12 +889,11 @@ class TestTheStandDownRuleAgreesWithTask2:
         type-recognition gate that always precedes them in production, is
         what manufactures the disagreement."""
         base = preflight_document()
-        model_without_noise = {key: value for key, value in base["model"].items()
-                               if key != "noise"}
-        inference_without_twin = {key: value for key, value in base["inference"].items()
-                                  if key != "twin"}
-        document = repatch(base, model=model_without_noise,
-                           inference=inference_without_twin)
+        model_without_noise = {key: value for key, value in base["model"].items() if key != "noise"}
+        inference_without_twin = {
+            key: value for key, value in base["inference"].items() if key != "twin"
+        }
+        document = repatch(base, model=model_without_noise, inference=inference_without_twin)
         payload = priced_run(document)
         assert _t2c_generated(document) is True
         assert _t6_drawn(payload) is None
@@ -864,24 +908,24 @@ class TestTheAdviceLoop:
     succeeds."""
 
     def test_changing_the_operator_repairs_a_radiometer_disagreement(self):
-        """"change model.noise's channel_width/integration_time" -- taken
+        """ "change model.noise's channel_width/integration_time" -- taken
         literally: move the OPERATOR to the likelihood's own numbers."""
         document = _pair(RADIOMETER_DRAWN, T6_RADIOMETER_TEN_FOLD)
         assert priced_only(document, "C18") is not None
-        repaired_operator = {"type": "RadiometerNoiseOperator",
-                             **{key: T6_RADIOMETER_TEN_FOLD[key]
-                                for key in ("channel_width", "integration_time")}}
+        repaired_operator = {
+            "type": "RadiometerNoiseOperator",
+            **{key: T6_RADIOMETER_TEN_FOLD[key] for key in ("channel_width", "integration_time")},
+        }
         repaired = _pair(repaired_operator, T6_RADIOMETER_TEN_FOLD)
         run = load_document(repaired)
         assert "C18" not in run.report.checks()
 
     def test_changing_the_likelihood_repairs_a_radiometer_disagreement(self):
-        """"or inference.noise's" -- the other escape: move the LIKELIHOOD to
+        """ "or inference.noise's" -- the other escape: move the LIKELIHOOD to
         the operator's own numbers."""
         document = _pair(RADIOMETER_DRAWN, T6_RADIOMETER_TEN_FOLD)
         assert priced_only(document, "C18") is not None
-        repaired_likelihood = {"kind": "radiometer", "include_logdet": True,
-                               **RADIOMETER_NODE}
+        repaired_likelihood = {"kind": "radiometer", "include_logdet": True, **RADIOMETER_NODE}
         repaired = _pair(RADIOMETER_DRAWN, repaired_likelihood)
         run = load_document(repaired)
         assert "C18" not in run.report.checks()
@@ -891,8 +935,7 @@ class TestTheAdviceLoop:
         OPERATOR."""
         document = _pair(SIGMA_MISMATCHED_K, HOMOSCEDASTIC)
         assert priced_only(document, "C18") is not None
-        repaired = _pair({"type": "NoiseOperator", "sigma": HOMOSCEDASTIC["sigma"]},
-                         HOMOSCEDASTIC)
+        repaired = _pair({"type": "NoiseOperator", "sigma": HOMOSCEDASTIC["sigma"]}, HOMOSCEDASTIC)
         run = load_document(repaired)
         assert "C18" not in run.report.checks()
 
@@ -900,34 +943,35 @@ class TestTheAdviceLoop:
         """The homoscedastic family's second escape: move the LIKELIHOOD."""
         document = _pair(SIGMA_MISMATCHED_K, HOMOSCEDASTIC)
         assert priced_only(document, "C18") is not None
-        repaired = _pair(SIGMA_MISMATCHED_K,
-                         {"kind": "homoscedastic", "sigma": SIGMA_MISMATCHED_K["sigma"]})
+        repaired = _pair(
+            SIGMA_MISMATCHED_K, {"kind": "homoscedastic", "sigma": SIGMA_MISMATCHED_K["sigma"]}
+        )
         run = load_document(repaired)
         assert "C18" not in run.report.checks()
 
-    def test_changing_the_operator_repairs_a_radiometer_frozen_disagreement(
-            self):
+    def test_changing_the_operator_repairs_a_radiometer_frozen_disagreement(self):
         """MINOR: ``radiometer_frozen`` -- "the twin" this plan names --
         had no advice-loop test at all. The first escape: move the
         OPERATOR to the frozen kind's own numbers."""
         document = _pair(RADIOMETER_DRAWN, T6_FROZEN_HUNDRED_FOLD)
         assert priced_only(document, "C18") is not None
-        repaired_operator = {"type": "RadiometerNoiseOperator",
-                             **{key: T6_FROZEN_HUNDRED_FOLD[key]
-                                for key in ("channel_width", "integration_time")}}
+        repaired_operator = {
+            "type": "RadiometerNoiseOperator",
+            **{key: T6_FROZEN_HUNDRED_FOLD[key] for key in ("channel_width", "integration_time")},
+        }
         repaired = _pair(repaired_operator, T6_FROZEN_HUNDRED_FOLD)
         run = load_document(repaired)
         assert "C18" not in run.report.checks()
 
-    def test_changing_the_likelihood_repairs_a_radiometer_frozen_disagreement(
-            self):
+    def test_changing_the_likelihood_repairs_a_radiometer_frozen_disagreement(self):
         """``radiometer_frozen``'s second escape: move the LIKELIHOOD to the
         operator's own numbers."""
         document = _pair(RADIOMETER_DRAWN, T6_FROZEN_HUNDRED_FOLD)
         assert priced_only(document, "C18") is not None
-        repaired_likelihood = {**T6_FROZEN_HUNDRED_FOLD,
-                               **{key: RADIOMETER_DRAWN[key]
-                                  for key in ("channel_width", "integration_time")}}
+        repaired_likelihood = {
+            **T6_FROZEN_HUNDRED_FOLD,
+            **{key: RADIOMETER_DRAWN[key] for key in ("channel_width", "integration_time")},
+        }
         repaired = _pair(RADIOMETER_DRAWN, repaired_likelihood)
         run = load_document(repaired)
         assert "C18" not in run.report.checks()
@@ -942,8 +986,7 @@ class TestByObservationIsReachableAndCorrect:
     off the SAME primary :func:`~rheplicant.config.postflight.noise.
     _t6_generating_twin` reads, never off ``by_observation`` itself."""
 
-    def test_by_observation_is_populated_and_c18_still_finds_the_primarys_disagreement(
-            self):
+    def test_by_observation_is_populated_and_c18_still_finds_the_primarys_disagreement(self):
         base = preflight_document()
         inference = dict(base["inference"])
         inference["noise"] = T6_FROZEN_HUNDRED_FOLD
@@ -951,8 +994,9 @@ class TestByObservationIsReachableAndCorrect:
             "night": {"from": "simulation", "twin": "full", "at": {"g": 1.5}},
             "primary": {"from": "simulation", "twin": "full", "at": {"g": 1.2}},
         }
-        document = repatch(base, model={**base["model"], "noise": RADIOMETER_DRAWN},
-                           inference=inference)
+        document = repatch(
+            base, model={**base["model"], "noise": RADIOMETER_DRAWN}, inference=inference
+        )
         payload = priced_run(document)
         weighed = payload.run.inference.noise
         assert sorted((weighed.by_observation or {}).keys()) == ["night", "primary"]
@@ -986,8 +1030,7 @@ def _c18(document):
     ``priced_only`` cannot be used below: the whole point of the widening is
     that one document now earns MORE than one, and ``_only`` refuses that.
     """
-    return tuple(found for found in priced_findings(document)
-                 if found.check == "C18")
+    return tuple(found for found in priced_findings(document) if found.check == "C18")
 
 
 class TestARecordWithoutAPrimaryIsStillChecked:
@@ -1025,29 +1068,28 @@ class TestARecordWithoutAPrimaryIsStillChecked:
         return repatch(
             base,
             model={**base["model"], "noise": SIGMA_MISMATCHED_K},
-            inference={**base["inference"], "noise": HOMOSCEDASTIC,
-                       "observed": observed},
+            inference={**base["inference"], "noise": HOMOSCEDASTIC, "observed": observed},
         )
 
     def test_the_three_shapes_that_resolve_a_primary_still_earn_one_finding(self):
         """The regression half. Widening must not double-report a document
         that already worked, and must not change what it says."""
-        for observed in ({"from": "simulation", "twin": "full"},
-                         {"primary": self.SIM, "second": self.SIM},
-                         {"alpha": self.SIM}):
+        for observed in (
+            {"from": "simulation", "twin": "full"},
+            {"primary": self.SIM, "second": self.SIM},
+            {"alpha": self.SIM},
+        ):
             found = _c18(self._observed(observed))
             assert len(found) == 1, (observed, [f.message for f in found])
             assert "this document's data" in found[0].message
 
     def test_two_named_records_without_a_primary_are_each_checked(self):
         """The gap, closed: one finding per record, each naming its own."""
-        found = _c18(
-            self._observed({"alpha": self.SIM, "beta": self.SIM}))
+        found = _c18(self._observed({"alpha": self.SIM, "beta": self.SIM}))
 
         assert len(found) == 2, [f.message for f in found]
         assert {f.severity for f in found} == {"refuse"}
-        named = sorted(re.search(r"observed record '(\w+)'", f.message).group(1)
-                       for f in found)
+        named = sorted(re.search(r"observed record '(\w+)'", f.message).group(1) for f in found)
         assert named == ["alpha", "beta"]
 
     def test_the_widened_message_is_pinned_whole(self):
@@ -1060,8 +1102,7 @@ class TestARecordWithoutAPrimaryIsStillChecked:
         The pin below and the two whole-message pins in ``TestTheMessage``
         are the whole of what holds these two sentences.
         """
-        found = _c18(
-            self._observed({"alpha": self.SIM, "beta": self.SIM}))
+        found = _c18(self._observed({"alpha": self.SIM, "beta": self.SIM}))
         alpha = next(f for f in found if "'alpha'" in f.message)
 
         assert alpha.where == "model.noise"
@@ -1085,14 +1126,16 @@ class TestARecordWithoutAPrimaryIsStillChecked:
         which is the same division of labour ``_t2c_generated`` and
         ``_t6_drawn`` have at the single-primary level.
         """
-        found = _c18(self._observed({
-            "alpha": self.SIM,
-            "beta": {"from": "simulation", "twin": "fit"},
-        }))
-
-        assert [f.message.count("'alpha'") for f in found] == [1], (
-            [f.message for f in found]
+        found = _c18(
+            self._observed(
+                {
+                    "alpha": self.SIM,
+                    "beta": {"from": "simulation", "twin": "fit"},
+                }
+            )
         )
+
+        assert [f.message.count("'alpha'") for f in found] == [1], [f.message for f in found]
 
     def test_a_sibling_read_from_a_file_is_not_checked(self, tmp_path):
         """A file-form record carries no second sigma to disagree with, so it
@@ -1107,17 +1150,16 @@ class TestARecordWithoutAPrimaryIsStillChecked:
 
         path = tmp_path / "d.npy"
         np.save(path, np.zeros((16, 8), dtype=np.float32))
-        document = self._observed({
-            "alpha": self.SIM,
-            "beta": {"file": {"format": "npy", "path": str(path)}},
-        })
-
-        assert [name for name, _ in
-                _t6_generating_records(priced_run(document))] == ["alpha"]
-        found = _c18(document)
-        assert [f.message.count("'alpha'") for f in found] == [1], (
-            [f.message for f in found]
+        document = self._observed(
+            {
+                "alpha": self.SIM,
+                "beta": {"file": {"format": "npy", "path": str(path)}},
+            }
         )
+
+        assert [name for name, _ in _t6_generating_records(priced_run(document))] == ["alpha"]
+        found = _c18(document)
+        assert [f.message.count("'alpha'") for f in found] == [1], [f.message for f in found]
 
     def test_the_two_vantage_points_agree_on_WHICH_records_they_check(self):
         """``TestTheStandDownRuleAgreesWithTask2``, at the widened level.
@@ -1140,16 +1182,20 @@ class TestARecordWithoutAPrimaryIsStillChecked:
         """
         from rheplicant.config.preflight.gated import _t2c_generating_records
 
-        for observed in ({"from": "simulation", "twin": "full"},
-                         {"primary": self.SIM, "second": self.SIM},
-                         {"alpha": self.SIM},
-                         {"alpha": self.SIM, "beta": self.SIM},
-                         {"alpha": self.SIM,
-                          "beta": {"from": "simulation", "twin": "fit"}}):
+        for observed in (
+            {"from": "simulation", "twin": "full"},
+            {"primary": self.SIM, "second": self.SIM},
+            {"alpha": self.SIM},
+            {"alpha": self.SIM, "beta": self.SIM},
+            {"alpha": self.SIM, "beta": {"from": "simulation", "twin": "fit"}},
+        ):
             document = self._observed(observed)
             text = _t2c_generating_records(document)
-            built = tuple(name for name, twin in _t6_generating_records(
-                priced_run(document)) if _t6_drawn_in(twin) is not None)
+            built = tuple(
+                name
+                for name, twin in _t6_generating_records(priced_run(document))
+                if _t6_drawn_in(twin) is not None
+            )
 
             assert text == built, (observed, text, built)
 

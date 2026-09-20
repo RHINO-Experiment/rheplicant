@@ -143,9 +143,7 @@ def power_law_space(joint_prior=None, priors=None) -> ParameterSpace:
 
 
 def power_law(floor: float = 0.0) -> PowerLaw:
-    return PowerLaw(
-        log_amp=jnp.array(7.8), beta=jnp.array(2.55), floor=jnp.array(floor)
-    )
+    return PowerLaw(log_amp=jnp.array(7.8), beta=jnp.array(2.55), floor=jnp.array(floor))
 
 
 def forward_of(space: ParameterSpace, pipeline, state: State):
@@ -222,9 +220,7 @@ def test_the_radiometer_jeffreys_prior_has_a_zero_gradient():
     def logp(values):
         return prior.log_density(forward, values, RADIOMETER)
 
-    grad = jax.grad(logp)(
-        {"fg_log_amp": jnp.array(7.8), "fg_beta": jnp.array(2.55)}
-    )
+    grad = jax.grad(logp)({"fg_log_amp": jnp.array(7.8), "fg_beta": jnp.array(2.55)})
     assert abs(float(grad["fg_log_amp"])) < 1e-14
     assert abs(float(grad["fg_beta"])) < 1e-14
 
@@ -268,9 +264,7 @@ def test_the_noise_model_chooses_the_priors_shape():
     at = {"fg_log_amp": jnp.array(7.8), "fg_beta": jnp.array(2.55)}
 
     def slope(noise):
-        return float(
-            jax.grad(lambda v: prior.log_density(forward, v, noise))(at)["fg_beta"]
-        )
+        return float(jax.grad(lambda v: prior.log_density(forward, v, noise))(at)["fg_beta"])
 
     assert slope(RADIOMETER) == pytest.approx(-1.366854e-02, rel=1e-5)
     assert slope(HOMOSCEDASTIC) == pytest.approx(+8.052944e-03, rel=1e-5)
@@ -376,8 +370,7 @@ def test_slogdet_and_cholesky_both_return_plausible_numbers_on_the_singular_bloc
 
     factor = jnp.linalg.cholesky(matrix)
     assert bool(jnp.all(jnp.isfinite(factor))), (
-        "cholesky returned NaN; the roundoff sign flipped on this platform. "
-        "It still did not raise."
+        "cholesky returned NaN; the roundoff sign flipped on this platform. It still did not raise."
     )
     pivots = jnp.diag(factor)
     # The smallest pivot is the square root of that same roundoff, so it moves
@@ -685,9 +678,7 @@ def test_a_sampled_noise_std_with_a_jeffreys_prior_is_refused():
     """
     space = power_law_space(joint_prior=JeffreysPrior(over=("fg_log_amp", "fg_beta")))
     with pytest.raises(ParameterSpaceError, match=r"sigma\^-2"):
-        to_numpyro_model(
-            power_law(), make_state(), space, dist.HalfNormal(1.0)
-        )
+        to_numpyro_model(power_law(), make_state(), space, dist.HalfNormal(1.0))
 
 
 @pytest.mark.parametrize("over", [("fg_log_amp",), ("fg_log_amp", "fg_beta")])
@@ -736,9 +727,7 @@ def test_a_jeffreys_prior_tilts_a_sampled_sigma_by_exactly_minus_p(over):
     }
 
     def logp(log_sigma):
-        return prior.log_density(
-            forward, values, HomoscedasticNoise(jnp.exp(log_sigma))
-        )
+        return prior.log_density(forward, values, HomoscedasticNoise(jnp.exp(log_sigma)))
 
     slope = float(jax.grad(logp)(jnp.array(0.3)))
     assert slope == pytest.approx(-float(len(over)), abs=1e-9)
@@ -809,9 +798,7 @@ def test_the_prior_inherits_the_exits_noise_rather_than_carrying_one():
         }
     )
     for noise in (RADIOMETER, HOMOSCEDASTIC):
-        a, _ = numpyro_log_density(
-            build_model(space, noise=noise), (), {"observed": data}, params
-        )
+        a, _ = numpyro_log_density(build_model(space, noise=noise), (), {"observed": data}, params)
         b, _ = numpyro_log_density(
             build_model(flat_space, noise=noise), (), {"observed": data}, params
         )
@@ -847,9 +834,7 @@ def test_information_rows_are_in_sorted_order_not_declaration_order():
     )
     # sorted(("fg_log_amp", "fg_beta")) == ("fg_beta", "fg_log_amp"), so row 0
     # is fg_beta whichever way the block was declared.
-    assert float(forward_matrix[0, 0]) == pytest.approx(
-        float(reverse_matrix[0, 0]), rel=1e-15
-    )
+    assert float(forward_matrix[0, 0]) == pytest.approx(float(reverse_matrix[0, 0]), rel=1e-15)
     assert float(declared.log_density(forward_a, values, RADIOMETER)) == pytest.approx(
         float(reversed_.log_density(forward_a, values, RADIOMETER)), rel=1e-15
     )
@@ -864,9 +849,7 @@ def _chain(space, noise, key, data):
 
     from rheplicant.inference.numpyro_bridge import init_to_declared
 
-    kernel = NUTS(
-        build_model(space, noise=noise), init_strategy=init_to_declared(space)
-    )
+    kernel = NUTS(build_model(space, noise=noise), init_strategy=init_to_declared(space))
     mcmc = MCMC(kernel, num_warmup=200, num_samples=300, progress_bar=False)
     mcmc.run(key, observed=data)
     return mcmc.get_samples()
@@ -927,8 +910,10 @@ class TestASamplerActuallyCarriesTheFactor:
         data = observed_data()
         prior = JeffreysPrior(over=("fg_log_amp", "fg_beta"))
         samples = _chain(
-            power_law_space(joint_prior=prior), RADIOMETER,
-            jax.random.key(20260827), data,
+            power_law_space(joint_prior=prior),
+            RADIOMETER,
+            jax.random.key(20260827),
+            data,
         )
         for name in ("fg_log_amp", "fg_beta"):
             assert jnp.all(jnp.isfinite(samples[name])), f"{name} went non-finite"
@@ -1062,10 +1047,7 @@ class TestTheSynthesisedInformationGraph:
         flat = dist.ImproperUniform(dist.constraints.real, (), ())
 
         def forward(values):
-            row = (
-                jnp.exp(values["fg_log_amp"]) * freq ** (-values["fg_beta"])
-                + values["t_floor"]
-            )
+            row = jnp.exp(values["fg_log_amp"]) * freq ** (-values["fg_beta"]) + values["t_floor"]
             return jnp.broadcast_to(row, (N_TIME, N_FREQ))
 
         def model(observed):
@@ -1076,9 +1058,7 @@ class TestTheSynthesisedInformationGraph:
                 )
                 for name in names
             ]
-            prediction = bayesmith.det(
-                gb.PREDICTION, gb._prediction_fn(forward, names), *refs
-            )
+            prediction = bayesmith.det(gb.PREDICTION, gb._prediction_fn(forward, names), *refs)
             bayesmith.observe(
                 gb.OBSERVATION,
                 gb._observation_fn(RADIOMETER),
@@ -1139,15 +1119,10 @@ class TestTheSynthesisedInformationGraph:
         freq = jnp.linspace(60e6, 85e6, N_FREQ) / NU0
 
         def forward(values):
-            row = (
-                jnp.exp(values["fg_log_amp"]) * freq ** (-values["fg_beta"])
-                + values["t_floor"]
-            )
+            row = jnp.exp(values["fg_log_amp"]) * freq ** (-values["fg_beta"]) + values["t_floor"]
             return jnp.broadcast_to(row, (N_TIME, N_FREQ))
 
-        shipped = self._matrix(
-            graph_for_information(forward, self.VALUES, RADIOMETER)
-        )
+        shipped = self._matrix(graph_for_information(forward, self.VALUES, RADIOMETER))
         assert float(jnp.max(jnp.abs(shipped - baseline))) == 0.0, (
             "the adapter builds a different graph from the one these "
             "measurements were made on, so they say nothing about it"
@@ -1157,7 +1132,5 @@ class TestTheSynthesisedInformationGraph:
         """A proper Normal in place of the flat declaration, on the latent the
         block does not name -- which is the one the adapter also declares flat
         and could equally have declared otherwise."""
-        other = self._matrix(
-            self._graph(jnp.zeros((N_TIME, N_FREQ)), dist.Normal(0.0, 1e6))
-        )
+        other = self._matrix(self._graph(jnp.zeros((N_TIME, N_FREQ)), dist.Normal(0.0, 1e6)))
         assert float(jnp.max(jnp.abs(other - self._baseline()))) == 0.0

@@ -82,9 +82,7 @@ def block():
         meta={"telescope": "transition"},
     )
     twin = assemble(
-        ForegroundOperator(
-            amplitude=jnp.array(1.0), spectral_index=jnp.array(2.5), ref_freq=70e6
-        ),
+        ForegroundOperator(amplitude=jnp.array(1.0), spectral_index=jnp.array(2.5), ref_freq=70e6),
         GainOperator(gain=jnp.array(1.1)),
         NoiseOperator(sigma=jnp.array(1.0)),
     )
@@ -192,9 +190,7 @@ def test_the_chain_actually_mixes(block) -> None:
     is not hypothetical -- it is what the first draft of this fixture did.
     """
     cond, values = block
-    a, _ = gradient_draw(
-        cond, ("beta",), values, key=jax.random.key(11), steps=STEPS, adapt=True
-    )
+    a, _ = gradient_draw(cond, ("beta",), values, key=jax.random.key(11), steps=STEPS, adapt=True)
     b, _ = gradient_draw(
         cond, ("beta",), values, key=jax.random.key(11), steps=STEPS // 2, adapt=True
     )
@@ -217,12 +213,8 @@ def test_the_potential_sees_the_neighbours_at_their_current_values(block) -> Non
     """
     cond, values = block
     moved = {**values, "gain": jnp.array(1.30)}
-    a, _ = gradient_draw(
-        cond, ("beta",), values, key=jax.random.key(3), steps=STEPS, adapt=True
-    )
-    b, _ = gradient_draw(
-        cond, ("beta",), moved, key=jax.random.key(3), steps=STEPS, adapt=True
-    )
+    a, _ = gradient_draw(cond, ("beta",), values, key=jax.random.key(3), steps=STEPS, adapt=True)
+    b, _ = gradient_draw(cond, ("beta",), moved, key=jax.random.key(3), steps=STEPS, adapt=True)
     assert float(a["beta"]) != float(b["beta"]), (
         "Moving a latent OUTSIDE the block left the block's draw unchanged, so "
         "the transition is conditioning on a stale neighbour."

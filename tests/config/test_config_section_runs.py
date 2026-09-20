@@ -16,15 +16,17 @@ def document(*runs, **extra):
 class TestGrammar:
     def test_a_single_mapping_is_one_run_named_by_its_kind(self):
         runs = parse_runs({"kind": "forward"})
-        assert runs == (RunSpec(name="forward", kind="forward", variant=None,
-                                on="primary", expect="ok", options={}),)
+        assert runs == (
+            RunSpec(
+                name="forward", kind="forward", variant=None, on="primary", expect="ok", options={}
+            ),
+        )
 
     def test_names_are_required_and_unique_when_there_are_several(self):
         with pytest.raises(ConfigError, match="name"):
             parse_runs([{"kind": "forward"}, {"kind": "forward"}])
         with pytest.raises(ConfigError, match="twice"):
-            parse_runs([{"name": "a", "kind": "forward"},
-                        {"name": "a", "kind": "forward"}])
+            parse_runs([{"name": "a", "kind": "forward"}, {"name": "a", "kind": "forward"}])
 
     def test_kind_is_required_and_the_table_is_closed(self):
         with pytest.raises(ConfigError, match="kind"):
@@ -37,9 +39,12 @@ class TestGrammar:
             assert parse_runs([{"kind": kind}])[0].kind == kind
 
     def test_compare_and_benchmark_are_live(self):
-        assert parse_runs(
-            [{"kind": "compare", "of": ["left", "right"], "metric": "rms", "tolerance": 0.0}]
-        )[0].kind == "compare"
+        assert (
+            parse_runs(
+                [{"kind": "compare", "of": ["left", "right"], "metric": "rms", "tolerance": 0.0}]
+            )[0].kind
+            == "compare"
+        )
         assert parse_runs([{"kind": "benchmark", "variants": ["base"]}])[0].kind == "benchmark"
 
     def test_reuse_is_a_name_on_the_spec(self):
@@ -55,8 +60,7 @@ class TestGrammar:
             parse_runs([])
 
     def test_kind_specific_keys_travel_in_options(self):
-        (run,) = parse_runs([{"kind": "plan.estimate",
-                              "blocks": [{"names": ["g"]}], "tol": 1e-3}])
+        (run,) = parse_runs([{"kind": "plan.estimate", "blocks": [{"names": ["g"]}], "tol": 1e-3}])
         assert run.options == {"blocks": [{"names": ["g"]}], "tol": 1e-3}
 
 
@@ -68,18 +72,22 @@ class TestRunDocument:
         assert results["forward"].error is None
 
     def test_a_variant_run_builds_its_own_configured_run(self):
-        results = run_document(document(
-            {"name": "base", "kind": "forward"},
-            {"name": "unity", "kind": "forward", "variant": "unity_gain"}))
+        results = run_document(
+            document(
+                {"name": "base", "kind": "forward"},
+                {"name": "unity", "kind": "forward", "variant": "unity_gain"},
+            )
+        )
         import jax.numpy as jnp
 
-        assert not jnp.allclose(results["base"].product.data,
-                                results["unity"].product.data)
+        assert not jnp.allclose(results["base"].product.data, results["unity"].product.data)
 
     def test_results_arrive_in_declaration_order(self):
-        results = run_document(document(
-            {"name": "z_first", "kind": "forward"},
-            {"name": "a_second", "kind": "forward"}))
+        results = run_document(
+            document(
+                {"name": "z_first", "kind": "forward"}, {"name": "a_second", "kind": "forward"}
+            )
+        )
         assert list(results) == ["z_first", "a_second"]
 
     def test_forward_takes_no_kind_specific_keys(self):
@@ -104,8 +112,7 @@ class TestRunDocument:
         refusal into a raise: the test names the PHASE, not the check.
         """
         doc = document({"kind": "forward", "expect": "refuse"})
-        doc["observation"] = {**doc["observation"],
-                              "data": {"ones": ["n_time", "n_freq"]}}
+        doc["observation"] = {**doc["observation"], "data": {"ones": ["n_time", "n_freq"]}}
         with pytest.raises(ConfigError, match="observation.data"):
             run_document(doc)
 
@@ -139,8 +146,9 @@ class TestTheScheduleParsesBeforeAnythingExecutes:
         PARSERS["forward"] = parse_spy
         EXECUTORS["forward"] = execute_spy
         try:
-            run_document(document({"name": "a", "kind": "forward"},
-                                  {"name": "b", "kind": "forward"}))
+            run_document(
+                document({"name": "a", "kind": "forward"}, {"name": "b", "kind": "forward"})
+            )
         finally:
             PARSERS["forward"] = real_parse
             EXECUTORS["forward"] = real_execute

@@ -72,9 +72,7 @@ def _digest_rows(
         if type(relative_path) is not str or type(payload) is not bytes:
             raise ConfigError("integrity rows must be exact text/bytes pairs.")
         if relative_path == INTEGRITY_NAME:
-            raise ConfigError(
-                f"{INTEGRITY_NAME} cannot appear in its own manifest."
-            )
+            raise ConfigError(f"{INTEGRITY_NAME} cannot appear in its own manifest.")
         if relative_path in seen:
             raise ConfigError(f"integrity row {relative_path!r} is duplicated.")
         seen.add(relative_path)
@@ -186,13 +184,11 @@ def verify_tree(published: Mapping[str, bytes]) -> tuple[str, ...]:
         digest = hashlib.sha256(actual).hexdigest()
         if digest != row.get("sha256"):
             problems.append(
-                f"{relative_path}: sha256 is {digest}, manifest says "
-                f"{row.get('sha256')}."
+                f"{relative_path}: sha256 is {digest}, manifest says {row.get('sha256')}."
             )
         elif len(actual) != row.get("bytes"):
             problems.append(
-                f"{relative_path}: {len(actual)} bytes, manifest says "
-                f"{row.get('bytes')}."
+                f"{relative_path}: {len(actual)} bytes, manifest says {row.get('bytes')}."
             )
 
     for relative_path in sorted(published):

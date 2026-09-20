@@ -145,8 +145,7 @@ def test_a_frozen_chain_converges_to_one_latent(width):
         mean, variance = smooth(blocks, transition, _THETA, _NAMES, _SHAPES)
         mean = np.asarray(mean)
         assert np.all(np.isfinite(mean)), (
-            f"width={width}, process_std={process_std:g}: the smoothed mean is "
-            f"not finite"
+            f"width={width}, process_std={process_std:g}: the smoothed mean is not finite"
         )
         assert np.all(np.asarray(variance) > 0.0)
         spread = float(np.max(np.ptp(mean, axis=0)))
@@ -182,9 +181,7 @@ def test_the_smoother_still_agrees_with_the_dense_oracle_where_both_are_conditio
     )
     mean, variance = smooth(bank.stacked(), transition, _THETA, _NAMES, _SHAPES)
     expected_mean, expected_covariance = bank.oracle_zeta_posterior([0.4, -1.1])
-    assert np.asarray(mean).ravel() == pytest.approx(
-        np.asarray(expected_mean).ravel(), abs=1e-10
-    )
+    assert np.asarray(mean).ravel() == pytest.approx(np.asarray(expected_mean).ravel(), abs=1e-10)
     assert np.asarray(variance).ravel() == pytest.approx(
         np.diag(np.asarray(expected_covariance)), abs=1e-10
     )

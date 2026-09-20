@@ -351,9 +351,7 @@ def held_out_z(
     # audit could write and reads as the quietest night of the run. Recorded as
     # D70; the arrays are discarded because only the checks are wanted here.
     _campaign_arrays(terms)
-    scored = _far_held_out_z(
-        [term.info for term in terms], prior_fisher, prior_mean
-    )
+    scored = _far_held_out_z([term.info for term in terms], prior_fisher, prior_mean)
     # `epoch_id` has no slot on the far side, so it is zipped back rather than
     # returned: far identifies epochs positionally and this package identifies
     # them by name, which is what its refusal messages and its reports both do.
@@ -512,9 +510,7 @@ def _prior_curvature(
     priors = factorization.global_priors
     curvature = np.zeros((width, width))
     for name, (start, stop) in zip(names, spans, strict=True):
-        point = jnp.asarray(
-            inits[name] if at is None or name not in at else at[name], dtype=float
-        )
+        point = jnp.asarray(inits[name] if at is None or name not in at else at[name], dtype=float)
         shape = point.shape
 
         def density(flat: jax.Array, prior: Any = priors[name], shape: Any = shape):
@@ -570,9 +566,9 @@ def _refuse_bad_floors(floors: Mapping[str, Any], names: tuple[str, ...]) -> Non
         )
 
 
-def _posterior_covariance(memory: Any, at: Mapping[str, Any] | None) -> tuple[
-    np.ndarray, tuple[str, ...], tuple[tuple[int, int], ...]
-]:
+def _posterior_covariance(
+    memory: Any, at: Mapping[str, Any] | None
+) -> tuple[np.ndarray, tuple[str, ...], tuple[tuple[int, int], ...]]:
     """``(covariance, names, spans)`` -- ``(F_like + F_prior)^-1``, whole.
 
     The prior is added back deliberately.

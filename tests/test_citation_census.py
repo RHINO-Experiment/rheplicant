@@ -58,8 +58,16 @@ CITING_FILES = ("README.md", "DESIGN.md", "CLAUDE.md", "AGENTS.md")
 #: worktree: a full second copy of the package, which makes every basename
 #: ambiguous if it is indexed.
 SKIP = (
-    "docs/superpowers/", ".agents/", ".venv/", "node_modules/", "site/",
-    "examples/TRIS/", "runs/", ".claude/", ".git/", "tools/",
+    "docs/superpowers/",
+    ".agents/",
+    ".venv/",
+    "node_modules/",
+    "site/",
+    "examples/TRIS/",
+    "runs/",
+    ".claude/",
+    ".git/",
+    "tools/",
 )
 
 #: Citations INTO a dependency. Their line numbers are that project's business
@@ -69,9 +77,14 @@ THIRD_PARTY = ("equinox/", "utils/utils.py", "cal/utils/utils.py")
 #: Names written to SHOW the citation form, in the docstrings of the guards
 #: that enforce it. They are examples of a shape, not references, and a guard
 #: that flagged its own illustration would be unwriteable.
-PLACEHOLDERS = frozenset({
-    "file.py", "path.py", "module.py", "some_file.py",
-})
+PLACEHOLDERS = frozenset(
+    {
+        "file.py",
+        "path.py",
+        "module.py",
+        "some_file.py",
+    }
+)
 
 CITATION = re.compile(r"\b([\w/]+\.py):(\d+)(?:-(\d+))?\b")
 
@@ -101,11 +114,16 @@ def _prose_only(path: pathlib.Path, text: str) -> str:
     docstrings = set()
     for node in ast.walk(tree):
         body = getattr(node, "body", None)
-        if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef,
-                             ast.AsyncFunctionDef)) and body:
+        if (
+            isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef))
+            and body
+        ):
             first = body[0]
-            if isinstance(first, ast.Expr) and isinstance(first.value, ast.Constant) \
-               and isinstance(first.value.value, str):
+            if (
+                isinstance(first, ast.Expr)
+                and isinstance(first.value, ast.Constant)
+                and isinstance(first.value.value, str)
+            ):
                 docstrings.add(id(first.value))
     lines = text.split("\n")
     for node in ast.walk(tree):
@@ -117,6 +135,7 @@ def _prose_only(path: pathlib.Path, text: str) -> str:
             lines[number] = " " * len(lines[number])
     return "\n".join(lines)
 
+
 #: The ratchets. **Both reached ZERO on 2026-09-20**, which is what the
 #: migration below was for; they stay as a floor, so a new ``file.py:<line>``
 #: written into the tree turns this red rather than starting the debt again.
@@ -125,9 +144,7 @@ AMBIGUOUS_CEILING = 0
 
 #: A citation in the form the migration produced: a path suffix, ``::``, and
 #: the qualified name of what it points at.
-NAME_CITATION = re.compile(
-    r"\b([\w/]+\.py)::([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*)"
-)
+NAME_CITATION = re.compile(r"\b([\w/]+\.py)::([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*)")
 
 
 def _skipped(path: pathlib.Path) -> bool:
@@ -150,7 +167,8 @@ def _sources() -> list[pathlib.Path]:
     sources: list[pathlib.Path] = []
     for root in CITING_ROOTS:
         sources += [
-            path for path in (ROOT / root).rglob("*")
+            path
+            for path in (ROOT / root).rglob("*")
             if path.is_file() and path.suffix in (".py", ".md")
         ]
     return sources + [ROOT / name for name in CITING_FILES]
@@ -181,20 +199,16 @@ def _resolve(target: str, candidates: list[pathlib.Path]) -> list[pathlib.Path]:
     rather than resolves.
     """
     parts = tuple(target.split("/"))
-    return [path for path in candidates if path.parts[-len(parts):] == parts]
+    return [path for path in candidates if path.parts[-len(parts) :] == parts]
 
 
 def test_no_citation_names_a_file_that_is_not_there():
     """Zero today, and a new one is a plain mistake rather than a debt."""
     candidates = _candidates()
     missing = [
-        (where, target)
-        for where, target, _, _ in _citations()
-        if not _resolve(target, candidates)
+        (where, target) for where, target, _, _ in _citations() if not _resolve(target, candidates)
     ]
-    assert not missing, (
-        f"these citations name a path no file in the tree ends with: {missing}"
-    )
+    assert not missing, f"these citations name a path no file in the tree ends with: {missing}"
 
 
 def test_no_citation_points_past_the_end_of_its_file():
@@ -258,8 +272,7 @@ def test_the_ceilings_are_not_far_above_the_truth():
     """
     candidates = _candidates()
     citations = _citations()
-    ambiguous = sum(1 for _, target, _, _ in citations
-                    if len(_resolve(target, candidates)) > 1)
+    ambiguous = sum(1 for _, target, _, _ in citations if len(_resolve(target, candidates)) > 1)
     assert TOTAL_CEILING - len(citations) <= 10, (
         f"TOTAL_CEILING is {TOTAL_CEILING} and the tree has {len(citations)}; "
         "lower the ceiling to the measurement"
@@ -322,8 +335,7 @@ def _defined_names(path: pathlib.Path) -> set[str]:
             # sentences here say "`document.py` and `validation.py` import
             # `_same_value` from here", and the citation is about the name as
             # those modules use it.
-            found.update(alias.asname or alias.name.split(".")[0]
-                         for alias in node.names)
+            found.update(alias.asname or alias.name.split(".")[0] for alias in node.names)
     return found
 
 
@@ -365,6 +377,4 @@ def test_every_named_citation_names_something_that_is_there():
             continue
         if name not in _defined_names(hits[0]):
             missing.append((where, f"{target}::{name}"))
-    assert not missing, (
-        f"these citations name something their file does not define: {missing}"
-    )
+    assert not missing, f"these citations name something their file does not define: {missing}"

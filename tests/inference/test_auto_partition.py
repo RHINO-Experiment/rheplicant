@@ -234,15 +234,11 @@ def space():
 @pytest.fixture
 def observed(space, multilinear, state):
     forward, values0 = space.forward_fn(multilinear, state)
-    return forward(
-        {**values0, "t_ant": TRUE_ANT, "t_nw": TRUE_NW, "gain": GAIN0}
-    )
+    return forward({**values0, "t_ant": TRUE_ANT, "t_nw": TRUE_NW, "gain": GAIN0})
 
 
 class TestTheMultilinearSplit:
-    def test_the_coupled_factor_gets_a_block_of_its_own(
-        self, space, multilinear, state
-    ):
+    def test_the_coupled_factor_gets_a_block_of_its_own(self, space, multilinear, state):
         """The whole point: one block per factor, all of a factor's latents in it."""
         blocks = auto_blocks(space, multilinear, state)
         assert [block.names for block in blocks] == [("t_ant", "t_nw"), ("gain",)]
@@ -251,9 +247,7 @@ class TestTheMultilinearSplit:
         plan = SamplingPlan.automatic(space, multilinear, state)
         assert set(plan.engines.values()) == {CONJUGATE}
 
-    def test_one_block_holding_all_three_is_refused(
-        self, space, multilinear, state, observed
-    ):
+    def test_one_block_holding_all_three_is_refused(self, space, multilinear, state, observed):
         """What auto_blocks avoided — run, not assumed.
 
         Each of the three is affine on its own, so nothing about the
@@ -272,9 +266,7 @@ class TestTheMultilinearSplit:
             )
         assert "JOINTLY" in str(caught.value)
 
-    def test_splitting_the_uncoupled_pair_is_NOT_refused(
-        self, space, multilinear, state, observed
-    ):
+    def test_splitting_the_uncoupled_pair_is_NOT_refused(self, space, multilinear, state, observed):
         """The other neighbour: legal, quietly worse, and nothing reports it.
 
         This is why the grouping assertion is on the exact partition rather
@@ -295,21 +287,15 @@ class TestTheMultilinearSplit:
             tol=None,
         )
 
-    def test_the_derived_partition_recovers_the_truth(
-        self, space, multilinear, state, observed
-    ):
+    def test_the_derived_partition_recovers_the_truth(self, space, multilinear, state, observed):
         """End to end: the derived blocks survive every check the plan runs."""
         plan = SamplingPlan.automatic(space, multilinear, state)
-        estimate = plan.estimate(
-            multilinear, state, observed, noise=HomoscedasticNoise(sigma=1.0)
-        )
+        estimate = plan.estimate(multilinear, state, observed, noise=HomoscedasticNoise(sigma=1.0))
         assert jnp.allclose(estimate.values["t_ant"], TRUE_ANT, rtol=1e-2)
         assert jnp.allclose(estimate.values["t_nw"], TRUE_NW, rtol=1e-2)
         assert jnp.allclose(estimate.values["gain"], GAIN0, rtol=1e-2)
 
-    def test_automatic_is_the_classmethod_for_the_same_blocks(
-        self, space, multilinear, state
-    ):
+    def test_automatic_is_the_classmethod_for_the_same_blocks(self, space, multilinear, state):
         blocks = auto_blocks(space, multilinear, state)
         assert SamplingPlan.automatic(space, multilinear, state).engines == {
             block.names: CONJUGATE for block in blocks
@@ -320,9 +306,7 @@ class TestTheMultilinearSplit:
 
 
 class TestGroupingWithoutCoupling:
-    def test_an_additive_model_puts_every_linear_latent_in_one_block(
-        self, space, state
-    ):
+    def test_an_additive_model_puts_every_linear_latent_in_one_block(self, space, state):
         """No gain, so nothing couples: the two temperatures share one solve.
 
         The complement of the headline test. Together they pin that the split
@@ -392,12 +376,8 @@ def log_gain_model():
 def log_gain_space() -> ParameterSpace:
     return ParameterSpace(
         latents=[
-            Latent(
-                "t_ant", init=TRUE_ANT, prior=dist.Normal(jnp.zeros(3), 1e4), linear=True
-            ),
-            Latent(
-                "t_nw", init=TRUE_NW, prior=dist.Normal(jnp.zeros(2), 1e3), linear=True
-            ),
+            Latent("t_ant", init=TRUE_ANT, prior=dist.Normal(jnp.zeros(3), 1e4), linear=True),
+            Latent("t_nw", init=TRUE_NW, prior=dist.Normal(jnp.zeros(2), 1e3), linear=True),
             Latent("log_gain", init=LOG_G, prior=dist.Normal(LOG_G, 0.5)),
         ],
         bindings=[
@@ -419,17 +399,13 @@ class TestLogLinearIsDiscovered:
         which the probe finds. No gradient block is produced at all — every
         latent in this model is solved in closed form.
         """
-        plan = SamplingPlan.automatic(
-            log_gain_space(), log_gain_model, state, noise=MULTIPLICATIVE
-        )
+        plan = SamplingPlan.automatic(log_gain_space(), log_gain_model, state, noise=MULTIPLICATIVE)
         assert plan.engines == {
             ("t_ant", "t_nw"): CONJUGATE,
             ("log_gain",): LOG_CONJUGATE,
         }
 
-    def test_a_genuinely_nonlinear_latent_is_NOT_filed_as_log_linear(
-        self, line, state
-    ):
+    def test_a_genuinely_nonlinear_latent_is_NOT_filed_as_log_linear(self, line, state):
         """The complement: the probe must say "no" as readily as it says "yes".
 
         Without this, "discovers log-linearity" would be consistent with a
@@ -440,9 +416,7 @@ class TestLogLinearIsDiscovered:
         assert [block.names for block in blocks] == [("amp",), ("centre",)]
         assert blocks[-1].engine is None  # derived as gradient, not log_conjugate
 
-    def test_the_linear_probe_scales_are_not_used_for_the_log_probe(
-        self, log_gain_model, state
-    ):
+    def test_the_linear_probe_scales_are_not_used_for_the_log_probe(self, log_gain_model, state):
         """A 1e3 probe through an exponential overflows and the check refuses.
 
         Passing the linear default down would file a genuinely log-linear
@@ -454,8 +428,12 @@ class TestLogLinearIsDiscovered:
         assert derived[-1].engine == LOG_CONJUGATE
 
         misprobed = auto_blocks(
-            space, log_gain_model, state, noise=MULTIPLICATIVE,
-            log_scales=(1e3,), steps=4,
+            space,
+            log_gain_model,
+            state,
+            noise=MULTIPLICATIVE,
+            log_scales=(1e3,),
+            steps=4,
         )
         assert misprobed[-1].names == ("log_gain",)
         assert misprobed[-1].engine is None  # fell through to the gradient block
@@ -484,22 +462,16 @@ class TestTheNoiseIsHalfTheLogQuestion:
         assert blocks[-1].names == ("log_gain",)
         assert blocks[-1].engine is None  # derived as gradient
 
-    def test_a_fractional_level_above_the_ceiling_means_no_log_block(
-        self, log_gain_model, state
-    ):
+    def test_a_fractional_level_above_the_ceiling_means_no_log_block(self, log_gain_model, state):
         """The same ceiling the transform enforces, applied before the
         partition rather than at the first sweep."""
-        blocks = auto_blocks(
-            log_gain_space(), log_gain_model, state, noise=_Multiplicative(0.3)
-        )
+        blocks = auto_blocks(log_gain_space(), log_gain_model, state, noise=_Multiplicative(0.3))
         assert blocks[-1].names == ("log_gain",)
         assert blocks[-1].engine is None
 
     @pytest.mark.parametrize("fractional", [1e-5, 4.05e-3, FIRST_ORDER_MAX_FRACTIONAL])
     @pytest.mark.parametrize("floor", [5e-324, 1e-6, 400.0, 1e30])
-    def test_a_declared_floor_means_no_log_block(
-        self, log_gain_model, state, fractional, floor
-    ):
+    def test_a_declared_floor_means_no_log_block(self, log_gain_model, state, fractional, floor):
         """A5-3: a floored sigma is neither multiplicative nor additive.
 
         ``sigma = f max(|mu|, floor)`` is constant where the floor binds, and
@@ -533,9 +505,7 @@ class TestTheNoiseIsHalfTheLogQuestion:
 
         assert LOG_ROUTE_REFUSALS <= NOT_LOG_LINEAR_REASONS
 
-    def test_omitting_the_noise_warns_rather_than_claiming_a_block(
-        self, log_gain_model, state
-    ):
+    def test_omitting_the_noise_warns_rather_than_claiming_a_block(self, log_gain_model, state):
         """Conservative AND loud.
 
         Gradient is always a sound verdict, so the omission cannot produce a

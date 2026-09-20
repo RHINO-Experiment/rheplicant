@@ -81,9 +81,7 @@ class _FakeDistribution:
 
 def _module(name: str, *, origin: str = "<generated>", loader=None) -> ModuleType:
     module = ModuleType(name)
-    module.__spec__ = importlib.machinery.ModuleSpec(
-        name, loader, origin=origin
-    )
+    module.__spec__ = importlib.machinery.ModuleSpec(name, loader, origin=origin)
     return module
 
 
@@ -287,9 +285,7 @@ def test_regular_plugin_facts_hash_the_resolved_artifact(tmp_path, monkeypatch):
 
     from _rheplicant_bootstrap import plugins as plugin_module
 
-    monkeypatch.setattr(
-        plugin_module.metadata, "packages_distributions", lambda: {}
-    )
+    monkeypatch.setattr(plugin_module.metadata, "packages_distributions", lambda: {})
     monkeypatch.setattr(plugin_module.metadata, "distributions", lambda: ())
 
     record = import_plugin("fact_plugin")
@@ -308,13 +304,10 @@ def test_regular_plugin_facts_hash_the_resolved_artifact(tmp_path, monkeypatch):
     assert record.unobserved_io is True
 
 
-def test_plugin_cannot_hide_source_hash_by_mutating_extension_suffixes(
-    tmp_path, monkeypatch
-):
+def test_plugin_cannot_hide_source_hash_by_mutating_extension_suffixes(tmp_path, monkeypatch):
     source = tmp_path / "suffix_mutator_plugin.py"
     source.write_text(
-        "import importlib.machinery\n"
-        "importlib.machinery.EXTENSION_SUFFIXES[:] = ['.py']\n"
+        "import importlib.machinery\nimportlib.machinery.EXTENSION_SUFFIXES[:] = ['.py']\n"
     )
     expected_hash = hashlib.sha256(source.read_bytes()).hexdigest()
     monkeypatch.syspath_prepend(str(tmp_path))
@@ -323,9 +316,7 @@ def test_plugin_cannot_hide_source_hash_by_mutating_extension_suffixes(
 
     suffixes = list(importlib.machinery.EXTENSION_SUFFIXES)
     monkeypatch.setattr(importlib.machinery, "EXTENSION_SUFFIXES", suffixes)
-    monkeypatch.setattr(
-        plugin_module.metadata, "packages_distributions", lambda: {}
-    )
+    monkeypatch.setattr(plugin_module.metadata, "packages_distributions", lambda: {})
     monkeypatch.setattr(plugin_module.metadata, "distributions", lambda: ())
 
     record = import_plugin("suffix_mutator_plugin")
@@ -335,9 +326,7 @@ def test_plugin_cannot_hide_source_hash_by_mutating_extension_suffixes(
     assert record.code_hash_reason is None
 
 
-def test_loader_cannot_forge_extension_identity_through_class_descriptor(
-    tmp_path, monkeypatch
-):
+def test_loader_cannot_forge_extension_identity_through_class_descriptor(tmp_path, monkeypatch):
     source = tmp_path / "class_forgery_plugin.py"
     source.write_text("VALUE = 1\n")
     expected_hash = hashlib.sha256(source.read_bytes()).hexdigest()
@@ -350,18 +339,12 @@ def test_loader_cannot_forge_extension_identity_through_class_descriptor(
             descriptor_calls += 1
             return importlib.machinery.ExtensionFileLoader
 
-    module = _module(
-        "class_forgery_plugin", origin=str(source), loader=Loader()
-    )
+    module = _module("class_forgery_plugin", origin=str(source), loader=Loader())
 
     from _rheplicant_bootstrap import plugins as plugin_module
 
-    monkeypatch.setattr(
-        plugin_module.importlib, "import_module", lambda name: module
-    )
-    monkeypatch.setattr(
-        plugin_module.metadata, "packages_distributions", lambda: {}
-    )
+    monkeypatch.setattr(plugin_module.importlib, "import_module", lambda name: module)
+    monkeypatch.setattr(plugin_module.metadata, "packages_distributions", lambda: {})
     monkeypatch.setattr(plugin_module.metadata, "distributions", lambda: ())
 
     record = import_plugin("class_forgery_plugin")
@@ -375,17 +358,13 @@ def test_plugins_import_once_in_order_and_each_is_verified(monkeypatch):
     from _rheplicant_bootstrap import plugins as plugin_module
 
     events: list[tuple[str, str]] = []
-    modules = {
-        name: _module(name) for name in ("pkg.a", "pkg.b")
-    }
+    modules = {name: _module(name) for name in ("pkg.a", "pkg.b")}
     monkeypatch.setattr(
         plugin_module.importlib,
         "import_module",
         lambda name: events.append(("import", name)) or modules[name],
     )
-    monkeypatch.setattr(
-        plugin_module.metadata, "packages_distributions", lambda: {}
-    )
+    monkeypatch.setattr(plugin_module.metadata, "packages_distributions", lambda: {})
     monkeypatch.setattr(plugin_module.metadata, "distributions", lambda: ())
 
     class Session:
@@ -423,9 +402,7 @@ def test_already_imported_is_recorded_without_reexecuting_the_module(monkeypatch
         "import_module",
         lambda requested: calls.append(requested) or sys.modules[requested],
     )
-    monkeypatch.setattr(
-        plugin_module.metadata, "packages_distributions", lambda: {}
-    )
+    monkeypatch.setattr(plugin_module.metadata, "packages_distributions", lambda: {})
     monkeypatch.setattr(plugin_module.metadata, "distributions", lambda: ())
 
     record = import_plugin(name)
@@ -448,9 +425,7 @@ def test_module_subclass_cannot_forge_a_missing_spec_with_a_descriptor(
             raise AttributeError("forged missing spec")
 
     module = HostileModule("hostile_spec_plugin")
-    monkeypatch.setattr(
-        plugin_module.importlib, "import_module", lambda name: module
-    )
+    monkeypatch.setattr(plugin_module.importlib, "import_module", lambda name: module)
     with pytest.raises(ConfigError, match="module specification"):
         import_plugin("hostile_spec_plugin")
     assert descriptor_calls == 0
@@ -512,9 +487,7 @@ def test_module_spec_data_descriptors_are_statically_refused_without_binding(
     setattr(Spec, field, property(hostile_getter))
     module = ModuleType(f"hostile_spec_{field}")
     module.__spec__ = spec
-    monkeypatch.setattr(
-        plugin_module.importlib, "import_module", lambda name: module
-    )
+    monkeypatch.setattr(plugin_module.importlib, "import_module", lambda name: module)
     with pytest.raises(ConfigError, match="module specification"):
         import_plugin(f"hostile_spec_{field}")
     if descriptor_calls != 0:
@@ -547,12 +520,8 @@ def test_loader_class_namespace_is_read_without_metaclass_descriptors(
 
     name = "static_loader_plugin"
     module = _module(name, loader=HonestLoader())
-    monkeypatch.setattr(
-        plugin_module.importlib, "import_module", lambda requested: module
-    )
-    monkeypatch.setattr(
-        plugin_module.metadata, "packages_distributions", lambda: {}
-    )
+    monkeypatch.setattr(plugin_module.importlib, "import_module", lambda requested: module)
+    monkeypatch.setattr(plugin_module.metadata, "packages_distributions", lambda: {})
     monkeypatch.setattr(plugin_module.metadata, "distributions", lambda: ())
 
     record = import_plugin(name)
@@ -564,9 +533,7 @@ def test_loader_class_namespace_is_read_without_metaclass_descriptors(
         pytest.fail(f"forged loader namespace accepted: {record.loader_type!r}")
 
 
-@pytest.mark.parametrize(
-    "name", ["", ".plug", "plug.", "two..dots", "not-a-module", "for"]
-)
+@pytest.mark.parametrize("name", ["", ".plug", "plug.", "two..dots", "not-a-module", "for"])
 def test_import_plugin_revalidates_and_canonicalizes_module_names(name):
     with pytest.raises(ConfigError, match="dot-separated Python module name"):
         import_plugin(name)
@@ -587,12 +554,8 @@ def test_import_plugin_canonicalizes_a_valid_string_subclass(monkeypatch):
             raise AssertionError("foreign str must not run")
 
     module = _module("valid_plugin")
-    monkeypatch.setattr(
-        plugin_module.importlib, "import_module", lambda name: module
-    )
-    monkeypatch.setattr(
-        plugin_module.metadata, "packages_distributions", lambda: {}
-    )
+    monkeypatch.setattr(plugin_module.importlib, "import_module", lambda name: module)
+    monkeypatch.setattr(plugin_module.metadata, "packages_distributions", lambda: {})
     monkeypatch.setattr(plugin_module.metadata, "distributions", lambda: ())
 
     record = import_plugin(Text("valid_plugin"))
@@ -610,16 +573,13 @@ def test_foreign_exception_is_wrapped_without_swallowing_base_exception(monkeypa
     with pytest.raises(ConfigError) as caught:
         import_plugin("fixture.raises_value_error")
     assert str(caught.value) == (
-        "plugins: importing 'fixture.raises_value_error' raised "
-        "ValueError: foreign message."
+        "plugins: importing 'fixture.raises_value_error' raised ValueError: foreign message."
     )
 
     def fail_keyboard_interrupt(name):
         raise KeyboardInterrupt
 
-    monkeypatch.setattr(
-        plugin_module.importlib, "import_module", fail_keyboard_interrupt
-    )
+    monkeypatch.setattr(plugin_module.importlib, "import_module", fail_keyboard_interrupt)
     with pytest.raises(KeyboardInterrupt):
         import_plugin("fixture.raises_keyboard_interrupt")
 
@@ -654,10 +614,7 @@ def test_foreign_exception_message_never_calls_exception_render_hooks(monkeypatc
     monkeypatch.setattr(plugin_module.importlib, "import_module", fail)
     with pytest.raises(ConfigError) as caught:
         import_plugin("fixture.hostile_error")
-    expected = (
-        "plugins: importing 'fixture.hostile_error' raised "
-        "HostileError: safe detail."
-    )
+    expected = "plugins: importing 'fixture.hostile_error' raised HostileError: safe detail."
     if str(caught.value) != expected:
         pytest.fail(f"unexpected static diagnostic: {caught.value.args!r}")
     if descriptor_calls != 0:
@@ -680,8 +637,7 @@ def test_foreign_exception_with_an_oversized_integer_has_a_static_summary(
     with pytest.raises(ConfigError) as caught:
         import_plugin("fixture.oversized_error")
     assert str(caught.value) == (
-        "plugins: importing 'fixture.oversized_error' raised "
-        "ValueError: details unavailable."
+        "plugins: importing 'fixture.oversized_error' raised ValueError: details unavailable."
     )
 
 
@@ -708,8 +664,7 @@ def test_foreign_exception_renders_only_an_exact_string_detail(monkeypatch):
     with pytest.raises(ConfigError) as caught:
         import_plugin("fixture.foreign_string_detail")
     assert str(caught.value) == (
-        "plugins: importing 'fixture.foreign_string_detail' raised "
-        "ValueError: details unavailable."
+        "plugins: importing 'fixture.foreign_string_detail' raised ValueError: details unavailable."
     )
     if hooks != 0:
         pytest.fail(f"foreign string detail hooks ran {hooks} times")
@@ -754,9 +709,7 @@ def test_foreign_exception_statically_summarizes_non_utf8_string_detail(
 def test_namespace_generated_builtin_and_extension_reasons(tmp_path, monkeypatch):
     from _rheplicant_bootstrap import plugins as plugin_module
 
-    monkeypatch.setattr(
-        plugin_module.metadata, "packages_distributions", lambda: {}
-    )
+    monkeypatch.setattr(plugin_module.metadata, "packages_distributions", lambda: {})
     monkeypatch.setattr(plugin_module.metadata, "distributions", lambda: ())
 
     namespace = tmp_path / "namespace_fact"
@@ -818,9 +771,7 @@ def test_namespace_generated_builtin_and_extension_reasons(tmp_path, monkeypatch
     assert extension_record.code_hash_reason == "extension_module"
 
 
-def test_extension_loader_identity_accepts_class_instance_and_subclass(
-    tmp_path, monkeypatch
-):
+def test_extension_loader_identity_accepts_class_instance_and_subclass(tmp_path, monkeypatch):
     from _rheplicant_bootstrap import plugins as plugin_module
 
     artifact = tmp_path / "extension_identity.bin"
@@ -833,18 +784,14 @@ def test_extension_loader_identity_accepts_class_instance_and_subclass(
         (importlib.machinery.ExtensionFileLoader, True),
         (ExtensionSubclass, True),
         (
-            importlib.machinery.ExtensionFileLoader(
-                "extension_instance", str(artifact)
-            ),
+            importlib.machinery.ExtensionFileLoader("extension_instance", str(artifact)),
             True,
         ),
         (ExtensionSubclass("extension_subclass", str(artifact)), True),
         (importlib.machinery.SourceFileLoader, False),
         (object(), False),
     )
-    monkeypatch.setattr(
-        plugin_module.metadata, "packages_distributions", lambda: {}
-    )
+    monkeypatch.setattr(plugin_module.metadata, "packages_distributions", lambda: {})
     monkeypatch.setattr(plugin_module.metadata, "distributions", lambda: ())
 
     for index, (loader, expected_extension) in enumerate(loaders):
@@ -860,27 +807,19 @@ def test_extension_loader_identity_accepts_class_instance_and_subclass(
             assert record.code_hash is None
             assert record.code_hash_reason == "extension_module"
         else:
-            assert record.code_hash == hashlib.sha256(
-                artifact.read_bytes()
-            ).hexdigest()
+            assert record.code_hash == hashlib.sha256(artifact.read_bytes()).hexdigest()
             assert record.code_hash_reason is None
 
 
 @pytest.mark.parametrize("length", (256, 257))
-def test_loader_class_text_has_an_exact_bounded_diagnostic_limit(
-    monkeypatch, length
-):
+def test_loader_class_text_has_an_exact_bounded_diagnostic_limit(monkeypatch, length):
     from _rheplicant_bootstrap import plugins as plugin_module
 
     loader = type("Q" * length, (), {})
     loader.__module__ = "m" * length
     module = _module("bounded_loader_text", loader=loader)
-    monkeypatch.setattr(
-        plugin_module.importlib, "import_module", lambda name: module
-    )
-    monkeypatch.setattr(
-        plugin_module.metadata, "packages_distributions", lambda: {}
-    )
+    monkeypatch.setattr(plugin_module.importlib, "import_module", lambda name: module)
+    monkeypatch.setattr(plugin_module.metadata, "packages_distributions", lambda: {})
     monkeypatch.setattr(plugin_module.metadata, "distributions", lambda: ())
 
     record = import_plugin("bounded_loader_text")
@@ -890,9 +829,7 @@ def test_loader_class_text_has_an_exact_bounded_diagnostic_limit(
         assert record.loader_type == "builtins.unknown"
 
 
-def test_non_regular_plugin_origin_has_closed_path_and_hash_reasons(
-    tmp_path, monkeypatch
-):
+def test_non_regular_plugin_origin_has_closed_path_and_hash_reasons(tmp_path, monkeypatch):
     from _rheplicant_bootstrap import plugins as plugin_module
 
     name = "directory_origin"
@@ -902,9 +839,7 @@ def test_non_regular_plugin_origin_has_closed_path_and_hash_reasons(
         loader=importlib.machinery.SourceFileLoader(name, str(tmp_path)),
     )
     monkeypatch.setitem(sys.modules, name, module)
-    monkeypatch.setattr(
-        plugin_module.metadata, "packages_distributions", lambda: {}
-    )
+    monkeypatch.setattr(plugin_module.metadata, "packages_distributions", lambda: {})
     monkeypatch.setattr(plugin_module.metadata, "distributions", lambda: ())
 
     record = import_plugin(name)
@@ -929,9 +864,7 @@ def test_artifact_replaced_between_path_inspection_and_hash_open_is_unreadable(
 
     from _rheplicant_bootstrap import plugins as plugin_module
 
-    monkeypatch.setattr(
-        plugin_module.metadata, "packages_distributions", lambda: {}
-    )
+    monkeypatch.setattr(plugin_module.metadata, "packages_distributions", lambda: {})
     monkeypatch.setattr(plugin_module.metadata, "distributions", lambda: ())
     real_open = plugin_module.os.open
     swapped = False
@@ -951,9 +884,7 @@ def test_artifact_replaced_between_path_inspection_and_hash_open_is_unreadable(
     assert record.code_hash_reason == "unreadable"
 
 
-def test_artifact_truncated_during_descriptor_read_is_unreadable(
-    tmp_path, monkeypatch
-):
+def test_artifact_truncated_during_descriptor_read_is_unreadable(tmp_path, monkeypatch):
     package = tmp_path / "truncate_during_hash"
     package.mkdir()
     source = package / "__init__.py"
@@ -963,9 +894,7 @@ def test_artifact_truncated_during_descriptor_read_is_unreadable(
 
     from _rheplicant_bootstrap import plugins as plugin_module
 
-    monkeypatch.setattr(
-        plugin_module.metadata, "packages_distributions", lambda: {}
-    )
+    monkeypatch.setattr(plugin_module.metadata, "packages_distributions", lambda: {})
     monkeypatch.setattr(plugin_module.metadata, "distributions", lambda: ())
     real_read = plugin_module.os.read
     truncated = False
@@ -996,9 +925,7 @@ def test_artifact_close_failure_is_reported_as_unreadable(tmp_path, monkeypatch)
 
     from _rheplicant_bootstrap import plugins as plugin_module
 
-    monkeypatch.setattr(
-        plugin_module.metadata, "packages_distributions", lambda: {}
-    )
+    monkeypatch.setattr(plugin_module.metadata, "packages_distributions", lambda: {})
     monkeypatch.setattr(plugin_module.metadata, "distributions", lambda: ())
     real_open = plugin_module.os.open
     real_close = plugin_module.os.close
@@ -1024,9 +951,7 @@ def test_artifact_close_failure_is_reported_as_unreadable(tmp_path, monkeypatch)
     assert record.code_hash_reason == "unreadable"
 
 
-def test_artifact_read_and_close_failures_still_report_unreadable(
-    tmp_path, monkeypatch
-):
+def test_artifact_read_and_close_failures_still_report_unreadable(tmp_path, monkeypatch):
     package = tmp_path / "read_close_failure_plugin"
     package.mkdir()
     source = package / "__init__.py"
@@ -1036,9 +961,7 @@ def test_artifact_read_and_close_failures_still_report_unreadable(
 
     from _rheplicant_bootstrap import plugins as plugin_module
 
-    monkeypatch.setattr(
-        plugin_module.metadata, "packages_distributions", lambda: {}
-    )
+    monkeypatch.setattr(plugin_module.metadata, "packages_distributions", lambda: {})
     monkeypatch.setattr(plugin_module.metadata, "distributions", lambda: ())
     real_open = plugin_module.os.open
     real_read = plugin_module.os.read
@@ -1081,9 +1004,7 @@ def test_artifact_close_baseexception_propagates(tmp_path, monkeypatch):
 
     from _rheplicant_bootstrap import plugins as plugin_module
 
-    monkeypatch.setattr(
-        plugin_module.metadata, "packages_distributions", lambda: {}
-    )
+    monkeypatch.setattr(plugin_module.metadata, "packages_distributions", lambda: {})
     monkeypatch.setattr(plugin_module.metadata, "distributions", lambda: ())
     real_open = plugin_module.os.open
     real_close = plugin_module.os.close
@@ -1107,9 +1028,7 @@ def test_artifact_close_baseexception_propagates(tmp_path, monkeypatch):
         import_plugin("close_interrupt_plugin")
 
 
-def test_growing_artifact_is_read_only_through_initial_size_plus_sentinel(
-    tmp_path, monkeypatch
-):
+def test_growing_artifact_is_read_only_through_initial_size_plus_sentinel(tmp_path, monkeypatch):
     package = tmp_path / "growing_hash_plugin"
     package.mkdir()
     source = package / "__init__.py"
@@ -1120,9 +1039,7 @@ def test_growing_artifact_is_read_only_through_initial_size_plus_sentinel(
 
     from _rheplicant_bootstrap import plugins as plugin_module
 
-    monkeypatch.setattr(
-        plugin_module.metadata, "packages_distributions", lambda: {}
-    )
+    monkeypatch.setattr(plugin_module.metadata, "packages_distributions", lambda: {})
     monkeypatch.setattr(plugin_module.metadata, "distributions", lambda: ())
     real_open = plugin_module.os.open
     real_read = plugin_module.os.read
@@ -1161,9 +1078,7 @@ def test_growing_artifact_is_read_only_through_initial_size_plus_sentinel(
 
 
 @pytest.mark.parametrize("mode", ("over_return", "non_bytes", "early_eof"))
-def test_hostile_artifact_read_results_are_unreadable_and_bounded(
-    tmp_path, monkeypatch, mode
-):
+def test_hostile_artifact_read_results_are_unreadable_and_bounded(tmp_path, monkeypatch, mode):
     package = tmp_path / f"hostile_read_{mode}"
     package.mkdir()
     source = package / "__init__.py"
@@ -1173,9 +1088,7 @@ def test_hostile_artifact_read_results_are_unreadable_and_bounded(
 
     from _rheplicant_bootstrap import plugins as plugin_module
 
-    monkeypatch.setattr(
-        plugin_module.metadata, "packages_distributions", lambda: {}
-    )
+    monkeypatch.setattr(plugin_module.metadata, "packages_distributions", lambda: {})
     monkeypatch.setattr(plugin_module.metadata, "distributions", lambda: ())
     real_open = plugin_module.os.open
     real_read = plugin_module.os.read
@@ -1211,9 +1124,7 @@ def test_hostile_artifact_read_results_are_unreadable_and_bounded(
     assert record.code_hash_reason == "unreadable"
 
 
-def test_distribution_candidates_are_top_level_plus_record_root_union(
-    tmp_path, monkeypatch
-):
+def test_distribution_candidates_are_top_level_plus_record_root_union(tmp_path, monkeypatch):
     package = tmp_path / "candidate_plugin"
     package.mkdir()
     source = package / "__init__.py"
@@ -1293,9 +1204,7 @@ def test_distribution_candidates_are_top_level_plus_record_root_union(
     assert missing.direct_url_reason == "not_installed"
 
 
-def test_no_candidate_never_guesses_a_distribution_from_import_name(
-    tmp_path, monkeypatch
-):
+def test_no_candidate_never_guesses_a_distribution_from_import_name(tmp_path, monkeypatch):
     package = tmp_path / "guess_me"
     package.mkdir()
     (package / "__init__.py").write_text("")
@@ -1303,9 +1212,7 @@ def test_no_candidate_never_guesses_a_distribution_from_import_name(
 
     from _rheplicant_bootstrap import plugins as plugin_module
 
-    monkeypatch.setattr(
-        plugin_module.metadata, "packages_distributions", lambda: {}
-    )
+    monkeypatch.setattr(plugin_module.metadata, "packages_distributions", lambda: {})
     monkeypatch.setattr(plugin_module.metadata, "distributions", lambda: ())
     calls = []
     monkeypatch.setattr(
@@ -1320,9 +1227,7 @@ def test_no_candidate_never_guesses_a_distribution_from_import_name(
     assert record.distributions_reason == "no_distribution"
 
 
-def test_recorded_top_level_artifact_root_claims_a_package_submodule(
-    tmp_path, monkeypatch
-):
+def test_recorded_top_level_artifact_root_claims_a_package_submodule(tmp_path, monkeypatch):
     package = tmp_path / "root_claim"
     package.mkdir()
     (package / "__init__.py").write_text("")
@@ -1337,12 +1242,8 @@ def test_recorded_top_level_artifact_root_claims_a_package_submodule(
 
     from _rheplicant_bootstrap import plugins as plugin_module
 
-    monkeypatch.setattr(
-        plugin_module.metadata, "packages_distributions", lambda: {}
-    )
-    monkeypatch.setattr(
-        plugin_module.metadata, "distributions", lambda: (distribution,)
-    )
+    monkeypatch.setattr(plugin_module.metadata, "packages_distributions", lambda: {})
+    monkeypatch.setattr(plugin_module.metadata, "distributions", lambda: (distribution,))
     monkeypatch.setattr(
         plugin_module.metadata,
         "distribution",
@@ -1350,14 +1251,10 @@ def test_recorded_top_level_artifact_root_claims_a_package_submodule(
     )
 
     record = import_plugin("root_claim.submodule")
-    assert tuple(item.name for item in record.distributions) == (
-        "root-claim-dist",
-    )
+    assert tuple(item.name for item in record.distributions) == ("root-claim-dist",)
 
 
-def test_recorded_symlink_root_cannot_escape_the_distribution_base(
-    tmp_path, monkeypatch
-):
+def test_recorded_symlink_root_cannot_escape_the_distribution_base(tmp_path, monkeypatch):
     metadata_base = tmp_path / "site"
     metadata_base.mkdir()
     shared = tmp_path / "shared"
@@ -1375,12 +1272,8 @@ def test_recorded_symlink_root_cannot_escape_the_distribution_base(
 
     from _rheplicant_bootstrap import plugins as plugin_module
 
-    monkeypatch.setattr(
-        plugin_module.metadata, "packages_distributions", lambda: {}
-    )
-    monkeypatch.setattr(
-        plugin_module.metadata, "distributions", lambda: (distribution,)
-    )
+    monkeypatch.setattr(plugin_module.metadata, "packages_distributions", lambda: {})
+    monkeypatch.setattr(plugin_module.metadata, "distributions", lambda: (distribution,))
     monkeypatch.setattr(
         plugin_module.metadata,
         "distribution",
@@ -1392,9 +1285,7 @@ def test_recorded_symlink_root_cannot_escape_the_distribution_base(
     assert record.distributions_reason == "no_distribution"
 
 
-def test_record_locator_snapshots_base_and_repeated_top_level_only_once(
-    tmp_path, monkeypatch
-):
+def test_record_locator_snapshots_base_and_repeated_top_level_only_once(tmp_path, monkeypatch):
     source = tmp_path / "locator_cache_plugin.py"
     source.write_text("VALUE = 1\n")
     unrelated = tmp_path / "other"
@@ -1420,21 +1311,15 @@ def test_record_locator_snapshots_base_and_repeated_top_level_only_once(
 
     from _rheplicant_bootstrap import plugins as plugin_module
 
-    monkeypatch.setattr(
-        plugin_module.metadata, "packages_distributions", lambda: {}
-    )
-    monkeypatch.setattr(
-        plugin_module.metadata, "distributions", lambda: (distribution,)
-    )
+    monkeypatch.setattr(plugin_module.metadata, "packages_distributions", lambda: {})
+    monkeypatch.setattr(plugin_module.metadata, "distributions", lambda: (distribution,))
     record = import_plugin("locator_cache_plugin")
     assert record.distributions == ()
     assert record.distributions_reason == "no_distribution"
     assert calls == {"<base>": 1, "other": 1}
 
 
-def test_unsafe_record_paths_are_ignored_without_claiming_the_plugin(
-    tmp_path, monkeypatch
-):
+def test_unsafe_record_paths_are_ignored_without_claiming_the_plugin(tmp_path, monkeypatch):
     source = tmp_path / "unsafe_record_plugin.py"
     source.write_text("VALUE = 1\n")
     monkeypatch.syspath_prepend(str(tmp_path))
@@ -1454,9 +1339,7 @@ def test_unsafe_record_paths_are_ignored_without_claiming_the_plugin(
 
     from _rheplicant_bootstrap import plugins as plugin_module
 
-    monkeypatch.setattr(
-        plugin_module.metadata, "packages_distributions", lambda: {}
-    )
+    monkeypatch.setattr(plugin_module.metadata, "packages_distributions", lambda: {})
     monkeypatch.setattr(
         plugin_module.metadata,
         "distributions",
@@ -1473,9 +1356,7 @@ def test_unsafe_record_paths_are_ignored_without_claiming_the_plugin(
     assert record.distributions_reason == "no_distribution"
 
 
-def test_record_path_components_are_budgeted_before_collection(
-    tmp_path, monkeypatch
-):
+def test_record_path_components_are_budgeted_before_collection(tmp_path, monkeypatch):
     source = tmp_path / "record_component_budget.py"
     source.write_text("VALUE = 1\n")
     monkeypatch.syspath_prepend(str(tmp_path))
@@ -1506,19 +1387,13 @@ def test_record_path_components_are_budgeted_before_collection(
     from _rheplicant_bootstrap import plugins as plugin_module
 
     monkeypatch.setattr(plugin_module, "_METADATA_EVIDENCE_LIMIT", 4)
-    monkeypatch.setattr(
-        plugin_module.metadata, "packages_distributions", lambda: {}
-    )
-    monkeypatch.setattr(
-        plugin_module.metadata, "distributions", lambda: (distribution,)
-    )
+    monkeypatch.setattr(plugin_module.metadata, "packages_distributions", lambda: {})
+    monkeypatch.setattr(plugin_module.metadata, "distributions", lambda: (distribution,))
     with pytest.raises(ConfigError, match="metadata.*budget"):
         import_plugin("record_component_budget")
 
 
-def test_exact_string_record_path_is_budgeted_before_component_splitting(
-    tmp_path, monkeypatch
-):
+def test_exact_string_record_path_is_budgeted_before_component_splitting(tmp_path, monkeypatch):
     source = tmp_path / "record_text_budget.py"
     source.write_text("VALUE = 1\n")
     monkeypatch.syspath_prepend(str(tmp_path))
@@ -1528,12 +1403,8 @@ def test_exact_string_record_path_is_budgeted_before_component_splitting(
     from _rheplicant_bootstrap import plugins as plugin_module
 
     monkeypatch.setattr(plugin_module, "_METADATA_EVIDENCE_LIMIT", 4)
-    monkeypatch.setattr(
-        plugin_module.metadata, "packages_distributions", lambda: {}
-    )
-    monkeypatch.setattr(
-        plugin_module.metadata, "distributions", lambda: (distribution,)
-    )
+    monkeypatch.setattr(plugin_module.metadata, "packages_distributions", lambda: {})
+    monkeypatch.setattr(plugin_module.metadata, "distributions", lambda: (distribution,))
 
     tracemalloc.start()
     try:
@@ -1581,9 +1452,7 @@ def test_exact_record_text_charges_dot_and_empty_segments(
         import_plugin("record_skipped_segments")
 
 
-def test_long_single_record_component_uses_bounded_base_string_scans(
-    tmp_path, monkeypatch
-):
+def test_long_single_record_component_uses_bounded_base_string_scans(tmp_path, monkeypatch):
     source = tmp_path / "record_single_component.py"
     source.write_text("VALUE = 1\n")
     monkeypatch.syspath_prepend(str(tmp_path))
@@ -1601,21 +1470,15 @@ def test_long_single_record_component_uses_bounded_base_string_scans(
 
     monkeypatch.setattr(plugin_module, "_METADATA_EVIDENCE_LIMIT", 2)
     monkeypatch.setattr(plugin_module, "range", forbidden_range, raising=False)
-    monkeypatch.setattr(
-        plugin_module.metadata, "packages_distributions", lambda: {}
-    )
-    monkeypatch.setattr(
-        plugin_module.metadata, "distributions", lambda: (distribution,)
-    )
+    monkeypatch.setattr(plugin_module.metadata, "packages_distributions", lambda: {})
+    monkeypatch.setattr(plugin_module.metadata, "distributions", lambda: (distribution,))
     with pytest.raises(ConfigError, match="metadata.*budget"):
         import_plugin("record_single_component")
     if range_calls != 0:
         pytest.fail(f"RECORD component range ran {range_calls} times")
 
 
-def test_exact_string_record_paths_preserve_posix_normalization(
-    tmp_path, monkeypatch
-):
+def test_exact_string_record_paths_preserve_posix_normalization(tmp_path, monkeypatch):
     package = tmp_path / "record_posix_semantics"
     package.mkdir()
     source = package / "module.py"
@@ -1635,9 +1498,7 @@ def test_exact_string_record_paths_preserve_posix_normalization(
 
     from _rheplicant_bootstrap import plugins as plugin_module
 
-    monkeypatch.setattr(
-        plugin_module.metadata, "packages_distributions", lambda: {}
-    )
+    monkeypatch.setattr(plugin_module.metadata, "packages_distributions", lambda: {})
     monkeypatch.setattr(
         plugin_module.metadata,
         "distributions",
@@ -1651,9 +1512,7 @@ def test_exact_string_record_paths_preserve_posix_normalization(
     )
 
 
-def test_record_path_absolute_protocol_requires_an_exact_bool(
-    tmp_path, monkeypatch
-):
+def test_record_path_absolute_protocol_requires_an_exact_bool(tmp_path, monkeypatch):
     source = tmp_path / "record_absolute_protocol.py"
     source.write_text("VALUE = 1\n")
     monkeypatch.syspath_prepend(str(tmp_path))
@@ -1669,12 +1528,8 @@ def test_record_path_absolute_protocol_requires_an_exact_bool(
 
     from _rheplicant_bootstrap import plugins as plugin_module
 
-    monkeypatch.setattr(
-        plugin_module.metadata, "packages_distributions", lambda: {}
-    )
-    monkeypatch.setattr(
-        plugin_module.metadata, "distributions", lambda: (distribution,)
-    )
+    monkeypatch.setattr(plugin_module.metadata, "packages_distributions", lambda: {})
+    monkeypatch.setattr(plugin_module.metadata, "distributions", lambda: (distribution,))
     with pytest.raises(ConfigError, match="RECORD path inspection"):
         import_plugin("record_absolute_protocol")
 
@@ -1725,12 +1580,8 @@ def test_record_component_protocol_failures_are_static_and_baseexception_passes(
 
     from _rheplicant_bootstrap import plugins as plugin_module
 
-    monkeypatch.setattr(
-        plugin_module.metadata, "packages_distributions", lambda: {}
-    )
-    monkeypatch.setattr(
-        plugin_module.metadata, "distributions", lambda: (distribution,)
-    )
+    monkeypatch.setattr(plugin_module.metadata, "packages_distributions", lambda: {})
+    monkeypatch.setattr(plugin_module.metadata, "distributions", lambda: (distribution,))
 
     distribution.files = (Entry(HostileError("secret")),)
     with pytest.raises(ConfigError) as caught:
@@ -1747,9 +1598,7 @@ def test_record_component_protocol_failures_are_static_and_baseexception_passes(
         import_plugin("record_component_protocol")
 
 
-def test_hostile_record_locator_cannot_claim_the_filesystem_anchor(
-    tmp_path, monkeypatch
-):
+def test_hostile_record_locator_cannot_claim_the_filesystem_anchor(tmp_path, monkeypatch):
     source = tmp_path / "anchor_claim_plugin.py"
     source.write_text("VALUE = 1\n")
     monkeypatch.syspath_prepend(str(tmp_path))
@@ -1769,9 +1618,7 @@ def test_hostile_record_locator_cannot_claim_the_filesystem_anchor(
 
     from _rheplicant_bootstrap import plugins as plugin_module
 
-    monkeypatch.setattr(
-        plugin_module.metadata, "packages_distributions", lambda: {}
-    )
+    monkeypatch.setattr(plugin_module.metadata, "packages_distributions", lambda: {})
     monkeypatch.setattr(
         plugin_module.metadata,
         "distributions",
@@ -1782,9 +1629,7 @@ def test_hostile_record_locator_cannot_claim_the_filesystem_anchor(
     assert record.distributions == ()
 
 
-def test_filesystem_anchor_cannot_be_used_as_distribution_metadata_base(
-    tmp_path, monkeypatch
-):
+def test_filesystem_anchor_cannot_be_used_as_distribution_metadata_base(tmp_path, monkeypatch):
     source = tmp_path / "anchor_base_plugin.py"
     source.write_text("VALUE = 1\n")
     monkeypatch.syspath_prepend(str(tmp_path))
@@ -1805,20 +1650,14 @@ def test_filesystem_anchor_cannot_be_used_as_distribution_metadata_base(
     )
     from _rheplicant_bootstrap import plugins as plugin_module
 
-    monkeypatch.setattr(
-        plugin_module.metadata, "packages_distributions", lambda: {}
-    )
-    monkeypatch.setattr(
-        plugin_module.metadata, "distributions", lambda: (distribution,)
-    )
+    monkeypatch.setattr(plugin_module.metadata, "packages_distributions", lambda: {})
+    monkeypatch.setattr(plugin_module.metadata, "distributions", lambda: (distribution,))
 
     record = import_plugin("anchor_base_plugin")
     assert record.distributions == ()
 
 
-def test_distribution_with_no_record_files_is_a_non_candidate(
-    tmp_path, monkeypatch
-):
+def test_distribution_with_no_record_files_is_a_non_candidate(tmp_path, monkeypatch):
     package = tmp_path / "no_record_files"
     package.mkdir()
     (package / "__init__.py").write_text("")
@@ -1828,19 +1667,13 @@ def test_distribution_with_no_record_files_is_a_non_candidate(
 
     from _rheplicant_bootstrap import plugins as plugin_module
 
-    monkeypatch.setattr(
-        plugin_module.metadata, "packages_distributions", lambda: {}
-    )
-    monkeypatch.setattr(
-        plugin_module.metadata, "distributions", lambda: (distribution,)
-    )
+    monkeypatch.setattr(plugin_module.metadata, "packages_distributions", lambda: {})
+    monkeypatch.setattr(plugin_module.metadata, "distributions", lambda: (distribution,))
     record = import_plugin("no_record_files")
     assert record.distributions == ()
 
 
-def test_origin_without_a_file_is_not_mislabeled_as_unreadable(
-    tmp_path, monkeypatch
-):
+def test_origin_without_a_file_is_not_mislabeled_as_unreadable(tmp_path, monkeypatch):
     from _rheplicant_bootstrap import plugins as plugin_module
 
     name = "missing_origin_plugin"
@@ -1851,9 +1684,7 @@ def test_origin_without_a_file_is_not_mislabeled_as_unreadable(
         loader=importlib.machinery.SourceFileLoader(name, str(missing)),
     )
     monkeypatch.setitem(sys.modules, name, module)
-    monkeypatch.setattr(
-        plugin_module.metadata, "packages_distributions", lambda: {}
-    )
+    monkeypatch.setattr(plugin_module.metadata, "packages_distributions", lambda: {})
     monkeypatch.setattr(plugin_module.metadata, "distributions", lambda: ())
 
     record = import_plugin(name)
@@ -1862,9 +1693,7 @@ def test_origin_without_a_file_is_not_mislabeled_as_unreadable(
     assert record.code_hash_reason == "not_regular_file"
 
 
-def test_extension_suffix_is_unhashable_even_with_a_nonextension_loader(
-    tmp_path, monkeypatch
-):
+def test_extension_suffix_is_unhashable_even_with_a_nonextension_loader(tmp_path, monkeypatch):
     from _rheplicant_bootstrap import plugins as plugin_module
 
     name = "suffix_extension_plugin"
@@ -1876,9 +1705,7 @@ def test_extension_suffix_is_unhashable_even_with_a_nonextension_loader(
         loader=importlib.machinery.SourceFileLoader(name, str(artifact)),
     )
     monkeypatch.setitem(sys.modules, name, module)
-    monkeypatch.setattr(
-        plugin_module.metadata, "packages_distributions", lambda: {}
-    )
+    monkeypatch.setattr(plugin_module.metadata, "packages_distributions", lambda: {})
     monkeypatch.setattr(plugin_module.metadata, "distributions", lambda: ())
 
     record = import_plugin(name)
@@ -1887,18 +1714,14 @@ def test_extension_suffix_is_unhashable_even_with_a_nonextension_loader(
     assert record.code_hash_reason == "extension_module"
 
 
-def test_namespace_without_a_regular_artifact_skips_record_enumeration(
-    tmp_path, monkeypatch
-):
+def test_namespace_without_a_regular_artifact_skips_record_enumeration(tmp_path, monkeypatch):
     namespace = tmp_path / "namespace_no_scan"
     namespace.mkdir()
     monkeypatch.syspath_prepend(str(tmp_path))
 
     from _rheplicant_bootstrap import plugins as plugin_module
 
-    monkeypatch.setattr(
-        plugin_module.metadata, "packages_distributions", lambda: {}
-    )
+    monkeypatch.setattr(plugin_module.metadata, "packages_distributions", lambda: {})
     monkeypatch.setattr(
         plugin_module.metadata,
         "distributions",
@@ -1923,9 +1746,7 @@ def test_namespace_without_a_regular_artifact_skips_record_enumeration(
         '{"value":' + "[" * 101 + "0" + "]" * 101 + "}",
     ],
 )
-def test_malformed_direct_url_metadata_is_marked_unreadable(
-    tmp_path, monkeypatch, direct_url
-):
+def test_malformed_direct_url_metadata_is_marked_unreadable(tmp_path, monkeypatch, direct_url):
     package = tmp_path / "direct_url_fact"
     package.mkdir()
     (package / "__init__.py").write_text("")
@@ -1944,9 +1765,7 @@ def test_malformed_direct_url_metadata_is_marked_unreadable(
         lambda: {"direct_url_fact": ["direct-url-dist"]},
     )
     monkeypatch.setattr(plugin_module.metadata, "distributions", lambda: ())
-    monkeypatch.setattr(
-        plugin_module.metadata, "distribution", lambda name: distribution
-    )
+    monkeypatch.setattr(plugin_module.metadata, "distribution", lambda name: distribution)
 
     row = import_plugin("direct_url_fact").distributions[0]
     assert row.direct_url is None
@@ -1954,17 +1773,13 @@ def test_malformed_direct_url_metadata_is_marked_unreadable(
 
 
 @pytest.mark.parametrize("extra", (0, 1))
-def test_direct_url_raw_text_has_an_exact_one_mebibyte_boundary(
-    tmp_path, monkeypatch, extra
-):
+def test_direct_url_raw_text_has_an_exact_one_mebibyte_boundary(tmp_path, monkeypatch, extra):
     package = tmp_path / f"direct_url_size_{extra}"
     package.mkdir()
     (package / "__init__.py").write_text("")
     monkeypatch.syspath_prepend(str(tmp_path))
     raw = "{}" + " " * ((1024 * 1024) - 2 + extra)
-    distribution = _FakeDistribution(
-        "direct-url-size-dist", tmp_path, direct_url=raw
-    )
+    distribution = _FakeDistribution("direct-url-size-dist", tmp_path, direct_url=raw)
 
     from _rheplicant_bootstrap import plugins as plugin_module
 
@@ -1974,9 +1789,7 @@ def test_direct_url_raw_text_has_an_exact_one_mebibyte_boundary(
         lambda: {f"direct_url_size_{extra}": ["direct-url-size-dist"]},
     )
     monkeypatch.setattr(plugin_module.metadata, "distributions", lambda: ())
-    monkeypatch.setattr(
-        plugin_module.metadata, "distribution", lambda name: distribution
-    )
+    monkeypatch.setattr(plugin_module.metadata, "distribution", lambda name: distribution)
 
     row = import_plugin(f"direct_url_size_{extra}").distributions[0]
     if extra == 0:
@@ -1988,9 +1801,7 @@ def test_direct_url_raw_text_has_an_exact_one_mebibyte_boundary(
 
 
 @pytest.mark.parametrize("extra", (0, 1))
-def test_direct_url_metadata_string_subclass_has_an_exact_character_boundary(
-    monkeypatch, extra
-):
+def test_direct_url_metadata_string_subclass_has_an_exact_character_boundary(monkeypatch, extra):
     hook_calls = 0
 
     class Text(str):
@@ -2026,9 +1837,7 @@ def test_direct_url_metadata_string_subclass_has_an_exact_character_boundary(
 
 
 @pytest.mark.parametrize("extra", (0, 1))
-def test_direct_url_metadata_string_subclass_enforces_the_utf8_byte_boundary(
-    monkeypatch, extra
-):
+def test_direct_url_metadata_string_subclass_enforces_the_utf8_byte_boundary(monkeypatch, extra):
     hook_calls = 0
 
     class Text(str):
@@ -2271,9 +2080,7 @@ def test_direct_url_integer_limit_is_derived_from_the_one_mibibyte_budget():
     expected = math.ceil((1024 * 1024) * math.log2(10))
     assert plugin_module._DIRECT_URL_INTEGER_BIT_LIMIT == expected
     exact = 1 << (expected - 1)
-    assert _valid_distribution(direct_url={"value": exact}).direct_url == {
-        "value": exact
-    }
+    assert _valid_distribution(direct_url={"value": exact}).direct_url == {"value": exact}
     with pytest.raises(ConfigError, match="direct_url.*integer"):
         _valid_distribution(direct_url={"value": 1 << expected})
 
@@ -2282,22 +2089,16 @@ def test_direct_url_nodes_consume_the_shared_metadata_budget(monkeypatch):
     from _rheplicant_bootstrap import plugins as plugin_module
 
     module = _module("direct_url_node_budget")
-    distribution = _FakeDistribution(
-        "direct-url-node-dist", Path("/tmp"), direct_url='{"a":[]}'
-    )
+    distribution = _FakeDistribution("direct-url-node-dist", Path("/tmp"), direct_url='{"a":[]}')
     monkeypatch.setattr(plugin_module, "_METADATA_EVIDENCE_LIMIT", 4, raising=False)
-    monkeypatch.setattr(
-        plugin_module.importlib, "import_module", lambda name: module
-    )
+    monkeypatch.setattr(plugin_module.importlib, "import_module", lambda name: module)
     monkeypatch.setattr(
         plugin_module.metadata,
         "packages_distributions",
         lambda: {"direct_url_node_budget": ["direct-url-node-dist"]},
     )
     monkeypatch.setattr(plugin_module.metadata, "distributions", lambda: ())
-    monkeypatch.setattr(
-        plugin_module.metadata, "distribution", lambda name: distribution
-    )
+    monkeypatch.setattr(plugin_module.metadata, "distribution", lambda name: distribution)
     with pytest.raises(ConfigError, match="metadata.*budget"):
         import_plugin("direct_url_node_budget")
 
@@ -2431,6 +2232,7 @@ def test_metadata_sequence_fields_require_a_static_ordered_sequence(
         distribution.files = value
         installed = (distribution,)
     else:
+
         class Entry:
             parts = value
 
@@ -2440,15 +2242,9 @@ def test_metadata_sequence_fields_require_a_static_ordered_sequence(
         top_map = {}
         distribution.files = (Entry(),)
         installed = (distribution,)
-    monkeypatch.setattr(
-        plugin_module.importlib, "import_module", lambda raw_name: module
-    )
-    monkeypatch.setattr(
-        plugin_module.metadata, "packages_distributions", lambda: top_map
-    )
-    monkeypatch.setattr(
-        plugin_module.metadata, "distributions", lambda: installed
-    )
+    monkeypatch.setattr(plugin_module.importlib, "import_module", lambda raw_name: module)
+    monkeypatch.setattr(plugin_module.metadata, "packages_distributions", lambda: top_map)
+    monkeypatch.setattr(plugin_module.metadata, "distributions", lambda: installed)
 
     with pytest.raises(ConfigError, match="ordered sequence"):
         import_plugin(name)
@@ -2461,9 +2257,7 @@ def test_distribution_enumeration_failures_are_not_reported_as_no_distribution(
     from _rheplicant_bootstrap import plugins as plugin_module
 
     module = _module("metadata_failure")
-    monkeypatch.setattr(
-        plugin_module.importlib, "import_module", lambda name: module
-    )
+    monkeypatch.setattr(plugin_module.importlib, "import_module", lambda name: module)
 
     def fail():
         raise RuntimeError("metadata failed")
@@ -2498,21 +2292,13 @@ def test_packages_distribution_items_are_snapshotted_without_getitem(
             type(self).getitem_calls += 1
             raise KeyboardInterrupt("top-map getitem must not run")
 
-    monkeypatch.setattr(
-        plugin_module.importlib, "import_module", lambda name: module
-    )
-    monkeypatch.setattr(
-        plugin_module.metadata, "packages_distributions", ItemsOnly
-    )
+    monkeypatch.setattr(plugin_module.importlib, "import_module", lambda name: module)
+    monkeypatch.setattr(plugin_module.metadata, "packages_distributions", ItemsOnly)
     monkeypatch.setattr(plugin_module.metadata, "distributions", lambda: ())
-    monkeypatch.setattr(
-        plugin_module.metadata, "distribution", lambda name: distribution
-    )
+    monkeypatch.setattr(plugin_module.metadata, "distribution", lambda name: distribution)
 
     record = import_plugin("items_only_top_map")
-    assert tuple(row.name for row in record.distributions) == (
-        "items-only-dist",
-    )
+    assert tuple(row.name for row in record.distributions) == ("items-only-dist",)
     assert ItemsOnly.getitem_calls == 0
 
 
@@ -2536,9 +2322,7 @@ def test_packages_distribution_items_failure_has_the_static_boundary(
         "import_module",
         lambda name: _module("top_map_items_failure"),
     )
-    monkeypatch.setattr(
-        plugin_module.metadata, "packages_distributions", FailingItems
-    )
+    monkeypatch.setattr(plugin_module.metadata, "packages_distributions", FailingItems)
     if error_type is KeyboardInterrupt:
         with pytest.raises(KeyboardInterrupt):
             import_plugin("top_map_items_failure")
@@ -2573,9 +2357,7 @@ def test_packages_distribution_items_binding_has_the_static_boundary(
         "import_module",
         lambda name: _module("top_map_items_binding_failure"),
     )
-    monkeypatch.setattr(
-        plugin_module.metadata, "packages_distributions", FailingBinding
-    )
+    monkeypatch.setattr(plugin_module.metadata, "packages_distributions", FailingBinding)
     if error_type is KeyboardInterrupt:
         with pytest.raises(KeyboardInterrupt):
             import_plugin("top_map_items_binding_failure")
@@ -2605,9 +2387,7 @@ def test_packages_distribution_keys_collide_after_canonicalization(
         "import_module",
         lambda name: _module("duplicate_top_map"),
     )
-    monkeypatch.setattr(
-        plugin_module.metadata, "packages_distributions", DuplicateItems
-    )
+    monkeypatch.setattr(plugin_module.metadata, "packages_distributions", DuplicateItems)
     with pytest.raises(ConfigError, match="collide after canonicalization"):
         import_plugin("duplicate_top_map")
 
@@ -2634,9 +2414,7 @@ def test_packages_distribution_pair_budget_precedes_limit_plus_one_unpack(
         "import_module",
         lambda name: _module("top_map_pair_budget"),
     )
-    monkeypatch.setattr(
-        plugin_module.metadata, "packages_distributions", PairStream
-    )
+    monkeypatch.setattr(plugin_module.metadata, "packages_distributions", PairStream)
     with pytest.raises(ConfigError, match="metadata.*budget"):
         import_plugin("top_map_pair_budget")
     assert BrokenPair.unpack_calls == 0
@@ -2654,9 +2432,7 @@ def test_installed_distribution_emission_budget_has_an_exact_public_boundary(
 
     from _rheplicant_bootstrap import plugins as plugin_module
 
-    monkeypatch.setattr(
-        plugin_module.metadata, "packages_distributions", lambda: {}
-    )
+    monkeypatch.setattr(plugin_module.metadata, "packages_distributions", lambda: {})
     monkeypatch.setattr(
         plugin_module.metadata,
         "distributions",
@@ -2679,16 +2455,12 @@ def test_metadata_budget_is_shared_across_candidate_arms(tmp_path, monkeypatch):
     module = _module(
         "shared_metadata_budget",
         origin=str(source),
-        loader=importlib.machinery.SourceFileLoader(
-            "shared_metadata_budget", str(source)
-        ),
+        loader=importlib.machinery.SourceFileLoader("shared_metadata_budget", str(source)),
     )
     distribution = _FakeDistribution("not-a-candidate", tmp_path)
     distribution.files = None
     monkeypatch.setattr(plugin_module, "_METADATA_EVIDENCE_LIMIT", 3)
-    monkeypatch.setattr(
-        plugin_module.importlib, "import_module", lambda name: module
-    )
+    monkeypatch.setattr(plugin_module.importlib, "import_module", lambda name: module)
     monkeypatch.setattr(
         plugin_module.metadata,
         "packages_distributions",
@@ -2703,9 +2475,7 @@ def test_metadata_budget_is_shared_across_candidate_arms(tmp_path, monkeypatch):
         import_plugin("shared_metadata_budget")
 
 
-def test_record_entries_and_final_candidates_share_the_metadata_budget(
-    tmp_path, monkeypatch
-):
+def test_record_entries_and_final_candidates_share_the_metadata_budget(tmp_path, monkeypatch):
     source = tmp_path / "record_budget_plugin.py"
     source.write_text("VALUE = 1\n")
     monkeypatch.syspath_prepend(str(tmp_path))
@@ -2718,19 +2488,13 @@ def test_record_entries_and_final_candidates_share_the_metadata_budget(
     from _rheplicant_bootstrap import plugins as plugin_module
 
     monkeypatch.setattr(plugin_module, "_METADATA_EVIDENCE_LIMIT", 4, raising=False)
-    monkeypatch.setattr(
-        plugin_module.metadata, "packages_distributions", lambda: {}
-    )
-    monkeypatch.setattr(
-        plugin_module.metadata, "distributions", lambda: (distribution,)
-    )
+    monkeypatch.setattr(plugin_module.metadata, "packages_distributions", lambda: {})
+    monkeypatch.setattr(plugin_module.metadata, "distributions", lambda: (distribution,))
     with pytest.raises(ConfigError, match="metadata.*budget"):
         import_plugin("record_budget_plugin")
 
     module = _module("candidate_budget_plugin")
-    monkeypatch.setattr(
-        plugin_module.importlib, "import_module", lambda name: module
-    )
+    monkeypatch.setattr(plugin_module.importlib, "import_module", lambda name: module)
     monkeypatch.setattr(plugin_module, "_METADATA_EVIDENCE_LIMIT", 3, raising=False)
     monkeypatch.setattr(
         plugin_module.metadata,
@@ -2742,9 +2506,7 @@ def test_record_entries_and_final_candidates_share_the_metadata_budget(
         import_plugin("candidate_budget_plugin")
 
 
-def test_metadata_iteration_failures_are_static_and_baseexception_propagates(
-    tmp_path, monkeypatch
-):
+def test_metadata_iteration_failures_are_static_and_baseexception_propagates(tmp_path, monkeypatch):
     source = tmp_path / "metadata_iteration_failure.py"
     source.write_text("VALUE = 1\n")
     monkeypatch.syspath_prepend(str(tmp_path))
@@ -2771,9 +2533,7 @@ def test_metadata_iteration_failures_are_static_and_baseexception_propagates(
         def __next__(self):
             raise HostileError("metadata secret")
 
-    monkeypatch.setattr(
-        plugin_module.metadata, "packages_distributions", lambda: {}
-    )
+    monkeypatch.setattr(plugin_module.metadata, "packages_distributions", lambda: {})
     monkeypatch.setattr(plugin_module.metadata, "distributions", Broken)
     with pytest.raises(ConfigError) as caught:
         import_plugin("metadata_iteration_failure")
@@ -2817,9 +2577,7 @@ def test_metadata_iteration_failures_are_static_and_baseexception_propagates(
         ({"unobserved_io": 1}, "unobserved_io"),
     ],
 )
-def test_plugin_projection_refuses_every_malformed_value_reason_pair(
-    changes, match
-):
+def test_plugin_projection_refuses_every_malformed_value_reason_pair(changes, match):
     record = _valid_record()
     for name, value in changes.items():
         object.__setattr__(record, name, value)
@@ -2905,9 +2663,7 @@ def test_plugin_record_distribution_limit_is_checked_before_any_copy(
         copy_calls += 1
         pytest.fail("oversized distributions were copied before the limit")
 
-    monkeypatch.setattr(
-        plugin_module, "_copy_distribution_record", forbidden_copy
-    )
+    monkeypatch.setattr(plugin_module, "_copy_distribution_record", forbidden_copy)
     for operation in (
         lambda: _valid_record(distributions=oversized),
         lambda: plugin_audit_row(forged),
@@ -2923,9 +2679,7 @@ def test_plugin_record_uses_one_shared_budget_for_nested_direct_urls(
 ):
     from _rheplicant_bootstrap import plugins as plugin_module
 
-    distribution = _valid_distribution(
-        name="budgeted-direct-url", direct_url={"a": 1}
-    )
+    distribution = _valid_distribution(name="budgeted-direct-url", direct_url={"a": 1})
     monkeypatch.setattr(plugin_module, "_METADATA_EVIDENCE_LIMIT", 5)
     assert _valid_record(distributions=(distribution,)).distributions
 
@@ -3019,23 +2773,17 @@ def test_plugin_record_reuses_one_prevalidated_shared_direct_url(monkeypatch):
         unobserved_io=True,
     )
     if freeze_calls != 1:
-        pytest.fail(
-            "shared direct_url was not copied exactly once: "
-            f"{freeze_calls} freezes"
-        )
+        pytest.fail(f"shared direct_url was not copied exactly once: {freeze_calls} freezes")
     private_copy = record.distributions[0].direct_url
     if private_copy is shared:
         pytest.fail("PluginRecord retained a caller-owned frozen mapping")
-    if any(
-        item.direct_url is not private_copy for item in record.distributions
-    ):
+    if any(item.direct_url is not private_copy for item in record.distributions):
         pytest.fail("private shared direct_url identity was not reused")
 
     plugin_audit_row(record)
     if freeze_calls != 3:
         pytest.fail(
-            "projection did not snapshot once before its final freeze: "
-            f"{freeze_calls} calls"
+            f"projection did not snapshot once before its final freeze: {freeze_calls} calls"
         )
 
 
@@ -3342,9 +3090,7 @@ def test_plugin_record_rejects_a_forged_frozen_direct_url_cycle():
     backing = {}
     cyclic = MappingProxyType(backing)
     backing["self"] = cyclic
-    distribution = _valid_distribution(
-        direct_url=None, direct_url_reason="missing_direct_url"
-    )
+    distribution = _valid_distribution(direct_url=None, direct_url_reason="missing_direct_url")
     object.__setattr__(distribution, "direct_url", cyclic)
     object.__setattr__(distribution, "direct_url_reason", None)
 
@@ -3360,9 +3106,7 @@ def test_plugin_record_rejects_a_cross_scheduled_frozen_cycle():
     left_backing["right"] = right
     right_backing["left"] = left
     root = MappingProxyType({"left": left, "right": right})
-    distribution = _valid_distribution(
-        direct_url=None, direct_url_reason="missing_direct_url"
-    )
+    distribution = _valid_distribution(direct_url=None, direct_url_reason="missing_direct_url")
     object.__setattr__(distribution, "direct_url", root)
     object.__setattr__(distribution, "direct_url_reason", None)
 
@@ -3523,9 +3267,7 @@ def test_direct_url_pair_unpack_failures_are_static_and_baseexception_passes():
 def test_plugin_record_detaches_a_forged_mappingproxy_backing():
     backing = {"value": 1}
     caller_owned = MappingProxyType(backing)
-    distribution = _valid_distribution(
-        direct_url=None, direct_url_reason="missing_direct_url"
-    )
+    distribution = _valid_distribution(direct_url=None, direct_url_reason="missing_direct_url")
     object.__setattr__(distribution, "direct_url", caller_owned)
     object.__setattr__(distribution, "direct_url_reason", None)
 
@@ -3537,9 +3279,7 @@ def test_plugin_record_detaches_a_forged_mappingproxy_backing():
 def test_plugin_record_copy_does_not_swallow_baseexception(monkeypatch):
     from _rheplicant_bootstrap import plugins as plugin_module
 
-    distribution = _valid_distribution(
-        direct_url=None, direct_url_reason="missing_direct_url"
-    )
+    distribution = _valid_distribution(direct_url=None, direct_url_reason="missing_direct_url")
 
     def stop(_value, **_kwargs):
         raise KeyboardInterrupt
@@ -3606,8 +3346,7 @@ def test_plugin_row_precedes_reverification_and_mutation_leaves_boundary_open(
 ):
     plugin_name = "fixture_mutates_jax"
     (tmp_path / f"{plugin_name}.py").write_text(
-        "from jax import config\n"
-        "config.update('jax_enable_x64', True)\n"
+        "from jax import config\nconfig.update('jax_enable_x64', True)\n"
     )
     program = f"""
 import json, sys
@@ -3663,7 +3402,6 @@ else:
         "records": [plugin_name],
         "boundaries": ["runtime"],
         "message": (
-            "runtime.jax_enable_x64: requested False, but plugin "
-            f"'{plugin_name}' has True."
+            f"runtime.jax_enable_x64: requested False, but plugin '{plugin_name}' has True."
         ),
     }

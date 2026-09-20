@@ -30,15 +30,11 @@ def _grid_oracle(theta, phi, process_var, initial_var, points=1201, span=9.0):
 
     total = 0.0
     for z1 in grid:
-        w1 = normal(z1, 0.0, initial_var) * normal(
-            d[0], a[0, 0] * theta + c[0] * z1, sigma**2
-        )
+        w1 = normal(z1, 0.0, initial_var) * normal(d[0], a[0, 0] * theta + c[0] * z1, sigma**2)
         if w1 == 0.0:
             continue
         z2 = grid
-        w2 = normal(z2, phi * z1, process_var) * normal(
-            d[1], a[1, 0] * theta + c[1] * z2, sigma**2
-        )
+        w2 = normal(z2, phi * z1, process_var) * normal(d[1], a[1, 0] * theta + c[1] * z2, sigma**2)
         total += w1 * np.sum(w2) * step
     return float(np.log(total * step))
 
@@ -58,8 +54,7 @@ def _analytic_two_epoch(theta, phi, process_var, initial_var):
     resid = d - a[:, 0] * theta
     _, logdet = np.linalg.slogdet(cov)
     return float(
-        -0.5 * resid @ np.linalg.solve(cov, resid)
-        - 0.5 * (logdet + 2 * np.log(2 * np.pi))
+        -0.5 * resid @ np.linalg.solve(cov, resid) - 0.5 * (logdet + 2 * np.log(2 * np.pi))
     )
 
 
@@ -67,9 +62,7 @@ def _analytic_two_epoch(theta, phi, process_var, initial_var):
 def test_the_analytic_marginal_agrees_with_direct_integration(theta):
     """Two routes to the same number, sharing no code."""
     grid = _grid_oracle(theta, bank.PHI, bank.PROCESS_VAR, bank.INITIAL_VAR)
-    analytic = _analytic_two_epoch(
-        theta, bank.PHI, bank.PROCESS_VAR, bank.INITIAL_VAR
-    )
+    analytic = _analytic_two_epoch(theta, bank.PHI, bank.PROCESS_VAR, bank.INITIAL_VAR)
     assert grid == pytest.approx(analytic, abs=1e-6)
 
 

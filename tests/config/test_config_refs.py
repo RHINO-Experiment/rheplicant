@@ -137,8 +137,11 @@ class TestRefRefusals:
 class TestStack:
     def test_it_adds_one_axis(self, context):
         got = resolve_value(
-            {"stack": [{"list": [1.0, 2.0]}, {"list": [3.0, 4.0]}], "axis": 0,
-             "unit": "dimensionless"},
+            {
+                "stack": [{"list": [1.0, 2.0]}, {"list": [3.0, 4.0]}],
+                "axis": 0,
+                "unit": "dimensionless",
+            },
             context,
         )
         assert got.value.shape == (2, 2)
@@ -187,8 +190,10 @@ class TestStack:
         is what makes {stack: [{ref: ...}, {ref: ...}]} the long-hand of
         from_switch_order."""
         got = resolve_value(
-            {"stack": [{"ref": "resources.s_params.antenna"},
-                       {"ref": "resources.s_params.hot"}], "part": "re"},
+            {
+                "stack": [{"ref": "resources.s_params.antenna"}, {"ref": "resources.s_params.hot"}],
+                "part": "re",
+            },
             context,
         )
         assert got.value.shape == (2, 2)

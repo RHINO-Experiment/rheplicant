@@ -207,8 +207,9 @@ def _a15_declared_rows(node: Any, n_source: int) -> int | None:
     return None
 
 
-def _a15_declared_class(node_id: Any, spec: Mapping[str, Any],
-                        table: Mapping[str, tuple[type, ...]]) -> Any:
+def _a15_declared_class(
+    node_id: Any, spec: Mapping[str, Any], table: Mapping[str, tuple[type, ...]]
+) -> Any:
     """The operator class this entry declares, when the text names exactly one.
 
     ``build_node_operator``'s own dispatch order (``sections/model.py::_from_route``),
@@ -297,8 +298,7 @@ def _a15_sites(document: Mapping[str, Any]) -> list[tuple[str, Mapping]]:
     sites: list[tuple[str, Mapping]] = []
     table = operator_table()
     for key, spec in model_nodes(document).items():
-        if isinstance(spec, Mapping) and _a15_carries_gamma(
-                _a15_declared_class(key, spec, table)):
+        if isinstance(spec, Mapping) and _a15_carries_gamma(_a15_declared_class(key, spec, table)):
             sites.append((f"model.{key}", spec))
     model = document.get("model")
     if not isinstance(model, Mapping) or model.get("kind", "graph") != "graph":
@@ -309,7 +309,8 @@ def _a15_sites(document: Mapping[str, Any]) -> list[tuple[str, Mapping]]:
     if isinstance(replace, Mapping):
         for key, spec in replace.items():
             if isinstance(spec, Mapping) and _a15_carries_gamma(
-                    _a15_declared_class(key, spec, table)):
+                _a15_declared_class(key, spec, table)
+            ):
                 sites.append((f"inference.twin.replace.{key}", spec))
     return sites
 
@@ -397,25 +398,28 @@ def _switch_order(document: Mapping[str, Any]) -> Iterable[Finding]:
     model = document.get("model")
     if not isinstance(model, Mapping) or model.get("kind", "graph") != "graph":
         return findings
-    placements = [_t5_placement(key, spec)
-                  for key, spec in model_nodes(document).items()]
+    placements = [_t5_placement(key, spec) for key, spec in model_nodes(document).items()]
     if any(placed is None for placed in placements):
         return findings
     if any(placed == ("cal_loads",) for placed in placements):
         return findings
-    findings.append(refuse(
-        "A14", "model.cal_loads",
-        f"observation.switching.order declares {list(order[1:])} after the "
-        f"antenna, and this model places no calibration load at all. One list "
-        f"fixes the switch indices, the order of model.cal_loads, the row "
-        f"order of noise_wave.gamma_src and the thermistor_columns labels, so "
-        f"an order with no loads behind it gives {len(order)} switch "
-        f"positions to a model with no calibration branch at all -- and "
-        f"nothing refuses that: measured, such a document builds and its twin "
-        f"runs, with the cycle in coords.extra['receiver_input'] and no load "
-        f"to switch to. Declare model.cal_loads with the keys "
-        f"{list(order[1:])} in that order"
-        f"{_a14_dropping_the_order(document)} (check A14)."))
+    findings.append(
+        refuse(
+            "A14",
+            "model.cal_loads",
+            f"observation.switching.order declares {list(order[1:])} after the "
+            f"antenna, and this model places no calibration load at all. One list "
+            f"fixes the switch indices, the order of model.cal_loads, the row "
+            f"order of noise_wave.gamma_src and the thermistor_columns labels, so "
+            f"an order with no loads behind it gives {len(order)} switch "
+            f"positions to a model with no calibration branch at all -- and "
+            f"nothing refuses that: measured, such a document builds and its twin "
+            f"runs, with the cycle in coords.extra['receiver_input'] and no load "
+            f"to switch to. Declare model.cal_loads with the keys "
+            f"{list(order[1:])} in that order"
+            f"{_a14_dropping_the_order(document)} (check A14).",
+        )
+    )
     return findings
 
 
@@ -446,18 +450,22 @@ def _a14_dropping_the_order(document: Mapping[str, Any]) -> str:
     clause telling a reader to write the number they already wrote (Task 6's
     own mutation finding).
     """
-    coupled = sorted({
-        f"{site}.{half}"
-        for site, spec in _a15_sites(document)
-        for half in _A15_HALVES
-        if (rows := _a15_declared_rows(spec.get(half), 1)) is not None
-        and rows != 1})
+    coupled = sorted(
+        {
+            f"{site}.{half}"
+            for site, spec in _a15_sites(document)
+            for half in _A15_HALVES
+            if (rows := _a15_declared_rows(spec.get(half), 1)) is not None and rows != 1
+        }
+    )
     if not coupled:
         return ", or write switching: {mode: none}"
-    return (", or write switching: {mode: none} AND cut "
-            f"{coupled} to a single row each -- mode: none is one source, and "
-            "check A15 refuses any other gamma_src row count under it, so "
-            "dropping the order alone trades this refusal for that one")
+    return (
+        ", or write switching: {mode: none} AND cut "
+        f"{coupled} to a single row each -- mode: none is one source, and "
+        "check A15 refuses any other gamma_src row count under it, so "
+        "dropping the order alone trades this refusal for that one"
+    )
 
 
 @register("A15")
@@ -487,14 +495,11 @@ def _gamma_rows(document: Mapping[str, Any]) -> Iterable[Finding]:
             if rows is None or rows == n_source:
                 continue
             where = f"{site}.{half}"
-            findings.append(refuse(
-                "A15", where, _a15_message(where, order, rows, n_source,
-                                           half)))
+            findings.append(refuse("A15", where, _a15_message(where, order, rows, n_source, half)))
     return findings
 
 
-def _a15_message(where: str, order: tuple[str, ...], rows: int, n_source: int,
-                 half: str) -> str:
+def _a15_message(where: str, order: tuple[str, ...], rows: int, n_source: int, half: str) -> str:
     """The refusal, whose second half is what the PACKAGE does about it.
 
     **It opens with the field's own path**, which is not decoration:
@@ -508,30 +513,44 @@ def _a15_message(where: str, order: tuple[str, ...], rows: int, n_source: int,
     task was handed asserted the silent one for every case).
     """
     if order:
-        why = (f"observation.switching.order declares {len(order)} sources "
-               f"({list(order)}), and this declares {rows} rows.")
-        fix = (f"Write {n_source} rows in switch order, or "
-               f"{{from_switch_order: {{resource: resources.s_params, part: "
-               f"{half.rsplit('_', 1)[1]}}}}}, which stacks them by name.")
+        why = (
+            f"observation.switching.order declares {len(order)} sources "
+            f"({list(order)}), and this declares {rows} rows."
+        )
+        fix = (
+            f"Write {n_source} rows in switch order, or "
+            f"{{from_switch_order: {{resource: resources.s_params, part: "
+            f"{half.rsplit('_', 1)[1]}}}}}, which stacks them by name."
+        )
         if rows > n_source:
-            cost = ("Nothing refuses this anywhere: NoiseWaveOperator checks "
-                    "ndim, re/im agreement and n_freq and never n_source, so "
-                    "the extra rows are carried, never used, and the run "
-                    "comes back finite and confident.")
+            cost = (
+                "Nothing refuses this anywhere: NoiseWaveOperator checks "
+                "ndim, re/im agreement and n_freq and never n_source, so "
+                "the extra rows are carried, never used, and the run "
+                "comes back finite and confident."
+            )
         else:
-            cost = ("NoiseWaveOperator checks ndim, re/im agreement and "
-                    "n_freq and never n_source, so nothing sees this until "
-                    "the twin is evaluated -- and then as a switch-cycle "
-                    "error about labels rather than about the field you "
-                    "wrote.")
+            cost = (
+                "NoiseWaveOperator checks ndim, re/im agreement and "
+                "n_freq and never n_source, so nothing sees this until "
+                "the twin is evaluated -- and then as a switch-cycle "
+                "error about labels rather than about the field you "
+                "wrote."
+            )
     else:
-        why = ("this run declares no observation.switching order, so it has "
-               f"exactly one source, and this declares {rows} rows.")
-        fix = ("Write one row (schema §4.1.5: mode: none means no cal_loads "
-               "and a single gamma_src row), or declare switching: {mode: "
-               "cycle, order: [antenna, ...]}.")
-        cost = ("NoiseWaveOperator checks ndim, re/im agreement and n_freq "
-                "and never n_source, so nothing sees this until the twin is "
-                "evaluated and the operator finds no switch index to choose "
-                "a row with.")
+        why = (
+            "this run declares no observation.switching order, so it has "
+            f"exactly one source, and this declares {rows} rows."
+        )
+        fix = (
+            "Write one row (schema §4.1.5: mode: none means no cal_loads "
+            "and a single gamma_src row), or declare switching: {mode: "
+            "cycle, order: [antenna, ...]}."
+        )
+        cost = (
+            "NoiseWaveOperator checks ndim, re/im agreement and n_freq "
+            "and never n_source, so nothing sees this until the twin is "
+            "evaluated and the operator finds no switch index to choose "
+            "a row with."
+        )
     return f"{where}: {why} {fix} {cost} (check A15)."

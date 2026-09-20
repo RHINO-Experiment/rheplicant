@@ -39,7 +39,9 @@ def _real_parts(array):
 def context(tmp_path):
     (tmp_path / "horn.s1p").write_text(_S1P)
     return ResolutionContext(
-        freq=jnp.linspace(60e6, 85e6, 4), time=jnp.arange(8.0), dtype="float32",
+        freq=jnp.linspace(60e6, 85e6, 4),
+        time=jnp.arange(8.0),
+        dtype="float32",
         base_dir=str(tmp_path),
     )
 
@@ -48,7 +50,9 @@ def context(tmp_path):
 def two_port_context(tmp_path):
     (tmp_path / "horn.s2p").write_text(_S2P)
     return ResolutionContext(
-        freq=jnp.linspace(60e6, 85e6, 4), time=jnp.arange(8.0), dtype="float32",
+        freq=jnp.linspace(60e6, 85e6, 4),
+        time=jnp.arange(8.0),
+        dtype="float32",
         base_dir=str(tmp_path),
     )
 
@@ -56,9 +60,16 @@ def two_port_context(tmp_path):
 class TestTouchstone:
     def test_it_reads_and_interpolates_onto_the_runs_grid(self, context):
         built = build_resources(
-            {"s_params": {"horn": {"kind": "touchstone",
-                                   "file": {"path": "horn.s1p", "format": "touchstone"},
-                                   "component": "s11", "onto": "freq"}}},
+            {
+                "s_params": {
+                    "horn": {
+                        "kind": "touchstone",
+                        "file": {"path": "horn.s1p", "format": "touchstone"},
+                        "component": "s11",
+                        "onto": "freq",
+                    }
+                }
+            },
             context,
         )
         gamma = built.resources["resources.s_params.horn"]
@@ -68,10 +79,17 @@ class TestTouchstone:
 
     def test_the_three_parts_are_exposed(self, context):
         built = build_resources(
-            {"s_params": {"horn": {"kind": "touchstone",
-                                   "file": {"path": "horn.s1p", "format": "touchstone"},
-                                   "component": "s11", "onto": "freq"}},
-             "arrays": {"re": {"ref": "resources.s_params.horn", "part": "re"}}},
+            {
+                "s_params": {
+                    "horn": {
+                        "kind": "touchstone",
+                        "file": {"path": "horn.s1p", "format": "touchstone"},
+                        "component": "s11",
+                        "onto": "freq",
+                    }
+                },
+                "arrays": {"re": {"ref": "resources.s_params.horn", "part": "re"}},
+            },
             context,
         )
         assert not jnp.iscomplexobj(built.resources["resources.arrays.re"])
@@ -83,18 +101,32 @@ class TestTouchstone:
 
         with pytest.raises((ConfigError, DataIngestionError)):
             build_resources(
-                {"s_params": {"horn": {"kind": "touchstone",
-                                       "file": {"path": "horn.s1p", "format": "touchstone"},
-                                       "component": "s21", "onto": "freq"}}},
+                {
+                    "s_params": {
+                        "horn": {
+                            "kind": "touchstone",
+                            "file": {"path": "horn.s1p", "format": "touchstone"},
+                            "component": "s21",
+                            "onto": "freq",
+                        }
+                    }
+                },
                 context,
             )
 
     def test_an_unknown_component_lists_the_four(self, context):
         with pytest.raises(ConfigError) as excinfo:
             build_resources(
-                {"s_params": {"horn": {"kind": "touchstone",
-                                       "file": {"path": "horn.s1p", "format": "touchstone"},
-                                       "component": "s13", "onto": "freq"}}},
+                {
+                    "s_params": {
+                        "horn": {
+                            "kind": "touchstone",
+                            "file": {"path": "horn.s1p", "format": "touchstone"},
+                            "component": "s13",
+                            "onto": "freq",
+                        }
+                    }
+                },
                 context,
             )
         message = str(excinfo.value)
@@ -114,9 +146,17 @@ class TestTouchstone:
         own guard -- port reversal exchanges two ports and a 1-port file
         has one)."""
         built = build_resources(
-            {"s_params": {"horn": {"kind": "touchstone",
-                                   "file": {"path": "horn.s1p", "format": "touchstone"},
-                                   "component": "s11", "flipped": False, "onto": "freq"}}},
+            {
+                "s_params": {
+                    "horn": {
+                        "kind": "touchstone",
+                        "file": {"path": "horn.s1p", "format": "touchstone"},
+                        "component": "s11",
+                        "flipped": False,
+                        "onto": "freq",
+                    }
+                }
+            },
             context,
         )
         assert "resources.s_params.horn" in built.resources
@@ -131,9 +171,12 @@ class TestFlippedIsVerifiable:
     s11/s22 sweeps proves it directly."""
 
     def _s11(self, context, *, flipped):
-        entry = {"kind": "touchstone",
-                  "file": {"path": "horn.s2p", "format": "touchstone"},
-                  "component": "s11", "onto": "freq"}
+        entry = {
+            "kind": "touchstone",
+            "file": {"path": "horn.s2p", "format": "touchstone"},
+            "component": "s11",
+            "onto": "freq",
+        }
         if flipped is not None:
             entry["flipped"] = flipped
         built = build_resources({"s_params": {"horn": entry}}, context)
@@ -157,7 +200,9 @@ class TestAllowExtrapolation:
     def wide_context(self, tmp_path):
         (tmp_path / "horn.s1p").write_text(_S1P)
         return ResolutionContext(
-            freq=jnp.array([50e6, 95e6]), time=jnp.arange(8.0), dtype="float32",
+            freq=jnp.array([50e6, 95e6]),
+            time=jnp.arange(8.0),
+            dtype="float32",
             base_dir=str(tmp_path),
         )
 
@@ -166,18 +211,32 @@ class TestAllowExtrapolation:
 
         with pytest.raises((ConfigError, DataIngestionError)):
             build_resources(
-                {"s_params": {"horn": {"kind": "touchstone",
-                                       "file": {"path": "horn.s1p", "format": "touchstone"},
-                                       "component": "s11", "onto": "freq"}}},
+                {
+                    "s_params": {
+                        "horn": {
+                            "kind": "touchstone",
+                            "file": {"path": "horn.s1p", "format": "touchstone"},
+                            "component": "s11",
+                            "onto": "freq",
+                        }
+                    }
+                },
                 wide_context,
             )
 
     def test_allow_extrapolation_clamps_to_the_edge_values(self, wide_context):
         built = build_resources(
-            {"s_params": {"horn": {"kind": "touchstone",
-                                   "file": {"path": "horn.s1p", "format": "touchstone"},
-                                   "component": "s11", "onto": "freq",
-                                   "allow_extrapolation": True}}},
+            {
+                "s_params": {
+                    "horn": {
+                        "kind": "touchstone",
+                        "file": {"path": "horn.s1p", "format": "touchstone"},
+                        "component": "s11",
+                        "onto": "freq",
+                        "allow_extrapolation": True,
+                    }
+                }
+            },
             wide_context,
         )
         gamma = built.resources["resources.s_params.horn"]
@@ -193,9 +252,7 @@ class TestTheObjectReader:
     def test_the_file_node_returns_a_touchstone_object(self, context):
         from rheplicant.radio.touchstone import Touchstone
 
-        resolved = resolve_value(
-            {"file": {"path": "horn.s1p", "format": "touchstone"}}, context
-        )
+        resolved = resolve_value({"file": {"path": "horn.s1p", "format": "touchstone"}}, context)
         assert isinstance(resolved.value, Touchstone)
 
     def test_modifiers_on_an_object_valued_file_node_are_refused(self, context):
@@ -219,9 +276,11 @@ class TestInterpolateOntoDerivation:
 
     def test_the_happy_path_pins_the_same_values_as_kind_touchstone(self, context):
         resolved = resolve_value(
-            {"from": "interpolate_onto",
-             "of": {"file": {"path": "horn.s1p", "format": "touchstone"}},
-             "component": "s11"},
+            {
+                "from": "interpolate_onto",
+                "of": {"file": {"path": "horn.s1p", "format": "touchstone"}},
+                "component": "s11",
+            },
             context,
         )
         assert _real_parts(resolved.value) == pytest.approx(_EXPECTED_S11, rel=1e-4)
@@ -231,8 +290,11 @@ class TestInterpolateOntoDerivation:
         with_array = dataclasses.replace(context, resources={"resources.arrays.probe": probe})
         with pytest.raises(ConfigError) as excinfo:
             resolve_value(
-                {"from": "interpolate_onto", "of": {"ref": "resources.arrays.probe"},
-                 "component": "s11"},
+                {
+                    "from": "interpolate_onto",
+                    "of": {"ref": "resources.arrays.probe"},
+                    "component": "s11",
+                },
                 with_array,
             )
         message = str(excinfo.value)
@@ -244,8 +306,16 @@ class TestTheCalKinds:
     def test_termination_needs_the_cal_extra(self, context):
         pytest.importorskip("rhino_cal_jax")
         built = build_resources(
-            {"s_params": {"open": {"kind": "termination", "termination": "open",
-                                   "z0": {"value": 50.0, "unit": "ohm"}, "n": "n_freq"}}},
+            {
+                "s_params": {
+                    "open": {
+                        "kind": "termination",
+                        "termination": "open",
+                        "z0": {"value": 50.0, "unit": "ohm"},
+                        "n": "n_freq",
+                    }
+                }
+            },
             context,
         )
         assert built.resources["resources.s_params.open"].shape == (4,)
@@ -254,8 +324,16 @@ class TestTheCalKinds:
         pytest.importorskip("rhino_cal_jax")
         with pytest.raises(ConfigError, match="impedance"):
             build_resources(
-                {"s_params": {"r": {"kind": "termination", "termination": "resistive",
-                                    "z0": {"value": 50.0, "unit": "ohm"}, "n": "n_freq"}}},
+                {
+                    "s_params": {
+                        "r": {
+                            "kind": "termination",
+                            "termination": "resistive",
+                            "z0": {"value": 50.0, "unit": "ohm"},
+                            "n": "n_freq",
+                        }
+                    }
+                },
                 context,
             )
 
@@ -274,8 +352,16 @@ class TestTheCalKinds:
         monkeypatch.setattr(builtins, "__import__", _blocked)
         with pytest.raises(ConfigError) as excinfo:
             build_resources(
-                {"s_params": {"open": {"kind": "termination", "termination": "open",
-                                       "z0": {"value": 50.0, "unit": "ohm"}, "n": "n_freq"}}},
+                {
+                    "s_params": {
+                        "open": {
+                            "kind": "termination",
+                            "termination": "open",
+                            "z0": {"value": 50.0, "unit": "ohm"},
+                            "n": "n_freq",
+                        }
+                    }
+                },
                 context,
             )
         message = str(excinfo.value)
@@ -295,8 +381,15 @@ class TestTerminationNeedsFreq:
         freqless = ResolutionContext(freq=None, time=jnp.arange(8.0), dtype="float32")
         with pytest.raises(ConfigError, match="freq"):
             build_resources(
-                {"s_params": {"open": {"kind": "termination", "termination": "open",
-                                       "z0": {"value": 50.0, "unit": "ohm"}}}},
+                {
+                    "s_params": {
+                        "open": {
+                            "kind": "termination",
+                            "termination": "open",
+                            "z0": {"value": 50.0, "unit": "ohm"},
+                        }
+                    }
+                },
                 freqless,
             )
 
@@ -311,8 +404,16 @@ class TestUnitValidation:
         pytest.importorskip("rhino_cal_jax")
         with pytest.raises(ConfigError) as excinfo:
             build_resources(
-                {"s_params": {"open": {"kind": "termination", "termination": "open",
-                                       "z0": {"value": 50.0, "unit": "K"}, "n": "n_freq"}}},
+                {
+                    "s_params": {
+                        "open": {
+                            "kind": "termination",
+                            "termination": "open",
+                            "z0": {"value": 50.0, "unit": "K"},
+                            "n": "n_freq",
+                        }
+                    }
+                },
                 context,
             )
         message = str(excinfo.value)
@@ -323,9 +424,17 @@ class TestUnitValidation:
         pytest.importorskip("rhino_cal_jax")
         with pytest.raises(ConfigError) as excinfo:
             build_resources(
-                {"s_params": {"r": {"kind": "termination", "termination": "resistive",
-                                    "impedance": {"value": 75.0, "unit": "K"},
-                                    "z0": {"value": 50.0, "unit": "ohm"}, "n": "n_freq"}}},
+                {
+                    "s_params": {
+                        "r": {
+                            "kind": "termination",
+                            "termination": "resistive",
+                            "impedance": {"value": 75.0, "unit": "K"},
+                            "z0": {"value": 50.0, "unit": "ohm"},
+                            "n": "n_freq",
+                        }
+                    }
+                },
                 context,
             )
         assert "impedance" in str(excinfo.value)
@@ -334,12 +443,21 @@ class TestUnitValidation:
         pytest.importorskip("rhino_cal_jax")
         with pytest.raises(ConfigError) as excinfo:
             build_resources(
-                {"s_params": {
-                    "open": {"kind": "termination", "termination": "open",
-                             "z0": {"value": 50.0, "unit": "ohm"}, "n": "n_freq"},
-                    "cable": {"kind": "cable", "behind": {"ref": "resources.s_params.open"},
-                              "length": {"value": 1.0, "unit": "K"}},
-                }},
+                {
+                    "s_params": {
+                        "open": {
+                            "kind": "termination",
+                            "termination": "open",
+                            "z0": {"value": 50.0, "unit": "ohm"},
+                            "n": "n_freq",
+                        },
+                        "cable": {
+                            "kind": "cable",
+                            "behind": {"ref": "resources.s_params.open"},
+                            "length": {"value": 1.0, "unit": "K"},
+                        },
+                    }
+                },
                 context,
             )
         message = str(excinfo.value)
@@ -355,12 +473,21 @@ class TestCable:
         requiring a value node on every cable."""
         pytest.importorskip("rhino_cal_jax")
         built = build_resources(
-            {"s_params": {
-                "open": {"kind": "termination", "termination": "open",
-                         "z0": {"value": 50.0, "unit": "ohm"}, "n": "n_freq"},
-                "cable": {"kind": "cable", "behind": {"ref": "resources.s_params.open"},
-                          "length": 1.5},
-            }},
+            {
+                "s_params": {
+                    "open": {
+                        "kind": "termination",
+                        "termination": "open",
+                        "z0": {"value": 50.0, "unit": "ohm"},
+                        "n": "n_freq",
+                    },
+                    "cable": {
+                        "kind": "cable",
+                        "behind": {"ref": "resources.s_params.open"},
+                        "length": 1.5,
+                    },
+                }
+            },
             context,
         )
         gamma = built.resources["resources.s_params.cable"]
@@ -374,10 +501,17 @@ class TestZ0LivesWhereItIsRead:
         termination_gamma(z0=) IS read. So the key exists in exactly one kind."""
         with pytest.raises(ConfigError) as excinfo:
             build_resources(
-                {"s_params": {"horn": {"kind": "touchstone",
-                                       "file": {"path": "horn.s1p", "format": "touchstone"},
-                                       "component": "s11", "onto": "freq",
-                                       "z0": {"value": 50.0, "unit": "ohm"}}}},
+                {
+                    "s_params": {
+                        "horn": {
+                            "kind": "touchstone",
+                            "file": {"path": "horn.s1p", "format": "touchstone"},
+                            "component": "s11",
+                            "onto": "freq",
+                            "z0": {"value": 50.0, "unit": "ohm"},
+                        }
+                    }
+                },
                 context,
             )
         assert "z0" in str(excinfo.value)
@@ -392,9 +526,17 @@ class TestUnknownKeysAreRefused:
         pytest.importorskip("rhino_cal_jax")
         with pytest.raises(ConfigError, match="component"):
             build_resources(
-                {"s_params": {"open": {"kind": "termination", "termination": "open",
-                                       "z0": {"value": 50.0, "unit": "ohm"}, "n": "n_freq",
-                                       "component": "s11"}}},
+                {
+                    "s_params": {
+                        "open": {
+                            "kind": "termination",
+                            "termination": "open",
+                            "z0": {"value": 50.0, "unit": "ohm"},
+                            "n": "n_freq",
+                            "component": "s11",
+                        }
+                    }
+                },
                 context,
             )
 
@@ -402,12 +544,21 @@ class TestUnknownKeysAreRefused:
         pytest.importorskip("rhino_cal_jax")
         with pytest.raises(ConfigError, match="z0"):
             build_resources(
-                {"s_params": {
-                    "open": {"kind": "termination", "termination": "open",
-                             "z0": {"value": 50.0, "unit": "ohm"}, "n": "n_freq"},
-                    "cable": {"kind": "cable", "behind": {"ref": "resources.s_params.open"},
-                              "length": {"value": 1.0, "unit": "m"},
-                              "z0": {"value": 50.0, "unit": "ohm"}},
-                }},
+                {
+                    "s_params": {
+                        "open": {
+                            "kind": "termination",
+                            "termination": "open",
+                            "z0": {"value": 50.0, "unit": "ohm"},
+                            "n": "n_freq",
+                        },
+                        "cable": {
+                            "kind": "cable",
+                            "behind": {"ref": "resources.s_params.open"},
+                            "length": {"value": 1.0, "unit": "m"},
+                            "z0": {"value": 50.0, "unit": "ohm"},
+                        },
+                    }
+                },
                 context,
             )

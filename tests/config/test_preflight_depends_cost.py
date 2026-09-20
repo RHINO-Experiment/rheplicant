@@ -56,7 +56,7 @@ _ROOT = pathlib.Path(__file__).resolve().parents[2]
 #: A35 can affect -- so a literal 10x regression in the walk moved the number
 #: only 3.3x and the assertion stayed green.  The layers are built ONCE,
 #: outside the clock, and what is timed is the loop over them.
-_COST_CHILD = textwrap.dedent('''
+_COST_CHILD = textwrap.dedent("""
     import sys, time
 
     from _rheplicant_bootstrap.layering import initial_merge
@@ -91,7 +91,7 @@ _COST_CHILD = textwrap.dedent('''
         one = time.perf_counter() - start
         best = one if best is None else min(best, one)
     print(best)
-''')
+""")
 
 #: One document lighting EVERY route in :data:`ROUTES` at once, which is what
 #: the cost and the invariant are both about: a pass that probed one route
@@ -109,35 +109,69 @@ _COST_CHILD = textwrap.dedent('''
 _EVERY_ROUTE = {
     "variants": {f"v{index}": {"runtime": {"seed": index}} for index in range(8)},
     "resources": {
-        "beams": {"cst": {"format": "cst", "nside": 4, "normalize": "pixel_sum",
-                          "directory": "cst", "phi0_deg": 0.0, "phi_sense": "ccw",
-                          "horizon": {"mode": "truncate_map"}},
-                  "uv": {"format": "uvbeam", "nside": 4, "normalize": "pixel_sum",
-                         "path": "b.beamfits"},
-                  "hp": {"format": "healpix", "nside": 4, "normalize": "pixel_sum",
-                         "path": "b.fits", "order": "ring", "frame": "beam_local",
-                         "freq": {"ones": ["n_freq"]}},
-                  "ga": {"format": "gaussian", "nside": 4, "normalize": "pixel_sum",
-                         "fwhm_deg": 10.0, "frame": "beam_local"}},
-        "projectors": {"ds": {"engine": "driftscan", "lmax": 8, "uniform_sampling": True,
-                              "normalize_beam": True,
-                              "beam": {"ref": "resources.beams.ga"}},
-                       "gp": {"engine": "general_pointing", "lmax": 8, "nside": 4,
-                              "normalize_beam": True,
-                              "beam": {"ref": "resources.beams.ga"}}},
+        "beams": {
+            "cst": {
+                "format": "cst",
+                "nside": 4,
+                "normalize": "pixel_sum",
+                "directory": "cst",
+                "phi0_deg": 0.0,
+                "phi_sense": "ccw",
+                "horizon": {"mode": "truncate_map"},
+            },
+            "uv": {"format": "uvbeam", "nside": 4, "normalize": "pixel_sum", "path": "b.beamfits"},
+            "hp": {
+                "format": "healpix",
+                "nside": 4,
+                "normalize": "pixel_sum",
+                "path": "b.fits",
+                "order": "ring",
+                "frame": "beam_local",
+                "freq": {"ones": ["n_freq"]},
+            },
+            "ga": {
+                "format": "gaussian",
+                "nside": 4,
+                "normalize": "pixel_sum",
+                "fwhm_deg": 10.0,
+                "frame": "beam_local",
+            },
+        },
+        "projectors": {
+            "ds": {
+                "engine": "driftscan",
+                "lmax": 8,
+                "uniform_sampling": True,
+                "normalize_beam": True,
+                "beam": {"ref": "resources.beams.ga"},
+            },
+            "gp": {
+                "engine": "general_pointing",
+                "lmax": 8,
+                "nside": 4,
+                "normalize_beam": True,
+                "beam": {"ref": "resources.beams.ga"},
+            },
+        },
         "s_params": {"z": {"kind": "termination", "termination": "open"}},
         "sky_models": {"s": {"kind": "gdsm", "nside": 8}},
     },
-    "observation": {"from_file": {"format": "rhino_hdf5", "path": "obs.h5",
-                                  "freq_unit": "MHz"}},
-    "model": {"noise_wave": {"type": "NoiseWaveOperator"},
-              "flagging": {"type": "MomentRFIFlaggingOperator"}},
-    "inference": {"twin": {"without": ["noise"],
-                           "replace": {"noise_wave": {"type": "NoiseWaveOperator"}}},
-                  "parameters": {"g": {"init": 1.0, "into": "gain.gain",
-                                       "prior": {"normal": {"loc": 1.0, "scale": 0.5}},
-                                       "transform": {"beam_analysis": {"nside": 4,
-                                                                       "lmax": 8}}}}},
+    "observation": {"from_file": {"format": "rhino_hdf5", "path": "obs.h5", "freq_unit": "MHz"}},
+    "model": {
+        "noise_wave": {"type": "NoiseWaveOperator"},
+        "flagging": {"type": "MomentRFIFlaggingOperator"},
+    },
+    "inference": {
+        "twin": {"without": ["noise"], "replace": {"noise_wave": {"type": "NoiseWaveOperator"}}},
+        "parameters": {
+            "g": {
+                "init": 1.0,
+                "into": "gain.gain",
+                "prior": {"normal": {"loc": 1.0, "scale": 0.5}},
+                "transform": {"beam_analysis": {"nside": 4, "lmax": 8}},
+            }
+        },
+    },
     "runs": [{"kind": "nuts", "name": "a"}, {"kind": "npe", "name": "b"}],
 }
 
@@ -153,8 +187,9 @@ def child():
     deprecated in pytest 8 and its attributes are invisible to the tests.
     """
     source = _COST_CHILD.replace("__PATCH__", repr(_EVERY_ROUTE))
-    done = subprocess.run([sys.executable, "-c", source],
-                          capture_output=True, text=True, cwd=str(_ROOT))
+    done = subprocess.run(
+        [sys.executable, "-c", source], capture_output=True, text=True, cwd=str(_ROOT)
+    )
     assert done.returncode == 0, done.stdout + done.stderr
     # NOT `.strip().splitlines()`: the second line is EMPTY exactly when the
     # invariant holds, and stripping it makes the passing case unparsable.
@@ -284,4 +319,5 @@ class TestTheCostAndTheImportInvariant:
         _, dragged, _ = child
         assert dragged == [], (
             f"{dragged} reached sys.modules during one pre-flight pass on a "
-            "document that only NAMES them")
+            "document that only NAMES them"
+        )

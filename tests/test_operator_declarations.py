@@ -47,8 +47,7 @@ def shipped_operators() -> list[type]:
     return [
         klass
         for klass in found.values()
-        if klass.__module__.startswith("rheplicant.")
-        and not inspect.isabstract(klass)
+        if klass.__module__.startswith("rheplicant.") and not inspect.isabstract(klass)
     ]
 
 

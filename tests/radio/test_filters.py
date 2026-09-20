@@ -66,8 +66,8 @@ class TestSiderealFilter:
 class TestFourierBandFilter:
     def test_removes_band_keeps_rest(self):
         t = jnp.arange(32.0)
-        slow = jnp.cos(2 * jnp.pi * (1 / 32) * t)   # on-grid bin: |f| ~ 0.031, outside band
-        fast = jnp.cos(2 * jnp.pi * (8 / 32) * t)   # on-grid bin: |f| = 0.25, inside band
+        slow = jnp.cos(2 * jnp.pi * (1 / 32) * t)  # on-grid bin: |f| ~ 0.031, outside band
+        fast = jnp.cos(2 * jnp.pi * (8 / 32) * t)  # on-grid bin: |f| = 0.25, inside band
         data = (slow + fast)[:, None] * jnp.ones((1, 2))
         out = FourierBandFilter(axis=0, low=0.2, high=0.3, mode="remove")(State(data=data))
         assert jnp.allclose(out.data[:, 0], slow, atol=1e-4)
@@ -153,8 +153,10 @@ class TestSkySpaceFilter:
         sky_true = jnp.outer(jnp.ones(N_FREQ), jnp.arange(1.0, self.N_PIX + 1.0))
         data = projector.forward(sky_true, None)
         filt = SkySpaceFilter(
-            projector=projector, regularization=jnp.array(1e-6),
-            cg_maxiter=200, mode="extract",
+            projector=projector,
+            regularization=jnp.array(1e-6),
+            cg_maxiter=200,
+            mode="extract",
         )
         out = filt(State(data=data))
         assert jnp.allclose(out.data, data, rtol=1e-3, atol=1e-3)
@@ -163,17 +165,19 @@ class TestSkySpaceFilter:
         sky_true = jnp.ones((N_FREQ, self.N_PIX))
         data = projector.forward(sky_true, None)
         out = SkySpaceFilter(
-            projector=projector, regularization=jnp.array(1e-6),
-            cg_maxiter=200, mode="remove",
+            projector=projector,
+            regularization=jnp.array(1e-6),
+            cg_maxiter=200,
+            mode="remove",
         )(State(data=data))
         assert jnp.max(jnp.abs(out.data)) < 1e-2 * jnp.max(jnp.abs(data))
 
     def test_flag_weighting_path(self, projector):
         data = projector.forward(jnp.ones((N_FREQ, self.N_PIX)), None)
         flags = jnp.zeros(data.shape, dtype=bool).at[0, 0].set(True)
-        out = SkySpaceFilter(
-            projector=projector, regularization=jnp.array(1e-4), mode="extract"
-        )(State(data=data, aux={"flags": flags}))
+        out = SkySpaceFilter(projector=projector, regularization=jnp.array(1e-4), mode="extract")(
+            State(data=data, aux={"flags": flags})
+        )
         assert jnp.all(jnp.isfinite(out.data))
 
     def test_differentiable_through_cg(self, projector):
@@ -182,9 +186,7 @@ class TestSkySpaceFilter:
         def loss(filt):
             return jnp.sum(filt(State(data=data)).data ** 2)
 
-        filt = SkySpaceFilter(
-            projector=projector, regularization=jnp.array(1e-3), mode="remove"
-        )
+        filt = SkySpaceFilter(projector=projector, regularization=jnp.array(1e-3), mode="remove")
         grads = eqx.filter_grad(loss)(filt)
         assert jnp.isfinite(grads.regularization)
 
@@ -228,9 +230,7 @@ class TestSkySpaceConvergenceGuard:
     @pytest.fixture
     def well_seen(self):
         """Every pixel sampled. Measured: kappa = 3.6, so residual ~ error."""
-        return MatrixProjector(
-            matrix=jax.random.normal(jax.random.key(3), (24, self.N_PIX))
-        )
+        return MatrixProjector(matrix=jax.random.normal(jax.random.key(3), (24, self.N_PIX)))
 
     @pytest.fixture
     def barely_seen(self):
@@ -260,8 +260,10 @@ class TestSkySpaceConvergenceGuard:
         runs on every evaluation of the signal path and the check is not free.
         """
         out = SkySpaceFilter(
-            projector=well_seen, regularization=jnp.array(1.0),
-            cg_maxiter=1, mode="extract",
+            projector=well_seen,
+            regularization=jnp.array(1.0),
+            cg_maxiter=1,
+            mode="extract",
         )(self._state(well_seen))
 
         assert jnp.all(jnp.isfinite(out.data))
@@ -272,8 +274,11 @@ class TestSkySpaceConvergenceGuard:
 
         with pytest.raises(EquinoxRuntimeError) as caught:
             SkySpaceFilter(
-                projector=well_seen, regularization=jnp.array(1.0),
-                cg_maxiter=1, mode="extract", require_convergence=1e-4,
+                projector=well_seen,
+                regularization=jnp.array(1.0),
+                cg_maxiter=1,
+                mode="extract",
+                require_convergence=1e-4,
             )(self._state(well_seen))
 
         assert "did not converge" in str(caught.value)
@@ -292,8 +297,11 @@ class TestSkySpaceConvergenceGuard:
         ``TestSkySpaceFilter`` above, against a sky it can recover.
         """
         kwargs = dict(
-            projector=well_seen, regularization=jnp.array(1.0),
-            cg_maxiter=200, cg_tol=1e-10, mode="extract",
+            projector=well_seen,
+            regularization=jnp.array(1.0),
+            cg_maxiter=200,
+            cg_tol=1e-10,
+            mode="extract",
         )
         state = self._state(well_seen)
 
@@ -316,8 +324,11 @@ class TestSkySpaceConvergenceGuard:
 
         with pytest.raises(EquinoxRuntimeError) as caught:
             SkySpaceFilter(
-                projector=barely_seen, regularization=jnp.array(1e-8),
-                cg_maxiter=200, cg_tol=1e-12, mode="extract",
+                projector=barely_seen,
+                regularization=jnp.array(1e-8),
+                cg_maxiter=200,
+                cg_tol=1e-12,
+                mode="extract",
                 require_convergence=1e-4,
             )(self._state(barely_seen))
 
@@ -326,8 +337,11 @@ class TestSkySpaceConvergenceGuard:
     def test_the_same_residual_passes_once_the_ridge_conditions_it(self, barely_seen):
         """Only ``regularization`` moves, from 1e-8 to 1.0. kappa: 4.9e+09 -> 50."""
         out = SkySpaceFilter(
-            projector=barely_seen, regularization=jnp.array(1.0),
-            cg_maxiter=200, cg_tol=1e-12, mode="extract",
+            projector=barely_seen,
+            regularization=jnp.array(1.0),
+            cg_maxiter=200,
+            cg_tol=1e-12,
+            mode="extract",
             require_convergence=1e-4,
         )(self._state(barely_seen))
 
@@ -343,13 +357,19 @@ class TestSkySpaceConvergenceGuard:
 
         with pytest.raises(EquinoxRuntimeError) as ran_out:
             SkySpaceFilter(
-                projector=well_seen, regularization=jnp.array(1.0),
-                cg_maxiter=1, mode="extract", require_convergence=1e-4,
+                projector=well_seen,
+                regularization=jnp.array(1.0),
+                cg_maxiter=1,
+                mode="extract",
+                require_convergence=1e-4,
             )(self._state(well_seen))
         with pytest.raises(EquinoxRuntimeError) as too_coarse:
             SkySpaceFilter(
-                projector=barely_seen, regularization=jnp.array(1e-8),
-                cg_maxiter=200, cg_tol=1e-12, mode="extract",
+                projector=barely_seen,
+                regularization=jnp.array(1e-8),
+                cg_maxiter=200,
+                cg_tol=1e-12,
+                mode="extract",
                 require_convergence=1e-4,
             )(self._state(barely_seen))
 
@@ -366,8 +386,12 @@ class TestSkySpaceConvergenceGuard:
             return jnp.sum(filt(state).data ** 2)
 
         filt = SkySpaceFilter(
-            projector=well_seen, regularization=jnp.array(1.0),
-            cg_maxiter=200, cg_tol=1e-10, mode="remove", require_convergence=1e-4,
+            projector=well_seen,
+            regularization=jnp.array(1.0),
+            cg_maxiter=200,
+            cg_tol=1e-10,
+            mode="remove",
+            require_convergence=1e-4,
         )
         grads = eqx.filter_grad(loss)(filt)
 

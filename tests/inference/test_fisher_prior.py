@@ -48,9 +48,7 @@ def design():
 
 def make_forward(design):
     def forward(values):
-        return design @ jnp.concatenate(
-            [values["a_vec"], jnp.atleast_1d(values["z_scalar"])]
-        )
+        return design @ jnp.concatenate([values["a_vec"], jnp.atleast_1d(values["z_scalar"])])
 
     return forward
 
@@ -86,9 +84,7 @@ class TestSpaceIsOptional:
     def test_without_a_space_the_matrix_is_the_likelihood_fisher(self, design):
         forward = make_forward(design)
         fisher = fisher_information(forward, VALUES, noise_std=NOISE)
-        assert jnp.allclose(
-            fisher.matrix, design.T @ design / NOISE**2, rtol=1e-5
-        )
+        assert jnp.allclose(fisher.matrix, design.T @ design / NOISE**2, rtol=1e-5)
 
     def test_without_a_space_the_kind_is_unchanged(self, design):
         forward = make_forward(design)
@@ -107,9 +103,7 @@ class TestPriorEntersTheMatrix:
         """``F_post = F_like + diag(1/scale^2)``, exactly, for a linear model."""
         forward = make_forward(design)
         space = make_space(vec_scale=[0.5, 0.25], scalar_scale=2.0)
-        posterior = fisher_information(
-            forward, VALUES, noise_std=NOISE, space=space
-        )
+        posterior = fisher_information(forward, VALUES, noise_std=NOISE, space=space)
         expected = design.T @ design / NOISE**2 + jnp.diag(
             jnp.array([1 / 0.5**2, 1 / 0.25**2, 1 / 2.0**2])
         )
@@ -122,10 +116,7 @@ class TestPriorEntersTheMatrix:
         forward = make_forward(design)
         base = fisher_information(forward, VALUES, noise_std=NOISE).matrix
         space = make_space(vec_scale=[0.5, 0.25], scalar_scale=2.0)
-        added = (
-            fisher_information(forward, VALUES, noise_std=NOISE, space=space).matrix
-            - base
-        )
+        added = fisher_information(forward, VALUES, noise_std=NOISE, space=space).matrix - base
         cov = parameter_covariance(
             fisher_information(forward, VALUES, noise_std=NOISE, space=space)
         )
@@ -156,13 +147,17 @@ class TestPriorEntersTheMatrix:
             forward = make_forward(wide)
             loose = parameter_covariance(
                 fisher_information(
-                    forward, values, noise_std=NOISE,
+                    forward,
+                    values,
+                    noise_std=NOISE,
                     space=make_space(vec_scale=[5.0, 5.0], scalar_scale=5.0),
                 )
             ).sigma("z_scalar")
             tight = parameter_covariance(
                 fisher_information(
-                    forward, values, noise_std=NOISE,
+                    forward,
+                    values,
+                    noise_std=NOISE,
                     space=make_space(vec_scale=[5.0, 5.0], scalar_scale=1e-4),
                 )
             ).sigma("z_scalar")
@@ -182,7 +177,9 @@ class TestPriorEntersTheMatrix:
         ).sigma("z_scalar")
         with_wide_prior = parameter_covariance(
             fisher_information(
-                forward, VALUES, noise_std=NOISE,
+                forward,
+                VALUES,
+                noise_std=NOISE,
                 space=make_space(vec_scale=[1e4, 1e4], scalar_scale=1e4),
             )
         ).sigma("z_scalar")
@@ -206,9 +203,7 @@ class TestPriorEntersTheMatrix:
                 Bind("z_scalar", into=lambda p: p["y"], fn=lambda v: v),
             ],
         )
-        posterior = fisher_information(
-            forward, VALUES, noise_std=NOISE, space=space
-        )
+        posterior = fisher_information(forward, VALUES, noise_std=NOISE, space=space)
         expected = design.T @ design / NOISE**2 + jnp.diag(
             jnp.array([1 / 0.5**2, 1 / 0.5**2, 1 / 2.0**2])
         )
@@ -226,9 +221,7 @@ class TestKindIsCarried:
         forward = make_forward(design)
         space = make_space(vec_scale=[0.5, 0.25], scalar_scale=2.0)
         assert (
-            parameter_covariance(
-                fisher_information(forward, VALUES, noise_std=NOISE)
-            ).kind
+            parameter_covariance(fisher_information(forward, VALUES, noise_std=NOISE)).kind
             == "covariance"
         )
         assert (
@@ -249,18 +242,14 @@ class TestKindIsCarried:
         no more an error bar than sqrt(diag(F)) was."""
         forward = make_forward(design)
         space = make_space(vec_scale=[0.5, 0.25], scalar_scale=2.0)
-        precision = fisher_information(
-            forward, VALUES, noise_std=NOISE, space=space
-        )
+        precision = fisher_information(forward, VALUES, noise_std=NOISE, space=space)
         with pytest.raises(StateValidationError, match="parameter_covariance"):
             precision.sigma("z_scalar")
 
     def test_sigma_works_on_both_covariance_kinds(self, design):
         forward = make_forward(design)
         space = make_space(vec_scale=[0.5, 0.25], scalar_scale=2.0)
-        plain = parameter_covariance(
-            fisher_information(forward, VALUES, noise_std=NOISE)
-        )
+        plain = parameter_covariance(fisher_information(forward, VALUES, noise_std=NOISE))
         posterior = parameter_covariance(
             fisher_information(forward, VALUES, noise_std=NOISE, space=space)
         )
@@ -352,9 +341,7 @@ class TestRefusals:
         space = make_space(vec_scale=[0.5, 0.25], scalar_scale=2.0)
         with pytest.raises(ParameterSpaceError, match="do not match"):
             fisher_information(
-                lambda v: design @ jnp.concatenate(
-                    [v["a_vec"], jnp.atleast_1d(v["other"])]
-                ),
+                lambda v: design @ jnp.concatenate([v["a_vec"], jnp.atleast_1d(v["other"])]),
                 {"a_vec": jnp.array([2.0, 3.0]), "other": jnp.array(1.0)},
                 noise_std=NOISE,
                 space=space,

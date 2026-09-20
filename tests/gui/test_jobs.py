@@ -332,9 +332,7 @@ def test_job_identity_keeps_original_bytes_and_preview_detaches_only_runs():
         forwarder=lambda text: captured.append(text) or {"waterfall": {}},
     )
     preview_document = yaml.safe_load(captured[0])
-    assert preview_document["runs"] == [
-        {"name": "preview-forward", "kind": "forward"}
-    ]
+    assert preview_document["runs"] == [{"name": "preview-forward", "kind": "forward"}]
     assert "kind: optimize" in exact_yaml
 
     execute_job(
@@ -346,9 +344,7 @@ def test_job_identity_keeps_original_bytes_and_preview_detaches_only_runs():
 
 
 @pytest.mark.parametrize("kind", ["run", "compare", "benchmark"])
-def test_default_formal_jobs_use_the_clean_worker_with_exact_bytes(
-    monkeypatch, kind
-):
+def test_default_formal_jobs_use_the_clean_worker_with_exact_bytes(monkeypatch, kind):
     calls = []
 
     def isolated(worker_kind, yaml_text):
@@ -397,9 +393,7 @@ def test_real_priced_validation_accepts_plan4_preset_and_outputs(tmp_path):
     # whole sentence: the wording is pinned in test_preflight_capability.py.
     result = run_priced_validation(text)
     assert result["layers"] == 2
-    assert [(one["check"], one["severity"]) for one in result["findings"]] == [
-        ("A53", "report")
-    ]
+    assert [(one["check"], one["severity"]) for one in result["findings"]] == [("A53", "report")]
 
 
 def test_real_forward_preview_accepts_plan4_preset_and_outputs(tmp_path):
@@ -488,9 +482,7 @@ def test_an_identical_active_job_is_refused_rather_than_queued_twice():
     assert yaml_digest(YAML) not in message
     assert "schema_version" not in message
     assert len(message) <= 200
-    assert [row.job_id for row in store.project("session-1", yaml_digest(YAML))] == [
-        first.job_id
-    ]
+    assert [row.job_id for row in store.project("session-1", yaml_digest(YAML))] == [first.job_id]
 
 
 def test_only_the_exact_kind_revision_document_and_session_is_a_duplicate():
@@ -541,9 +533,7 @@ def test_a_running_job_still_blocks_an_identical_submission():
         ),
     ],
 )
-def test_an_identical_re_run_is_allowed_once_the_first_job_is_terminal(
-    outcome, runner
-):
+def test_an_identical_re_run_is_allowed_once_the_first_job_is_terminal(outcome, runner):
     ids = iter(("job-a", "job-b"))
     store = JobStore(id_factory=lambda: next(ids))
     first = store.submit("session-1", "validate", 3, YAML)

@@ -79,8 +79,7 @@ def factorization():
     space = ParameterSpace(
         latents=latents,
         bindings=tuple(
-            Bind(latent.name, into=lambda p, n=latent.name: getattr(p, n))
-            for latent in latents
+            Bind(latent.name, into=lambda p, n=latent.name: getattr(p, n)) for latent in latents
         ),
     )
     return Factorization(space)
@@ -113,9 +112,7 @@ def _term(epoch_id, *, projections):
         residual_chi2=jnp.array(7.5),
         template_projections=projections,
         residual_dof=13,
-        template_names=(
-            ("gain_ripple", "ground_pickup") if projections is not None else ()
-        ),
+        template_names=(("gain_ripple", "ground_pickup") if projections is not None else ()),
         inputs=(("beam_model", "sha256:b3ee"), ("cal_solution", "sha256:0f17")),
     )
 

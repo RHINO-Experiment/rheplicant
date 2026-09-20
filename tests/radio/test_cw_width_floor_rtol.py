@@ -58,7 +58,9 @@ def _spacing(freq):
 
 def _accepts(freq, width, lineshape="sinc2"):
     op = CWCalibrationOperator(
-        amplitude=1.0, tone_freq=float(freq[len(freq) // 2]), line_width=width,
+        amplitude=1.0,
+        tone_freq=float(freq[len(freq) // 2]),
+        line_width=width,
         lineshape=lineshape,
     )
     try:
@@ -94,9 +96,7 @@ class TestEachSampledGrid:
         spacing = _spacing(freq)
         assert _accepts(freq, spacing * (1.0 - 0.5 * width_floor_rtol(freq, spacing)))
 
-    def test_a_width_a_thousandth_under_the_channel_is_refused_where_resolved(
-        self, n, dtype
-    ):
+    def test_a_width_a_thousandth_under_the_channel_is_refused_where_resolved(self, n, dtype):
         """``(1 - 1e-3)`` of the spacing is refused wherever the grid resolves a
         thousandth of a channel -- float64 at every N, float32 below N = 618.
         Above that a float32 grid does not carry 1e-3 of its own spacing (8 Hz
@@ -118,7 +118,9 @@ def test_the_float32_cut_for_a_thousandth_is_between_617_and_618():
 def _verdict(freq, width, lineshape="sinc2"):
     """``"accepted"``, ``"narrow"`` or ``"unresolved"``, each checked by its text."""
     op = CWCalibrationOperator(
-        amplitude=1.0, tone_freq=float(freq[len(freq) // 2]), line_width=width,
+        amplitude=1.0,
+        tone_freq=float(freq[len(freq) // 2]),
+        line_width=width,
         lineshape=lineshape,
     )
     try:
@@ -243,8 +245,9 @@ def test_every_n_accepts_the_ideal_width(dtype, last):
     """The audited sweep over every N rather than a sample. float32 stops at
     the audited 599 because ``jnp.linspace`` compiles once per N (10 s for
     these 597); the sampled N above carry it to 8192."""
-    refused = [n for n in range(3, last + 1)
-               if not _accepts(_grid(n, dtype), (HIGH - LOW) / (n - 1))]
+    refused = [
+        n for n in range(3, last + 1) if not _accepts(_grid(n, dtype), (HIGH - LOW) / (n - 1))
+    ]
     assert refused == []
 
 
@@ -262,7 +265,8 @@ def test_the_rhino_width_is_accepted_through_the_operator_call():
     """The same verdict through ``__call__``, which builds the grid from a State."""
     freq = jnp.asarray(LOW + RHINO_WIDTH * np.arange(410), dtype=jnp.float32)
     state = State(
-        data=jnp.ones((4, 410)), coords=Coordinates(time=jnp.asarray(TIME), freq=freq),
+        data=jnp.ones((4, 410)),
+        coords=Coordinates(time=jnp.asarray(TIME), freq=freq),
         meta={"telescope": "RHINO", "obs_id": "a5-5"},
     )
     op = CWCalibrationOperator(amplitude=1.0, tone_freq=72.5e6, line_width=RHINO_WIDTH)

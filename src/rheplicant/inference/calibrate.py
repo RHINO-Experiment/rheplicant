@@ -38,19 +38,14 @@ def _refuse_mis_shaped_observed(
     the calibrator had already been asked to run.
     """
     prediction = jax.eval_shape(forward, params0)
-    check_observed_shape(
-        jax.numpy.shape(prediction), observed, predictor="this forward model"
-    )
+    check_observed_shape(jax.numpy.shape(prediction), observed, predictor="this forward model")
 
 
 #: The far side's remedy names its OWN routes, which do not exist here. The
 #: wrapper below swaps this sentence for the near-side one; see
 #: :func:`_refuse_a_score_the_optimizer_would_walk_away_from` for why the
 #: substitution is asserted rather than trusted.
-_FAR_REMEDY = (
-    "Pass `lambda p, o: -score(p, o)`, or use a density-aware route "
-    "(`fit`, `nuts`)."
-)
+_FAR_REMEDY = "Pass `lambda p, o: -score(p, o)`, or use a density-aware route (`fit`, `nuts`)."
 _NEAR_REMEDY = (
     "Pass `lambda p, o: -likelihood(p, o)`, or use a likelihood-aware route "
     "(numpyro_bridge, SamplingPlan)."
@@ -154,9 +149,7 @@ class GradientCalibrator(eqx.Module):
                 asked and report a small, converged loss for it.
         """
         _refuse_mis_shaped_observed(forward, params0, observed)
-        _refuse_a_score_the_optimizer_would_walk_away_from(
-            loss_fn, forward, params0, observed
-        )
+        _refuse_a_score_the_optimizer_would_walk_away_from(loss_fn, forward, params0, observed)
         far = _far_minimize(
             lambda params: loss_fn(forward(params), observed),
             params0,
@@ -219,9 +212,7 @@ class AdamCalibrator(eqx.Module):
                 than an error — see :meth:`GradientCalibrator.fit`.
         """
         _refuse_mis_shaped_observed(forward, params0, observed)
-        _refuse_a_score_the_optimizer_would_walk_away_from(
-            loss_fn, forward, params0, observed
-        )
+        _refuse_a_score_the_optimizer_would_walk_away_from(loss_fn, forward, params0, observed)
         far = _far_minimize(
             lambda params: loss_fn(forward(params), observed),
             params0,

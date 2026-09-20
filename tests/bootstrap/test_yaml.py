@@ -127,9 +127,7 @@ def test_yaml_accepts_values_exactly_at_each_limit(payload, limits, expected):
 def test_alias_expansion_is_detached_between_uses():
     """Catches construction reusing an aliased list before it is frozen."""
     limits = YamlLimits()
-    composed = compose_one_bounded(
-        "[&a [1], *a]", source_name="aliases.yaml", limits=limits
-    )
+    composed = compose_one_bounded("[&a [1], *a]", source_name="aliases.yaml", limits=limits)
     value, _ = construct_plain_bounded(composed.root, source_name="aliases.yaml", limits=limits)
 
     assert value == [[1], [1]]

@@ -107,8 +107,10 @@ def benchmark_callables(
     if type(warmup) is not int or warmup < 0:
         raise ConfigError("benchmark warmup must be a non-negative integer.")
     chosen = tuple(metrics)
-    if not chosen or len(chosen) != len(set(chosen)) or any(
-        metric not in _METRICS for metric in chosen
+    if (
+        not chosen
+        or len(chosen) != len(set(chosen))
+        or any(metric not in _METRICS for metric in chosen)
     ):
         raise ConfigError(f"benchmark metrics must be a non-empty subset of {list(_METRICS)}.")
     if not targets:
@@ -192,9 +194,7 @@ def _parse_benchmark(options: Mapping[str, object], context: object):
     metrics = _unique_names(metrics_node, where=f"{where}: metrics")
     for index, metric in enumerate(metrics):
         if metric not in _METRICS:
-            raise ConfigError(
-                f"{where}: metrics[{index}]: must be one of {list(_METRICS)}."
-            )
+            raise ConfigError(f"{where}: metrics[{index}]: must be one of {list(_METRICS)}.")
     normalized = {
         "variants": variants,
         "repeats": repeats,

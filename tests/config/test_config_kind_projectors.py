@@ -16,7 +16,9 @@ pytest.importorskip("limtod_jax")
 def context(tmp_path):
     np.save(tmp_path / "beam.npy", np.ones((2, 192)))
     return ResolutionContext(
-        freq=jnp.linspace(60e6, 85e6, 2), time=jnp.arange(8.0), dtype="float64",
+        freq=jnp.linspace(60e6, 85e6, 2),
+        time=jnp.arange(8.0),
+        dtype="float64",
         base_dir=str(tmp_path),
     )
 
@@ -34,18 +36,29 @@ def _doc(**overrides):
     }
     projector.update(overrides)
     return {
-        "beams": {"horn": {"format": "npy", "path": "beam.npy", "nside": 4,
-                           "normalize": "pixel_sum", "frame": "beam_local"}},
+        "beams": {
+            "horn": {
+                "format": "npy",
+                "path": "beam.npy",
+                "nside": 4,
+                "normalize": "pixel_sum",
+                "frame": "beam_local",
+            }
+        },
         "projectors": {"drift": projector},
     }
 
 
 def _matrix_doc(provenance):
-    return {"projectors": {"baked": {
-        "engine": "matrix",
-        "matrix": {"full": {"shape": [8, 192], "value": 1.0}},
-        "provenance": provenance,
-    }}}
+    return {
+        "projectors": {
+            "baked": {
+                "engine": "matrix",
+                "matrix": {"full": {"shape": [8, 192], "value": 1.0}},
+                "provenance": provenance,
+            }
+        }
+    }
 
 
 class TestTheEngines:
@@ -66,7 +79,8 @@ class TestTheEngines:
         doc["projectors"]["general"] = {
             "engine": "general_pointing",
             "beam_alms": {"ref": "resources.projectors.drift.beam_alms"},
-            "lmax": 8, "nside": 4,
+            "lmax": 8,
+            "nside": 4,
             "lat_deg": {"value": 53.2367, "unit": "deg"},
             "normalize_beam": True,
         }
@@ -90,7 +104,8 @@ class TestTheEngines:
         doc["projectors"]["general"] = {
             "engine": "general_pointing",
             "beam": {"ref": "resources.beams.horn"},
-            "lmax": 8, "nside": 4,
+            "lmax": 8,
+            "nside": 4,
             "lat_deg": {"value": 53.2367, "unit": "deg"},
             "normalize_beam": True,
         }
@@ -100,8 +115,11 @@ class TestTheEngines:
         assert jnp.allclose(general.beam_alms, drift.beam_alms, atol=5e-4)
 
     def test_matrix_requires_provenance(self, context):
-        doc = {"projectors": {"baked": {"engine": "matrix",
-                                        "matrix": {"full": {"shape": [8, 192], "value": 1.0}}}}}
+        doc = {
+            "projectors": {
+                "baked": {"engine": "matrix", "matrix": {"full": {"shape": [8, 192], "value": 1.0}}}
+            }
+        }
         with pytest.raises(ConfigError) as excinfo:
             build_resources(doc, context)
         assert "provenance" in str(excinfo.value)
@@ -146,8 +164,12 @@ class TestCheckA44:
         required keys for, and it is invisible: the maps come back finite,
         correctly shaped and plausibly structured."""
         np.save(tmp_path / "beam.npy", np.ones((2, 192)))
-        context = ResolutionContext(freq=jnp.linspace(60e6, 85e6, 2), time=jnp.arange(8.0),
-                                    dtype="float32", base_dir=str(tmp_path))
+        context = ResolutionContext(
+            freq=jnp.linspace(60e6, 85e6, 2),
+            time=jnp.arange(8.0),
+            dtype="float32",
+            base_dir=str(tmp_path),
+        )
         with pytest.raises(ConfigError) as excinfo:
             build_resources(_doc(), context)
         message = str(excinfo.value)
@@ -157,8 +179,12 @@ class TestCheckA44:
 
     def test_the_acknowledgement_lets_it_through(self, tmp_path):
         np.save(tmp_path / "beam.npy", np.ones((2, 192)))
-        context = ResolutionContext(freq=jnp.linspace(60e6, 85e6, 2), time=jnp.arange(8.0),
-                                    dtype="float32", base_dir=str(tmp_path))
+        context = ResolutionContext(
+            freq=jnp.linspace(60e6, 85e6, 2),
+            time=jnp.arange(8.0),
+            dtype="float32",
+            base_dir=str(tmp_path),
+        )
         built = build_resources(_doc(acknowledge_float32_sky=True), context)
         assert "resources.projectors.drift" in built.resources
 
@@ -194,8 +220,7 @@ class TestOptimizationsAndLstRef:
         from rheplicant.config.values import resolve_value
 
         built = build_resources(
-            _doc(optimizations=["cache_beam_rotation"],
-                 lst_ref_deg={"value": 0.0, "unit": "deg"}),
+            _doc(optimizations=["cache_beam_rotation"], lst_ref_deg={"value": 0.0, "unit": "deg"}),
             context,
         )
         scoped = context
@@ -203,8 +228,7 @@ class TestOptimizationsAndLstRef:
             scoped = scoped.with_resource(name, value)
         with pytest.raises(ConfigError) as excinfo:
             resolve_value(
-                {"from": "horizon_fraction",
-                 "projector": {"ref": "resources.projectors.drift"}},
+                {"from": "horizon_fraction", "projector": {"ref": "resources.projectors.drift"}},
                 scoped,
             )
         assert "cache_beam_rotation" in str(excinfo.value)
@@ -230,7 +254,8 @@ class TestTheEngineKeys:
         doc["projectors"]["general"] = {
             "engine": "general_pointing",
             "beam_alms": {"ref": "resources.projectors.drift.beam_alms"},
-            "lmax": 8, "nside": 4,
+            "lmax": 8,
+            "nside": 4,
             "lat_deg": {"value": 53.2367, "unit": "deg"},
             "normalize_beam": True,
             "az_deg": {"value": 0.0, "unit": "deg"},
@@ -321,8 +346,10 @@ class TestMatrixEngine:
         ``context.dtype`` itself), so a dropped cast in this kind's own code
         would not be caught by this assertion alone."""
         float32_context = ResolutionContext(
-            freq=jnp.linspace(60e6, 85e6, 2), time=jnp.arange(8.0),
-            dtype="float32", base_dir=str(tmp_path),
+            freq=jnp.linspace(60e6, 85e6, 2),
+            time=jnp.arange(8.0),
+            dtype="float32",
+            base_dir=str(tmp_path),
         )
         built = build_resources(_matrix_doc({"built_by": "test"}), float32_context)
         projector = built.resources["resources.projectors.baked"]
@@ -335,14 +362,41 @@ class TestPresenceRefusals:
     @pytest.mark.parametrize(
         ("engine", "spec", "missing"),
         [
-            ("driftscan", {"engine": "driftscan", "normalize_beam": True, "lmax": 8,
-                           "lat_deg": 53.0, "az_deg": 0.0, "el_deg": 90.0}, "beam"),
-            ("driftscan", {"engine": "driftscan", "normalize_beam": True,
-                           "beam": {"ref": "resources.beams.b"},
-                           "lat_deg": 53.0, "az_deg": 0.0, "el_deg": 90.0}, "lmax"),
-            ("general_pointing", {"engine": "general_pointing", "normalize_beam": True,
-                                  "beam": {"ref": "resources.beams.b"}, "lmax": 8,
-                                  "lat_deg": 53.0}, "nside"),
+            (
+                "driftscan",
+                {
+                    "engine": "driftscan",
+                    "normalize_beam": True,
+                    "lmax": 8,
+                    "lat_deg": 53.0,
+                    "az_deg": 0.0,
+                    "el_deg": 90.0,
+                },
+                "beam",
+            ),
+            (
+                "driftscan",
+                {
+                    "engine": "driftscan",
+                    "normalize_beam": True,
+                    "beam": {"ref": "resources.beams.b"},
+                    "lat_deg": 53.0,
+                    "az_deg": 0.0,
+                    "el_deg": 90.0,
+                },
+                "lmax",
+            ),
+            (
+                "general_pointing",
+                {
+                    "engine": "general_pointing",
+                    "normalize_beam": True,
+                    "beam": {"ref": "resources.beams.b"},
+                    "lmax": 8,
+                    "lat_deg": 53.0,
+                },
+                "nside",
+            ),
         ],
     )
     def test_missing_keys_are_refused_by_name(self, context, engine, spec, missing):
@@ -363,8 +417,15 @@ class TestPresenceRefusals:
             )
 
     def test_a_beam_that_is_not_a_ref_mapping_is_refused(self, context):
-        spec = {"engine": "driftscan", "normalize_beam": True, "beam": "the_beam",
-                "lmax": 8, "lat_deg": 53.0, "az_deg": 0.0, "el_deg": 90.0}
+        spec = {
+            "engine": "driftscan",
+            "normalize_beam": True,
+            "beam": "the_beam",
+            "lmax": 8,
+            "lat_deg": 53.0,
+            "az_deg": 0.0,
+            "el_deg": 90.0,
+        }
         with pytest.raises(ConfigError, match=r"beam: is \{ref:"):
             build_projector("resources.projectors.p", spec, context)
 
@@ -452,9 +513,7 @@ class TestDriftscanTakesPrecomputedAlms:
         assert reused.uniform_sampling is True
         assert reused.freq_chunk == 1
 
-    def test_nside_is_required_on_the_alms_route_and_refused_on_the_beam_route(
-        self, context
-    ):
+    def test_nside_is_required_on_the_alms_route_and_refused_on_the_beam_route(self, context):
         """The one thing that genuinely reverses between the two routes.
 
         Alms carry no pixel count, so ``nside`` must be written; a map length
@@ -515,9 +574,7 @@ class TestDriftscanTakesPrecomputedAlms:
             build_resources(doc, context)
 
     @pytest.mark.parametrize("engine", ["driftscan", "general_pointing"])
-    def test_beam_alms_takes_precedence_over_a_beam_that_is_also_written(
-        self, context, engine
-    ):
+    def test_beam_alms_takes_precedence_over_a_beam_that_is_also_written(self, context, engine):
         """Both keys together is PRECEDENCE, and this test replaces one that
         asserted a refusal.
 

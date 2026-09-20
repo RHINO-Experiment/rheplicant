@@ -213,9 +213,7 @@ class Conditioning:
         moment a noise model started reading its argument would be worse than
         the omission this replaces.
         """
-        return 0.5 * self.chi2(values) + log_determinant(
-            self.noise, self.forward(values)
-        )
+        return 0.5 * self.chi2(values) + log_determinant(self.noise, self.forward(values))
 
     def neg_log_posterior(self, values: dict[str, jax.Array]) -> jax.Array:
         """``-log p(values | data)`` up to a constant, over EVERY latent.
@@ -232,9 +230,7 @@ class Conditioning:
         chi-squared; a stop rule on chi-squared read such a rise as
         convergence, 1 to 15 posterior sigma from the MAP (T-002 A5-1).
         """
-        return self.neg_log_likelihood(values) - _log_prior(
-            self.space, self.space.names, values
-        )
+        return self.neg_log_likelihood(values) - _log_prior(self.space, self.space.names, values)
 
 
 def _objective_terms(
@@ -337,9 +333,7 @@ def conditional_potential(
     others = {key: value for key, value in values.items() if key not in names}
 
     def potential(x: dict[str, jax.Array]) -> jax.Array:
-        return cond.neg_log_likelihood({**others, **x}) - _log_prior(
-            cond.space, names, x
-        )
+        return cond.neg_log_likelihood({**others, **x}) - _log_prior(cond.space, names, x)
 
     return potential
 
@@ -360,12 +354,8 @@ def _potential_of(
     single-argument objective the estimator and the residual reporting take.
     """
 
-    def potential(
-        others: dict[str, jax.Array], x: dict[str, jax.Array]
-    ) -> jax.Array:
-        return cond.neg_log_likelihood({**others, **x}) - _log_prior(
-            cond.space, names, x
-        )
+    def potential(others: dict[str, jax.Array], x: dict[str, jax.Array]) -> jax.Array:
+        return cond.neg_log_likelihood({**others, **x}) - _log_prior(cond.space, names, x)
 
     return potential
 
@@ -467,13 +457,22 @@ def _conjugate_transition(
     def transition(values, key):
         sigma = cond.sigma(values)
         block = linear_operator(
-            cond.space, cond.pipeline, cond.state_template,
-            names=names, at=values, check=False,
+            cond.space,
+            cond.pipeline,
+            cond.state_template,
+            names=names,
+            at=values,
+            check=False,
         )
         extra = {"key": key} if draw else {}
         return (gcr_sample if draw else wiener_solve)(
-            block, cond.observed, noise_std=sigma, tol=tol, maxiter=maxiter,
-            require_convergence=require_convergence, **extra,
+            block,
+            cond.observed,
+            noise_std=sigma,
+            tol=tol,
+            maxiter=maxiter,
+            require_convergence=require_convergence,
+            **extra,
         )
 
     return transition
@@ -514,13 +513,22 @@ def _log_conjugate_transition(
     @eqx.filter_jit
     def transition(values, key):
         block = log_linear_operator(
-            cond.space, cond.pipeline, cond.state_template,
-            names=names, at=values, check=False,
+            cond.space,
+            cond.pipeline,
+            cond.state_template,
+            names=names,
+            at=values,
+            check=False,
         )
         extra = {"key": key} if draw else {}
         return (gcr_sample if draw else wiener_solve)(
-            block, cond.log_observed, noise_std=cond.log_sigma, tol=tol,
-            maxiter=maxiter, require_convergence=require_convergence, **extra,
+            block,
+            cond.log_observed,
+            noise_std=cond.log_sigma,
+            tol=tol,
+            maxiter=maxiter,
+            require_convergence=require_convergence,
+            **extra,
         )
 
     return transition
@@ -563,13 +571,13 @@ def _conjugate_update(
     key_for = (names, draw, tol, maxiter, require_convergence, engine)
     transition = None if programs is None else programs.get(key_for)
     if transition is None:
-        build = (
-            _log_conjugate_transition
-            if engine == LOG_CONJUGATE
-            else _conjugate_transition
-        )
+        build = _log_conjugate_transition if engine == LOG_CONJUGATE else _conjugate_transition
         transition = build(
-            cond, names, draw=draw, tol=tol, maxiter=maxiter,
+            cond,
+            names,
+            draw=draw,
+            tol=tol,
+            maxiter=maxiter,
             require_convergence=require_convergence,
         )
         if programs is not None:
@@ -585,9 +593,7 @@ def conjugate_estimate(cond, names, values, **kwargs):
 
 def log_conjugate_estimate(cond, names, values, **kwargs):
     """The same mean, solved in log space. See :func:`_log_conjugate_transition`."""
-    return _conjugate_update(
-        cond, names, values, key=None, engine=LOG_CONJUGATE, **kwargs
-    )
+    return _conjugate_update(cond, names, values, key=None, engine=LOG_CONJUGATE, **kwargs)
 
 
 def log_conjugate_draw(cond, names, values, *, key, **kwargs):
@@ -598,9 +604,7 @@ def log_conjugate_draw(cond, names, values, *, key, **kwargs):
     :data:`CONJUGATE` block does not carry. See
     :func:`_log_conjugate_transition` for the size of it.
     """
-    return _conjugate_update(
-        cond, names, values, key=key, engine=LOG_CONJUGATE, **kwargs
-    )
+    return _conjugate_update(cond, names, values, key=key, engine=LOG_CONJUGATE, **kwargs)
 
 
 def conjugate_draw(cond, names, values, *, key, **kwargs):
@@ -695,9 +699,7 @@ def _estimate_transition(
     :func:`~rheplicant.inference.linear._magnitude`.
     """
     potential_of = _potential_of(cond, names)
-    step_sizes = {
-        name: learning_rate * _magnitude(cond.space.latent(name)) for name in names
-    }
+    step_sizes = {name: learning_rate * _magnitude(cond.space.latent(name)) for name in names}
 
     @eqx.filter_jit
     def transition(others, x0):
@@ -741,9 +743,7 @@ def gradient_estimate(
     key_for = (_ESTIMATE_TAG, tuple(names), steps, learning_rate)
     transition = None if programs is None else programs.get(key_for)
     if transition is None:
-        transition = _estimate_transition(
-            cond, names, steps=steps, learning_rate=learning_rate
-        )
+        transition = _estimate_transition(cond, names, steps=steps, learning_rate=learning_rate)
         if programs is not None:
             programs[key_for] = transition
     others = {key: value for key, value in values.items() if key not in names}
@@ -843,9 +843,7 @@ def gradient_draw(
     else:
         transition = programs.get(key_for)
         if transition is None:
-            transition = _gradient_transition(
-                cond, names, steps=steps, adapt=adapting
-            )
+            transition = _gradient_transition(cond, names, steps=steps, adapt=adapting)
             programs[key_for] = transition
 
     others = {key: value for key, value in values.items() if key not in names}

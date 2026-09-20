@@ -105,8 +105,7 @@ _A41_NESTED_SHAPE_FORMS: tuple[str, ...] = ("full", "normal", "uniform")
 #: The keys ``inference.observed``'s grammar owns, so a sibling key is a
 #: RECORD NAME rather than a form.  Mirrors ``sections/observed.py``'s own
 #: ``_FORM_KEYS``; a test imports that module's frozenset and compares.
-_A42_FORM_KEYS: frozenset[str] = frozenset({"from", "twin", "at", "realise",
-                                            "file"})
+_A42_FORM_KEYS: frozenset[str] = frozenset({"from", "twin", "at", "realise", "file"})
 
 #: A ``ref`` at or below this names a projector.  The trailing dot is
 #: load-bearing: ``resources.projectors_backup.p`` shares every other
@@ -184,8 +183,7 @@ def _a41_scope(document: Mapping[str, Any]) -> ShapeScope | None:
     order = _t4_switch_order(document)
     if order is None:
         return None
-    return ShapeScope(n_time=lengths[0], n_freq=lengths[1],
-                      n_source=len(order) or 1)
+    return ShapeScope(n_time=lengths[0], n_freq=lengths[1], n_source=len(order) or 1)
 
 
 def _a41_shapes(node: Any, where: str) -> list[tuple[str, list]]:
@@ -209,8 +207,7 @@ def _a41_shapes(node: Any, where: str) -> list[tuple[str, list]]:
                 found.append((where, list(shape)))
         for form in _A41_NESTED_SHAPE_FORMS:
             inner = node.get(form)
-            if isinstance(inner, Mapping) and isinstance(inner.get("shape"),
-                                                         (list, tuple)):
+            if isinstance(inner, Mapping) and isinstance(inner.get("shape"), (list, tuple)):
                 found.append((where, list(inner["shape"])))
         for key, value in node.items():
             # DEFENSIVE and, measured, an equivalent mutant: a non-string key
@@ -246,9 +243,11 @@ def _a42_records(section: Any) -> tuple[tuple[str, Mapping], ...]:
         return ()
     if "from" in section or "file" in section:
         return (("primary", section),)
-    return tuple((name, spec) for name, spec in section.items()
-                 if isinstance(name, str) and name not in _A42_FORM_KEYS
-                 and isinstance(spec, Mapping))
+    return tuple(
+        (name, spec)
+        for name, spec in section.items()
+        if isinstance(name, str) and name not in _A42_FORM_KEYS and isinstance(spec, Mapping)
+    )
 
 
 # NO SECOND STOCHASTIC PREDICATE HERE.  §3.2 (f) binds ONE name for "does this
@@ -329,9 +328,9 @@ def _a42_removed(document: Mapping[str, Any]) -> tuple[str, ...]:
         a property of the layer.
         """
         if _a30_stochastic(node_id, replacement, table) is not None:
-            return False                       # it still draws
+            return False  # it still draws
         if not isinstance(replacement, Mapping):
-            return False                       # nothing to name
+            return False  # nothing to name
         if "python" in replacement:
             # `_t5_radio_class` is P-1's resolver and it is STILL narrower
             # than the build's -- it imports nothing, so a class outside
@@ -347,18 +346,24 @@ def _a42_removed(document: Mapping[str, Any]) -> tuple[str, ...]:
         # unreachable_today` is what dates that, rather than this comment.
         declared = replacement.get("type")
         return isinstance(declared, str) and declared in {
-            cls.__name__ for cls in table.get(node_id) or ()}
+            cls.__name__ for cls in table.get(node_id) or ()
+        }
 
     removed: list[str] = []
     without = spec.get("without")
     if isinstance(without, (list, tuple)):
-        removed.extend(node_id for node_id in without
-                       if isinstance(node_id, str) and node_id in drawing)
+        removed.extend(
+            node_id for node_id in without if isinstance(node_id, str) and node_id in drawing
+        )
     replace = spec.get("replace")
     if isinstance(replace, Mapping):
-        removed.extend(node_id for node_id, replacement in replace.items()
-                       if isinstance(node_id, str) and node_id in drawing
-                       and took_the_draw_out(node_id, replacement))
+        removed.extend(
+            node_id
+            for node_id, replacement in replace.items()
+            if isinstance(node_id, str)
+            and node_id in drawing
+            and took_the_draw_out(node_id, replacement)
+        )
     return tuple(dict.fromkeys(removed))
 
 
@@ -405,9 +410,11 @@ def _shadowed_literals(document: Mapping[str, Any]) -> Iterable[Finding]:
     scope = _a41_scope(document)
     if scope is None:
         return findings
-    declared_by = {"n_time": "observation.time.grid",
-                   "n_freq": "observation.freq.grid",
-                   "n_source": "observation.switching.order"}
+    declared_by = {
+        "n_time": "observation.time.grid",
+        "n_freq": "observation.freq.grid",
+        "n_source": "observation.switching.order",
+    }
     for section, block in document.items():
         if not isinstance(section, str) or section == "variants":
             continue
@@ -416,15 +423,19 @@ def _shadowed_literals(document: Mapping[str, Any]) -> Iterable[Finding]:
                 symbol = literal_shadowing_a_symbol(entry, scope)
                 if symbol is None:
                     continue
-                findings.append(warn(
-                    "A41", longest_legal_prefix(path),
-                    f"{path}: the literal {entry} at shape position {index} "
-                    f"is this run's {symbol}, which {declared_by[symbol]} "
-                    f"declares. Write '{symbol}' there instead -- a copied "
-                    f"extent stays right until the grid moves, and then it is "
-                    f"a finite, correctly shaped array of the wrong length, "
-                    f"which no shape check and no finite check can see "
-                    f"(check A41)."))
+                findings.append(
+                    warn(
+                        "A41",
+                        longest_legal_prefix(path),
+                        f"{path}: the literal {entry} at shape position {index} "
+                        f"is this run's {symbol}, which {declared_by[symbol]} "
+                        f"declares. Write '{symbol}' there instead -- a copied "
+                        f"extent stays right until the grid moves, and then it is "
+                        f"a finite, correctly shaped array of the wrong length, "
+                        f"which no shape check and no finite check can see "
+                        f"(check A41).",
+                    )
+                )
     return findings
 
 
@@ -449,17 +460,21 @@ def _simulated_fit_twin(document: Mapping[str, Any]) -> Iterable[Finding]:
         if spec.get("from") != "simulation" or spec.get("twin", "full") != "fit":
             continue
         path = f"inference.observed.{name}"
-        findings.append(warn(
-            "A42", longest_legal_prefix(path),
-            f"{path}: from: simulation with twin: fit simulates this "
-            f"observation through the FIT twin, and inference.twin: takes "
-            f"{list(removed)} out of that twin -- so the data carries no "
-            f"realisation of {list(removed)} while the likelihood is asked to "
-            f"account for it. examples/radio_digital_twin.py puts the noise "
-            f"in the DATA and keeps it out of the fit twin: write twin: full "
-            f"(the default) to simulate through the model twin, or realise: "
-            f"to put the scatter back where the likelihood's own sigma can "
-            f"see it (check A42)."))
+        findings.append(
+            warn(
+                "A42",
+                longest_legal_prefix(path),
+                f"{path}: from: simulation with twin: fit simulates this "
+                f"observation through the FIT twin, and inference.twin: takes "
+                f"{list(removed)} out of that twin -- so the data carries no "
+                f"realisation of {list(removed)} while the likelihood is asked to "
+                f"account for it. examples/radio_digital_twin.py puts the noise "
+                f"in the DATA and keeps it out of the fit twin: write twin: full "
+                f"(the default) to simulate through the model twin, or realise: "
+                f"to put the scatter back where the likelihood's own sigma can "
+                f"see it (check A42).",
+            )
+        )
     return findings
 
 
@@ -492,21 +507,29 @@ def _pointing_none(document: Mapping[str, Any]) -> Iterable[Finding]:
     if (spec or {}).get("mode", "none") != "none":
         return findings
     if "observed_astro_sky" in _lit(document):
-        findings.append(refuse(
-            "A52", "observation.pointing",
-            "model lights observed_astro_sky, which sees the sky through a "
-            "projector, and observation.pointing is mode: none -- which is "
-            "the default when the section is absent, and the statement that "
-            "this run has no pointing at all. Declare observation.pointing: "
-            "{mode: drift|tracked|baked}, or drop the node (check A52)."))
+        findings.append(
+            refuse(
+                "A52",
+                "observation.pointing",
+                "model lights observed_astro_sky, which sees the sky through a "
+                "projector, and observation.pointing is mode: none -- which is "
+                "the default when the section is absent, and the statement that "
+                "this run has no pointing at all. Declare observation.pointing: "
+                "{mode: drift|tracked|baked}, or drop the node (check A52).",
+            )
+        )
     for path in _a52_projector_refs(document.get("model"), "model"):
-        findings.append(refuse(
-            "A52", longest_legal_prefix(path),
-            f"{path} references a projector while observation.pointing is "
-            "mode: none -- which is the default when the section is absent, "
-            "and the statement that this run has no pointing at all. A "
-            "projector turns a sky into what THIS observation saw, and mode: "
-            "none says there is no pointing for it to turn it into. Declare "
-            "observation.pointing: {mode: drift|tracked|baked}, or remove the "
-            "reference (check A52)."))
+        findings.append(
+            refuse(
+                "A52",
+                longest_legal_prefix(path),
+                f"{path} references a projector while observation.pointing is "
+                "mode: none -- which is the default when the section is absent, "
+                "and the statement that this run has no pointing at all. A "
+                "projector turns a sky into what THIS observation saw, and mode: "
+                "none says there is no pointing for it to turn it into. Declare "
+                "observation.pointing: {mode: drift|tracked|baked}, or remove the "
+                "reference (check A52).",
+            )
+        )
     return findings

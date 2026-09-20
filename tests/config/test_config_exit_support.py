@@ -80,13 +80,16 @@ class TestTheRegistryIsComplete:
         which is the same edit that would silently drop a table a later plan
         adds.  Discovery covers both directions.
         """
-        tables = {name: getattr(runs_module, name) for name in vars(runs_module)
-                  if name.startswith("_KINDS")}
+        tables = {
+            name: getattr(runs_module, name)
+            for name in vars(runs_module)
+            if name.startswith("_KINDS")
+        }
         assert tuple(tables) == ("_KINDS",), sorted(tables)
         assert "_KINDS_2C" not in tables, "predict was its last member"
         names = sorted(tables)
         for i, left in enumerate(names):
-            for right in names[i + 1:]:
+            for right in names[i + 1 :]:
                 shared = sorted(set(tables[left]) & set(tables[right]))
                 assert not shared, (
                     f"{left} and {right} both claim {shared}; a kind is "
@@ -118,8 +121,7 @@ class TestTheRegistryIsComplete:
             with pytest.raises(ConfigError):
                 register("_probe_kind")(probe)
         finally:
-            for registry in (PARSERS, PRE_EXECUTORS, EXECUTORS,
-                             DEFERRED_CHECKS):
+            for registry in (PARSERS, PRE_EXECUTORS, EXECUTORS, DEFERRED_CHECKS):
                 registry.pop("_probe_kind", None)
 
     def test_an_unregistered_kind_refuses_in_the_layers_own_voice(self):
@@ -128,8 +130,9 @@ class TestTheRegistryIsComplete:
         The config layer's contract is that every user-facing refusal is a
         ConfigError; a bare KeyError from a dict lookup breaks it.
         """
-        run = RunSpec(name="x", kind="not_a_kind", variant=None, on="primary",
-                      expect="ok", options={})
+        run = RunSpec(
+            name="x", kind="not_a_kind", variant=None, on="primary", expect="ok", options={}
+        )
         with pytest.raises(ConfigError, match="no executor"):
             exits.execute_run(run, None)
 
@@ -158,32 +161,40 @@ class TestReuseResolution:
         and the user reading `reuse: None names no earlier run` -- declaration
         order blamed for a key that was never written.
         """
-        run = RunSpec(name="b", kind="forward", variant=None, on="primary",
-                      expect="ok", options={}, reuse=None)
+        run = RunSpec(
+            name="b",
+            kind="forward",
+            variant=None,
+            on="primary",
+            expect="ok",
+            options={},
+            reuse=None,
+        )
         with pytest.raises(ConfigError, match="is required"):
             reuse_of(run, {})
 
     def test_a_reuse_naming_no_earlier_run_is_refused(self):
-        run = RunSpec(name="b", kind="forward", variant=None, on="primary",
-                      expect="ok", options={}, reuse="a")
+        run = RunSpec(
+            name="b", kind="forward", variant=None, on="primary", expect="ok", options={}, reuse="a"
+        )
         with pytest.raises(ConfigError, match="names no earlier run"):
             reuse_of(run, {})
 
     def test_a_reuse_naming_a_refused_run_is_refused(self):
         """expect: refuse makes a run's product None -- reusing it is a bug."""
-        earlier = RunResult(name="a", kind="fisher", product=None,
-                            error=ValueError("boom"))
-        run = RunSpec(name="b", kind="forward", variant=None, on="primary",
-                      expect="ok", options={}, reuse="a")
+        earlier = RunResult(name="a", kind="fisher", product=None, error=ValueError("boom"))
+        run = RunSpec(
+            name="b", kind="forward", variant=None, on="primary", expect="ok", options={}, reuse="a"
+        )
         with pytest.raises(ConfigError, match="refused"):
             reuse_of(run, {"a": earlier})
 
     def test_a_resolved_reuse_hands_back_the_whole_result(self):
         """The RunResult, not its product -- Task 11 reads .kind off it."""
-        earlier = RunResult(name="a", kind="fisher", product={"fisher": 1},
-                            error=None)
-        run = RunSpec(name="b", kind="forward", variant=None, on="primary",
-                      expect="ok", options={}, reuse="a")
+        earlier = RunResult(name="a", kind="fisher", product={"fisher": 1}, error=None)
+        run = RunSpec(
+            name="b", kind="forward", variant=None, on="primary", expect="ok", options={}, reuse="a"
+        )
         assert reuse_of(run, {"a": earlier}) is earlier
 
 
@@ -203,8 +214,9 @@ class TestTheLoopIsOrdered:
         original = EXECUTORS["forward"]
         EXECUTORS["forward"] = spy
         try:
-            run_document(document({"name": "a", "kind": "forward"},
-                                  {"name": "b", "kind": "forward"}))
+            run_document(
+                document({"name": "a", "kind": "forward"}, {"name": "b", "kind": "forward"})
+            )
         finally:
             EXECUTORS["forward"] = original
         assert seen == {"a": [], "b": ["a"]}
@@ -229,8 +241,9 @@ class TestTheLoopIsOrdered:
         original = EXECUTORS["forward"]
         EXECUTORS["forward"] = vandal
         try:
-            out = run_document(document({"name": "a", "kind": "forward"},
-                                        {"name": "b", "kind": "forward"}))
+            out = run_document(
+                document({"name": "a", "kind": "forward"}, {"name": "b", "kind": "forward"})
+            )
         finally:
             EXECUTORS["forward"] = original
         assert len(refused) == 2, f"the write was allowed: {refused}"
@@ -252,8 +265,7 @@ class TestARunResultCarriesItsVariant:
     """
 
     def test_the_ok_path_records_the_variant_it_ran_on(self):
-        results = run_document(document({"name": "a", "kind": "forward",
-                                         "variant": "unity_gain"}))
+        results = run_document(document({"name": "a", "kind": "forward", "variant": "unity_gain"}))
         assert results["a"].variant == "unity_gain"
 
     def test_a_run_declaring_no_variant_records_none(self):
@@ -262,8 +274,7 @@ class TestARunResultCarriesItsVariant:
         results = run_document(document({"name": "a", "kind": "forward"}))
         assert results["a"].variant is None
 
-    def test_the_field_defaults_so_a_four_argument_construction_still_binds(
-            self):
+    def test_the_field_defaults_so_a_four_argument_construction_still_binds(self):
         """The DEFAULT, which no route through ``execute_run`` can reach.
 
         Both constructors now pass ``variant=`` explicitly, so the test above
@@ -284,9 +295,9 @@ class TestARunResultCarriesItsVariant:
         no inference.parameters -- which is all this leg needs: a run whose
         RunResult comes back through the OTHER constructor.
         """
-        results = run_document(document({"name": "a", "kind": "fisher",
-                                         "variant": "unity_gain",
-                                         "expect": "refuse"}))
+        results = run_document(
+            document({"name": "a", "kind": "fisher", "variant": "unity_gain", "expect": "refuse"})
+        )
         assert results["a"].product is None
         assert isinstance(results["a"].error, ConfigError)
         assert results["a"].variant == "unity_gain"
@@ -312,9 +323,11 @@ class TestTheObservationFan:
         # satisfy either alone.
         built = fanned_built()
         assert float(_noise(spec(kind="fisher"), built)[0, 4]) == (
-            pytest.approx(self.PRIMARY, rel=1e-6))
+            pytest.approx(self.PRIMARY, rel=1e-6)
+        )
         assert float(_noise(spec(kind="fisher", on="night"), built)[0, 4]) == (
-            pytest.approx(self.NIGHT, rel=1e-6))
+            pytest.approx(self.NIGHT, rel=1e-6)
+        )
 
     def test_the_decided_sigma_route_selects_the_same_way(self):
         """The twin accessor -- every conjugate exit reaches its sigma here.
@@ -325,10 +338,10 @@ class TestTheObservationFan:
         same two, and that is the point: they must be.
         """
         built = fanned_built()
-        assert float(_decided_sigma(spec(), built)[0, 4]) == pytest.approx(
-            self.PRIMARY, rel=1e-6)
+        assert float(_decided_sigma(spec(), built)[0, 4]) == pytest.approx(self.PRIMARY, rel=1e-6)
         assert float(_decided_sigma(spec(on="night"), built)[0, 4]) == (
-            pytest.approx(self.NIGHT, rel=1e-6))
+            pytest.approx(self.NIGHT, rel=1e-6)
+        )
 
     def test_noise_and_observed_agree_about_which_observation(self):
         """One resolver, or a run is weighed with one and compared to another.
@@ -342,13 +355,13 @@ class TestTheObservationFan:
         built = fanned_built()
         for name in ("primary", "night"):
             run = spec(kind="fisher", on=name)
-            assert jnp.allclose(_noise(run, built),
-                                jnp.abs(_observed(run, built))
-                                * FROZEN_FRACTION)
+            assert jnp.allclose(
+                _noise(run, built), jnp.abs(_observed(run, built)) * FROZEN_FRACTION
+            )
         primary, night = spec(kind="fisher"), spec(kind="fisher", on="night")
-        assert not jnp.allclose(_noise(primary, built),
-                                jnp.abs(_observed(night, built))
-                                * FROZEN_FRACTION)
+        assert not jnp.allclose(
+            _noise(primary, built), jnp.abs(_observed(night, built)) * FROZEN_FRACTION
+        )
 
     def test_the_shared_resolver_reads_primary_as_the_documents_own_name(self):
         """``on: primary`` on a document whose one observation is not.
@@ -362,8 +375,9 @@ class TestTheObservationFan:
         the same.  Here it would raise a bare KeyError on a document the
         layer accepts.
         """
-        observed = ObservedBuild(entries={"night": jnp.asarray([[1.0]])},
-                                 primary="night", at={}, records={})
+        observed = ObservedBuild(
+            entries={"night": jnp.asarray([[1.0]])}, primary="night", at={}, records={}
+        )
         assert _on(spec(kind="fisher"), observed) == "night"
         assert _on(spec(kind="fisher", on="night"), observed) == "night"
 
@@ -389,8 +403,7 @@ class TestTheObservationFan:
         here and fail the identity.
         """
         built = fanned_built(noise=HOMOSCEDASTIC)
-        assert (_noise(spec(kind="fisher"), built)
-                is _noise(spec(kind="fisher", on="night"), built))
+        assert _noise(spec(kind="fisher"), built) is _noise(spec(kind="fisher", on="night"), built)
 
     def test_the_fan_reaches_the_answer_a_run_returns(self):
         """The feature's own thesis: it must move a NUMBER, from a document.
@@ -403,10 +416,8 @@ class TestTheObservationFan:
         seam, and this is the one assertion that says the seam is wired to
         the answer.
         """
-        narrow = run_document(fanned_document({"name": "cov",
-                                               "kind": "fisher"}))
-        wide = run_document(fanned_document({"name": "cov", "kind": "fisher",
-                                             "on": "night"}))
+        narrow = run_document(fanned_document({"name": "cov", "kind": "fisher"}))
+        wide = run_document(fanned_document({"name": "cov", "kind": "fisher", "on": "night"}))
         narrow_g = float(narrow["cov"].product["covariance"].sigma("g"))
         wide_g = float(wide["cov"].product["covariance"].sigma("g"))
         assert narrow_g == pytest.approx(9.375001536682248e-05, rel=1e-5)
@@ -427,9 +438,12 @@ class TestTheDeferredKindsNameTheirPlan:
 
     def test_compare_and_benchmark_are_both_live(self):
         assert not hasattr(runs_module, "_KINDS_PLAN4")
-        assert parse_runs(
-            [{"kind": "compare", "of": ["a", "b"], "metric": "rms", "tolerance": 0.0}]
-        )[0].kind == "compare"
+        assert (
+            parse_runs([{"kind": "compare", "of": ["a", "b"], "metric": "rms", "tolerance": 0.0}])[
+                0
+            ].kind
+            == "compare"
+        )
         assert parse_runs([{"kind": "benchmark", "variants": ["base"]}])[0].kind == "benchmark"
 
     def test_nuts_and_npe_have_left_and_the_tuple_has_gone_with_them(self):
@@ -497,8 +511,7 @@ class TestTheSharedCallabilityProbe:
     """
 
     def test_a_callable_of_the_wrong_arity_does_not_bind(self):
-        binds, signature = _binds(lambda prediction: prediction, object(),
-                                  object())
+        binds, signature = _binds(lambda prediction: prediction, object(), object())
         assert binds is False
         assert "prediction" in str(signature)
 
@@ -509,8 +522,7 @@ class TestTheSharedCallabilityProbe:
 
     def test_defaults_and_star_args_bind_rather_than_being_counted(self):
         # Counting parameters gets all three of these wrong; binding does not.
-        for fn in (lambda a, b=1: a, lambda *args: args,
-                   lambda a, /, b: a):
+        for fn in (lambda a, b=1: a, lambda *args: args, lambda a, /, b: a):
             assert _binds(fn, object(), object())[0] is True
 
     def test_a_callable_inspect_cannot_describe_is_passed_through(self):

@@ -234,9 +234,7 @@ def _refuse(message: str) -> NoReturn:
     raise ParameterSpaceError(message)
 
 
-def _prior_of(
-    latent: Latent, supplied: Mapping[str, Any], covered_by: str | None = None
-) -> Any:
+def _prior_of(latent: Latent, supplied: Mapping[str, Any], covered_by: str | None = None) -> Any:
     """The one prior in force for ``latent`` -- declared or supplied, never both.
 
     ``priors=`` is the SINGLE entry for a prior that the declaration does not
@@ -627,9 +625,7 @@ def to_graph(
     priors_by_name = resolved.priors
 
     def model(data: Any) -> None:
-        refs = [
-            bayesmith.sample(name, _prior_factory(priors_by_name[name])) for name in names
-        ]
+        refs = [bayesmith.sample(name, _prior_factory(priors_by_name[name])) for name in names]
         prediction = bayesmith.det(
             prediction_name,
             _prediction_fn(forward, names),
@@ -641,9 +637,7 @@ def to_graph(
             # The scale is a node, not a number. `observe` takes several
             # parents, so this needs nothing from the far side that 0.4.0 does
             # not already have -- measured before it was written (D27).
-            parents.append(
-                bayesmith.sample(scale_prior[0], _prior_factory(scale_prior[1]))
-            )
+            parents.append(bayesmith.sample(scale_prior[0], _prior_factory(scale_prior[1])))
         bayesmith.observe(
             observation_name,
             _observation_fn(noise, declared_scale=scale_prior is not None),
@@ -718,10 +712,7 @@ def graph_for_information(
     _refuse_flags_that_do_not_match(noise, prediction_shape)
 
     def model(data: Any) -> None:
-        refs = [
-            bayesmith.sample(name, _prior_factory(declared.get(name, flat)))
-            for name in names
-        ]
+        refs = [bayesmith.sample(name, _prior_factory(declared.get(name, flat))) for name in names]
         prediction = bayesmith.det(PREDICTION, _prediction_fn(forward, names), *refs)
         bayesmith.observe(
             OBSERVATION,
@@ -808,9 +799,7 @@ def _observation_fn(noise: Any, *, declared_scale: bool = False) -> Callable[...
         return distributions.Normal(prediction, _finite_sigma(noise, prediction))
 
     def observation_with_scale(prediction: jax.Array, scale: jax.Array) -> Any:
-        return distributions.Normal(
-            prediction, jnp.broadcast_to(scale, jnp.shape(prediction))
-        )
+        return distributions.Normal(prediction, jnp.broadcast_to(scale, jnp.shape(prediction)))
 
     return observation_with_scale if declared_scale else observation
 

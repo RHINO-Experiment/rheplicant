@@ -52,8 +52,10 @@ class TestSkyModels:
             UniformSkyModel(amplitude=jnp.array(1.0), n_pix=0)
         with pytest.raises(StateValidationError, match="ref_freq"):
             PowerLawSkyModel(
-                amplitude=jnp.array(1.0), spectral_index=jnp.array(2.5),
-                ref_freq=-1.0, n_pix=N_PIX,
+                amplitude=jnp.array(1.0),
+                spectral_index=jnp.array(2.5),
+                ref_freq=-1.0,
+                n_pix=N_PIX,
             )
 
 
@@ -91,8 +93,10 @@ class TestSkySourceOperator:
     def source(self, key):
         return SkySourceOperator(
             sky_model=PowerLawSkyModel(
-                amplitude=jnp.ones(N_PIX), spectral_index=jnp.array(2.5),
-                ref_freq=70e6, n_pix=N_PIX,
+                amplitude=jnp.ones(N_PIX),
+                spectral_index=jnp.array(2.5),
+                ref_freq=70e6,
+                n_pix=N_PIX,
             ),
             projector=MatrixProjector(matrix=jax.random.normal(key, (N_TIME, N_PIX))),
         )
@@ -122,9 +126,7 @@ class TestSkySourceOperator:
         kept the old projector would not produce this output.
         """
         chromatic = jax.random.normal(key, (N_FREQ, N_TIME, N_PIX))
-        swapped = eqx.tree_at(
-            lambda s: s.projector, source, MatrixProjector(matrix=chromatic)
-        )
+        swapped = eqx.tree_at(lambda s: s.projector, source, MatrixProjector(matrix=chromatic))
         out = swapped(template_state)
         assert out.data.shape == (N_TIME, N_FREQ)
         assert isinstance(swapped.sky_model, PowerLawSkyModel)  # sky untouched
@@ -200,7 +202,9 @@ class TestGeneralPointingProjector:
         with pytest.raises(StateValidationError, match="beam_alms"):
             GeneralPointingProjector(
                 beam_alms=jnp.zeros((2, self.N_ALM + 1), dtype=jnp.complex64),
-                lat_deg=self.LAT, lmax=self.LMAX, nside=self.NSIDE,
+                lat_deg=self.LAT,
+                lmax=self.LMAX,
+                nside=self.NSIDE,
             )
 
     def test_oracle_matches_limtod_linear_chain(self, obs_coords):
@@ -224,9 +228,7 @@ class TestGeneralPointingProjector:
         rng = np.random.default_rng(0)
         beam_maps = rng.random((2, self.N_PIX_HP))
         sky_maps = rng.random((2, self.N_PIX_HP))
-        beam_alms = jnp.asarray(
-            np.stack([hp.map2alm(b, lmax=self.LMAX) for b in beam_maps])
-        )
+        beam_alms = jnp.asarray(np.stack([hp.map2alm(b, lmax=self.LMAX) for b in beam_maps]))
         proj = GeneralPointingProjector(
             beam_alms=beam_alms, lat_deg=self.LAT, lmax=self.LMAX, nside=self.NSIDE
         )
@@ -238,12 +240,18 @@ class TestGeneralPointingProjector:
         lst = np.asarray(obs_coords.extra["lst_deg"])
         for f in range(2):
             direct = limtod.generate_TOD_sky(
-                beam_maps[f], sky_maps[f], lst, self.LAT, az, el,
-                np.zeros(N_TIME), truncate_frac_thres=0.0,
+                beam_maps[f],
+                sky_maps[f],
+                lst,
+                self.LAT,
+                az,
+                el,
+                np.zeros(N_TIME),
+                truncate_frac_thres=0.0,
             )
-            assert jnp.allclose(
-                out[:, f], jnp.asarray(direct), rtol=5e-2
-            ), f"freq {f}: {np.max(np.abs(np.asarray(out[:, f]) - direct))}"
+            assert jnp.allclose(out[:, f], jnp.asarray(direct), rtol=5e-2), (
+                f"freq {f}: {np.max(np.abs(np.asarray(out[:, f]) - direct))}"
+            )
 
     def test_oracle_x64_subprocess(self):
         """Full-precision end-to-end wiring proof: 1e-6 vs the oracle in x64.
@@ -310,7 +318,10 @@ print(f"X64 OK worst_rel={{worst:.3e}}")
         env = dict(os.environ, JAX_ENABLE_X64="1")
         result = subprocess.run(
             [sys.executable, "-c", script],
-            capture_output=True, text=True, env=env, timeout=600,
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=600,
         )
         assert result.returncode == 0, result.stderr[-2000:]
         assert "X64 OK" in result.stdout
@@ -360,9 +371,7 @@ print(f"X64 OK worst_rel={{worst:.3e}}")
 
         k1, k2 = jax.random.split(key)
         proj = self._random_projector(k1)
-        filt = SkySpaceFilter(
-            projector=proj, regularization=jnp.array(1e-2), cg_maxiter=8
-        )
+        filt = SkySpaceFilter(projector=proj, regularization=jnp.array(1e-2), cg_maxiter=8)
         data = jax.random.normal(k2, (N_TIME, 2))
         state = State(coords=obs_coords)
         projected = filt.project(data, state)

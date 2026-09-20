@@ -243,15 +243,12 @@ def _static_setting(name: str, array_why: str, traced_why: str):
     def convert(value) -> float:
         shape = jnp.shape(value)
         if shape != ():
-            raise StateValidationError(
-                f"{name} must be a scalar, got shape {shape}. {array_why}"
-            )
+            raise StateValidationError(f"{name} must be a scalar, got shape {shape}. {array_why}")
         try:
             return float(value)
         except Exception as exc:  # tracer, or anything else with no float value
             raise StateValidationError(
-                f"{name} must be a KNOWN, static number, got "
-                f"{type(value).__name__}. {traced_why}"
+                f"{name} must be a KNOWN, static number, got {type(value).__name__}. {traced_why}"
             ) from exc
 
     return convert
@@ -361,9 +358,7 @@ class CWCalibrationOperator(AbstractOperator):
     tone_freq: float = eqx.field(static=True, converter=_named_setting("tone_freq"))
     line_width: float = eqx.field(static=True, converter=_named_setting("line_width"))
     lineshape: str = eqx.field(static=True, default="sinc2")
-    drift_rate: float = eqx.field(
-        static=True, default=0.0, converter=_named_setting("drift_rate")
-    )
+    drift_rate: float = eqx.field(static=True, default=0.0, converter=_named_setting("drift_rate"))
     amplitude_drift_rate: float = eqx.field(
         static=True, default=0.0, converter=_named_setting("amplitude_drift_rate")
     )
@@ -703,9 +698,7 @@ def width_floor_rtol(freq, spacing: float) -> float:
     return min(max(WIDTH_FLOOR_RTOL, raw), WIDTH_FLOOR_RTOL_MAX)
 
 
-def width_floor_unresolved(
-    freq, spacing: float, width: float, floor: float
-) -> str | None:
+def width_floor_unresolved(freq, spacing: float, width: float, floor: float) -> str | None:
     """Why this grid cannot say whether ``width`` clears ``floor``, or ``None``.
 
     Only past :data:`WIDTH_FLOOR_RTOL_MAX`, and only for a width inside
@@ -839,12 +832,9 @@ class CalLoadOperator(AbstractOperator):
                     f"is the per-SAMPLE form and must be exactly ({n_time}, 1), "
                     f"one temperature per time sample."
                 )
-            return state.with_data(
-                jnp.broadcast_to(self.t_load, (n_time, n_freq))
-            )
+            return state.with_data(jnp.broadcast_to(self.t_load, (n_time, n_freq)))
         raise StateValidationError(
-            f"t_load must be scalar, (n_freq,) or (n_time, 1); got "
-            f"ndim={self.t_load.ndim}."
+            f"t_load must be scalar, (n_freq,) or (n_time, 1); got ndim={self.t_load.ndim}."
         )
 
 
@@ -879,6 +869,5 @@ class ApplyCalibrationOperator(AbstractOperator):
                 )
             return state.with_data(state.data / self.gain[:, None])
         raise StateValidationError(
-            f"{type(self).__name__}: gain must be scalar or 1D, got "
-            f"ndim={self.gain.ndim}."
+            f"{type(self).__name__}: gain must be scalar or 1D, got ndim={self.gain.ndim}."
         )

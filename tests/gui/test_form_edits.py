@@ -107,9 +107,7 @@ def test_semantic_noops_return_the_exact_original_yaml_bytes():
     ("document", "path", "value"),
     [
         (
-            BASE_YAML.replace(
-                "jax_enable_x64: true", "jax_enable_x64: false  # keep false"
-            ),
+            BASE_YAML.replace("jax_enable_x64: true", "jax_enable_x64: false  # keep false"),
             "runtime.jax_enable_x64",
             False,
         ),
@@ -153,9 +151,7 @@ runs: []
 
 def test_changed_serialization_preserves_existing_mapping_order():
     before = yaml.safe_load(BASE_YAML)
-    changed = yaml.safe_load(
-        set_form_value(BASE_YAML, "runtime.jax_enable_x64", False)
-    )
+    changed = yaml.safe_load(set_form_value(BASE_YAML, "runtime.jax_enable_x64", False))
 
     assert tuple(changed) == tuple(before)
     assert tuple(changed["runtime"]) == (
@@ -177,9 +173,7 @@ def test_changed_serialization_preserves_existing_mapping_order():
     ],
 )
 def test_literal_wildcard_and_list_index_paths_are_refused_as_nonconcrete(path: str):
-    document = BASE_YAML.replace(
-        "runs: []", "runs:\n  - name: forward\n    kind: forward"
-    )
+    document = BASE_YAML.replace("runs: []", "runs:\n  - name: forward\n    kind: forward")
 
     with pytest.raises(ConfigError, match="exact concrete"):
         set_form_value(document, path, "changed")

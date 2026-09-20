@@ -115,9 +115,7 @@ class SumOperator(AbstractOperator):
             try:
                 index = self.names.index(index)
             except ValueError:
-                raise KeyError(
-                    f"No branch named {index!r}; available: {self.names}"
-                ) from None
+                raise KeyError(f"No branch named {index!r}; available: {self.names}") from None
         return self.branches[index]
 
     def __len__(self) -> int:
@@ -139,9 +137,7 @@ class SumOperator(AbstractOperator):
             try:
                 index = self.names.index(index)
             except ValueError:
-                raise KeyError(
-                    f"No branch named {index!r}; available: {self.names}"
-                ) from None
+                raise KeyError(f"No branch named {index!r}; available: {self.names}") from None
         new_branches = list(self.branches)
         new_branches[index] = operator
         return SumOperator(*new_branches, names=self.names)
@@ -281,9 +277,7 @@ class SelectOperator(AbstractOperator):
             try:
                 index = self.names.index(index)
             except ValueError:
-                raise KeyError(
-                    f"No branch named {index!r}; available: {self.names}"
-                ) from None
+                raise KeyError(f"No branch named {index!r}; available: {self.names}") from None
         return self.branches[index]
 
     def __len__(self) -> int:

@@ -96,9 +96,9 @@ class TestEndToEnd:
         @eqx.filter_jit
         def grad_step(pipeline):
             traces.append(1)
-            return eqx.filter_grad(
-                lambda p: mean_squared_error(p(template_state).data, observed)
-            )(pipeline)
+            return eqx.filter_grad(lambda p: mean_squared_error(p(template_state).data, observed))(
+                pipeline
+            )
 
         grad_step(demo_pipeline)
         grad_step(demo_pipeline)
@@ -119,9 +119,7 @@ class TestEndToEnd:
         with pytest.raises(ParameterSpaceError, match="NoiseOperator at 'noise'"):
             build_forward_fn(demo_pipeline, template_state)
 
-    def test_forward_fn_composes_with_the_deterministic_twin(
-        self, demo_pipeline, template_state
-    ):
+    def test_forward_fn_composes_with_the_deterministic_twin(self, demo_pipeline, template_state):
         model = _without_noise(demo_pipeline)
         forward, params0 = build_forward_fn(model, template_state)
         assert jnp.array_equal(forward(params0), model(template_state).data)

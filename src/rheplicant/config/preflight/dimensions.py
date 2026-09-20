@@ -177,18 +177,12 @@ def _operator_entries(
                 node = graph.nodes.get(node_id)
                 if node is None:
                     continue
-                if node.many and many_shape_problem(
-                    str(node_id), spec, many=True
-                ) is not None:
+                if node.many and many_shape_problem(str(node_id), spec, many=True) is not None:
                     continue
                 if isinstance(spec, Mapping) and "compose" in spec:
-                    if not _compose_stage_specs(
-                        spec, node.kind, str(node_id)
-                    ):
+                    if not _compose_stage_specs(spec, node.kind, str(node_id)):
                         continue
-                for relative, entry in _t4_entries(
-                    str(node_id), spec, many=bool(node.many)
-                ):
+                for relative, entry in _t4_entries(str(node_id), spec, many=bool(node.many)):
                     yield f"model.{relative}", str(node_id), entry
             # A live plugin table can expose an additional node before the
             # graph's separate placement check accepts it.  Keep A9's plugin
@@ -218,9 +212,7 @@ def _model(document: Mapping[str, Any]) -> Iterable[Finding]:
             continue
         class_name = _qualified(cls)
         binding = MODEL_FORMULA_BINDINGS.get(class_name)
-        plugin_formulas = (
-            () if binding is not None else _plugin_formulas_for_class(cls)
-        )
+        plugin_formulas = () if binding is not None else _plugin_formulas_for_class(cls)
         missing_formula = (
             not all(name in _FORMULA_REGISTRY for name in binding.formulas)
             if binding is not None
@@ -352,9 +344,7 @@ def _validate_live_row(
     if spec.disposition != "contextual" or token is None:
         return
     try:
-        expected = dimension_for(
-            DestinationDescriptor(selector, domain, where), environment
-        )
+        expected = dimension_for(DestinationDescriptor(selector, domain, where), environment)
     except ConfigError as error:
         yield _refuse(where, f"{where}: {error} (check A9).")
         return
@@ -370,9 +360,7 @@ def _validate_live_row(
 def _config(document: Mapping[str, Any], environment: DimensionEnvironment) -> Iterable[Finding]:
     for path, node in _walk(document):
         rows = matching_dimension_rows("config_path", path)
-        yield from _validate_live_row(
-            path, node, "config_path", path, rows, environment
-        )
+        yield from _validate_live_row(path, node, "config_path", path, rows, environment)
 
 
 def _resource_selectors(kind: str, spec: Mapping[str, Any], path: str):
@@ -389,9 +377,7 @@ def _resource_selectors(kind: str, spec: Mapping[str, Any], path: str):
         yield f"{path}.{field_path}", candidates, value
 
 
-def _resources(
-    document: Mapping[str, Any], environment: DimensionEnvironment
-) -> Iterable[Finding]:
+def _resources(document: Mapping[str, Any], environment: DimensionEnvironment) -> Iterable[Finding]:
     resources = document.get("resources")
     if not isinstance(resources, Mapping):
         return
@@ -406,10 +392,7 @@ def _resources(
                 and spec.get("kind") == "maps"
                 and isinstance(spec.get("unit"), str)
             ):
-                selector = (
-                    "rheplicant.config.kinds.sky_models."
-                    "build_sky_model.maps.maps"
-                )
+                selector = "rheplicant.config.kinds.sky_models.build_sky_model.maps.maps"
                 rows = matching_dimension_rows("resource_field", selector)
                 yield from _validate_live_row(
                     f"resources.{kind}.{name}.maps",

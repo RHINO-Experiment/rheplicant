@@ -126,9 +126,7 @@ def _feeds_only_selectors(graph: SignalGraph, node: str) -> bool:
     the conservative reading, and no shipped graph has such a node.
     """
     consumers = graph._out[node]
-    return bool(consumers) and all(
-        graph.nodes[c].kind == "selector" for c in consumers
-    )
+    return bool(consumers) and all(graph.nodes[c].kind == "selector" for c in consumers)
 
 
 # ---------------------------------------------------------------------------
@@ -224,9 +222,7 @@ def _check_slot_kinds(
         if _creates_data(graph, declared) == _creates_data(graph, node):
             continue
         where = (
-            f"the region {tuple(path)}, entered at {node!r}"
-            if len(path) > 1
-            else f"node {node!r}"
+            f"the region {tuple(path)}, entered at {node!r}" if len(path) > 1 else f"node {node!r}"
         )
         if _creates_data(graph, declared):
             consequence = (
@@ -300,9 +296,7 @@ def _check_ordering(
             if target not in lit or target in path:
                 continue
             if target not in downstream:
-                because = (
-                    f" {op.must_precede_because}" if op.must_precede_because else ""
-                )
+                because = f" {op.must_precede_because}" if op.must_precede_because else ""
                 raise AssemblyError(
                     f"{type(op).__name__} declares must_precede="
                     f"{list(required)}, but this assembly places it at "

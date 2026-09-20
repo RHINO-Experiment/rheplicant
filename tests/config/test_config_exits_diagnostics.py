@@ -62,19 +62,23 @@ DEGENERATE = [[1.0 + 1.0e-4 * channel] for channel in range(8)]
 #: Gaussian in frequency, so its WIDTH is a knob check_linearity refuses.  It
 #: is what gives ``check:`` a lever on this exit -- see
 #: :meth:`TestWhatItRefuses.test_check_false_builds_the_block_linearity_refuses`.
-WIDTH_LATENT = {"w": {"init": {"value": 5.0, "unit": "MHz"}, "linear": True,
-                      "into": "global_signal.width"}}
+WIDTH_LATENT = {
+    "w": {"init": {"value": 5.0, "unit": "MHz"}, "linear": True, "into": "global_signal.width"}
+}
 
 
-LINEARITY_DECLINED = {"linearity": {"mode": "skip",
-                      "reason": "this fixture declares linear: true on a "
-                                "latent the prediction is not affine in, on "
-                                "purpose, so that the exit-level check: has "
-                                "a lever"}}
+LINEARITY_DECLINED = {
+    "linearity": {
+        "mode": "skip",
+        "reason": "this fixture declares linear: true on a "
+        "latent the prediction is not affine in, on "
+        "purpose, so that the exit-level check: has "
+        "a lever",
+    }
+}
 
 
-def condition_document(run, freq_basis=DEGENERATE, sigma=0.5, extra=None,
-                       checks=None):
+def condition_document(run, freq_basis=DEGENERATE, sigma=0.5, extra=None, checks=None):
     """A document with two linear temperatures, a sigma, and NO observed data.
 
     ``condition_estimate`` takes no ``observed`` and never calls
@@ -89,26 +93,34 @@ def condition_document(run, freq_basis=DEGENERATE, sigma=0.5, extra=None,
     """
     doc = synthetic_document()
     doc["runtime"] = {"seed": 20260806, "seeds": {"zero": 0, "other": 1}}
-    doc["model"] = {key: value for key, value in doc["model"].items()
-                    if key != "noise"}
+    doc["model"] = {key: value for key, value in doc["model"].items() if key != "noise"}
     doc["model"]["t_sys_extra"] = [
-        {"coeff": {"list": [[100.0]], "unit": "K"},
-         "time_basis": {"ones": [16, 1]},
-         "freq_basis": {"ones": [8, 1]}},
-        {"coeff": {"list": [[10.0]], "unit": "K"},
-         "time_basis": {"ones": [16, 1]},
-         "freq_basis": {"list": freq_basis}},
+        {
+            "coeff": {"list": [[100.0]], "unit": "K"},
+            "time_basis": {"ones": [16, 1]},
+            "freq_basis": {"ones": [8, 1]},
+        },
+        {
+            "coeff": {"list": [[10.0]], "unit": "K"},
+            "time_basis": {"ones": [16, 1]},
+            "freq_basis": {"list": freq_basis},
+        },
     ]
     doc["inference"] = {
         "parameters": {
-            "a": {"init": {"list": [[100.0]], "unit": "K"}, "linear": True,
-                  "into": "t_sys_extra_1.coeff"},
-            "b": {"init": {"list": [[10.0]], "unit": "K"}, "linear": True,
-                  "into": "t_sys_extra_2.coeff"},
+            "a": {
+                "init": {"list": [[100.0]], "unit": "K"},
+                "linear": True,
+                "into": "t_sys_extra_1.coeff",
+            },
+            "b": {
+                "init": {"list": [[10.0]], "unit": "K"},
+                "linear": True,
+                "into": "t_sys_extra_2.coeff",
+            },
             **(extra or {}),
         },
-        "noise": {"kind": "homoscedastic",
-                  "sigma": {"value": sigma, "unit": "K"}},
+        "noise": {"kind": "homoscedastic", "sigma": {"value": sigma, "unit": "K"}},
     }
     if checks is not None:
         doc["inference"]["checks"] = checks
@@ -121,8 +133,12 @@ def condition_document(run, freq_basis=DEGENERATE, sigma=0.5, extra=None,
 #: built from ``run.name`` -- what the executors spell -- from one built out of
 #: ``run.kind``.  Under this name the two are different strings, and the
 #: refusal tests read the prefix.
-KAPPA = {"name": "kappa", "kind": "condition", "names": ["a", "b"],
-         "prior_std": {"a": 100.0, "b": 100.0}}
+KAPPA = {
+    "name": "kappa",
+    "kind": "condition",
+    "names": ["a", "b"],
+    "prior_std": {"a": 100.0, "b": 100.0},
+}
 
 
 def kappa_of(run, **document):
@@ -133,8 +149,7 @@ def kappa_of(run, **document):
 
 class TestTheNumberItReports:
     def test_an_orthogonal_block_is_perfectly_conditioned(self):
-        assert kappa_of(KAPPA, freq_basis=ORTHOGONAL) == pytest.approx(1.0,
-                                                                       rel=1e-3)
+        assert kappa_of(KAPPA, freq_basis=ORTHOGONAL) == pytest.approx(1.0, rel=1e-3)
 
     def test_a_nearly_degenerate_block_reports_seven_orders_more(self):
         """The whole point of the exit, in one comparison.
@@ -243,8 +258,7 @@ class TestTheKnobsReachThePackage:
             kappa_of({**KAPPA, "iterations": 0})
 
     def test_a_non_number_iterations_is_refused_here_not_in_a_trace(self):
-        with pytest.raises(ConfigError,
-                           match=r"iterations: is a number") as caught:
+        with pytest.raises(ConfigError, match=r"iterations: is a number") as caught:
             kappa_of({**KAPPA, "iterations": "twelve"})
         assert str(caught.value).startswith("runs['kappa']: ")
 
@@ -348,8 +362,7 @@ class TestWhatItRefuses:
         ran first.
         """
         with pytest.raises(ConfigError, match="centre") as caught:
-            kappa_of({**KAPPA, "prior_mean": {"a": 0.0, "b": 0.0},
-                      "tol": 1.0e-9})
+            kappa_of({**KAPPA, "prior_mean": {"a": 0.0, "b": 0.0}, "tol": 1.0e-9})
         assert "tol" not in str(caught.value)
 
     def test_the_sweep_names_exactly_the_keys_this_exit_takes(self):
@@ -361,9 +374,10 @@ class TestWhatItRefuses:
         (``conjugate_support._BLOCK_KEYS``).
         """
         with pytest.raises(
-                ConfigError,
-                match=r"it takes \['check', 'iterations', 'names', "
-                      r"'prior_std', 'seed'\]") as caught:
+            ConfigError,
+            match=r"it takes \['check', 'iterations', 'names', "
+            r"'prior_std', 'seed'\]",
+        ) as caught:
             kappa_of({**KAPPA, "tol": 1.0e-9})
         assert "does not take ['tol']" in str(caught.value)
 
@@ -410,8 +424,7 @@ class TestWhatItRefuses:
             kappa_of({**KAPPA, "prior_std": {"a": 100.0}})
         assert "['a', 'b']" in str(caught.value)
 
-    def test_a_prior_free_block_with_no_prior_std_is_the_packages_refusal(
-            self):
+    def test_a_prior_free_block_with_no_prior_std_is_the_packages_refusal(self):
         """_require_prior_std runs here as it does for the three solves.
 
         Neither latent in this document declares a ``prior:``, so kappa has
@@ -419,8 +432,7 @@ class TestWhatItRefuses:
         width to keep the run going (linear.py).
         """
         with pytest.raises(ParameterSpaceError, match="prior_std"):
-            kappa_of({key: value for key, value in KAPPA.items()
-                      if key != "prior_std"})
+            kappa_of({key: value for key, value in KAPPA.items() if key != "prior_std"})
 
     def test_check_false_builds_the_block_linearity_refuses(self):
         """``check:`` is linear_operator's key and it reaches this exit.
@@ -433,13 +445,12 @@ class TestWhatItRefuses:
         the key: the condition number of a block that is not affine is not a
         number.
         """
-        pair = {**KAPPA, "names": ["a", "w"],
-                "prior_std": {"a": 100.0, "w": 100.0}}
+        pair = {**KAPPA, "names": ["a", "w"], "prior_std": {"a": 100.0, "w": 100.0}}
         with pytest.raises(ParameterSpaceError, match="JOINTLY"):
             kappa_of(pair, extra=WIDTH_LATENT, checks=LINEARITY_DECLINED)
-        assert math.isnan(kappa_of({**pair, "check": False},
-                                   extra=WIDTH_LATENT,
-                                   checks=LINEARITY_DECLINED))
+        assert math.isnan(
+            kappa_of({**pair, "check": False}, extra=WIDTH_LATENT, checks=LINEARITY_DECLINED)
+        )
 
 
 # --- The two diagnostics that need only a space ----------------------------
@@ -510,13 +521,11 @@ class TestIdentifiability:
         Jacobian whose own roundoff is ~1e-16 relative.  Nothing but the
         declared rtol can produce that, and the report echoes it back.
         """
-        loose = diagnostic_report({"kind": "identifiability", "rtol": 0.6},
-                       IDENTIFIED_PAIR)
+        loose = diagnostic_report({"kind": "identifiability", "rtol": 0.6}, IDENTIFIED_PAIR)
         assert loose.rtol == pytest.approx(0.6)
         assert loose.threshold == pytest.approx(0.7543759, rel=1e-5)
         assert (loose.rank, loose.nullity) == (1, 1)
-        assert loose.singular_values == pytest.approx([1.2572932, 0.6474673],
-                                                      rel=1e-5)
+        assert loose.singular_values == pytest.approx([1.2572932, 0.6474673], rel=1e-5)
         tight = diagnostic_report({"kind": "identifiability"}, IDENTIFIED_PAIR)
         assert (tight.rank, tight.nullity) == (2, 0)
 
@@ -535,16 +544,11 @@ class TestIdentifiability:
         docstring would fail.
         """
         base = diagnostic_report({"kind": "identifiability"})
-        moved = diagnostic_report({"kind": "identifiability",
-                                   "at": {"d": 1.0}})
-        assert base.column_norms == pytest.approx([3.1501079, 6.3002157],
-                                                  rel=1e-5)
-        assert moved.column_norms == pytest.approx([6.3002157, 6.3002157],
-                                                   rel=1e-5)
-        assert moved.column_norms[0] == pytest.approx(
-            2.0 * base.column_norms[0], rel=1e-5)
-        assert moved.column_norms[1] == pytest.approx(
-            base.column_norms[1], rel=1e-5)
+        moved = diagnostic_report({"kind": "identifiability", "at": {"d": 1.0}})
+        assert base.column_norms == pytest.approx([3.1501079, 6.3002157], rel=1e-5)
+        assert moved.column_norms == pytest.approx([6.3002157, 6.3002157], rel=1e-5)
+        assert moved.column_norms[0] == pytest.approx(2.0 * base.column_norms[0], rel=1e-5)
+        assert moved.column_norms[1] == pytest.approx(base.column_norms[1], rel=1e-5)
 
     def test_at_reads_the_documents_own_value_grammar(self):
         """``{value:, unit:}`` is what ``inference.observed.<name>.at``
@@ -552,10 +556,10 @@ class TestIdentifiability:
         seam.  An executor that did ``float(node)`` instead would raise on
         this mapping, and one that passed the mapping through unresolved
         would reach jnp.asarray with a dict."""
-        moved = diagnostic_report({"kind": "identifiability",
-                        "at": {"d": {"value": 1.0, "unit": "K"}}})
-        assert moved.column_norms == pytest.approx([6.3002157, 6.3002157],
-                                                   rel=1e-5)
+        moved = diagnostic_report(
+            {"kind": "identifiability", "at": {"d": {"value": 1.0, "unit": "K"}}}
+        )
+        assert moved.column_norms == pytest.approx([6.3002157, 6.3002157], rel=1e-5)
 
     def test_an_empty_at_is_the_report_with_no_at_at_all(self):
         """``{}`` is the right empty, and it is not "no ``at:``" spelled twice.
@@ -579,8 +583,7 @@ class TestIdentifiability:
         because the type alone is what tells the two apart.
         """
         with pytest.raises(ConfigError, match=r"at: names \['q'\]") as caught:
-            run_document(diagnostic_document({"kind": "identifiability",
-                                   "at": {"q": 1.0}}))
+            run_document(diagnostic_document({"kind": "identifiability", "at": {"q": 1.0}}))
         assert "it declares ['g', 'd']" in str(caught.value)
 
     def test_names_naming_an_undeclared_latent_is_the_packages_refusal(self):
@@ -592,10 +595,8 @@ class TestIdentifiability:
         that is already refused for the right reason, so this test is what
         records the decision rather than leaving it to be "fixed".
         """
-        with pytest.raises(ParameterSpaceError,
-                           match="not a latent of this space"):
-            run_document(diagnostic_document({"kind": "identifiability",
-                                   "names": ["q"]}))
+        with pytest.raises(ParameterSpaceError, match="not a latent of this space"):
+            run_document(diagnostic_document({"kind": "identifiability", "names": ["q"]}))
 
     def test_a_float32_document_runs_rather_than_being_refused(self):
         """identifiability() forces x64 process-globally for its own duration
@@ -616,11 +617,8 @@ class TestIdentifiability:
         ``rtol: must be >= 0`` as well, and a bare ``match="rtols"`` cannot
         see a key set that has grown or lost a member.
         """
-        with pytest.raises(
-                ConfigError,
-                match=r"it takes \['at', 'names', 'rtol'\]") as caught:
-            run_document(diagnostic_document(
-                {"kind": "identifiability", "rtols": 0.6}))
+        with pytest.raises(ConfigError, match=r"it takes \['at', 'names', 'rtol'\]") as caught:
+            run_document(diagnostic_document({"kind": "identifiability", "rtols": 0.6}))
         assert "does not take ['rtols']" in str(caught.value)
 
     def test_without_parameters_it_is_refused(self):
@@ -640,10 +638,10 @@ class TestIdentifiability:
         ``runs[0]``, ``runs['identifiability']`` and ``runs['probe']`` are
         three different strings, and only one of them is the contract.
         """
-        with pytest.raises(ConfigError,
-                           match="non-empty list of latent") as caught:
-            run_document(diagnostic_document({"name": "probe",
-                                   "kind": "identifiability", "names": "g"}))
+        with pytest.raises(ConfigError, match="non-empty list of latent") as caught:
+            run_document(
+                diagnostic_document({"name": "probe", "kind": "identifiability", "names": "g"})
+            )
         assert str(caught.value).startswith("runs['probe']: ")
 
     def test_at_is_a_mapping_of_latent_to_value(self):
@@ -657,8 +655,9 @@ class TestIdentifiability:
         three different strings.
         """
         with pytest.raises(ConfigError, match="at: is a mapping") as caught:
-            run_document(diagnostic_document({"name": "probe",
-                                   "kind": "identifiability", "at": ["d"]}))
+            run_document(
+                diagnostic_document({"name": "probe", "kind": "identifiability", "at": ["d"]})
+            )
         assert str(caught.value).startswith("runs['probe']: ")
 
     def test_the_at_helper_returns_an_empty_mapping_rather_than_none(self):
@@ -686,16 +685,14 @@ class TestIdentifiability:
         which contains the key and says nothing at all about its type.
         """
         with pytest.raises(ConfigError, match=r"rtol: is a number"):
-            run_document(diagnostic_document({"kind": "identifiability",
-                                   "rtol": "loose"}))
+            run_document(diagnostic_document({"kind": "identifiability", "rtol": "loose"}))
 
     def test_a_negative_rtol_is_refused_at_the_floor(self):
         """A relative tolerance below zero puts every singular value above the
         cutoff, so the rank verdict is vacuous rather than loose.  Matched on
         the floor clause, which the ``is a number`` branch does not carry."""
         with pytest.raises(ConfigError, match=r"rtol: must be >= 0"):
-            run_document(diagnostic_document(
-                {"kind": "identifiability", "rtol": -0.1}))
+            run_document(diagnostic_document({"kind": "identifiability", "rtol": -0.1}))
 
 
 class TestScoreDirections:
@@ -706,21 +703,23 @@ class TestScoreDirections:
         alphabetical names.  Sorted here is ``['d', 'g']``, so asking for
         ``['g', 'd']`` and getting ``['g', 'd']`` is the whole assertion --
         and the reversed ask is what makes it non-vacuous."""
-        assert list(diagnostic_rows({"kind": "score_directions",
-                          "names": ["g", "d"]})) == ["g", "d"]
-        assert list(diagnostic_rows({"kind": "score_directions",
-                          "names": ["d", "g"]})) == ["d", "g"]
+        assert list(diagnostic_rows({"kind": "score_directions", "names": ["g", "d"]})) == [
+            "g",
+            "d",
+        ]
+        assert list(diagnostic_rows({"kind": "score_directions", "names": ["d", "g"]})) == [
+            "d",
+            "g",
+        ]
 
     def test_no_names_means_the_declared_order_not_the_sorted_one(self):
         """inference.parameters declares g then d; sorted() would say d then
         g.  An executor that filled ``names`` in for an absent key by sorting
         the space would be caught here and nowhere else."""
-        assert list(
-            diagnostic_rows({"kind": "score_directions"})) == ["g", "d"]
+        assert list(diagnostic_rows({"kind": "score_directions"})) == ["g", "d"]
 
     def test_one_row_per_scalar_degree_of_freedom(self):
-        out = diagnostic_rows({"kind": "score_directions",
-                               "names": ["g", "d"]})
+        out = diagnostic_rows({"kind": "score_directions", "names": ["g", "d"]})
         assert out["g"].shape == (1, 128)
         assert out["d"].shape == (1, 128)
 
@@ -731,12 +730,9 @@ class TestScoreDirections:
         only the ratio -- a run that dropped ``at:`` returns the first row
         twice, and one that rescaled the whole Jacobian keeps the ratio."""
         base = diagnostic_rows({"kind": "score_directions", "names": ["d"]})
-        moved = diagnostic_rows({"kind": "score_directions", "names": ["d"],
-                      "at": {"g": 2.0}})
-        assert float(np.max(np.abs(base["d"]))) == pytest.approx(0.9898477,
-                                                                 rel=1e-5)
-        assert float(np.max(np.abs(moved["d"]))) == pytest.approx(1.9796954,
-                                                                  rel=1e-5)
+        moved = diagnostic_rows({"kind": "score_directions", "names": ["d"], "at": {"g": 2.0}})
+        assert float(np.max(np.abs(base["d"]))) == pytest.approx(0.9898477, rel=1e-5)
+        assert float(np.max(np.abs(moved["d"]))) == pytest.approx(1.9796954, rel=1e-5)
 
     def test_at_naming_an_undeclared_latent_is_refused_here_too(self):
         """The same hole, closed on the other route.
@@ -747,8 +743,7 @@ class TestScoreDirections:
         Two routes, one helper, two tests.
         """
         with pytest.raises(ConfigError, match=r"at: names \['q'\]") as caught:
-            run_document(diagnostic_document({"kind": "score_directions",
-                                   "at": {"q": 1.0}}))
+            run_document(diagnostic_document({"kind": "score_directions", "at": {"q": 1.0}}))
         assert "it declares ['g', 'd']" in str(caught.value)
 
     def test_rtol_belongs_to_identifiability_alone(self):
@@ -756,16 +751,13 @@ class TestScoreDirections:
         by naming what score_directions does take.  Anchored on that tail:
         ``match="rtol"`` would be satisfied by any refusal mentioning the key,
         including one raised because this exit had started accepting it."""
-        with pytest.raises(ConfigError,
-                           match=r"it takes \['at', 'names'\]") as caught:
-            run_document(diagnostic_document(
-                {"kind": "score_directions", "rtol": 0.6}))
+        with pytest.raises(ConfigError, match=r"it takes \['at', 'names'\]") as caught:
+            run_document(diagnostic_document({"kind": "score_directions", "rtol": 0.6}))
         assert "does not take ['rtol']" in str(caught.value)
 
     def test_names_is_a_list_even_for_a_block_of_one(self):
         with pytest.raises(ConfigError, match="non-empty list of latent"):
-            run_document(diagnostic_document(
-                {"kind": "score_directions", "names": "g"}))
+            run_document(diagnostic_document({"kind": "score_directions", "names": "g"}))
 
     def test_without_parameters_it_is_refused(self):
         doc = diagnostic_document({"kind": "score_directions"})
@@ -777,8 +769,7 @@ class TestScoreDirections:
 class TestParsersRunNoScience:
     """Plan 4A Task 9: the cheap diagnostics' parsers stay cheap."""
 
-    def test_identifiability_parses_with_the_package_exploded(
-            self, monkeypatch):
+    def test_identifiability_parses_with_the_package_exploded(self, monkeypatch):
         import rheplicant.inference as inference
         from _rheplicant_bootstrap.variants import LayerRef
         from rheplicant.config.sections.exit_support import parse_run
@@ -792,9 +783,9 @@ class TestParsersRunNoScience:
         built = load_document(diagnostic_document({"kind": "forward"}))
         for kind in ("identifiability", "score_directions"):
             parsed = parse_run(
-                RunSpec(name=kind, kind=kind, variant=None, on="primary",
-                        expect="ok", options={}),
-                built, index=0,
-                layer=LayerRef(kind="base", name=None, prefix="",
-                               document={}, declared_runs=None))
+                RunSpec(name=kind, kind=kind, variant=None, on="primary", expect="ok", options={}),
+                built,
+                index=0,
+                layer=LayerRef(kind="base", name=None, prefix="", document={}, declared_runs=None),
+            )
             assert parsed.parsed.resolved is not None

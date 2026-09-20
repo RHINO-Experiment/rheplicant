@@ -15,9 +15,7 @@ from _rheplicant_bootstrap.capture import (
 from _rheplicant_bootstrap.types import DestinationDescriptor, LayerIdentity
 from rheplicant.config.errors import ConfigError
 
-DESTINATION = DestinationDescriptor(
-    "observation.data", "config_path", "observation.data"
-)
+DESTINATION = DestinationDescriptor("observation.data", "config_path", "observation.data")
 LAYER = LayerIdentity("base", None)
 
 
@@ -55,9 +53,7 @@ def test_reader_exception_still_records_verified_input_and_cleans(tmp_path):
     source = tmp_path / "data.txt"
     source.write_text("data")
     verified = []
-    service = CaptureService(
-        tmp_path / "captures", on_verified=lambda *row: verified.append(row)
-    )
+    service = CaptureService(tmp_path / "captures", on_verified=lambda *row: verified.append(row))
     seen = {}
 
     def reader(path):
@@ -81,9 +77,7 @@ def test_snapshot_mutation_is_refused_and_not_recorded(tmp_path):
     source = tmp_path / "data.txt"
     source.write_text("data")
     verified = []
-    service = CaptureService(
-        tmp_path / "captures", on_verified=lambda *row: verified.append(row)
-    )
+    service = CaptureService(tmp_path / "captures", on_verified=lambda *row: verified.append(row))
 
     def reader(path):
         path.write_text("changed")
@@ -109,13 +103,16 @@ def test_symlink_records_lexical_and_real_paths(tmp_path):
     with CaptureService(
         tmp_path / "captures", on_verified=lambda _layer, row: rows.append(row)
     ) as service:
-        assert service.consume_file(
-            link,
-            layer=LAYER,
-            destination=DESTINATION,
-            format="txt",
-            reader=Path.read_bytes,
-        ) == b"x"
+        assert (
+            service.consume_file(
+                link,
+                layer=LAYER,
+                destination=DESTINATION,
+                format="txt",
+                reader=Path.read_bytes,
+            )
+            == b"x"
+        )
     assert rows[0].path == str(link.absolute())
     assert rows[0].realpath == str(target.resolve())
 
@@ -126,9 +123,7 @@ def test_capture_modes_ignore_umask(tmp_path):
     previous = os.umask(0)
     try:
         service = CaptureService(tmp_path / "captures")
-        captured = service.capture_file(
-            source, destination=DESTINATION, format="txt"
-        )
+        captured = service.capture_file(source, destination=DESTINATION, format="txt")
     finally:
         os.umask(previous)
     assert stat.S_IMODE((tmp_path / "captures").stat().st_mode) == 0o700
@@ -158,9 +153,7 @@ def test_directory_tree_is_sorted_hashed_and_reverified(tmp_path):
             destination=DESTINATION,
             format="cst",
             enumerate_manifest=enumerate_,
-            reader=lambda snapshot: sorted(
-                path.name for path in snapshot.glob("*.txt")
-            ),
+            reader=lambda snapshot: sorted(path.name for path in snapshot.glob("*.txt")),
         )
     assert names == ["a.txt", "b.txt"]
     assert [member.relative_path for member in rows[0].members] == [
@@ -189,8 +182,12 @@ def test_directory_manifest_rejects_unsafe_names(tmp_path, relative):
 
 @pytest.mark.parametrize(
     "name, suffix",
-    [("horn.beamfits", ".beamfits"), ("cable.S2P", ".S2P"),
-     ("table.txt.gz", ".gz"), ("README", "")],
+    [
+        ("horn.beamfits", ".beamfits"),
+        ("cable.S2P", ".S2P"),
+        ("table.txt.gz", ".gz"),
+        ("README", ""),
+    ],
 )
 def test_a_file_slot_keeps_the_suffix_of_its_source(tmp_path, name, suffix):
     """A reader that sniffs the extension sees the one the document named.

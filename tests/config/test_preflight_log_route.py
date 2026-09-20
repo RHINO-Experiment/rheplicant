@@ -41,8 +41,13 @@ WIDTH_HZ, TAU_S = 3.5714286e6, 2.0
 
 #: A non-linear latent: ``engine: log_conjugate`` on a ``linear: true`` one is
 #: a different refusal (``plan.py``'s own), and not this file's subject.
-NONLINEAR = {"w": {"init": 5.0, "into": "global_signal.width",
-                   "prior": {"normal": {"loc": 5.0, "scale": 1.0}}}}
+NONLINEAR = {
+    "w": {
+        "init": 5.0,
+        "into": "global_signal.width",
+        "prior": {"normal": {"loc": 5.0, "scale": 1.0}},
+    }
+}
 
 
 def _before_g4() -> bool:
@@ -56,21 +61,28 @@ def _before_g4() -> bool:
 #: merged and the marker is still active (which it cannot be: the condition
 #: reads the package) an unexpected pass is loud.
 G4 = pytest.mark.xfail(
-    _before_g4(), strict=True,
+    _before_g4(),
+    strict=True,
     reason="log_route_refusal refuses a floor > 0 only after T-002 G4 "
-           "(t002-g4-numerics, A5-3) is merged")
+    "(t002-g4-numerics, A5-3) is merged",
+)
 
 
 def _document(noise, *, engine="log_conjugate", warm=False):
-    run = {"name": "fit", "kind": "plan.estimate",
-           "blocks": [{"names": ["w"], "engine": engine}]}
+    run = {"name": "fit", "kind": "plan.estimate", "blocks": [{"names": ["w"], "engine": engine}]}
     if warm:
-        run = {"name": "fit", "kind": "plan.sample", "n_sweeps": 12,
-               "blocks": [{"names": ["w"]}],
-               "warm_start": {"kind": "plan.estimate", "move": ["w"],
-                              "blocks": [{"names": ["w"], "engine": engine}]}}
-    return preflight_document(
-        inference={"parameters": NONLINEAR, "noise": noise}, runs=[run])
+        run = {
+            "name": "fit",
+            "kind": "plan.sample",
+            "n_sweeps": 12,
+            "blocks": [{"names": ["w"]}],
+            "warm_start": {
+                "kind": "plan.estimate",
+                "move": ["w"],
+                "blocks": [{"names": ["w"], "engine": engine}],
+            },
+        }
+    return preflight_document(inference={"parameters": NONLINEAR, "noise": noise}, runs=[run])
 
 
 def _found(document):
@@ -91,31 +103,43 @@ class TestTheCheck:
         assert finding.check == "A19"
         assert finding.where == "runs[0].blocks[0]"
         message = finding.message
-        assert message.startswith(
-            "runs['fit']: blocks[0] asks for engine: log_conjugate")
+        assert message.startswith("runs['fit']: blocks[0] asks for engine: log_conjugate")
         assert "inference.noise.floor declares 1.0 K" in message
         assert "noise_neither" in message
         assert message.endswith("(check A19).")
 
-    @pytest.mark.parametrize("noise, kind", [
-        ({"kind": "homoscedastic", "sigma": {"value": 0.05, "unit": "K"}},
-         "homoscedastic"),
-        ({"kind": "radiometer_frozen", "source": "observed",
-          "channel_width": RADIOMETER["channel_width"],
-          "integration_time": RADIOMETER["integration_time"]},
-         "radiometer_frozen"),
-    ])
+    @pytest.mark.parametrize(
+        "noise, kind",
+        [
+            ({"kind": "homoscedastic", "sigma": {"value": 0.05, "unit": "K"}}, "homoscedastic"),
+            (
+                {
+                    "kind": "radiometer_frozen",
+                    "source": "observed",
+                    "channel_width": RADIOMETER["channel_width"],
+                    "integration_time": RADIOMETER["integration_time"],
+                },
+                "radiometer_frozen",
+            ),
+        ],
+    )
     def test_an_additive_noise_refuses_a_log_conjugate_block(self, noise, kind):
         found = _found(_document(noise))
         assert [one.check for one in found] == ["A19"], found
         assert f"inference.noise is kind: {kind}" in found[0].message
         assert "noise_additive" in found[0].message
 
-    @pytest.mark.parametrize("noise", [
-        RADIOMETER, _floored(0), _floored(0.0, "mK"),
-        # -273.15 celsius is 0 K: the unit is APPLIED, affine offset included
-        _floored(-273.15, "celsius"),
-    ], ids=["no-floor", "zero-K", "zero-mK", "zero-kelvin-in-celsius"])
+    @pytest.mark.parametrize(
+        "noise",
+        [
+            RADIOMETER,
+            _floored(0),
+            _floored(0.0, "mK"),
+            # -273.15 celsius is 0 K: the unit is APPLIED, affine offset included
+            _floored(-273.15, "celsius"),
+        ],
+        ids=["no-floor", "zero-K", "zero-mK", "zero-kelvin-in-celsius"],
+    )
     def test_a_radiometer_with_no_floor_is_accepted(self, noise):
         # The anti-vacuity half: a check that refused every log_conjugate
         # block would pass every test above.
@@ -149,11 +173,15 @@ class TestTheCheck:
         checks = sorted(one.check for one in _found(document))
         assert "A19" in checks and "A16" in checks, checks
 
-    @pytest.mark.parametrize("floor", [
-        {"ref": "resources.arrays.floor"},
-        {"value": "one", "unit": "K"},
-        {"value": True, "unit": "K"},
-    ], ids=["ref", "string", "bool"])
+    @pytest.mark.parametrize(
+        "floor",
+        [
+            {"ref": "resources.arrays.floor"},
+            {"value": "one", "unit": "K"},
+            {"value": True, "unit": "K"},
+        ],
+        ids=["ref", "string", "bool"],
+    )
     def test_a_floor_the_text_cannot_read_stands_down(self, floor):
         # "Cannot tell" is not a verdict; build_noise and the package still
         # decide these at P2/P3.
@@ -176,9 +204,13 @@ class TestTheCommandLine:
 
     @staticmethod
     def _write(tmp_path, noise):
-        doc = document({"kind": "plan.estimate",
-                        "blocks": [{"names": ["g"], "engine": "log_conjugate"}],
-                        "check_identifiability": False})
+        doc = document(
+            {
+                "kind": "plan.estimate",
+                "blocks": [{"names": ["g"], "engine": "log_conjugate"}],
+                "check_identifiability": False,
+            }
+        )
         doc["inference"]["parameters"]["g"].pop("linear")
         doc["inference"]["noise"] = noise
         path = tmp_path / "doc.yaml"
@@ -239,8 +271,7 @@ def _package_nan_floor():
     # RadiometerNoise refuses a NaN floor at construction, so the package's
     # PREDICATE is asked with the two attributes it reads. G4 writes the
     # comparison `not floor <= 0` so that a NaN is refused and not routed.
-    return SimpleNamespace(fractional=1.0 / math.sqrt(WIDTH_HZ * TAU_S),
-                           floor=float("nan"))
+    return SimpleNamespace(fractional=1.0 / math.sqrt(WIDTH_HZ * TAU_S), floor=float("nan"))
 
 
 #: (config text, the package's model for the same declaration). The
@@ -248,22 +279,32 @@ def _package_nan_floor():
 _TABLE = [
     pytest.param(RADIOMETER, _package_radiometer, id="fractional-only-no-floor"),
     pytest.param(_floored(0.0), lambda: _package_radiometer(0.0), id="floor-0"),
-    pytest.param(_floored(1.0), lambda: _package_radiometer(1.0),
-                 id="floor-positive", marks=G4),
-    pytest.param(_floored(float("nan")), _package_nan_floor, id="floor-nan",
-                 marks=G4),
-    pytest.param({"kind": "homoscedastic",
-                  "sigma": {"value": 0.05, "unit": "K"}},
-                 _package_homoscedastic, id="additive-only"),
-    pytest.param({"kind": "radiometer_frozen", "source": "observed",
-                  "channel_width": RADIOMETER["channel_width"],
-                  "integration_time": RADIOMETER["integration_time"]},
-                 _package_decided_sigma, id="additive-decided-sigma"),
-    pytest.param({**RADIOMETER, "flags": {"from": "observation"}},
-                 _package_flagged, id="flagged-fractional"),
-    pytest.param({**_floored(1.0), "flags": {"from": "observation"}},
-                 lambda: _package_flagged(1.0), id="both-fractional-and-floor",
-                 marks=G4),
+    pytest.param(_floored(1.0), lambda: _package_radiometer(1.0), id="floor-positive", marks=G4),
+    pytest.param(_floored(float("nan")), _package_nan_floor, id="floor-nan", marks=G4),
+    pytest.param(
+        {"kind": "homoscedastic", "sigma": {"value": 0.05, "unit": "K"}},
+        _package_homoscedastic,
+        id="additive-only",
+    ),
+    pytest.param(
+        {
+            "kind": "radiometer_frozen",
+            "source": "observed",
+            "channel_width": RADIOMETER["channel_width"],
+            "integration_time": RADIOMETER["integration_time"],
+        },
+        _package_decided_sigma,
+        id="additive-decided-sigma",
+    ),
+    pytest.param(
+        {**RADIOMETER, "flags": {"from": "observation"}}, _package_flagged, id="flagged-fractional"
+    ),
+    pytest.param(
+        {**_floored(1.0), "flags": {"from": "observation"}},
+        lambda: _package_flagged(1.0),
+        id="both-fractional-and-floor",
+        marks=G4,
+    ),
 ]
 
 
@@ -275,10 +316,13 @@ class TestTheTextVerdictIsLogRouteRefusals:
 
         assert _log_route_refusal_text(text) == log_route_refusal(model())
 
-    @pytest.mark.parametrize("reason", [
-        "noise_additive",
-        pytest.param("noise_neither", marks=G4),
-    ])
+    @pytest.mark.parametrize(
+        "reason",
+        [
+            "noise_additive",
+            pytest.param("noise_neither", marks=G4),
+        ],
+    )
     def test_every_word_the_text_can_say_is_a_package_reason(self, reason):
         from rheplicant.config.preflight.fitting import _LOG_ROUTE_REASONS
         from rheplicant.inference.loglinear import LOG_ROUTE_REFUSALS
@@ -298,8 +342,10 @@ class TestTheTextVerdictIsLogRouteRefusals:
         from rheplicant.inference.loglinear import log_route_refusal
         from rheplicant.inference.noise import RadiometerNoise
 
-        text = {**RADIOMETER, "channel_width": {"value": 100.0, "unit": "Hz"},
-                "integration_time": {"value": 1.0, "unit": "s"}}
+        text = {
+            **RADIOMETER,
+            "channel_width": {"value": 100.0, "unit": "Hz"},
+            "integration_time": {"value": 1.0, "unit": "s"},
+        }
         assert _log_route_refusal_text(text) is None
-        assert log_route_refusal(RadiometerNoise(100.0, 1.0)) == \
-            "fractional_too_large"
+        assert log_route_refusal(RadiometerNoise(100.0, 1.0)) == "fractional_too_large"

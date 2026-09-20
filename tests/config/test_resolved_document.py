@@ -201,9 +201,7 @@ def test_every_completed_layer_uses_the_same_base_execution_projection():
     )
     assert [row.execution_runs for row in rows] == [expected, expected]
     assert rows[0].declared_runs != rows[1].declared_runs
-    assert rows[1].declared_runs == (
-        RunDescriptor(0, "variant-only", "forward", None),
-    )
+    assert rows[1].declared_runs == (RunDescriptor(0, "variant-only", "forward", None),)
 
 
 def test_later_variant_refusal_preserves_only_the_completed_base(monkeypatch):

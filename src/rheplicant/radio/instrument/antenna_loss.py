@@ -69,8 +69,7 @@ class AntennaLossOperator(AbstractOperator):
     t_physical: jax.Array = eqx.field(converter=jnp.asarray)
 
     def __check_init__(self):
-        for name, value in (("efficiency", self.efficiency),
-                            ("t_physical", self.t_physical)):
+        for name, value in (("efficiency", self.efficiency), ("t_physical", self.t_physical)):
             if value.ndim > 1:
                 raise StateValidationError(
                     f"{name} must be scalar or (n_freq,), got ndim={value.ndim}."

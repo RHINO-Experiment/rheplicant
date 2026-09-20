@@ -88,9 +88,7 @@ def _campaign(basis, n_epochs):
 def test_the_stored_gradient_is_the_gradient_of_the_fidelity_residual():
     """Against the residual written out by hand, not against itself."""
     basis, data = _basis(), rhino_bank.observed(jax.random.key(52))
-    term = compress_reduced_basis(
-        basis, observed=data, noise=rhino_bank.noise(), epoch_id="e0"
-    )
+    term = compress_reduced_basis(basis, observed=data, noise=rhino_bank.noise(), epoch_id="e0")
     predict, values = rhino_bank.forward()
     sigma = rhino_bank.noise().std(basis.rows.T @ basis.c_ref)
 
@@ -174,10 +172,7 @@ def test_a_bigger_incoherent_error_does_not_show_the_sqrt_n_law():
     coherent, and only the coherent part is what section 7 budgets.
     """
     basis = _basis(3, seed_scores=False)
-    ratios = [
-        _campaign(basis, n).audit()["bias_over_sigma"]["t21_depth"]
-        for n in (4, 16, 64)
-    ]
+    ratios = [_campaign(basis, n).audit()["bias_over_sigma"]["t21_depth"] for n in (4, 16, 64)]
     assert min(ratios) > 1e-4, ratios
     assert max(ratios) / min(ratios) < 5.0, ratios
     assert not (ratios[0] < ratios[1] < ratios[2]), ratios
@@ -199,12 +194,8 @@ def test_the_reported_ratio_is_the_marginalised_one_and_not_the_raw_gradient():
     # a Fisher taken anywhere else makes the ratio a quotient of two different
     # linearisations.
     at = dict(memory.basis.reference_values)
-    covariance = np.asarray(
-        jnp.linalg.pinv(memory._permuted(memory._theta_fisher(at)))
-    )
-    gradient = np.sum(
-        np.stack([np.asarray(term.bias_gradient) for term in memory.archive]), axis=0
-    )
+    covariance = np.asarray(jnp.linalg.pinv(memory._permuted(memory._theta_fisher(at))))
+    gradient = np.sum(np.stack([np.asarray(term.bias_gradient) for term in memory.archive]), axis=0)
     bias = covariance @ gradient
     width = np.sqrt(np.diag(covariance))
 
@@ -257,12 +248,8 @@ def test_the_marginalised_ratio_is_invariant_to_units_and_the_raw_gradient_is_no
     # a Fisher taken anywhere else makes the ratio a quotient of two different
     # linearisations.
     at = dict(memory.basis.reference_values)
-    covariance = np.asarray(
-        jnp.linalg.pinv(memory._permuted(memory._theta_fisher(at)))
-    )
-    gradient = np.sum(
-        np.stack([np.asarray(term.bias_gradient) for term in memory.archive]), axis=0
-    )
+    covariance = np.asarray(jnp.linalg.pinv(memory._permuted(memory._theta_fisher(at))))
+    gradient = np.sum(np.stack([np.asarray(term.bias_gradient) for term in memory.archive]), axis=0)
 
     def report(cov, grad):
         bias, width = cov @ grad, np.sqrt(np.diag(cov))
@@ -310,8 +297,7 @@ def test_the_marginalised_ratio_is_invariant_to_units_and_the_raw_gradient_is_no
     # by twice.
     raw_after = raw(rescaled_grad)
     assert max(raw_after, key=raw_after.__getitem__) == promoted, (
-        f"the rescaling did not change the raw gradient's answer: "
-        f"{raw_before} -> {raw_after}"
+        f"the rescaling did not change the raw gradient's answer: {raw_before} -> {raw_after}"
     )
     assert raw_after[worst] == pytest.approx(raw_before[worst], rel=1e-9)
 
@@ -339,14 +325,12 @@ def test_an_unconstrained_direction_is_named_rather_than_refused():
     dark = compress_reduced_basis(
         basis,
         observed=rhino_bank.observed(jax.random.key(54)),
-        noise=FlaggedNoise(
-            rhino_bank.noise(), jnp.ones((rhino_bank.N_FREQ,), dtype=bool)
-        ),
+        noise=FlaggedNoise(rhino_bank.noise(), jnp.ones((rhino_bank.N_FREQ,), dtype=bool)),
         epoch_id="dark",
     )
     assert dark.n_observed == 0
-    report = BayesMemory(Factorization(rhino_bank.space())).remember(dark).audit(
-        bias_tolerance=1e-30
+    report = (
+        BayesMemory(Factorization(rhino_bank.space())).remember(dark).audit(bias_tolerance=1e-30)
     )
     assert report["unconstrained"] == FLAT
     assert report["bias_over_sigma"] == {}
@@ -447,7 +431,5 @@ def test_the_gradient_survives_a_round_trip_through_the_term():
     """`bias_gradient` is a dynamic leaf, so equinox moves it like any array."""
     term = _term(_basis(), 0)
     copied = eqx.tree_at(lambda t: t.bias_gradient, term, term.bias_gradient * 1.0)
-    np.testing.assert_array_equal(
-        np.asarray(copied.bias_gradient), np.asarray(term.bias_gradient)
-    )
+    np.testing.assert_array_equal(np.asarray(copied.bias_gradient), np.asarray(term.bias_gradient))
     assert copied.bias_names == term.bias_names

@@ -90,9 +90,9 @@ def _degenerate_document(**inference):
     merge would leave the base's ``g`` beside ``g1``/``g2`` and the pair would
     no longer be the whole space.
     """
-    return repatch(preflight_document(),
-                   inference={**preflight_helpers.T4_DEGENERATE_PAIR,
-                              **inference})
+    return repatch(
+        preflight_document(), inference={**preflight_helpers.T4_DEGENERATE_PAIR, **inference}
+    )
 
 
 # ------------------------------------------------------------- doctoring --
@@ -115,23 +115,30 @@ def _doctored(payload, dtype, *, name="g"):
     old = space.latent(name)
     doctored = ParameterSpace(
         latents=tuple(
-            Latent(one.name, init=jnp.asarray(one.init, dtype=dtype),
-                   prior=one.prior, linear=one.linear)
-            if one.name == name else one
-            for one in space.latents),
+            Latent(
+                one.name,
+                init=jnp.asarray(one.init, dtype=dtype),
+                prior=one.prior,
+                linear=one.linear,
+            )
+            if one.name == name
+            else one
+            for one in space.latents
+        ),
         bindings=space.bindings,
         joint_prior=space.joint_prior,
     )
     assert doctored.latent(name).init.dtype != old.init.dtype
-    run = payload.run._replace(
-        inference=payload.run.inference._replace(space=doctored))
+    run = payload.run._replace(inference=payload.run.inference._replace(space=doctored))
     return dataclasses.replace(payload, run=run)
 
 
 def _regated(payload, **modes):
     """``payload`` with named gates put into ``mode``, defaults elsewhere."""
-    gates = {name: gate._replace(state=modes[name]) if name in modes else gate
-             for name, gate in payload.gates.items()}
+    gates = {
+        name: gate._replace(state=modes[name]) if name in modes else gate
+        for name, gate in payload.gates.items()
+    }
     return dataclasses.replace(payload, gates=gates)
 
 
@@ -143,9 +150,10 @@ def _recorded(payload, **modes):
     check records has to set both -- ``gating.gates`` only ever sets ``record``
     from the document's own ``report:``.
     """
-    gates = {name: gate._replace(state=modes[name], record=True)
-             if name in modes else gate
-             for name, gate in payload.gates.items()}
+    gates = {
+        name: gate._replace(state=modes[name], record=True) if name in modes else gate
+        for name, gate in payload.gates.items()
+    }
     return dataclasses.replace(payload, gates=gates)
 
 
@@ -175,6 +183,7 @@ def _linearity_stub(counter, *, raises=None):
         if raises is not None:
             raise raises
         return {0.001: 0.0, 1.0: 0.0, 1000.0: 0.0}
+
     return stub
 
 
@@ -184,9 +193,15 @@ def _identifiability_stub(counter, *, nullity=0, raises=None):
         if raises is not None:
             raise raises
         return types.SimpleNamespace(
-            n_par=2, n_data=128, rank=2 - nullity, nullity=nullity,
-            rtol=1e-8, weakest_identified=0.35,
-            participation=lambda index: {"d": 0.5, "a": 0.5})
+            n_par=2,
+            n_data=128,
+            rank=2 - nullity,
+            nullity=nullity,
+            rtol=1e-8,
+            weakest_identified=0.35,
+            participation=lambda index: {"d": 0.5, "a": 0.5},
+        )
+
     return stub
 
 
@@ -196,8 +211,11 @@ def _sensitivity_stub(counter, *, shift=1e-3, raises=None):
         if raises is not None:
             raise raises
         return types.SimpleNamespace(
-            n_par=1, worst=("g", 0, shift),
-            for_latent=lambda name: {"criterion_std": np.array([0.0303])})
+            n_par=1,
+            worst=("g", 0, shift),
+            for_latent=lambda name: {"criterion_std": np.array([0.0303])},
+        )
+
     return stub
 
 
@@ -216,24 +234,28 @@ def _stub_all(monkeypatch, counter, **options):
     ``from x import y`` re-reads the attribute on every call, so patching the
     source module is what reaches it.
     """
-    monkeypatch.setattr(_LINEAR, "check_linearity",
-                        _linearity_stub(counter,
-                                        raises=options.get("linearity_raises")))
     monkeypatch.setattr(
-        _IDENTIFIABILITY, "identifiability",
+        _LINEAR, "check_linearity", _linearity_stub(counter, raises=options.get("linearity_raises"))
+    )
+    monkeypatch.setattr(
+        _IDENTIFIABILITY,
+        "identifiability",
         _identifiability_stub(
-            counter, nullity=options.get("nullity", 0),
-            raises=options.get("identifiability_raises")))
+            counter, nullity=options.get("nullity", 0), raises=options.get("identifiability_raises")
+        ),
+    )
     monkeypatch.setattr(
-        _SENSITIVITY, "prior_sensitivity",
-        _sensitivity_stub(counter, shift=options.get("shift", 1e-3),
-                          raises=options.get("raises")))
+        _SENSITIVITY,
+        "prior_sensitivity",
+        _sensitivity_stub(counter, shift=options.get("shift", 1e-3), raises=options.get("raises")),
+    )
 
 
 def _counts(counter):
-    return tuple(sum(1 for one in counter if one[0] == which)
-                 for which in ("check_linearity", "identifiability",
-                               "prior_sensitivity"))
+    return tuple(
+        sum(1 for one in counter if one[0] == which)
+        for which in ("check_linearity", "identifiability", "prior_sensitivity")
+    )
 
 
 # ============================================================ the contract ==
@@ -247,8 +269,7 @@ class TestTheSlotsThisModuleOwns:
 
         **Kills** a fourth ``@register("C14")``, which would double-count in
         ``Report.checks()`` and make ``raise_if_refused``'s tail wrong."""
-        mine = {slot for slot, fn in CHECKS.items()
-                if fn.__module__ == fitting_module.__name__}
+        mine = {slot for slot, fn in CHECKS.items() if fn.__module__ == fitting_module.__name__}
         assert mine == {"C12", "C13", "C19"}
         assert "C14" not in CHECKS
 
@@ -268,8 +289,7 @@ class TestTheCostContract:
     paying for it.
     """
 
-    def test_the_call_count_with_no_checks_declared_is_one_per_linear_latent(
-            self, monkeypatch):
+    def test_the_call_count_with_no_checks_declared_is_one_per_linear_latent(self, monkeypatch):
         """``(len(linear latents), 0, 0)`` on a document declaring **no**
         ``inference.checks:`` at all.
 
@@ -283,19 +303,16 @@ class TestTheCostContract:
         priced_findings(document)
         assert _counts(counter) == (2, 0, 0)
 
-    def test_the_call_count_with_all_three_declared_is_n_one_one(
-            self, monkeypatch):
+    def test_the_call_count_with_all_three_declared_is_n_one_one(self, monkeypatch):
         """The anti-vacuity partner: a check-counter that always returns
         ``(n, 0, 0)`` -- three functions that never call anything -- passes
         the test above and fails this one."""
         counter = []
         _stub_all(monkeypatch, counter)
-        priced_findings(_two_latent_document(
-            checks=preflight_helpers.T4_CHECKS_ALL_REFUSE))
+        priced_findings(_two_latent_document(checks=preflight_helpers.T4_CHECKS_ALL_REFUSE))
         assert _counts(counter) == (2, 1, 1)
 
-    def test_C12_passes_no_rtol_and_C13_passes_one_only_when_written(
-            self, monkeypatch):
+    def test_C12_passes_no_rtol_and_C13_passes_one_only_when_written(self, monkeypatch):
         """§0.2 item 7: ``rtol`` is ``identifiability``'s alone.
 
         ``check_linearity``'s signature is ``rtol: float | None = None``, so
@@ -315,25 +332,30 @@ class TestTheCostContract:
         is where."""
         counter = []
         _stub_all(monkeypatch, counter)
-        priced_findings(_two_latent_document(
-            checks=preflight_helpers.T4_CHECKS_ALL_REFUSE))
+        priced_findings(_two_latent_document(checks=preflight_helpers.T4_CHECKS_ALL_REFUSE))
         by_name = {one[0]: one[2] for one in counter}
         assert "rtol" not in by_name["check_linearity"]
         assert "rtol" not in by_name["identifiability"]
         assert "rtol" not in by_name["prior_sensitivity"]
 
         counter.clear()
-        priced_findings(_two_latent_document(
-            checks=preflight_helpers.T4_CHECKS_IDENTIFIABILITY_RTOL))
+        priced_findings(
+            _two_latent_document(checks=preflight_helpers.T4_CHECKS_IDENTIFIABILITY_RTOL)
+        )
         by_name = {one[0]: one[2] for one in counter}
         assert by_name["identifiability"] == {"rtol": 1e-2}
 
     def test_the_gate_rtol_is_None_for_the_other_two_however_written(self):
         """Pinned on the GATES rather than on the calls, because
         ``gating.gates`` is where a fourth ``rtol`` would be admitted."""
-        payload = priced_run(_two_latent_document(
-            checks={**preflight_helpers.T4_CHECKS_ALL_REFUSE,
-                    **preflight_helpers.T4_CHECKS_IDENTIFIABILITY_RTOL}))
+        payload = priced_run(
+            _two_latent_document(
+                checks={
+                    **preflight_helpers.T4_CHECKS_ALL_REFUSE,
+                    **preflight_helpers.T4_CHECKS_IDENTIFIABILITY_RTOL,
+                }
+            )
+        )
         assert payload.gates["linearity"].rtol is None
         assert payload.gates["prior_sensitivity"].rtol is None
         assert payload.gates["identifiability"].rtol == 1e-2
@@ -353,8 +375,7 @@ class TestC12:
         counter = []
         _stub_all(monkeypatch, counter)
         priced_findings(_two_latent_document())
-        assert [one[1] for one in counter
-                if one[0] == "check_linearity"] == ["d", "a"]
+        assert [one[1] for one in counter if one[0] == "check_linearity"] == ["d", "a"]
 
     def test_C12_passes_on_the_shipped_document(self):
         """P8: the base document has exactly ONE latent, ``g``, and measured
@@ -362,10 +383,8 @@ class TestC12:
 
         **Kills** a gate that refuses everything, which every negative test in
         this class would pass."""
-        assert list(priced_run(preflight_document())
-                    .run.inference.space.names) == ["g"]
-        assert "C12" not in {one.check
-                             for one in priced_findings(preflight_document())}
+        assert list(priced_run(preflight_document()).run.inference.space.names) == ["g"]
+        assert "C12" not in {one.check for one in priced_findings(preflight_document())}
 
     def test_C12_passes_on_the_two_latent_document_and_records_both(self):
         """P8's correction: the ``d`` row is a DIFFERENT fixture from the base
@@ -374,8 +393,8 @@ class TestC12:
         is wrong here.  Both latents' margins reach the record, which is what
         says the loop did not stop after the first."""
         found = priced_only(
-            _two_latent_document(
-                checks=preflight_helpers.T4_CHECKS_LINEARITY_REPORT), "C12")
+            _two_latent_document(checks=preflight_helpers.T4_CHECKS_LINEARITY_REPORT), "C12"
+        )
         assert found.severity == REPORT
         assert "d" in found.message and "a" in found.message
         assert found.where == "inference.parameters"
@@ -385,8 +404,7 @@ class TestC12:
         declared ``linear: True`` and the prediction is not affine in it.
 
         **Kills** a check whose failure branch is unreachable."""
-        found = priced_only(
-            preflight_document(inference=exit_helpers.NONLINEAR_LATENT), "C12")
+        found = priced_only(preflight_document(inference=exit_helpers.NONLINEAR_LATENT), "C12")
         assert found.severity == REFUSE
         assert found.where == "inference.parameters.w"
         assert "not affine" in found.message
@@ -401,8 +419,8 @@ class TestC12:
         attribute and the prose cannot drift into describing different runs.
         """
         found = priced_only(
-            _two_latent_document(
-                checks=preflight_helpers.T4_CHECKS_LINEARITY_REPORT), "C12")
+            _two_latent_document(checks=preflight_helpers.T4_CHECKS_LINEARITY_REPORT), "C12"
+        )
         assert found.departure is not None
         assert [name for name, _ in found.departure] == ["d", "a"]
         for _name, pairs in found.departure:
@@ -419,8 +437,7 @@ class TestC12:
         with nothing structured to read, and a field fed by the passing branch
         alone would have surfaced a row of zeros.
         """
-        found = priced_only(
-            preflight_document(inference=exit_helpers.NONLINEAR_LATENT), "C12")
+        found = priced_only(preflight_document(inference=exit_helpers.NONLINEAR_LATENT), "C12")
         assert found.severity == REFUSE
         assert found.departure is not None
         assert [name for name, _ in found.departure] == ["w"]
@@ -449,34 +466,38 @@ class TestC12:
         indistinguishable.
         """
         passing = priced_only(
-            _two_latent_document(
-                checks=preflight_helpers.T4_CHECKS_LINEARITY_REPORT), "C12")
-        refusing = priced_only(
-            preflight_document(inference=exit_helpers.NONLINEAR_LATENT), "C12")
-        assert all(math.isfinite(error) for _, pairs in passing.departure
-                   for _, error in pairs)
-        assert not any(math.isfinite(error) for _, pairs in refusing.departure
-                       for _, error in pairs)
+            _two_latent_document(checks=preflight_helpers.T4_CHECKS_LINEARITY_REPORT), "C12"
+        )
+        refusing = priced_only(preflight_document(inference=exit_helpers.NONLINEAR_LATENT), "C12")
+        assert all(math.isfinite(error) for _, pairs in passing.departure for _, error in pairs)
+        assert not any(
+            math.isfinite(error) for _, pairs in refusing.departure for _, error in pairs
+        )
 
-    def test_C12_reads_the_refusals_OWN_numbers_and_does_not_re_measure(
-            self, monkeypatch):
+    def test_C12_reads_the_refusals_OWN_numbers_and_does_not_re_measure(self, monkeypatch):
         """The seam: ``fitting`` takes what ``LinearityRefused`` carries.
 
         Stubbed with a table nothing could compute, so a re-measurement here
         would produce different values rather than these.
         """
         counter = []
-        _stub_all(monkeypatch, counter, linearity_raises=LinearityRefused(
-            "the package's own words", errors={0.5: 0.25, 2.0: 0.75},
-            rtol=1e-9, failed=(2.0,)))
-        found = priced_only(_two_latent_document(
-            checks=preflight_helpers.T4_CHECKS_ALL_REFUSE), "C12")
+        _stub_all(
+            monkeypatch,
+            counter,
+            linearity_raises=LinearityRefused(
+                "the package's own words", errors={0.5: 0.25, 2.0: 0.75}, rtol=1e-9, failed=(2.0,)
+            ),
+        )
+        found = priced_only(
+            _two_latent_document(checks=preflight_helpers.T4_CHECKS_ALL_REFUSE), "C12"
+        )
         assert found.severity == REFUSE
-        assert found.departure == (("d", ((0.5, 0.25), (2.0, 0.75))),
-                                   ("a", ((0.5, 0.25), (2.0, 0.75))))
+        assert found.departure == (
+            ("d", ((0.5, 0.25), (2.0, 0.75))),
+            ("a", ((0.5, 0.25), (2.0, 0.75))),
+        )
 
-    def test_a_refusal_that_measured_NOTHING_carries_no_table_at_all(
-            self, monkeypatch):
+    def test_a_refusal_that_measured_NOTHING_carries_no_table_at_all(self, monkeypatch):
         """``None``, and not an empty table, and never a table of zeros.
 
         C12's ``except`` catches three refusals wider than
@@ -487,15 +508,16 @@ class TestC12:
         that really is affine genuinely does.
         """
         counter = []
-        _stub_all(monkeypatch, counter,
-                  linearity_raises=ParameterSpaceError("the package's own words"))
-        found = priced_only(_two_latent_document(
-            checks=preflight_helpers.T4_CHECKS_ALL_REFUSE), "C12")
+        _stub_all(
+            monkeypatch, counter, linearity_raises=ParameterSpaceError("the package's own words")
+        )
+        found = priced_only(
+            _two_latent_document(checks=preflight_helpers.T4_CHECKS_ALL_REFUSE), "C12"
+        )
         assert found.severity == REFUSE
         assert found.departure is None
 
-    def test_a_latent_that_PASSED_is_left_out_of_a_refusals_table(
-            self, monkeypatch):
+    def test_a_latent_that_PASSED_is_left_out_of_a_refusals_table(self, monkeypatch):
         """The table names what the finding is ABOUT.
 
         ``where`` and ``message`` on the refusing branch both speak for the
@@ -507,13 +529,15 @@ class TestC12:
         def one_bad(space, pipeline, state, name=None, **options):
             counter.append(("check_linearity", name, options))
             if name == "a":
-                raise LinearityRefused("the package's own words",
-                                       errors={1.0: 0.5}, rtol=1e-9, failed=(1.0,))
+                raise LinearityRefused(
+                    "the package's own words", errors={1.0: 0.5}, rtol=1e-9, failed=(1.0,)
+                )
             return {1.0: 0.0}
 
         monkeypatch.setattr(_LINEAR, "check_linearity", one_bad)
-        found = priced_only(_two_latent_document(
-            checks=preflight_helpers.T4_CHECKS_LINEARITY_REPORT), "C12")
+        found = priced_only(
+            _two_latent_document(checks=preflight_helpers.T4_CHECKS_LINEARITY_REPORT), "C12"
+        )
         assert found.severity == REFUSE
         assert found.where == "inference.parameters.a"
         assert found.departure == (("a", ((1.0, 0.5),)),)
@@ -526,7 +550,8 @@ class TestC12:
         which would refuse every document whose model is not globally
         linear."""
         found = priced_findings(
-            preflight_document(inference=preflight_helpers.NONLINEAR_NOT_DECLARED))
+            preflight_document(inference=preflight_helpers.NONLINEAR_NOT_DECLARED)
+        )
         assert "C12" not in {one.check for one in found}
 
     def test_C12_stands_down_when_the_document_declares_no_latents(self):
@@ -560,17 +585,28 @@ class TestC12:
         space = payload.run.inference.space
         doctored = ParameterSpace(
             latents=tuple(
-                Latent(one.name, init=jnp.asarray(one.init, dtype=jnp.int32),
-                       prior=one.prior, linear=False)
-                if one.name == "a" else one
-                for one in space.latents),
-            bindings=space.bindings, joint_prior=space.joint_prior)
+                Latent(
+                    one.name,
+                    init=jnp.asarray(one.init, dtype=jnp.int32),
+                    prior=one.prior,
+                    linear=False,
+                )
+                if one.name == "a"
+                else one
+                for one in space.latents
+            ),
+            bindings=space.bindings,
+            joint_prior=space.joint_prior,
+        )
         assert fitting_module._unlinearisable(doctored) == {"a": "int32"}
         assert fitting_module._unlinearisable(doctored, ("d",)) == {}
         payload = _recorded(
-            dataclasses.replace(payload, run=payload.run._replace(
-                inference=payload.run.inference._replace(space=doctored))),
-            linearity="report")
+            dataclasses.replace(
+                payload,
+                run=payload.run._replace(inference=payload.run.inference._replace(space=doctored)),
+            ),
+            linearity="report",
+        )
         found = _found(fitting_module._linearity, payload)
         assert [one.check for one in found] == ["C12"]
         assert found[0].where == "inference.parameters.d"
@@ -595,12 +631,10 @@ class TestC12:
         is what every exit and every solver actually reads: a claim the build
         carries and the text has lost is exactly the one nobody would check.
         """
-        payload = _recorded(priced_run(preflight_document()),
-                            linearity="report")
+        payload = _recorded(priced_run(preflight_document()), linearity="report")
         payload.run.document["inference"]["parameters"]["g"]["linear"] = False
         assert payload.run.inference.space.latent("g").linear is True
-        assert [one.check for one in
-                _found(fitting_module._linearity, payload)] == ["C12"]
+        assert [one.check for one in _found(fitting_module._linearity, payload)] == ["C12"]
 
     def test_C12_records_its_margins_only_when_the_document_asks(self):
         """§2.3's table, rows 3/6/9: ``report:`` governs the numbers of a
@@ -609,9 +643,10 @@ class TestC12:
         **Kills** a check that always reports, which would put a C12 finding
         on every document in the suite."""
         quiet = {one.check for one in priced_findings(preflight_document())}
-        loud = priced_only(preflight_document(
-            inference={"checks": preflight_helpers.T4_CHECKS_LINEARITY_REPORT}),
-            "C12")
+        loud = priced_only(
+            preflight_document(inference={"checks": preflight_helpers.T4_CHECKS_LINEARITY_REPORT}),
+            "C12",
+        )
         assert "C12" not in quiet
         assert loud.severity == REPORT
         assert "0.001" in loud.message
@@ -627,8 +662,7 @@ class TestC13:
         payload = priced_run(preflight_document())
         assert payload.gates["identifiability"].state == "off"
         assert not payload.gates["identifiability"].runs()
-        assert "C13" not in {one.check
-                             for one in priced_findings(preflight_document())}
+        assert "C13" not in {one.check for one in priced_findings(preflight_document())}
 
     def test_C13_reports_the_nullity_it_found(self):
         """Measured on the two-latent document: ``n_par 2``, ``n_data 128``,
@@ -638,9 +672,8 @@ class TestC13:
         and one that reports a number it did not compute -- the nullity and
         the rank both have to come off the report."""
         found = priced_only(
-            _two_latent_document(
-                checks=preflight_helpers.T4_CHECKS_IDENTIFIABILITY_REPORT),
-            "C13")
+            _two_latent_document(checks=preflight_helpers.T4_CHECKS_IDENTIFIABILITY_REPORT), "C13"
+        )
         assert found.severity == REPORT
         assert "nullity 0" in found.message
         assert "rank 2" in found.message
@@ -656,33 +689,30 @@ class TestC13:
         ``n_par``: rank 1 is a perfectly good number and this document is
         still not identified."""
         found = priced_only(
-            _degenerate_document(
-                checks=preflight_helpers.T4_CHECKS_IDENTIFIABILITY_REFUSE),
-            "C13")
+            _degenerate_document(checks=preflight_helpers.T4_CHECKS_IDENTIFIABILITY_REFUSE), "C13"
+        )
         assert found.severity == REFUSE
         assert "nullity 1" in found.message
         assert "g1" in found.message and "g2" in found.message
         assert found.message.endswith("(check C13).")
 
-    def test_C13_does_not_fire_on_the_identified_document_it_shares_a_gate_with(
-            self):
+    def test_C13_does_not_fire_on_the_identified_document_it_shares_a_gate_with(self):
         """The anti-vacuity partner: the same gate at the same mode on a
         document that IS identified produces no refusal."""
-        found = priced_findings(_two_latent_document(
-            checks=preflight_helpers.T4_CHECKS_IDENTIFIABILITY_REFUSE))
+        found = priced_findings(
+            _two_latent_document(checks=preflight_helpers.T4_CHECKS_IDENTIFIABILITY_REFUSE)
+        )
         assert [one.check for one in found if one.severity == REFUSE] == []
 
     def test_C13_uses_the_documents_rtol_when_it_wrote_one(self):
         """``rtol`` is the only per-check option ``check_gates`` admits, and
         only for this check.  The recorded number must be the document's."""
         found = priced_only(
-            _two_latent_document(
-                checks=preflight_helpers.T4_CHECKS_IDENTIFIABILITY_RTOL),
-            "C13")
+            _two_latent_document(checks=preflight_helpers.T4_CHECKS_IDENTIFIABILITY_RTOL), "C13"
+        )
         assert "1e-02" in found.message or "0.01" in found.message
 
-    def test_C13_runs_at_the_package_default_when_the_document_wrote_none(
-            self):
+    def test_C13_runs_at_the_package_default_when_the_document_wrote_none(self):
         """D-12: ``identifiability``'s ``rtol`` is keyword-only with a default
         of ``1e-08``, and ``rtol=None`` is a ``TypeError`` -- deliberately
         OUTSIDE this module's except set, so it would escape as ``post-flight
@@ -691,9 +721,8 @@ class TestC13:
         **Kills** ``identifiability(..., rtol=gate.rtol)`` on every default
         C13 run, which is every C13 run a document does not tune."""
         found = priced_only(
-            _two_latent_document(
-                checks=preflight_helpers.T4_CHECKS_IDENTIFIABILITY_REPORT),
-            "C13")
+            _two_latent_document(checks=preflight_helpers.T4_CHECKS_IDENTIFIABILITY_REPORT), "C13"
+        )
         assert "1e-08" in found.message
 
     def test_the_message_says_which_identifiability_key(self):
@@ -703,9 +732,8 @@ class TestC13:
         ``inference/plan.py``'s own refusal) and has nothing to do with this
         check.  Both directions, so a message naming the wrong one is red."""
         found = priced_only(
-            _degenerate_document(
-                checks=preflight_helpers.T4_CHECKS_IDENTIFIABILITY_REFUSE),
-            "C13")
+            _degenerate_document(checks=preflight_helpers.T4_CHECKS_IDENTIFIABILITY_REFUSE), "C13"
+        )
         assert "inference.checks.identifiability" in found.message
         assert "check_identifiability" not in found.message
         assert "runs[" not in found.message
@@ -770,8 +798,7 @@ class TestC14:
         produce a C13 REFUSE.  It produces one C14 REPORT instead, and
         ``gating.verdict`` ignores ``report:`` on that branch: a check the
         user asked for and did not get must say so."""
-        payload = _regated(_doctored(base, jnp.complex64),
-                           identifiability="refuse")
+        payload = _regated(_doctored(base, jnp.complex64), identifiability="refuse")
         found = _found(fitting_module._identifiability, payload)
         assert [one.check for one in found] == ["C14"]
         assert found[0].severity == REPORT
@@ -798,12 +825,17 @@ class TestC14:
 
         **Kills** ``_unlinearisable`` reused for C13 -- under which C12 would
         auto-skip here and C13 would not."""
-        payload = _regated(_doctored(base, jnp.int32),
-                           linearity="refuse", identifiability="refuse",
-                           prior_sensitivity="refuse")
-        for check in (fitting_module._linearity,
-                      fitting_module._identifiability,
-                      fitting_module._prior_sensitivity):
+        payload = _regated(
+            _doctored(base, jnp.int32),
+            linearity="refuse",
+            identifiability="refuse",
+            prior_sensitivity="refuse",
+        )
+        for check in (
+            fitting_module._linearity,
+            fitting_module._identifiability,
+            fitting_module._prior_sensitivity,
+        ):
             found = _found(check, payload)
             assert [one.check for one in found] == ["C14"], check.__name__
             assert found[0].severity == REPORT
@@ -811,16 +843,14 @@ class TestC14:
     def test_C14_s_generated_reason_names_the_latent_and_its_dtype(self, base):
         """**Kills** a generic "a latent is not differentiable", which tells a
         user with forty latents nothing about which one to go and look at."""
-        payload = _regated(_doctored(base, jnp.complex64),
-                           identifiability="refuse")
+        payload = _regated(_doctored(base, jnp.complex64), identifiability="refuse")
         found = _found(fitting_module._identifiability, payload)[0]
         assert "g" in found.message
         assert "complex64" in found.message
         assert found.where == "inference.parameters.g"
         assert found.message.endswith("(check C14).")
 
-    def test_the_reason_distinguishes_complex_from_merely_non_floating(
-            self, base):
+    def test_the_reason_distinguishes_complex_from_merely_non_floating(self, base):
         """**The trap inside the test itself.**  A complex dtype is ALSO
         non-floating, and ``_check_differentiable``'s non-floating message
         EMBEDS the string ``complex64`` in its ``{name: dtype}`` mapping -- so
@@ -828,10 +858,8 @@ class TestC14:
         at all.  ``tests/inference/test_identifiability.py`` records that
         exact mutation.  This asserts the two reasons are DIFFERENT
         sentences."""
-        complexed = _regated(_doctored(base, jnp.complex64),
-                             identifiability="refuse")
-        integered = _regated(_doctored(base, jnp.int32),
-                             identifiability="refuse")
+        complexed = _regated(_doctored(base, jnp.complex64), identifiability="refuse")
+        integered = _regated(_doctored(base, jnp.int32), identifiability="refuse")
         first = _found(fitting_module._identifiability, complexed)[0].message
         second = _found(fitting_module._identifiability, integered)[0].message
         assert first != second
@@ -846,21 +874,18 @@ class TestC14:
         assert "not floating-point" in second
         assert "not floating-point" not in first
 
-    def test_C14_advises_no_fix_because_a_generated_auto_skip_has_none(
-            self, base):
+    def test_C14_advises_no_fix_because_a_generated_auto_skip_has_none(self, base):
         """The advice-loop rule, in its one negative form.  A refusal must
         name its escape; an auto-skip has none to give -- there is nothing in
         ``inference.checks:`` for the reader to change, and advising
         ``{mode: skip}`` for a check that already did not run is an advice
         loop with a straight face."""
-        payload = _regated(_doctored(base, jnp.complex64),
-                           identifiability="refuse")
+        payload = _regated(_doctored(base, jnp.complex64), identifiability="refuse")
         message = _found(fitting_module._identifiability, payload)[0].message
         assert "mode:" not in message
         assert "inference.checks.identifiability" in message
 
-    def test_the_auto_skipped_gate_is_local_and_the_mapping_is_untouched(
-            self, base):
+    def test_the_auto_skipped_gate_is_local_and_the_mapping_is_untouched(self, base):
         """``auto_skipped`` returns a NEW gate; one mapping is handed to every
         check in the pass, so a check that wrote into it would change what a
         later check sees.
@@ -868,21 +893,22 @@ class TestC14:
         **Kills** an implementation that reaches for ``payload.gates[name] =
         ...`` -- which is a ``TypeError`` today and would be a silent
         cross-check leak if the proxy were ever dropped."""
-        payload = _regated(_doctored(base, jnp.int32),
-                           identifiability="refuse")
+        payload = _regated(_doctored(base, jnp.int32), identifiability="refuse")
         _found(fitting_module._identifiability, payload)
         assert payload.gates["identifiability"].state == "refuse"
         assert payload.gates["identifiability"].state != AUTO_SKIP
 
     @pytest.mark.parametrize(
         ("label", "inference"),
-        [("the base document", {}),
-         ("the two-latent document", dict(_TWO)),
-         ("a latent asking for a complex init",
-          dict(preflight_helpers.COMPLEX_INIT_LATENT))],
+        [
+            ("the base document", {}),
+            ("the two-latent document", dict(_TWO)),
+            ("a latent asking for a complex init", dict(preflight_helpers.COMPLEX_INIT_LATENT)),
+        ],
     )
     def test_no_document_this_layer_accepts_builds_an_undifferentiable_latent(
-            self, label, inference):
+        self, label, inference
+    ):
         """The end-to-end partner of the four unit tests above, and the one
         that goes RED the day the config layer admits a complex latent.
 
@@ -903,8 +929,9 @@ class TestC14:
         where it is pinned."""
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
-            payload = priced_run(preflight_document(
-                **({"inference": inference} if inference else {})))
+            payload = priced_run(
+                preflight_document(**({"inference": inference} if inference else {}))
+            )
         space = payload.run.inference.space
         assert fitting_module._undifferentiable(space) == {}, label
         assert fitting_module._unlinearisable(space) == {}, label
@@ -918,10 +945,10 @@ class TestC14:
         or ever keeps the complex dtype, C14 becomes reachable from a document
         and the four unit tests above stop being hypothetical."""
         with pytest.warns(Warning, match="[Cc]omplex"):
-            payload = priced_run(preflight_document(
-                inference=preflight_helpers.COMPLEX_INIT_LATENT))
-        assert str(payload.run.inference.space.latent("g").init.dtype) \
-            == "float32"
+            payload = priced_run(
+                preflight_document(inference=preflight_helpers.COMPLEX_INIT_LATENT)
+            )
+        assert str(payload.run.inference.space.latent("g").init.dtype) == "float32"
 
 
 # ==================================================================== C19 ==
@@ -935,9 +962,15 @@ class TestC19:
         **Kills** ``observed.entries[observed.primary]`` on ``None`` --
         ``post-flight check 'C19' RAISED AttributeError: 'NoneType' object has
         no attribute 'entries'``."""
-        payload = priced_run(repatch(preflight_document(), inference={
-            **preflight_helpers.T4_NO_OBSERVED_INFERENCE,
-            "checks": preflight_helpers.T4_CHECKS_PRIOR_SENSITIVITY_REPORT}))
+        payload = priced_run(
+            repatch(
+                preflight_document(),
+                inference={
+                    **preflight_helpers.T4_NO_OBSERVED_INFERENCE,
+                    "checks": preflight_helpers.T4_CHECKS_PRIOR_SENSITIVITY_REPORT,
+                },
+            )
+        )
         assert payload.run.inference.observed is None
         assert payload.run.inference.space is not None
         assert payload.gates["prior_sensitivity"].runs()
@@ -950,9 +983,12 @@ class TestC19:
         **Kills** handing ``None`` over and re-voicing the package's
         ``TypeError`` as a document fault -- which would be a refusal naming
         an ``inference.parameters`` line that is perfectly correct."""
-        document = preflight_document(inference={
-            **preflight_helpers.T4_NOISE_NONE,
-            "checks": preflight_helpers.T4_CHECKS_PRIOR_SENSITIVITY_REPORT})
+        document = preflight_document(
+            inference={
+                **preflight_helpers.T4_NOISE_NONE,
+                "checks": preflight_helpers.T4_CHECKS_PRIOR_SENSITIVITY_REPORT,
+            }
+        )
         payload = priced_run(document)
         assert payload.run.inference.noise.kind == "none"
         assert payload.run.inference.observed is not None
@@ -974,9 +1010,15 @@ class TestC19:
         RAISED KeyError: None``, the laundered-blame shape this layer exists
         to prevent.
         """
-        payload = priced_run(repatch(preflight_document(), inference={
-            **preflight_helpers.T4_TWO_NAMED_OBSERVATIONS,
-            "checks": preflight_helpers.T4_CHECKS_PRIOR_SENSITIVITY_REPORT}))
+        payload = priced_run(
+            repatch(
+                preflight_document(),
+                inference={
+                    **preflight_helpers.T4_TWO_NAMED_OBSERVATIONS,
+                    "checks": preflight_helpers.T4_CHECKS_PRIOR_SENSITIVITY_REPORT,
+                },
+            )
+        )
         observed = payload.run.inference.observed
         assert observed is not None
         assert sorted(observed.entries) == ["day", "night"]
@@ -985,10 +1027,11 @@ class TestC19:
         assert _found(fitting_module._prior_sensitivity, payload) == ()
 
     @pytest.mark.parametrize(
-        ("shift", "refuses"),
-        [(0.15, True), (0.05, False), (-0.15, True), (-0.05, False)])
+        ("shift", "refuses"), [(0.15, True), (0.05, False), (-0.15, True), (-0.05, False)]
+    )
     def test_C19_uses_the_packages_criterion_and_not_a_larger_one(
-            self, monkeypatch, shift, refuses):
+        self, monkeypatch, shift, refuses
+    ):
         """The THRESHOLD's value, and not merely that one exists.
 
         ``test_C19_refuses_a_prior_that_moved_the_mode`` drives 1.75 sigma and
@@ -1002,8 +1045,7 @@ class TestC19:
         """
         counter = []
         _stub_all(monkeypatch, counter, shift=shift)
-        found = priced_findings(_two_latent_document(
-            checks=preflight_helpers.T4_CHECKS_ALL_REFUSE))
+        found = priced_findings(_two_latent_document(checks=preflight_helpers.T4_CHECKS_ALL_REFUSE))
         refused = [one.check for one in found if one.severity == REFUSE]
         assert (refused == ["C19"]) is refuses, (shift, refused)
 
@@ -1016,9 +1058,12 @@ class TestC19:
         Anti-vacuity for every stubbed C19 test above and below: without it
         the whole body of ``_prior_sensitivity`` is only ever driven against a
         ``SimpleNamespace``."""
-        found = priced_only(preflight_document(inference={
-            "checks": preflight_helpers.T4_CHECKS_PRIOR_SENSITIVITY_REPORT}),
-            "C19")
+        found = priced_only(
+            preflight_document(
+                inference={"checks": preflight_helpers.T4_CHECKS_PRIOR_SENSITIVITY_REPORT}
+            ),
+            "C19",
+        )
         assert found.severity == REPORT
         assert "sigma" in found.message
         assert "inference.checks.prior_sensitivity" in found.message
@@ -1034,11 +1079,17 @@ class TestC19:
         for one reason: the real route costs two Newton solves that do not
         converge, and this module's budget allows exactly one cold C19."""
         counter = []
-        _stub_all(monkeypatch, counter, raises=StateValidationError(
-            "prior_sensitivity could not find the mode: 100 damped Newton "
-            "steps did not converge."))
-        found = priced_only(_two_latent_document(
-            checks=preflight_helpers.T4_CHECKS_ALL_REFUSE), "C19")
+        _stub_all(
+            monkeypatch,
+            counter,
+            raises=StateValidationError(
+                "prior_sensitivity could not find the mode: 100 damped Newton "
+                "steps did not converge."
+            ),
+        )
+        found = priced_only(
+            _two_latent_document(checks=preflight_helpers.T4_CHECKS_ALL_REFUSE), "C19"
+        )
         assert found.severity == REFUSE
         assert "could not find the mode" in found.message
         assert "inference.checks.prior_sensitivity" in found.message
@@ -1048,28 +1099,28 @@ class TestC19:
         """The other half of the except set.  Both are named; neither is
         ``Exception``."""
         counter = []
-        _stub_all(monkeypatch, counter, raises=ParameterSpaceError(
-            "identifiability() reports rank 1 of 2 at the mode."))
-        found = priced_only(_two_latent_document(
-            checks=preflight_helpers.T4_CHECKS_ALL_REFUSE), "C19")
+        _stub_all(
+            monkeypatch,
+            counter,
+            raises=ParameterSpaceError("identifiability() reports rank 1 of 2 at the mode."),
+        )
+        found = priced_only(
+            _two_latent_document(checks=preflight_helpers.T4_CHECKS_ALL_REFUSE), "C19"
+        )
         assert found.severity == REFUSE
         assert "reports rank 1 of 2" in found.message
 
-    def test_an_unexpected_exception_is_not_re_voiced_as_a_document_fault(
-            self, monkeypatch):
+    def test_an_unexpected_exception_is_not_re_voiced_as_a_document_fault(self, monkeypatch):
         """**Kills the bare ``except Exception``.**  A ``TypeError`` out of a
         package function is a bug in THIS layer, not in the user's document,
         and must reach ``sweep``'s raise-guard -- which names the slot --
         rather than being dressed up as a refusal of
         ``inference.parameters``."""
         counter = []
-        _stub_all(monkeypatch, counter,
-                  raises=TypeError("unsupported operand type(s)"))
+        _stub_all(monkeypatch, counter, raises=TypeError("unsupported operand type(s)"))
         with pytest.raises(ConfigError) as raised:
-            priced_findings(_two_latent_document(
-                checks=preflight_helpers.T4_CHECKS_ALL_REFUSE))
-        assert str(raised.value).startswith(
-            "post-flight check 'C19' RAISED TypeError: ")
+            priced_findings(_two_latent_document(checks=preflight_helpers.T4_CHECKS_ALL_REFUSE))
+        assert str(raised.value).startswith("post-flight check 'C19' RAISED TypeError: ")
 
     def test_C19_refuses_a_prior_that_moved_the_mode(self, monkeypatch):
         """The package's own :data:`CRITERION_SHIFT` (0.1 sigma) is the
@@ -1080,8 +1131,9 @@ class TestC19:
         it."""
         counter = []
         _stub_all(monkeypatch, counter, shift=-1.75)
-        found = priced_only(_two_latent_document(
-            checks=preflight_helpers.T4_CHECKS_ALL_REFUSE), "C19")
+        found = priced_only(
+            _two_latent_document(checks=preflight_helpers.T4_CHECKS_ALL_REFUSE), "C19"
+        )
         assert found.severity == REFUSE
         assert "1.75" in found.message
 
@@ -1090,8 +1142,7 @@ class TestC19:
         shift three decades below the criterion."""
         counter = []
         _stub_all(monkeypatch, counter, shift=-1e-3)
-        found = priced_findings(_two_latent_document(
-            checks=preflight_helpers.T4_CHECKS_ALL_REFUSE))
+        found = priced_findings(_two_latent_document(checks=preflight_helpers.T4_CHECKS_ALL_REFUSE))
         assert [one.check for one in found if one.severity == REFUSE] == []
 
 
@@ -1108,11 +1159,11 @@ class TestTheExceptSetIsThreeTimesNarrow:
 
     @pytest.mark.parametrize(
         ("slot", "option"),
-        [("C12", "linearity_raises"), ("C13", "identifiability_raises"),
-         ("C19", "raises")],
+        [("C12", "linearity_raises"), ("C13", "identifiability_raises"), ("C19", "raises")],
     )
     def test_an_unexpected_exception_escapes_from_each_of_the_three(
-            self, monkeypatch, slot, option):
+        self, monkeypatch, slot, option
+    ):
         """A ``TypeError`` out of a package function is a bug in THIS layer.
         It must reach ``sweep``'s raise-guard -- which names the slot -- and
         never be dressed up as a refusal of a document line the user wrote
@@ -1122,28 +1173,25 @@ class TestTheExceptSetIsThreeTimesNarrow:
         is armed per case: with all three armed the first would mask the
         other two."""
         counter = []
-        _stub_all(monkeypatch, counter,
-                  **{option: TypeError("unsupported operand type(s)")})
+        _stub_all(monkeypatch, counter, **{option: TypeError("unsupported operand type(s)")})
         with pytest.raises(ConfigError) as raised:
-            priced_findings(_two_latent_document(
-                checks=preflight_helpers.T4_CHECKS_ALL_REFUSE))
-        assert str(raised.value).startswith(
-            f"post-flight check {slot!r} RAISED TypeError: ")
+            priced_findings(_two_latent_document(checks=preflight_helpers.T4_CHECKS_ALL_REFUSE))
+        assert str(raised.value).startswith(f"post-flight check {slot!r} RAISED TypeError: ")
 
     @pytest.mark.parametrize(
         ("slot", "option"),
-        [("C12", "linearity_raises"), ("C13", "identifiability_raises"),
-         ("C19", "raises")],
+        [("C12", "linearity_raises"), ("C13", "identifiability_raises"), ("C19", "raises")],
     )
     def test_a_package_error_from_each_of_the_three_becomes_a_finding(
-            self, monkeypatch, slot, option):
+        self, monkeypatch, slot, option
+    ):
         """The anti-vacuity partner: the SAME three call sites turn the two
         NAMED exceptions into findings rather than letting them escape."""
         counter = []
-        _stub_all(monkeypatch, counter,
-                  **{option: ParameterSpaceError("the package's own words")})
-        found = priced_only(_two_latent_document(
-            checks=preflight_helpers.T4_CHECKS_ALL_REFUSE), slot)
+        _stub_all(monkeypatch, counter, **{option: ParameterSpaceError("the package's own words")})
+        found = priced_only(
+            _two_latent_document(checks=preflight_helpers.T4_CHECKS_ALL_REFUSE), slot
+        )
         assert found.severity == REFUSE
         assert "the package's own words" in found.message
 
@@ -1156,15 +1204,27 @@ class TestNoGateSilencesAnother:
         **Kills** a shared early return -- one ``if not gate.runs(): return``
         covering all three, which is the single most likely way three
         functions in one module come to share a stand-down."""
-        found = priced_only(preflight_document(
-            inference={**exit_helpers.NONLINEAR_LATENT,
-                       "checks": preflight_helpers.T4_CHECKS_IDENTIFIABILITY_SKIP}),
-            "C12")
+        found = priced_only(
+            preflight_document(
+                inference={
+                    **exit_helpers.NONLINEAR_LATENT,
+                    "checks": preflight_helpers.T4_CHECKS_IDENTIFIABILITY_SKIP,
+                }
+            ),
+            "C12",
+        )
         assert found.severity == REFUSE
-        assert "C13" not in {one.check for one in priced_findings(
-            preflight_document(inference={
-                **exit_helpers.NONLINEAR_LATENT,
-                "checks": preflight_helpers.T4_CHECKS_IDENTIFIABILITY_SKIP}))}
+        assert "C13" not in {
+            one.check
+            for one in priced_findings(
+                preflight_document(
+                    inference={
+                        **exit_helpers.NONLINEAR_LATENT,
+                        "checks": preflight_helpers.T4_CHECKS_IDENTIFIABILITY_SKIP,
+                    }
+                )
+            )
+        }
 
     def test_a_C14_from_one_gate_does_not_speak_for_another(self, monkeypatch):
         """Two priced checks cannot communicate through ``payload.run.report``
@@ -1172,11 +1232,11 @@ class TestNoGateSilencesAnother:
         must not be read by C19 -- each recomputes its own predicate."""
         payload = _regated(
             _doctored(priced_run(preflight_document()), jnp.int32),
-            identifiability="refuse", prior_sensitivity="refuse")
-        assert [one.check for one in
-                _found(fitting_module._identifiability, payload)] == ["C14"]
-        assert [one.check for one in
-                _found(fitting_module._prior_sensitivity, payload)] == ["C14"]
+            identifiability="refuse",
+            prior_sensitivity="refuse",
+        )
+        assert [one.check for one in _found(fitting_module._identifiability, payload)] == ["C14"]
+        assert [one.check for one in _found(fitting_module._prior_sensitivity, payload)] == ["C14"]
 
 
 # ========================================================== the advice loop ==
@@ -1202,14 +1262,13 @@ class TestTheAdviceLoop:
 
     def test_applying_mode_warn_loads_and_downgrades_to_a_warning(self):
         """(i) the severity becomes WARN, (ii) ``load_document`` returns."""
-        document = preflight_document(inference={
-            **self.REFUSED,
-            "checks": preflight_helpers.T4_CHECKS_LINEARITY_WARN})
+        document = preflight_document(
+            inference={**self.REFUSED, "checks": preflight_helpers.T4_CHECKS_LINEARITY_WARN}
+        )
         assert priced_only(document, "C12").severity == WARN
         with pytest.warns(ConfigWarning, match="not affine"):
             run = load_document(document)
-        assert [one.check for one in run.report.findings
-                if one.severity == WARN] == ["C12"]
+        assert [one.check for one in run.report.findings if one.severity == WARN] == ["C12"]
 
     def test_applying_mode_skip_loads_and_removes_the_finding(self):
         """(i) C12 is gone from the report entirely, (ii) ``load_document``
@@ -1217,9 +1276,9 @@ class TestTheAdviceLoop:
         wave-1 failure this rule exists for.  In particular ``mode: skip``
         with a written ``reason:`` satisfies A37, and the pair is not the
         ``{mode: skip, report: true}`` shape Task 2 refuses."""
-        document = preflight_document(inference={
-            **self.REFUSED,
-            "checks": preflight_helpers.T4_CHECKS_LINEARITY_SKIP})
+        document = preflight_document(
+            inference={**self.REFUSED, "checks": preflight_helpers.T4_CHECKS_LINEARITY_SKIP}
+        )
         run = load_document(document)
         assert "C12" not in {one.check for one in run.report.findings}
         assert run.report.refusals() == ()
@@ -1245,26 +1304,28 @@ class TestMessageDiscipline:
         document, and an unconditional append SURVIVED every other test
         here."""
         assert fitting_module._tagged("C12", "x") == "x (check C12)."
-        assert fitting_module._tagged("C12", "x (check C12).") \
-            == "x (check C12)."
-        assert fitting_module._tagged("C13", "x (check C12).") \
-            == "x (check C12). (check C13)."
+        assert fitting_module._tagged("C12", "x (check C12).") == "x (check C12)."
+        assert fitting_module._tagged("C13", "x (check C12).") == "x (check C12). (check C13)."
 
     def test_every_finding_this_module_emits_ends_with_its_check_tag(self):
         """``Finding``'s own docstring: a message "ends with ``(check A30).``
         when ``check`` is set", and the tail is APPENDED rather than woven in,
         so a doubled tag is a defect."""
         seen = []
-        seen.append(priced_only(
-            preflight_document(inference=exit_helpers.NONLINEAR_LATENT), "C12"))
-        seen.append(priced_only(
-            _degenerate_document(
-                checks=preflight_helpers.T4_CHECKS_IDENTIFIABILITY_REFUSE),
-            "C13"))
+        seen.append(priced_only(preflight_document(inference=exit_helpers.NONLINEAR_LATENT), "C12"))
+        seen.append(
+            priced_only(
+                _degenerate_document(checks=preflight_helpers.T4_CHECKS_IDENTIFIABILITY_REFUSE),
+                "C13",
+            )
+        )
         base = priced_run(preflight_document())
-        seen.extend(_found(fitting_module._identifiability,
-                           _regated(_doctored(base, jnp.complex64),
-                                    identifiability="refuse")))
+        seen.extend(
+            _found(
+                fitting_module._identifiability,
+                _regated(_doctored(base, jnp.complex64), identifiability="refuse"),
+            )
+        )
         for one in seen:
             assert one.message.endswith(f"(check {one.check}).")
             assert one.message.count(f"(check {one.check}).") == 1
@@ -1272,11 +1333,17 @@ class TestMessageDiscipline:
     def test_every_gated_message_names_its_gate_and_its_escape(self):
         """§3.2(i).  C14 is the deliberate exception and has its own test."""
         for found, gate in (
-            (priced_only(preflight_document(
-                inference=exit_helpers.NONLINEAR_LATENT), "C12"), "linearity"),
-            (priced_only(_degenerate_document(
-                checks=preflight_helpers.T4_CHECKS_IDENTIFIABILITY_REFUSE),
-                "C13"), "identifiability"),
+            (
+                priced_only(preflight_document(inference=exit_helpers.NONLINEAR_LATENT), "C12"),
+                "linearity",
+            ),
+            (
+                priced_only(
+                    _degenerate_document(checks=preflight_helpers.T4_CHECKS_IDENTIFIABILITY_REFUSE),
+                    "C13",
+                ),
+                "identifiability",
+            ),
         ):
             assert f"inference.checks.{gate}" in found.message
             assert "mode: warn" in found.message
@@ -1286,20 +1353,21 @@ class TestMessageDiscipline:
         """§3.2(i)'s third clause, for the two checks that default to ``off``
         -- a reader has to learn that this document ASKED for the cost."""
         found = priced_only(
-            _degenerate_document(
-                checks=preflight_helpers.T4_CHECKS_IDENTIFIABILITY_REFUSE),
-            "C13")
+            _degenerate_document(checks=preflight_helpers.T4_CHECKS_IDENTIFIABILITY_REFUSE), "C13"
+        )
         assert "off by default" in found.message
 
     def test_C12_does_not_claim_to_be_off_by_default(self):
         """It is the one check that is ON by default (``gating.DEFAULT_MODE``),
         so the clause above must not be shared by all three."""
-        found = priced_only(
-            preflight_document(inference=exit_helpers.NONLINEAR_LATENT), "C12")
+        found = priced_only(preflight_document(inference=exit_helpers.NONLINEAR_LATENT), "C12")
         assert "off by default" not in found.message
 
     def test_every_finding_carries_the_id_its_gate_is_bound_to(self):
         """``gating.CHECK_ID`` is the one binding of check name to schema id;
         a second table here would be a second thing to keep in step."""
-        assert CHECK_ID == {"linearity": "C12", "identifiability": "C13",
-                            "prior_sensitivity": "C19"}
+        assert CHECK_ID == {
+            "linearity": "C12",
+            "identifiability": "C13",
+            "prior_sensitivity": "C19",
+        }

@@ -44,9 +44,7 @@ def _canonical_text(value: object, *, where: str) -> str:
 
 def _canonical_limit(value: object) -> int:
     if isinstance(value, bool) or not isinstance(value, int):
-        raise ConfigError(
-            f"maximum must be a non-boolean integer; got {type(value).__name__}."
-        )
+        raise ConfigError(f"maximum must be a non-boolean integer; got {type(value).__name__}.")
     try:
         maximum = int.__int__(value)
     except Exception:
@@ -71,9 +69,7 @@ def _byte_limit_error(source_name: str, observed: int, limit: int) -> ConfigErro
     return ConfigError(f"{source_name}: YAML byte count {observed} exceeds limit {limit}.")
 
 
-def _stable_read_callback(
-    operation: Callable[[], _T], *, source_name: str
-) -> _T:
+def _stable_read_callback(operation: Callable[[], _T], *, source_name: str) -> _T:
     try:
         return operation()
     except Exception:
@@ -86,9 +82,7 @@ class _StableStreamContext:
         self._source_name = source_name
 
     def __enter__(self) -> None:
-        _stable_read_callback(
-            lambda: self._stream.__enter__(), source_name=self._source_name
-        )
+        _stable_read_callback(lambda: self._stream.__enter__(), source_name=self._source_name)
 
     def __exit__(
         self,
@@ -97,24 +91,16 @@ class _StableStreamContext:
         traceback: object | None,
     ) -> bool:
         try:
-            self._stream.__exit__(
-                exception_type, exception, traceback
-            )
+            self._stream.__exit__(exception_type, exception, traceback)
         except Exception:
             if exception is not None:
                 try:
-                    exception_bases = type.__getattribute__(
-                        type(exception), "__mro__"
-                    )
+                    exception_bases = type.__getattribute__(type(exception), "__mro__")
                 except Exception:
-                    raise ConfigError(
-                        f"{self._source_name}: cannot read source."
-                    ) from None
+                    raise ConfigError(f"{self._source_name}: cannot read source.") from None
                 if not any(base is Exception for base in exception_bases):
                     return False
-            raise ConfigError(
-                f"{self._source_name}: cannot read source."
-            ) from None
+            raise ConfigError(f"{self._source_name}: cannot read source.") from None
         return False
 
 
@@ -152,9 +138,7 @@ def _read_stable_regular_file(
     fd = -1
     maximum = _canonical_limit(maximum)
     display_name = (
-        "<source>"
-        if source_name is None
-        else _canonical_text(source_name, where="source_name")
+        "<source>" if source_name is None else _canonical_text(source_name, where="source_name")
     )
     try:
         given_path = os.fspath(path)
@@ -175,9 +159,7 @@ def _read_stable_regular_file(
         if not stat.S_ISLNK(before_link.st_mode):
             flags |= getattr(os, "O_NOFOLLOW", 0)
         fd = os.open(source_path, flags)
-        before_target = _stable_read_callback(
-            lambda: os.fstat(fd), source_name=display_name
-        )
+        before_target = _stable_read_callback(lambda: os.fstat(fd), source_name=display_name)
         if not stat.S_ISREG(before_target.st_mode):
             raise ConfigError(f"{display_name}: source must be a regular file.")
         if before_target.st_size > maximum:
@@ -187,12 +169,8 @@ def _read_stable_regular_file(
             source_name=display_name,
         )
         with _StableStreamContext(stream, source_name=display_name):
-            data = _read_bounded_forward(
-                stream, source_name=display_name, limit=maximum
-            )
-            stream_fd = _stable_read_callback(
-                lambda: stream.fileno(), source_name=display_name
-            )
+            data = _read_bounded_forward(stream, source_name=display_name, limit=maximum)
+            stream_fd = _stable_read_callback(lambda: stream.fileno(), source_name=display_name)
             after_target = _stable_read_callback(
                 lambda: os.fstat(stream_fd), source_name=display_name
             )
@@ -238,26 +216,18 @@ def read_stable_regular_bytes(
     source_name: str | None = None,
 ) -> bytes:
     """Read one unchanged regular file in one bounded forward consumption."""
-    data, _ = _read_stable_regular_file(
-        path, maximum=maximum, source_name=source_name
-    )
+    data, _ = _read_stable_regular_file(path, maximum=maximum, source_name=source_name)
     return data
 
 
 def _read_path_once(source_path: str) -> tuple[bytes, str]:
     """Read a CLI path with the shared stable-file primitive."""
-    return _read_stable_regular_file(
-        source_path, maximum=_input_limit(), source_name=source_path
-    )
+    return _read_stable_regular_file(source_path, maximum=_input_limit(), source_name=source_path)
 
 
 def _stdin_base_dir(base_dir: str | None) -> str:
     try:
-        chosen = (
-            os.getcwd()
-            if base_dir is None
-            else _canonical_text(base_dir, where="base_dir")
-        )
+        chosen = os.getcwd() if base_dir is None else _canonical_text(base_dir, where="base_dir")
         return _canonical_dir(chosen)
     except ConfigError:
         raise
@@ -308,9 +278,7 @@ def read_cli_source_once(
     except ConfigError:
         raise
     except Exception:
-        raise ConfigError(
-            f"{path_or_dash!r}: invalid source or base_dir."
-        ) from None
+        raise ConfigError(f"{path_or_dash!r}: invalid source or base_dir.") from None
     data, source_realpath = _read_path_once(source_path)
     return SourceInput(
         input_bytes=data,

@@ -78,18 +78,24 @@ def test_invalid_or_unsafe_yaml_is_refused_in_the_layer_voice(value, message):
 
 def test_noop_edits_keep_the_authoritative_yaml_byte_for_byte():
     assert replace_yaml(BASE).yaml_text == BASE
-    assert set_node(
-        BASE,
-        "gain",
-        enabled=True,
-        settings={"type": "GainOperator", "gain": 1.0},
-    ).yaml_text == BASE
-    assert set_node(
-        BASE,
-        "gain",
-        enabled=True,
-        settings={"gain": 1.0, "type": "GainOperator"},
-    ).yaml_text == BASE
+    assert (
+        set_node(
+            BASE,
+            "gain",
+            enabled=True,
+            settings={"type": "GainOperator", "gain": 1.0},
+        ).yaml_text
+        == BASE
+    )
+    assert (
+        set_node(
+            BASE,
+            "gain",
+            enabled=True,
+            settings={"gain": 1.0, "type": "GainOperator"},
+        ).yaml_text
+        == BASE
+    )
 
 
 def test_bool_and_number_settings_are_not_mistaken_for_noop_edits():
@@ -137,8 +143,7 @@ def test_enable_edit_and_disable_are_document_transformations():
 def test_disabling_one_node_preserves_every_sibling_and_section():
     document = BASE.replace(
         "  gain:\n    type: GainOperator\n    gain: 1.0\n",
-        "  bandpass:\n    type: ReceiverOperator\n  gain:\n"
-        "    type: GainOperator\n    gain: 1.0\n",
+        "  bandpass:\n    type: ReceiverOperator\n  gain:\n    type: GainOperator\n    gain: 1.0\n",
     )
     found = set_node(document, "gain", enabled=False)
     parsed = yaml.safe_load(found.yaml_text)
@@ -308,9 +313,7 @@ class TestEveryInstanceCarriesItsOwnFields:
         card = _card(snapshot(MANY_YAML).base_diagram, "filters")
 
         assert card.typed_form is False, "the node has no single field set"
-        assert [instance.instance_id for instance in card.instances] == [
-            "filters_1", "filters_2"
-        ]
+        assert [instance.instance_id for instance in card.instances] == ["filters_1", "filters_2"]
         first, second = card.instances
         assert first.selected_type == "SiderealFilter"
         assert second.selected_type == "FourierBandFilter"

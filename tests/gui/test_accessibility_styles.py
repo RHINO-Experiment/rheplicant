@@ -2,12 +2,12 @@ from pathlib import Path
 
 from rheplicant.core.render import _SVG_STYLE, _THEMES
 
-CSS = (
-    Path(__file__).parents[2] / "src/rheplicant/gui/react/editor.css"
-).read_text(encoding="utf-8")
-TOKENS = (
-    Path(__file__).parents[2] / "src/rheplicant/gui/react/tokens.css"
-).read_text(encoding="utf-8")
+CSS = (Path(__file__).parents[2] / "src/rheplicant/gui/react/editor.css").read_text(
+    encoding="utf-8"
+)
+TOKENS = (Path(__file__).parents[2] / "src/rheplicant/gui/react/tokens.css").read_text(
+    encoding="utf-8"
+)
 
 
 def _block(source: str, marker: str) -> str:
@@ -27,9 +27,7 @@ def _block(source: str, marker: str) -> str:
 def _luminance(colour: str) -> float:
     channels = [int(colour[index : index + 2], 16) / 255 for index in (1, 3, 5)]
     linear = [
-        value / 12.92
-        if value <= 0.04045
-        else ((value + 0.055) / 1.055) ** 2.4
+        value / 12.92 if value <= 0.04045 else ((value + 0.055) / 1.055) ** 2.4
         for value in channels
     ]
     return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2]
@@ -156,7 +154,7 @@ def test_workbench_has_all_four_responsive_layout_contracts():
     assert ".workspace-nav" in compact
     assert "flex-direction: row;" in compact
     assert ".workbench-inspector" in compact
-    assert ".workbench-drawer > [role=\"dialog\"]" in compact
+    assert '.workbench-drawer > [role="dialog"]' in compact
     assert "width: 100%;" in _block(compact, ".workbench-inspector,")
     assert ".product-grid" in narrow
     assert "grid-template-rows: minmax(0, 20rem) minmax(0, 1fr) minmax(0, 16rem);" in narrow

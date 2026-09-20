@@ -56,25 +56,19 @@ class _Normal:
         self.loc, self.scale = loc, scale
 
     def log_prob(self, x):
-        return -0.5 * (
-            ((x - self.loc) / self.scale) ** 2 + jnp.log(2 * jnp.pi * self.scale**2)
-        )
+        return -0.5 * (((x - self.loc) / self.scale) ** 2 + jnp.log(2 * jnp.pi * self.scale**2))
 
 
 def design(seed=0):
     """`(A, C, d)` -- per-epoch theta design, zeta design and data."""
     keys = jax.random.split(jax.random.key(seed), 3 * N_EPOCHS)
-    A = [
-        np.asarray(jax.random.normal(keys[e], (N_SAMPLES, N_THETA)))
-        for e in range(N_EPOCHS)
-    ]
+    A = [np.asarray(jax.random.normal(keys[e], (N_SAMPLES, N_THETA))) for e in range(N_EPOCHS)]
     C = [
         np.asarray(jax.random.normal(keys[N_EPOCHS + e], (N_SAMPLES, 1))) + 1.0
         for e in range(N_EPOCHS)
     ]
     d = [
-        np.asarray(jax.random.normal(keys[2 * N_EPOCHS + e], (N_SAMPLES,)))
-        for e in range(N_EPOCHS)
+        np.asarray(jax.random.normal(keys[2 * N_EPOCHS + e], (N_SAMPLES,))) for e in range(N_EPOCHS)
     ]
     return A, C, d
 
@@ -98,8 +92,7 @@ def space():
     return ParameterSpace(
         latents=tuple(latents),
         bindings=tuple(
-            Bind(latent.name, into=lambda p, n=latent.name: getattr(p, n))
-            for latent in latents
+            Bind(latent.name, into=lambda p, n=latent.name: getattr(p, n)) for latent in latents
         ),
     )
 
@@ -130,9 +123,7 @@ def blocks(seed=0):
             shapes={"t_rx": (), "gain_slope": (), ZETA_NAME: ()},
             epoch_id=f"e{e}",
         )
-        square = SqrtInfo.combine(
-            SqrtInfo.null(term.info.names, term.info.shapes), term.info
-        )
+        square = SqrtInfo.combine(SqrtInfo.null(term.info.names, term.info.shapes), term.info)
         out.append(square)
     return tuple(out)
 
@@ -147,9 +138,7 @@ def stacked(seed=0):
     )
 
 
-def zeta_covariance(
-    phi=PHI, process_var=PROCESS_VAR, initial_var=INITIAL_VAR, n=N_EPOCHS
-):
+def zeta_covariance(phi=PHI, process_var=PROCESS_VAR, initial_var=INITIAL_VAR, n=N_EPOCHS):
     """`Sigma_zeta` for `zeta_{e+1} = phi zeta_e + w`, `var(zeta_1) = initial_var`."""
     var = np.zeros(n)
     var[0] = initial_var
@@ -180,14 +169,13 @@ def oracle(theta, seed=0, phi=PHI, process_var=PROCESS_VAR, initial_var=INITIAL_
         big_a[rows, :] = A[e]
         big_c[rows, e] = C[e][:, 0]
     mean_zeta = np.array([phi**e * INITIAL_MEAN for e in range(N_EPOCHS)])
-    cov = SIGMA**2 * np.eye(n_data) + big_c @ zeta_covariance(
-        phi, process_var, initial_var
-    ) @ big_c.T
+    cov = (
+        SIGMA**2 * np.eye(n_data) + big_c @ zeta_covariance(phi, process_var, initial_var) @ big_c.T
+    )
     resid = np.concatenate(d) - big_a @ theta - big_c @ mean_zeta
     _, logdet = np.linalg.slogdet(cov)
     return float(
-        -0.5 * resid @ np.linalg.solve(cov, resid)
-        - 0.5 * (logdet + n_data * np.log(2 * np.pi))
+        -0.5 * resid @ np.linalg.solve(cov, resid) - 0.5 * (logdet + n_data * np.log(2 * np.pi))
     )
 
 
@@ -210,8 +198,6 @@ def oracle_zeta_posterior(theta, seed=0):
     return mean_zeta + gain @ resid, prior - gain @ big_c @ prior
 
 
-
-
 # ---------------------------------------------------------- the wide fixture --
 #
 # A width-2 chain, with an asymmetric `phi` and two DIFFERENT process spreads.
@@ -231,17 +217,13 @@ def wide_design(width, seed=11):
     a subtly correlated one.
     """
     keys = jax.random.split(jax.random.key(seed), 3 * N_EPOCHS)
-    A = [
-        np.asarray(jax.random.normal(keys[e], (N_SAMPLES, N_THETA)))
-        for e in range(N_EPOCHS)
-    ]
+    A = [np.asarray(jax.random.normal(keys[e], (N_SAMPLES, N_THETA))) for e in range(N_EPOCHS)]
     C = [
         np.asarray(jax.random.normal(keys[N_EPOCHS + e], (N_SAMPLES, width))) + 1.0
         for e in range(N_EPOCHS)
     ]
     d = [
-        np.asarray(jax.random.normal(keys[2 * N_EPOCHS + e], (N_SAMPLES,)))
-        for e in range(N_EPOCHS)
+        np.asarray(jax.random.normal(keys[2 * N_EPOCHS + e], (N_SAMPLES,))) for e in range(N_EPOCHS)
     ]
     return A, C, d
 
@@ -267,11 +249,7 @@ def wide_stacked(width, seed=11):
             shapes={"t_rx": (), "gain_slope": (), ZETA_NAME: (width,)},
             epoch_id=f"w{e}",
         )
-        infos.append(
-            SqrtInfo.combine(
-                SqrtInfo.null(term.info.names, term.info.shapes), term.info
-            )
-        )
+        infos.append(SqrtInfo.combine(SqrtInfo.null(term.info.names, term.info.shapes), term.info))
     return (
         jnp.stack([info.factor for info in infos]),
         jnp.stack([info.target for info in infos]),
@@ -324,14 +302,10 @@ def wide_oracle_zeta_posterior(theta, transition, seed=11):
         rows = slice(e * N_SAMPLES, (e + 1) * N_SAMPLES)
         big_a[rows, :] = A[e]
         big_c[rows, e * width : (e + 1) * width] = C[e]
-    prior = wide_zeta_covariance(
-        phi, transition.process_std, transition.initial_std
-    )
+    prior = wide_zeta_covariance(phi, transition.process_std, transition.initial_std)
     mean_zeta = np.tile(np.asarray(transition.initial_mean, dtype=float), N_EPOCHS)
     for e in range(1, N_EPOCHS):
-        mean_zeta[e * width : (e + 1) * width] = (
-            phi @ mean_zeta[(e - 1) * width : e * width]
-        )
+        mean_zeta[e * width : (e + 1) * width] = phi @ mean_zeta[(e - 1) * width : e * width]
     cov = SIGMA**2 * np.eye(n_data) + big_c @ prior @ big_c.T
     gain = prior @ big_c.T @ np.linalg.inv(cov)
     resid = np.concatenate(d) - big_a @ np.asarray(theta, dtype=float) - big_c @ mean_zeta

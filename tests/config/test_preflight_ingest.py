@@ -116,8 +116,10 @@ WORKING_COLUMNS = {"antenna": 0, "internal_load": 0, "heated_load": 1}
 #: A ``noise_wave`` spec's other six fields.  Symbolic extents throughout, so
 #: no document in this module carries an unrelated A41 (§0.3 E.11).
 _NOISE_WAVE_FIELDS = {
-    "t_unc": {"zeros": ["n_freq"]}, "t_cos": {"zeros": ["n_freq"]},
-    "t_sin": {"zeros": ["n_freq"]}, "t_rx": {"zeros": ["n_freq"]},
+    "t_unc": {"zeros": ["n_freq"]},
+    "t_cos": {"zeros": ["n_freq"]},
+    "t_sin": {"zeros": ["n_freq"]},
+    "t_rx": {"zeros": ["n_freq"]},
     "gamma_rec_re": {"zeros": ["n_freq"]},
     "gamma_rec_im": {"zeros": ["n_freq"]},
     "gamma_src_re": {"zeros": ["n_source", "n_freq"]},
@@ -139,8 +141,7 @@ def noise_wave(**extra):
 
 def cal_loads(order=SWITCHED):
     """``model.cal_loads`` matching ``order[1:]``, which A14 wants present."""
-    return {label: {"t_load": {"value": 300.0, "unit": "K"}}
-            for label in order[1:]}
+    return {label: {"t_load": {"value": 300.0, "unit": "K"}} for label in order[1:]}
 
 
 def switched_document(node=None, **patch):
@@ -151,13 +152,17 @@ def switched_document(node=None, **patch):
     itself writes, where an ingested run gets it from ``to_state`` afterwards.
     """
     document = preflight_document(
-        model={**BASE_MODEL,
-               "noise_wave": noise_wave() if node is None else node,
-               "cal_loads": cal_loads()},
-        observation={**BASE_OBSERVATION,
-                     "switching": {"mode": "cycle", "order": list(SWITCHED),
-                                   "dwell": 4}},
-        **patch)
+        model={
+            **BASE_MODEL,
+            "noise_wave": noise_wave() if node is None else node,
+            "cal_loads": cal_loads(),
+        },
+        observation={
+            **BASE_OBSERVATION,
+            "switching": {"mode": "cycle", "order": list(SWITCHED), "dwell": 4},
+        },
+        **patch,
+    )
     return document
 
 
@@ -167,8 +172,7 @@ def recording(tmp_path):
     return str(tmp_path)
 
 
-def ingested_document(*, columns="working", loads="both", freq_unit="MHz",
-                      **patch):
+def ingested_document(*, columns="working", loads="both", freq_unit="MHz", **patch):
     """A document whose observation IS a recording -- the INGESTED route.
 
     Hand-built rather than patched over :func:`preflight_document`, because an
@@ -179,8 +183,7 @@ def ingested_document(*, columns="working", loads="both", freq_unit="MHz",
     LOADS: measured, ``run.twin['cal_loads_1']`` is a ``CalLoadOperator`` at
     293.15 K.
     """
-    from_file = {"format": "rhino_hdf5", "path": "obs.hd5f",
-                 "settle_seconds": 0.0}
+    from_file = {"format": "rhino_hdf5", "path": "obs.hd5f", "settle_seconds": 0.0}
     if freq_unit is not None:
         from_file["freq_unit"] = freq_unit
     if columns == "working":
@@ -189,15 +192,13 @@ def ingested_document(*, columns="working", loads="both", freq_unit="MHz",
         from_file["thermistor_columns"] = columns
     model = {"gain": {"gain": {"value": 2.0, "unit": "dimensionless"}}}
     if loads == "both":
-        loads = {label: {"from": "thermistors", "label": label}
-                 for label in RECORDED_ORDER[1:]}
+        loads = {label: {"from": "thermistors", "label": label} for label in RECORDED_ORDER[1:]}
     if loads is not None:
         model["cal_loads"] = loads
     document = {
         "schema_version": 1,
         "runtime": {"seed": 1},
-        "observation": {"from_file": from_file,
-                        "switching": {"order": list(RECORDED_ORDER)}},
+        "observation": {"from_file": from_file, "switching": {"order": list(RECORDED_ORDER)}},
         "model": model,
         "runs": [{"kind": "forward"}],
     }
@@ -259,8 +260,7 @@ class TestA10TheUnitIsAskedBeforeTheFileIsOpened:
         ``pytest.raises(ConfigError, match="freq_unit")`` -- eight characters
         of two hundred and thirty, which survives every rewrite of the clause
         a reader acts on."""
-        assert only(ingested_document(freq_unit=None), "A10").message == \
-            A10_MESSAGE
+        assert only(ingested_document(freq_unit=None), "A10").message == A10_MESSAGE
 
     def test_the_pass_and_the_section_say_one_sentence(self):
         """Kills: a hoist that COPIES the message rather than calling it.
@@ -281,13 +281,10 @@ class TestA10TheUnitIsAskedBeforeTheFileIsOpened:
         make_file(tmp_path / "obs.hd5f")
         context = ResolutionContext(dtype="float32", base_dir=str(tmp_path))
         with pytest.raises(ConfigError) as caught:
-            resolve_value(
-                {"file": {"path": "obs.hd5f", "format": "rhino_hdf5"}},
-                context)
+            resolve_value({"file": {"path": "obs.hd5f", "format": "rhino_hdf5"}}, context)
         assert str(caught.value).endswith(freq_unit_problem({}))
 
-    def test_a_declared_unit_earns_nothing_and_the_document_loads(
-            self, tmp_path):
+    def test_a_declared_unit_earns_nothing_and_the_document_loads(self, tmp_path):
         """S4's second half: take the check's advice -- declare ``freq_unit``
         -- and the document it refused now passes.
 
@@ -296,8 +293,7 @@ class TestA10TheUnitIsAskedBeforeTheFileIsOpened:
         assert ids(document) & MINE == frozenset()
         assert load(document, recording(tmp_path)) is not None
 
-    def test_neither_the_digest_nor_the_read_is_reached(self, tmp_path,
-                                                        monkeypatch):
+    def test_neither_the_digest_nor_the_read_is_reached(self, tmp_path, monkeypatch):
         """The phase property, instrumented on the READ rather than on a beam.
 
         A10 already ran before ``build_resources`` at ``ea4839b`` -- so an
@@ -313,8 +309,7 @@ class TestA10TheUnitIsAskedBeforeTheFileIsOpened:
         assert str(caught.value).startswith(A10_MESSAGE)
         assert spy.seen == []
 
-    def test_that_probe_can_still_see_a_file_being_read(self, tmp_path,
-                                                        monkeypatch):
+    def test_that_probe_can_still_see_a_file_being_read(self, tmp_path, monkeypatch):
         """ANTI-VACUITY for the probe above.  A spy that records nothing on a
         document that DOES read the recording is a green assertion measuring
         its own monkeypatch."""
@@ -333,8 +328,8 @@ class TestA10TheUnitIsAskedBeforeTheFileIsOpened:
         Kills: a check that reads ``observation.from_file`` and nothing else
         -- the shape every 3A task shipped."""
         document = preflight_document(
-            resources={"arrays": {"rec": {"file": {"path": "obs.hd5f",
-                                                   "format": "rhino_hdf5"}}}})
+            resources={"arrays": {"rec": {"file": {"path": "obs.hd5f", "format": "rhino_hdf5"}}}}
+        )
         finding = only(document, "A10")
         assert finding.where == "resources.arrays.rec"
         assert finding.message == A10_MESSAGE
@@ -347,10 +342,10 @@ class TestA10TheUnitIsAskedBeforeTheFileIsOpened:
 
         Kills: a section list that names ``observation`` and ``resources``."""
         document = preflight_document()
-        document["inference"]["twin"]["replace"] = {"gain": {"gain": {
-            "file": {"path": "obs.hd5f", "format": "rhino_hdf5"}}}}
-        assert only(document, "A10").where == \
-            "inference.twin.replace.gain.gain"
+        document["inference"]["twin"]["replace"] = {
+            "gain": {"gain": {"file": {"path": "obs.hd5f", "format": "rhino_hdf5"}}}
+        }
+        assert only(document, "A10").where == "inference.twin.replace.gain.gain"
 
     def test_an_unselected_variant_that_omits_freq_unit_is_reported(self):
         """S3 INVERTED (§0.3 D-23 / Plan 3C Task 0): the fault a user wrote
@@ -366,8 +361,12 @@ class TestA10TheUnitIsAskedBeforeTheFileIsOpened:
         that mutant is caught."""
         document = preflight_document(
             observation={**BASE_OBSERVATION},
-            variants={"recorded": {"observation": {"from_file": {
-                "format": "rhino_hdf5", "path": "obs.hd5f"}}}})
+            variants={
+                "recorded": {
+                    "observation": {"from_file": {"format": "rhino_hdf5", "path": "obs.hd5f"}}
+                }
+            },
+        )
         finding = only(document, "A10")
         assert finding.where == "variants.recorded.observation.from_file"
         assert finding.message == f"variants.recorded: {A10_MESSAGE}"
@@ -379,8 +378,12 @@ class TestA10TheUnitIsAskedBeforeTheFileIsOpened:
         the anti-vacuity read for the test above, on the same document."""
         document = preflight_document(
             observation={**BASE_OBSERVATION},
-            variants={"recorded": {"observation": {"from_file": {
-                "format": "rhino_hdf5", "path": "obs.hd5f"}}}})
+            variants={
+                "recorded": {
+                    "observation": {"from_file": {"format": "rhino_hdf5", "path": "obs.hd5f"}}
+                }
+            },
+        )
         finding = only(apply_variant(document, "recorded"), "A10")
         assert finding.where == "observation.from_file"
         assert finding.message == A10_MESSAGE
@@ -395,8 +398,14 @@ class TestA10TheUnitIsAskedBeforeTheFileIsOpened:
         ``observation.from_file``'s own read to every layer and never
         touches ``_a10_file_nodes``'s recursion."""
         document = preflight_document(
-            variants={"recorded": {"resources": {"arrays": {"rec": {
-                "file": {"path": "obs.hd5f", "format": "rhino_hdf5"}}}}}})
+            variants={
+                "recorded": {
+                    "resources": {
+                        "arrays": {"rec": {"file": {"path": "obs.hd5f", "format": "rhino_hdf5"}}}
+                    }
+                }
+            }
+        )
         finding = only(document, "A10")
         assert finding.where == "variants.recorded.resources.arrays.rec"
         assert finding.message == f"variants.recorded: {A10_MESSAGE}"
@@ -411,8 +420,14 @@ class TestA10TheUnitIsAskedBeforeTheFileIsOpened:
         above cannot see it, because a patch writing ``observation.from_file``
         carries no ``{file:}`` wrapper for the recursive walk to find."""
         document = preflight_document(
-            variants={"recorded": {"resources": {"arrays": {"rec": {
-                "file": {"path": "obs.hd5f", "format": "rhino_hdf5"}}}}}})
+            variants={
+                "recorded": {
+                    "resources": {
+                        "arrays": {"rec": {"file": {"path": "obs.hd5f", "format": "rhino_hdf5"}}}
+                    }
+                }
+            }
+        )
         finding = only(apply_variant(document, "recorded"), "A10")
         assert finding.where == "resources.arrays.rec"
 
@@ -422,8 +437,8 @@ class TestA10TheUnitIsAskedBeforeTheFileIsOpened:
         ``rhino_hdf5``'s, and ``files.py`` refuses it as an unknown key
         anywhere else."""
         document = preflight_document(
-            resources={"arrays": {"rec": {"file": {"path": "d.npy",
-                                                   "format": "npy"}}}})
+            resources={"arrays": {"rec": {"file": {"path": "d.npy", "format": "npy"}}}}
+        )
         assert "A10" not in ids(document)
 
     def test_a_from_file_of_another_format_stands_down(self):
@@ -484,8 +499,7 @@ class TestA45TheSwitchKeyNamesAKeyTheRunWrites:
         That naive gate is the one a reader writes from
         ``sections/switching.py``."""
         document = ingested_document()
-        document["model"]["noise_wave"] = noise_wave(
-            switch_key="receiver_input")
+        document["model"]["noise_wave"] = noise_wave(switch_key="receiver_input")
         assert "A45" not in ids(document)
 
     def test_the_message_lists_every_key_the_run_writes(self):
@@ -503,8 +517,12 @@ class TestA45TheSwitchKeyNamesAKeyTheRunWrites:
         document = switched_document(noise_wave(switch_key="my_switch"))
         document["observation"] = {
             **document["observation"],
-            "pointing": {"mode": "drift", "materialise": ["selfrot_deg"],
-                         "lst": {"mode": "uniform_turn"}}}
+            "pointing": {
+                "mode": "drift",
+                "materialise": ["selfrot_deg"],
+                "lst": {"mode": "uniform_turn"},
+            },
+        }
         assert only(document, "A45").message == (
             "model.noise_wave.switch_key: 'my_switch' is not a key this run "
             "writes into coords.extra, so the operator has no switch index to "
@@ -520,14 +538,21 @@ class TestA45TheSwitchKeyNamesAKeyTheRunWrites:
         document = switched_document(noise_wave(switch_key="my_switch"))
         document["observation"] = {
             **document["observation"],
-            "extra": {"my_switch": {"zeros": ["n_time"]}}}
+            "extra": {"my_switch": {"zeros": ["n_time"]}},
+        }
         assert "A45" not in ids(document)
 
-    @pytest.mark.parametrize(("pointing", "key"), [
-        ({"mode": "drift", "materialise": ["selfrot_deg"]}, "selfrot_deg"),
-        ({"mode": "drift", "materialise": ["pointing"],
-          "lst": {"mode": "uniform_turn"}}, "lst_deg"),
-    ], ids=["materialise-selfrot", "lst"])
+    @pytest.mark.parametrize(
+        ("pointing", "key"),
+        [
+            ({"mode": "drift", "materialise": ["selfrot_deg"]}, "selfrot_deg"),
+            (
+                {"mode": "drift", "materialise": ["pointing"], "lst": {"mode": "uniform_turn"}},
+                "lst_deg",
+            ),
+        ],
+        ids=["materialise-selfrot", "lst"],
+    )
     def test_a_key_pointing_writes_is_accepted(self, pointing, key):
         """S3's named twin: ``pointing.extra`` against ``observation.extra``.
 
@@ -537,8 +562,7 @@ class TestA45TheSwitchKeyNamesAKeyTheRunWrites:
 
         Kills exactly that reading -- which is what §6's one-liner invites."""
         document = switched_document(noise_wave(switch_key=key))
-        document["observation"] = {**document["observation"],
-                                   "pointing": pointing}
+        document["observation"] = {**document["observation"], "pointing": pointing}
         assert "A45" not in ids(document)
 
     def test_the_python_spelling_is_read_too(self):
@@ -548,8 +572,7 @@ class TestA45TheSwitchKeyNamesAKeyTheRunWrites:
         Measured, ``python: 'rheplicant.radio:NoiseWaveOperator'`` builds the
         same class at the same node, and Plan 3A's tests already exercise the
         spelling.  The class is resolved, never the token."""
-        document = switched_document(
-            noise_wave(python=NOISE_WAVE_CLASS, switch_key="my_switch"))
+        document = switched_document(noise_wave(python=NOISE_WAVE_CLASS, switch_key="my_switch"))
         assert only(document, "A45").where == "model.noise_wave.switch_key"
 
     def test_a_class_without_the_field_is_not_asked(self):
@@ -560,9 +583,14 @@ class TestA45TheSwitchKeyNamesAKeyTheRunWrites:
         "is not a key coords.extra will carry" about it is the vaguer of the
         two sentences (§2.3)."""
         document = preflight_document(
-            model={**BASE_MODEL, "gain": {
-                "gain": {"value": 1.0, "unit": "dimensionless"},
-                "switch_key": "my_switch"}})
+            model={
+                **BASE_MODEL,
+                "gain": {
+                    "gain": {"value": 1.0, "unit": "dimensionless"},
+                    "switch_key": "my_switch",
+                },
+            }
+        )
         assert "A45" not in ids(document)
 
     def test_the_selector_field_is_not_a_document_key(self):
@@ -574,8 +602,7 @@ class TestA45TheSwitchKeyNamesAKeyTheRunWrites:
         reach it."""
         from rheplicant.core.combinators import SelectOperator
 
-        registered = {cls for classes in operator_table().values()
-                      for cls in classes}
+        registered = {cls for classes in operator_table().values() for cls in classes}
         assert SelectOperator not in registered
         assert _a45_carries_switch_key(SelectOperator)
 
@@ -595,8 +622,7 @@ class TestA45TheSwitchKeyNamesAKeyTheRunWrites:
 
         with pytest.raises(ConfigError) as caught:
             load_document(document)
-        assert str(caught.value) == \
-            "observation.extra: is a mapping; got list."
+        assert str(caught.value) == "observation.extra: is a mapping; got list."
 
     def test_a_pipeline_models_twin_block_is_not_asked(self):
         """S4: do not pre-empt.  ``build_fit_twin`` refuses the WHOLE
@@ -610,11 +636,19 @@ class TestA45TheSwitchKeyNamesAKeyTheRunWrites:
         for such a model, so the MODEL half needs no guard and this is the
         only place the question arises.)"""
         document = preflight_document()
-        document["model"] = {"kind": "pipeline", "stages": [
-            {"name": "gain", "type": "GainOperator",
-             "gain": {"value": 1.1, "unit": "dimensionless"}}]}
-        document["inference"]["twin"]["replace"] = {"noise_wave": {
-            "type": "NoiseWaveOperator", **noise_wave(switch_key="nope")}}
+        document["model"] = {
+            "kind": "pipeline",
+            "stages": [
+                {
+                    "name": "gain",
+                    "type": "GainOperator",
+                    "gain": {"value": 1.1, "unit": "dimensionless"},
+                }
+            ],
+        }
+        document["inference"]["twin"]["replace"] = {
+            "noise_wave": {"type": "NoiseWaveOperator", **noise_wave(switch_key="nope")}
+        }
         assert "A45" not in ids(document)
         from rheplicant.config import load_document
 
@@ -632,6 +666,7 @@ class TestA45TheSwitchKeyNamesAKeyTheRunWrites:
         undefendable-guard note: without the guard, ``field_specs`` raises
         ``TypeError`` here, and a raise inside a check costs the document
         every other finding (§2.3's TRAP)."""
+
         class NotADataclass:
             switch_key = "receiver_input"
 
@@ -646,13 +681,15 @@ class TestA45TheSwitchKeyNamesAKeyTheRunWrites:
 
         Kills: a walk over ``document['model']`` alone."""
         document = switched_document()
-        document["inference"]["twin"]["replace"] = {"noise_wave": {
-            "type": "NoiseWaveOperator", **noise_wave(switch_key="nope")}}
+        document["inference"]["twin"]["replace"] = {
+            "noise_wave": {"type": "NoiseWaveOperator", **noise_wave(switch_key="nope")}
+        }
         finding = only(document, "A45")
         assert finding.where == "inference.twin.replace.noise_wave.switch_key"
         assert finding.message.startswith(
             "inference.twin.replace.noise_wave.switch_key: 'nope' is not a "
-            "key this run writes into coords.extra")
+            "key this run writes into coords.extra"
+        )
 
     def test_a_compose_stage_is_walked(self):
         """A further twin, found rather than given: ``_t4_entries`` expands a
@@ -661,12 +698,13 @@ class TestA45TheSwitchKeyNamesAKeyTheRunWrites:
         one is modelled on -- records that shape as a silent false negative.
 
         Kills: reading the node spec and never its stages."""
-        document = switched_document({
-            "compose": "cascade",
-            "stages": [noise_wave(type="NoiseWaveOperator",
-                                  switch_key="my_switch")]})
-        assert only(document, "A45").where == \
-            "model.noise_wave.stages[0].switch_key"
+        document = switched_document(
+            {
+                "compose": "cascade",
+                "stages": [noise_wave(type="NoiseWaveOperator", switch_key="my_switch")],
+            }
+        )
+        assert only(document, "A45").where == "model.noise_wave.stages[0].switch_key"
 
     def test_an_unselected_variant_that_renames_the_key_is_reported(self):
         """A45's equivalent of A10's unselected-variant test (§0.3 D-23 /
@@ -678,11 +716,10 @@ class TestA45TheSwitchKeyNamesAKeyTheRunWrites:
         document = switched_document()
         document["variants"] = {
             **document.get("variants", {}),
-            "other_switch": {"model": {"noise_wave": {
-                "switch_key": "my_switch"}}}}
+            "other_switch": {"model": {"noise_wave": {"switch_key": "my_switch"}}},
+        }
         finding = only(document, "A45")
-        assert finding.where == \
-            "variants.other_switch.model.noise_wave.switch_key"
+        assert finding.where == "variants.other_switch.model.noise_wave.switch_key"
         assert finding.message == (
             "variants.other_switch: model.noise_wave.switch_key: "
             "'my_switch' is not a key this run writes into coords.extra, so "
@@ -701,10 +738,12 @@ class TestA45TheSwitchKeyNamesAKeyTheRunWrites:
         document = switched_document()
         document["variants"] = {
             **document.get("variants", {}),
-            "other_switch": {"model": {"noise_wave": {
-                "switch_key": "my_switch"}}}}
-        assert only(apply_variant(document, "other_switch"), "A45").where == \
-            "model.noise_wave.switch_key"
+            "other_switch": {"model": {"noise_wave": {"switch_key": "my_switch"}}},
+        }
+        assert (
+            only(apply_variant(document, "other_switch"), "A45").where
+            == "model.noise_wave.switch_key"
+        )
 
     def test_a_non_string_key_stands_down(self):
         """S4: do not pre-empt.  ``deliver``'s ``static_str`` rule refuses a
@@ -718,9 +757,7 @@ class TestA45TheSwitchKeyNamesAKeyTheRunWrites:
         measured, A45 loses to an unreadable beam today.
 
         Kills: leaving the check anywhere after ``build_resources``."""
-        document = switched_document(
-            noise_wave(switch_key="my_switch"),
-            resources=UNREADABLE_BEAM)
+        document = switched_document(noise_wave(switch_key="my_switch"), resources=UNREADABLE_BEAM)
         assert "A45" in {one.check for one in refusals(document)}
         from rheplicant.config import load_document
 
@@ -736,9 +773,11 @@ class TestA46Leg2TheColumnALabelHas:
         inside the reader -- ``DataIngestionError``, behind the whole
         recording, naming no key of the document."""
         document = ingested_document(
-            loads={"internal_load": {"from": "thermistors",
-                                     "label": "internal_load"},
-                   "heated_load": {"from": "thermistors", "label": "ghost"}})
+            loads={
+                "internal_load": {"from": "thermistors", "label": "internal_load"},
+                "heated_load": {"from": "thermistors", "label": "ghost"},
+            }
+        )
         finding = only(document, "A46")
         assert finding.severity == REFUSE
         assert finding.where == "model.cal_loads.heated_load"
@@ -750,9 +789,11 @@ class TestA46Leg2TheColumnALabelHas:
         reused: that refusal reads ``obs.thermistor_k`` and quotes the file's
         own contents, neither of which exists at P-1."""
         document = ingested_document(
-            loads={"internal_load": {"from": "thermistors",
-                                     "label": "internal_load"},
-                   "heated_load": {"from": "thermistors", "label": "ghost"}})
+            loads={
+                "internal_load": {"from": "thermistors", "label": "internal_load"},
+                "heated_load": {"from": "thermistors", "label": "ghost"},
+            }
+        )
         assert only(document, "A46").message == (
             "model.cal_loads.heated_load: label: 'ghost' has no entry in "
             "observation.from_file.thermistor_columns, so this load's t_load "
@@ -774,10 +815,11 @@ class TestA46Leg2TheColumnALabelHas:
         message naming no document key.  A key-presence gate says nothing
         about it."""
         document = ingested_document(columns=None)
-        found = [one for one in preflight(document).findings
-                 if one.check == "A46"]
+        found = [one for one in preflight(document).findings if one.check == "A46"]
         assert {one.where for one in found} == {
-            "model.cal_loads.internal_load", "model.cal_loads.heated_load"}
+            "model.cal_loads.internal_load",
+            "model.cal_loads.heated_load",
+        }
 
     def test_it_stands_down_when_there_is_no_recording(self, tmp_path):
         """S4's stand-down: a document wrong in this check's way AND wrong in
@@ -788,12 +830,18 @@ class TestA46Leg2TheColumnALabelHas:
         sentence that names the route to fix, which this check must not
         pre-empt."""
         document = preflight_document(
-            model={**BASE_MODEL, "cal_loads": {
-                "ambient": {"from": "thermistors", "label": "ambient"},
-                "hot": {"from": "thermistors", "label": "hot"}}},
-            observation={**BASE_OBSERVATION,
-                         "switching": {"mode": "cycle",
-                                       "order": list(SWITCHED), "dwell": 4}})
+            model={
+                **BASE_MODEL,
+                "cal_loads": {
+                    "ambient": {"from": "thermistors", "label": "ambient"},
+                    "hot": {"from": "thermistors", "label": "hot"},
+                },
+            },
+            observation={
+                **BASE_OBSERVATION,
+                "switching": {"mode": "cycle", "order": list(SWITCHED), "dwell": 4},
+            },
+        )
         assert "A46" not in ids(document)
         from rheplicant.config import load_document
 
@@ -813,10 +861,11 @@ class TestA46Leg2TheColumnALabelHas:
         position the other one's physical temperature; that is a real defect
         and a different check's.)"""
         document = ingested_document(
-            loads={"internal_load": {"from": "thermistors",
-                                     "label": "heated_load"},
-                   "heated_load": {"from": "thermistors",
-                                   "label": "internal_load"}})
+            loads={
+                "internal_load": {"from": "thermistors", "label": "heated_load"},
+                "heated_load": {"from": "thermistors", "label": "internal_load"},
+            }
+        )
         assert "A46" not in ids(document)
         # BOTH halves of §0.3 E.9 ruling 3.  "earns no A46" alone would stay
         # green the day some other check started refusing a document that
@@ -827,8 +876,11 @@ class TestA46Leg2TheColumnALabelHas:
         """Kills: a check that reads every ``model.cal_loads`` entry.  A load
         whose ``t_load`` is a value node never touches the thermistor log."""
         document = ingested_document(
-            loads={"internal_load": {"t_load": {"value": 300.0, "unit": "K"}},
-                   "heated_load": {"t_load": {"value": 350.0, "unit": "K"}}})
+            loads={
+                "internal_load": {"t_load": {"value": 300.0, "unit": "K"}},
+                "heated_load": {"t_load": {"value": 350.0, "unit": "K"}},
+            }
+        )
         assert "A46" not in ids(document)
 
     def test_the_advice_applied_leaves_the_document_loading(self, tmp_path):
@@ -839,13 +891,11 @@ class TestA46Leg2TheColumnALabelHas:
         document loads."""
         document = ingested_document(columns=None)
         assert "A46" in ids(document)
-        document["observation"]["from_file"]["thermistor_columns"] = \
-            dict(WORKING_COLUMNS)
+        document["observation"]["from_file"]["thermistor_columns"] = dict(WORKING_COLUMNS)
         assert "A46" not in ids(document)
         assert load(document, recording(tmp_path)) is not None
 
-    def test_advice_that_names_only_the_loads_is_still_refused(self,
-                                                              tmp_path):
+    def test_advice_that_names_only_the_loads_is_still_refused(self, tmp_path):
         """Why the advice says "the antenna included": a column map covering
         ``switching.order[1:]`` and no more satisfies THIS check and is still
         refused by the reader, which demands a column for every label in the
@@ -854,13 +904,12 @@ class TestA46Leg2TheColumnALabelHas:
         Kills: a message advising ``switching.order[1:]``, which would be
         advice that cannot be followed."""
         document = ingested_document(
-            columns={label: index for index, label
-                     in enumerate(RECORDED_ORDER[1:])})
+            columns={label: index for index, label in enumerate(RECORDED_ORDER[1:])}
+        )
         assert "A46" not in ids(document)
         with pytest.raises(ConfigError) as caught:
             load(document, recording(tmp_path))
-        assert "thermistor_columns has no entry for ['antenna']" in \
-            str(caught.value)
+        assert "thermistor_columns has no entry for ['antenna']" in str(caught.value)
 
     def test_a_recording_of_another_format_stands_down(self, tmp_path):
         """S4: do not pre-empt.  ``thermistor_columns`` is a ``rhino_hdf5``
@@ -903,9 +952,12 @@ class TestA46Leg2TheColumnALabelHas:
 
         Kills: dropping the empty-``label:`` skip -- measured, that mutant
         makes leg 2 fire on ``label: ""`` and survives the suite."""
-        document = ingested_document(loads={
-            "internal_load": {"from": "thermistors", "label": ""},
-            "heated_load": {"from": "thermistors", "label": "heated_load"}})
+        document = ingested_document(
+            loads={
+                "internal_load": {"from": "thermistors", "label": ""},
+                "heated_load": {"from": "thermistors", "label": "heated_load"},
+            }
+        )
         assert "A46" not in ids(document)
         with pytest.raises(ConfigError) as caught:
             load(document, recording(tmp_path))
@@ -918,15 +970,15 @@ class TestA46Leg2TheColumnALabelHas:
         """§0.3 E.10.  Measured, ``replace: {cal_loads: {from: thermistors,
         label: ghost}}`` reaches ``cal_load_operators`` and its
         ``DataIngestionError``."""
-        document = ingested_document(inference={
-            "twin": {"replace": {"cal_loads": {"from": "thermistors",
-                                               "label": "ghost"}}},
-            "parameters": {"g": {"init": 1.0, "into": "gain.gain"}},
-            "observed": {"from": "simulation"},
-            "noise": {"kind": "homoscedastic",
-                      "sigma": {"value": 1.0, "unit": "K"}}})
-        assert only(document, "A46").where == \
-            "inference.twin.replace.cal_loads"
+        document = ingested_document(
+            inference={
+                "twin": {"replace": {"cal_loads": {"from": "thermistors", "label": "ghost"}}},
+                "parameters": {"g": {"init": 1.0, "into": "gain.gain"}},
+                "observed": {"from": "simulation"},
+                "noise": {"kind": "homoscedastic", "sigma": {"value": 1.0, "unit": "K"}},
+            }
+        )
+        assert only(document, "A46").where == "inference.twin.replace.cal_loads"
 
     def test_an_unselected_variant_that_drops_a_column_is_reported(self):
         """A46's equivalent of A10's unselected-variant test (§0.3 D-23 /
@@ -934,8 +986,11 @@ class TestA46Leg2TheColumnALabelHas:
 
         Kills: wiring A10 and A45 to the walk and leaving A46 unwalked."""
         document = ingested_document()
-        document["variants"] = {"partial": {"observation": {"from_file": {
-            "thermistor_columns": {"~heated_load": None}}}}}
+        document["variants"] = {
+            "partial": {
+                "observation": {"from_file": {"thermistor_columns": {"~heated_load": None}}}
+            }
+        }
         finding = only(document, "A46")
         assert finding.where == "variants.partial.model.cal_loads.heated_load"
         assert finding.message == (
@@ -955,16 +1010,19 @@ class TestA46Leg2TheColumnALabelHas:
         for the route a user actually takes, unprefixed -- the
         anti-vacuity read for the test above."""
         document = ingested_document()
-        document["variants"] = {"partial": {"observation": {"from_file": {
-            "thermistor_columns": {"~heated_load": None}}}}}
-        assert only(apply_variant(document, "partial"), "A46").where == \
-            "model.cal_loads.heated_load"
+        document["variants"] = {
+            "partial": {
+                "observation": {"from_file": {"thermistor_columns": {"~heated_load": None}}}
+            }
+        }
+        assert (
+            only(apply_variant(document, "partial"), "A46").where == "model.cal_loads.heated_load"
+        )
 
     def test_the_beam_does_not_win(self, tmp_path):
         """The standard phase test: measured, A46 leg 2 loses to an unreadable
         beam today, because ``build_resources`` runs before ``build_model``."""
-        document = ingested_document(columns=None,
-                                     resources=copy.deepcopy(UNREADABLE_BEAM))
+        document = ingested_document(columns=None, resources=copy.deepcopy(UNREADABLE_BEAM))
         with pytest.raises(ConfigError) as caught:
             load(document, recording(tmp_path))
         assert "no_such_beam.npy" not in str(caught.value)
@@ -982,9 +1040,8 @@ class TestA46Leg3TheColumnTwoLoadsShare:
         the column the reader must go and change."""
         other = 1 - shared
         return ingested_document(
-            columns={"antenna": other, "internal_load": shared,
-                     "heated_load": shared},
-            **patch)
+            columns={"antenna": other, "internal_load": shared, "heated_load": shared}, **patch
+        )
 
     def test_two_loads_on_one_column_earn_a_warning(self):
         """Kills: not shipping leg 3, and shipping it as a REFUSAL.
@@ -1023,13 +1080,13 @@ class TestA46Leg3TheColumnTwoLoadsShare:
         is FORCED and ``radio/rhino.py`` documents it as legal.  A leg 3 over
         the whole map warns on the document the package ships tests for."""
         document = ingested_document()
-        assert document["observation"]["from_file"]["thermistor_columns"][
-            "antenna"] == document["observation"]["from_file"][
-            "thermistor_columns"]["internal_load"]
+        assert (
+            document["observation"]["from_file"]["thermistor_columns"]["antenna"]
+            == document["observation"]["from_file"]["thermistor_columns"]["internal_load"]
+        )
         assert ids(document) & MINE == frozenset()
 
-    def test_the_warning_is_said_out_loud_when_the_document_loads(
-            self, tmp_path):
+    def test_the_warning_is_said_out_loud_when_the_document_loads(self, tmp_path):
         """Kills: a WARN that never reaches a user.  ``ids()`` cannot express
         this -- it holds warnings too -- so the assertion is on what
         ``load_document`` actually emits."""
@@ -1048,10 +1105,11 @@ class TestA46Leg3TheColumnTwoLoadsShare:
         CONTAINS A46 here, which is exactly why this test drives
         ``load_document`` instead."""
         document = self._sharing(
-            loads={"wrong_key": {"from": "thermistors",
-                                 "label": "internal_load"},
-                   "heated_load": {"from": "thermistors",
-                                   "label": "heated_load"}})
+            loads={
+                "wrong_key": {"from": "thermistors", "label": "internal_load"},
+                "heated_load": {"from": "thermistors", "label": "heated_load"},
+            }
+        )
         assert "A46" in ids(document)
         with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter("always")
@@ -1073,15 +1131,17 @@ class TestA46Leg3TheColumnTwoLoadsShare:
         that mutant warns on this document and survives the suite."""
         document = ingested_document(
             columns={"antenna": 1, "internal_load": 0, "heated_load": 0},
-            loads={"internal_load": {"from": "thermistors",
-                                     "label": "internal_load"},
-                   "heated_load": {"t_load": {"value": 350.0, "unit": "K"}}},
-            inference={"twin": {"replace": {"cal_loads": {
-                "from": "thermistors", "label": "heated_load"}}},
+            loads={
+                "internal_load": {"from": "thermistors", "label": "internal_load"},
+                "heated_load": {"t_load": {"value": 350.0, "unit": "K"}},
+            },
+            inference={
+                "twin": {"replace": {"cal_loads": {"from": "thermistors", "label": "heated_load"}}},
                 "parameters": {"g": {"init": 1.0, "into": "gain.gain"}},
                 "observed": {"from": "simulation"},
-                "noise": {"kind": "homoscedastic",
-                          "sigma": {"value": 1.0, "unit": "K"}}})
+                "noise": {"kind": "homoscedastic", "sigma": {"value": 1.0, "unit": "K"}},
+            },
+        )
         assert "A46" not in ids(document)
 
     def test_a_boolean_column_is_not_a_column(self):
@@ -1098,7 +1158,8 @@ class TestA46Leg3TheColumnTwoLoadsShare:
         Kills: dropping the clause -- measured, that mutant warns on this
         document and survives the suite."""
         document = ingested_document(
-            columns={"antenna": 0, "internal_load": True, "heated_load": 1})
+            columns={"antenna": 0, "internal_load": True, "heated_load": 1}
+        )
         assert "A46" not in ids(document)
 
     def test_a_load_sharing_with_the_antenna_alone_is_silent(self):
@@ -1107,9 +1168,11 @@ class TestA46Leg3TheColumnTwoLoadsShare:
         collision."""
         document = ingested_document(
             columns={"antenna": 0, "internal_load": 0, "heated_load": 1},
-            loads={"internal_load": {"from": "thermistors",
-                                     "label": "internal_load"},
-                   "heated_load": {"t_load": {"value": 350.0, "unit": "K"}}})
+            loads={
+                "internal_load": {"from": "thermistors", "label": "internal_load"},
+                "heated_load": {"t_load": {"value": 350.0, "unit": "K"}},
+            },
+        )
         assert "A46" not in ids(document)
 
 
@@ -1133,20 +1196,24 @@ class TestTheLayerWalkItself:
         default) and an ``unrelated`` one added here, neither of which
         touches ``observation.from_file``."""
         document = preflight_document(
-            observation={**BASE_OBSERVATION, "from_file": {
-                "format": "rhino_hdf5", "path": "obs.hd5f"}},
-            variants={"unrelated": {"model": {"gain": {"gain": {
-                "value": 2.0, "unit": "dimensionless"}}}}})
+            observation={
+                **BASE_OBSERVATION,
+                "from_file": {"format": "rhino_hdf5", "path": "obs.hd5f"},
+            },
+            variants={
+                "unrelated": {"model": {"gain": {"gain": {"value": 2.0, "unit": "dimensionless"}}}}
+            },
+        )
         assert len(document["variants"]) >= 2, (
             "this test's point is a base fault surviving into MULTIPLE "
             "layers unchanged; one variant would not distinguish "
-            "de-duplication from a walk that only ever looked at the base")
+            "de-duplication from a walk that only ever looked at the base"
+        )
         finding = only(document, "A10")
         assert finding.where == "observation.from_file"
         assert finding.message == A10_MESSAGE
 
-    def test_a_variant_that_breaks_the_rule_DIFFERENTLY_is_still_reported(
-            self):
+    def test_a_variant_that_breaks_the_rule_DIFFERENTLY_is_still_reported(self):
         """The de-duplication key is the WHOLE ``Finding``, not its
         ``where``.  A variant that rebinds the SAME document path to a
         DIFFERENT bad value is a second violation, not a repeat of the
@@ -1159,12 +1226,13 @@ class TestTheLayerWalkItself:
         document = switched_document(noise_wave(switch_key="bad_key_1"))
         document["variants"] = {
             **document.get("variants", {}),
-            "other_key": {"model": {"noise_wave": {
-                "switch_key": "bad_key_2"}}}}
+            "other_key": {"model": {"noise_wave": {"switch_key": "bad_key_2"}}},
+        }
         found = [one for one in findings(document) if one.check == "A45"]
         assert {one.where for one in found} == {
             "model.noise_wave.switch_key",
-            "variants.other_key.model.noise_wave.switch_key"}
+            "variants.other_key.model.noise_wave.switch_key",
+        }
         messages = {one.message for one in found}
         assert any("'bad_key_1'" in message for message in messages)
         assert any("'bad_key_2'" in message for message in messages)
@@ -1193,15 +1261,15 @@ class TestTheLayerWalkItself:
         document = preflight_document(
             observation={**BASE_OBSERVATION},
             variants={
-                "v1": {"observation": {"from_file": {
-                    "format": "rhino_hdf5", "path": "obs.hd5f"}}},
-                "v2": {"observation": {"from_file": {
-                    "format": "rhino_hdf5", "path": "obs.hd5f"}}},
-            })
+                "v1": {"observation": {"from_file": {"format": "rhino_hdf5", "path": "obs.hd5f"}}},
+                "v2": {"observation": {"from_file": {"format": "rhino_hdf5", "path": "obs.hd5f"}}},
+            },
+        )
         found = [one for one in findings(document) if one.check == "A10"]
         assert {one.where for one in found} == {
             "variants.v1.observation.from_file",
-            "variants.v2.observation.from_file"}
+            "variants.v2.observation.from_file",
+        }
 
     def test_a_non_identifier_variant_name_does_not_kill_the_pass(self):
         """A variant name need not be an identifier -- neither
@@ -1218,8 +1286,12 @@ class TestTheLayerWalkItself:
         whole pass and hide every other finding."""
         document = preflight_document(
             observation={**BASE_OBSERVATION},
-            variants={"bad-name": {"observation": {"from_file": {
-                "format": "rhino_hdf5", "path": "obs.hd5f"}}}})
+            variants={
+                "bad-name": {
+                    "observation": {"from_file": {"format": "rhino_hdf5", "path": "obs.hd5f"}}
+                }
+            },
+        )
         finding = only(document, "A10")
         assert finding.where == "variants"
         assert finding.message == f"variants.bad-name: {A10_MESSAGE}"
@@ -1242,8 +1314,10 @@ class TestTheLayerWalkItself:
         which is not a document path"* -- OUTSIDE the per-check ``try``,
         aborting the whole pass rather than failing only this one."""
         document = preflight_document(
-            resources={"arrays": {"my-array": {"file": {
-                "format": "rhino_hdf5", "path": "obs.hd5f"}}}})
+            resources={
+                "arrays": {"my-array": {"file": {"format": "rhino_hdf5", "path": "obs.hd5f"}}}
+            }
+        )
         finding = only(document, "A10")
         assert finding.where == "resources.arrays"
 
@@ -1263,8 +1337,7 @@ class TestTheLayerWalkItself:
         column-matched labels, so the only A46 finding on this document is
         the one ``a-load``/``'ghost'`` earns."""
         document = ingested_document()
-        document["model"]["cal_loads"]["a-load"] = {
-            "from": "thermistors", "label": "ghost"}
+        document["model"]["cal_loads"]["a-load"] = {"from": "thermistors", "label": "ghost"}
         finding = only(document, "A46")
         assert finding.where == "model.cal_loads"
 
@@ -1294,22 +1367,38 @@ class TestTheLayerWalkItself:
         so a future change to either is visible against a pinned baseline
         rather than silent."""
         broken_base = preflight_document(
-            resources={"arrays": {"a-one": {"file": {
-                "format": "rhino_hdf5", "path": "obs.hd5f"}}}},
-            variants={"v": {"resources": {"arrays": {"a-two": {"file": {
-                "format": "rhino_hdf5", "path": "obs.hd5f"}}}}}})
+            resources={"arrays": {"a-one": {"file": {"format": "rhino_hdf5", "path": "obs.hd5f"}}}},
+            variants={
+                "v": {
+                    "resources": {
+                        "arrays": {"a-two": {"file": {"format": "rhino_hdf5", "path": "obs.hd5f"}}}
+                    }
+                }
+            },
+        )
         found = [one for one in findings(broken_base) if one.check == "A10"]
         assert {one.where for one in found} == {"resources.arrays"}, (
             "the variant's own a-two fault is swallowed by the base's "
             "a-one finding -- both collapse to the identical unprefixed "
-            "Finding because A10_MESSAGE carries no path")
+            "Finding because A10_MESSAGE carries no path"
+        )
 
         fixed_base = preflight_document(
-            resources={"arrays": {"a-one": {"file": {
-                "format": "rhino_hdf5", "path": "obs.hd5f",
-                "freq_unit": "MHz"}}}},
-            variants={"v": {"resources": {"arrays": {"a-two": {"file": {
-                "format": "rhino_hdf5", "path": "obs.hd5f"}}}}}})
+            resources={
+                "arrays": {
+                    "a-one": {
+                        "file": {"format": "rhino_hdf5", "path": "obs.hd5f", "freq_unit": "MHz"}
+                    }
+                }
+            },
+            variants={
+                "v": {
+                    "resources": {
+                        "arrays": {"a-two": {"file": {"format": "rhino_hdf5", "path": "obs.hd5f"}}}
+                    }
+                }
+            },
+        )
         finding = only(fixed_base, "A10")
         assert finding.where == "variants.v.resources.arrays"
 
@@ -1336,16 +1425,20 @@ class TestTheLayerWalkItself:
         uses, but both broken arrays live in the ONE variant here rather
         than split across base and variant."""
         document = preflight_document(
-            variants={"v": {"resources": {"arrays": {
-                "a-one": {"file": {"format": "rhino_hdf5",
-                                   "path": "obs.hd5f"}},
-                "a-two": {"file": {"format": "rhino_hdf5",
-                                   "path": "obs.hd5f"}},
-            }}}})
+            variants={
+                "v": {
+                    "resources": {
+                        "arrays": {
+                            "a-one": {"file": {"format": "rhino_hdf5", "path": "obs.hd5f"}},
+                            "a-two": {"file": {"format": "rhino_hdf5", "path": "obs.hd5f"}},
+                        }
+                    }
+                }
+            }
+        )
         found = [one for one in findings(document) if one.check == "A10"]
         assert len(found) == 2
-        assert {one.where for one in found} == {
-            "variants.v.resources.arrays"}
+        assert {one.where for one in found} == {"variants.v.resources.arrays"}
         assert {one.message for one in found} == {f"variants.v: {A10_MESSAGE}"}
 
     #: One base document rich enough for all three checks to have something
@@ -1357,44 +1450,66 @@ class TestTheLayerWalkItself:
     @staticmethod
     def _hostile_document():
         return ingested_document(
-            loads={"internal_load": {"from": "thermistors",
-                                     "label": "internal_load"},
-                   "heated_load": {"from": "thermistors",
-                                   "label": "heated_load"}},
+            loads={
+                "internal_load": {"from": "thermistors", "label": "internal_load"},
+                "heated_load": {"from": "thermistors", "label": "heated_load"},
+            },
             inference={
-                "twin": {"replace": {"noise_wave": {
-                    "type": "NoiseWaveOperator",
-                    **noise_wave(switch_key="receiver_input")}}},
+                "twin": {
+                    "replace": {
+                        "noise_wave": {
+                            "type": "NoiseWaveOperator",
+                            **noise_wave(switch_key="receiver_input"),
+                        }
+                    }
+                },
                 "parameters": {"g": {"init": 1.0, "into": "gain.gain"}},
                 "observed": {"from": "simulation"},
-                "noise": {"kind": "homoscedastic",
-                          "sigma": {"value": 1.0, "unit": "K"}}})
+                "noise": {"kind": "homoscedastic", "sigma": {"value": 1.0, "unit": "K"}},
+            },
+        )
 
-    @pytest.mark.parametrize(("patch",), [
-        ({"~observation": None},),
-        ({"~model": None},),
-        ({"~inference": None},),
-        ({"model": ["oops"]},),
-        ({"inference": "oops"},),
-        ({"observation": 3},),
-        ({"observation": {"extra": ["a"]}},),
-        ({"model": {"kind": "pipeline"}},),
-        ({"inference": {"twin": {"replace": "oops"}}},),
-        ({"observation": {"from_file": "oops"}},),
-        ({"observation": {"from_file": {
-            "thermistor_columns": [0, 1]}}},),
-        ({"model": {"cal_loads": {"internal_load": {"label": 3}}}},),
-        ({"inference": {"twin": {"replace": {
-            "cal_loads": {"from": "thermistors", "label": 3}}}}},),
-        ({"resources": ["oops"]},),
-    ], ids=[
-        "delete-observation", "delete-model", "delete-inference",
-        "model-not-a-mapping", "inference-not-a-mapping",
-        "observation-not-a-mapping", "observation-extra-a-list",
-        "model-kind-pipeline", "scalar-twin-replace", "scalar-from-file",
-        "thermistor-columns-a-list", "non-string-label-model-route",
-        "non-string-label-replace-route", "resources-a-list",
-    ])
+    @pytest.mark.parametrize(
+        ("patch",),
+        [
+            ({"~observation": None},),
+            ({"~model": None},),
+            ({"~inference": None},),
+            ({"model": ["oops"]},),
+            ({"inference": "oops"},),
+            ({"observation": 3},),
+            ({"observation": {"extra": ["a"]}},),
+            ({"model": {"kind": "pipeline"}},),
+            ({"inference": {"twin": {"replace": "oops"}}},),
+            ({"observation": {"from_file": "oops"}},),
+            ({"observation": {"from_file": {"thermistor_columns": [0, 1]}}},),
+            ({"model": {"cal_loads": {"internal_load": {"label": 3}}}},),
+            (
+                {
+                    "inference": {
+                        "twin": {"replace": {"cal_loads": {"from": "thermistors", "label": 3}}}
+                    }
+                },
+            ),
+            ({"resources": ["oops"]},),
+        ],
+        ids=[
+            "delete-observation",
+            "delete-model",
+            "delete-inference",
+            "model-not-a-mapping",
+            "inference-not-a-mapping",
+            "observation-not-a-mapping",
+            "observation-extra-a-list",
+            "model-kind-pipeline",
+            "scalar-twin-replace",
+            "scalar-from-file",
+            "thermistor-columns-a-list",
+            "non-string-label-model-route",
+            "non-string-label-replace-route",
+            "resources-a-list",
+        ],
+    )
     def test_a_hostile_variant_layer_earns_no_raise(self, patch):
         """A merged variant layer is not ``_structural``-validated -- that
         guard runs once, on the top-level document, before layering -- so
@@ -1415,8 +1530,7 @@ class TestTheLayerWalkItself:
         # False.
         findings(document)
 
-    def test_the_variants_own_advice_applied_clears_a10_and_the_variant_loads(
-            self):
+    def test_the_variants_own_advice_applied_clears_a10_and_the_variant_loads(self):
         """R4 for A10: apply the refusal's own advice -- declare
         ``freq_unit:`` -- INSIDE the variant patch that broke it.  The id
         disappears (both unselected, which is Task 0's own new read, and
@@ -1426,23 +1540,35 @@ class TestTheLayerWalkItself:
 
         broken = preflight_document(
             observation={**BASE_OBSERVATION},
-            variants={"recorded": {"observation": {"from_file": {
-                "format": "rhino_hdf5", "path": "obs.hd5f"}}}})
+            variants={
+                "recorded": {
+                    "observation": {"from_file": {"format": "rhino_hdf5", "path": "obs.hd5f"}}
+                }
+            },
+        )
         assert "A10" in ids(broken)  # Task 0: reported unselected, prefixed
 
         fixed = preflight_document(
             observation={**BASE_OBSERVATION},
-            variants={"recorded": {"observation": {"from_file": {
-                "format": "rhino_hdf5", "path": "obs.hd5f",
-                "freq_unit": "MHz"}}}})
+            variants={
+                "recorded": {
+                    "observation": {
+                        "from_file": {
+                            "format": "rhino_hdf5",
+                            "path": "obs.hd5f",
+                            "freq_unit": "MHz",
+                        }
+                    }
+                }
+            },
+        )
         assert "A10" not in ids(fixed)
         # A LATER reason -- no file at 'obs.hd5f' -- not A10's.
         with pytest.raises(ConfigError) as caught:
             load_document(fixed, variant="recorded")
         assert "freq_unit" not in str(caught.value)
 
-    def test_the_variants_own_advice_applied_clears_a45_and_the_variant_loads(
-            self):
+    def test_the_variants_own_advice_applied_clears_a45_and_the_variant_loads(self):
         """R4 for A45: the message says ``receiver_input`` is written;
         writing it into the variant's own patch that broke it clears the id
         both unselected and selected, and the selected variant fully
@@ -1450,70 +1576,97 @@ class TestTheLayerWalkItself:
         broken = switched_document()
         broken["variants"] = {
             **broken.get("variants", {}),
-            "renamed": {"model": {"noise_wave": {
-                "switch_key": "my_switch"}}}}
+            "renamed": {"model": {"noise_wave": {"switch_key": "my_switch"}}},
+        }
         assert "A45" in ids(broken)  # Task 0: reported unselected, prefixed
 
         fixed = switched_document()
         fixed["variants"] = {
             **fixed.get("variants", {}),
-            "renamed": {"model": {"noise_wave": {
-                "switch_key": "receiver_input"}}}}
+            "renamed": {"model": {"noise_wave": {"switch_key": "receiver_input"}}},
+        }
         assert "A45" not in ids(fixed)
         from rheplicant.config import load_document
 
         assert load_document(fixed, variant="renamed") is not None
 
-    def test_the_variants_own_advice_applied_clears_a46_and_the_variant_loads(
-            self, tmp_path):
+    def test_the_variants_own_advice_applied_clears_a46_and_the_variant_loads(self, tmp_path):
         """R4 for A46: the message names EVERY switch label the recording
         visits, the antenna included -- not ``switching.order[1:]``.
         Applied in full inside the variant patch that broke it, the id
         disappears both unselected and selected, and the selected variant
         loads."""
         broken = ingested_document()
-        broken["variants"] = {"trimmed": {"observation": {"from_file": {
-            "thermistor_columns": {"~heated_load": None}}}}}
+        broken["variants"] = {
+            "trimmed": {
+                "observation": {"from_file": {"thermistor_columns": {"~heated_load": None}}}
+            }
+        }
         assert "A46" in ids(broken)  # Task 0: reported unselected, prefixed
 
         fixed = ingested_document()
-        fixed["variants"] = {"trimmed": {"observation": {"from_file": {
-            "thermistor_columns": dict(WORKING_COLUMNS)}}}}
+        fixed["variants"] = {
+            "trimmed": {"observation": {"from_file": {"thermistor_columns": dict(WORKING_COLUMNS)}}}
+        }
         assert "A46" not in ids(fixed)
-        assert load(apply_variant(fixed, "trimmed"), recording(tmp_path)) \
-            is not None
+        assert load(apply_variant(fixed, "trimmed"), recording(tmp_path)) is not None
 
 
 class TestThePointingKeySetHasOneBinding:
-    @pytest.mark.parametrize(("spec", "expected"), [
-        (None, frozenset()),
-        ({"mode": "none"}, frozenset()),
-        ({"mode": "baked", "provenance": {"who": "me"}}, frozenset()),
-        ({"mode": "drift", "materialise": ["pointing"]}, frozenset()),
-        ({"mode": "drift", "materialise": ["selfrot_deg"]},
-         frozenset({"selfrot_deg"})),
-        ({"mode": "drift", "materialise": ["pointing", "selfrot_deg"],
-          "lst": {"mode": "uniform_turn"}},
-         frozenset({"selfrot_deg", "lst_deg"})),
-        ({"mode": "tracked", "table": {}, "lst": {"mode": "from_site"}},
-         frozenset({"lst_deg"})),
-        ({"mode": "tracked", "table": {}, "lst": {"mode": "from_site"},
-          "selfrot": {"zeros": ["n_time"]}},
-         frozenset({"lst_deg", "selfrot_deg"})),
-        ("drift", frozenset()),
-        ({"mode": "spiral"}, frozenset()),
-        ({"mode": "drift", "materialise": "selfrot_deg"}, frozenset()),
-    ], ids=["absent", "none", "baked", "drift-pointing-only", "drift-selfrot",
-            "drift-both", "tracked", "tracked-selfrot", "not-a-mapping",
-            "unknown-mode", "materialise-not-a-list"])
+    @pytest.mark.parametrize(
+        ("spec", "expected"),
+        [
+            (None, frozenset()),
+            ({"mode": "none"}, frozenset()),
+            ({"mode": "baked", "provenance": {"who": "me"}}, frozenset()),
+            ({"mode": "drift", "materialise": ["pointing"]}, frozenset()),
+            ({"mode": "drift", "materialise": ["selfrot_deg"]}, frozenset({"selfrot_deg"})),
+            (
+                {
+                    "mode": "drift",
+                    "materialise": ["pointing", "selfrot_deg"],
+                    "lst": {"mode": "uniform_turn"},
+                },
+                frozenset({"selfrot_deg", "lst_deg"}),
+            ),
+            (
+                {"mode": "tracked", "table": {}, "lst": {"mode": "from_site"}},
+                frozenset({"lst_deg"}),
+            ),
+            (
+                {
+                    "mode": "tracked",
+                    "table": {},
+                    "lst": {"mode": "from_site"},
+                    "selfrot": {"zeros": ["n_time"]},
+                },
+                frozenset({"lst_deg", "selfrot_deg"}),
+            ),
+            ("drift", frozenset()),
+            ({"mode": "spiral"}, frozenset()),
+            ({"mode": "drift", "materialise": "selfrot_deg"}, frozenset()),
+        ],
+        ids=[
+            "absent",
+            "none",
+            "baked",
+            "drift-pointing-only",
+            "drift-selfrot",
+            "drift-both",
+            "tracked",
+            "tracked-selfrot",
+            "not-a-mapping",
+            "unknown-mode",
+            "materialise-not-a-list",
+        ],
+    )
     def test_the_four_branches_and_the_stand_down(self, spec, expected):
         """§0.3 E.9's pinned signature.  ``frozenset()`` for a spec it cannot
         parse -- an unknown mode and a malformed ``materialise:`` are
         ``compile_pointing``'s own refusals, said with the shape they got."""
         assert pointing_extra_keys(spec) == expected
 
-    def test_compile_pointing_reads_this_function_rather_than_its_own_copy(
-            self, monkeypatch):
+    def test_compile_pointing_reads_this_function_rather_than_its_own_copy(self, monkeypatch):
         """Kills the R1 mutant that matters here: re-deriving the key set
         inline in the pre-flight pass and leaving ``compile_pointing``'s four
         branches where they were.
@@ -1531,22 +1684,23 @@ class TestThePointingKeySetHasOneBinding:
         time_s = jnp.arange(0.0, 4.0, 1.0)
         context = ResolutionContext(time=time_s, dtype="float32")
         site = SiteFacts(lat_deg=None, lon_deg=None, alt_m=None)
-        built = compile_pointing(spec, context, time_s=time_s,
-                                 epoch_unix_s=None, site=site)
+        built = compile_pointing(spec, context, time_s=time_s, epoch_unix_s=None, site=site)
         assert set(built.extra) == {"selfrot_deg"}
 
-        monkeypatch.setattr(pointing_module, "pointing_extra_keys",
-                            lambda spec: frozenset())
-        starved = compile_pointing(spec, context, time_s=time_s,
-                                   epoch_unix_s=None, site=site)
+        monkeypatch.setattr(pointing_module, "pointing_extra_keys", lambda spec: frozenset())
+        starved = compile_pointing(spec, context, time_s=time_s, epoch_unix_s=None, site=site)
         assert starved.extra == {}
 
 
 class TestTheRegistry:
-    @pytest.mark.parametrize(("check", "function"), [
-        ("A10", _freq_unit), ("A45", _switch_key),
-        ("A46", _thermistor_columns),
-    ])
+    @pytest.mark.parametrize(
+        ("check", "function"),
+        [
+            ("A10", _freq_unit),
+            ("A45", _switch_key),
+            ("A46", _thermistor_columns),
+        ],
+    )
     def test_each_id_binds_to_its_own_function(self, check, function):
         """Identity on this task's own ids -- one of the four assertion forms
         a six-way parallel wave leaves legal (§0.3 F.2)."""
@@ -1618,10 +1772,10 @@ class TestTheRegistry:
         source = pathlib.Path(module.__file__).read_text(encoding="utf-8")
         package = "rheplicant.config.preflight"
         siblings = set()
-        for node in ast.parse(source).body:          # module level ONLY
+        for node in ast.parse(source).body:  # module level ONLY
             if isinstance(node, ast.ImportFrom) and node.module:
                 if node.module.startswith(f"{package}."):
-                    siblings.add(node.module)        # from ...preflight.X import y
+                    siblings.add(node.module)  # from ...preflight.X import y
                 elif node.module == package:
                     # `from ...preflight import X` -- the sibling is the
                     # ALIAS, not the module path.  This is the spelling the
@@ -1629,11 +1783,11 @@ class TestTheRegistry:
                     # inspects `node.module` misses it entirely: measured, a
                     # `from rheplicant.config.preflight import model` mutant
                     # SURVIVED the first version of this test.
-                    siblings.update(f"{package}.{a.name}" for a in node.names
-                                    if a.name != "register")
+                    siblings.update(
+                        f"{package}.{a.name}" for a in node.names if a.name != "register"
+                    )
             elif isinstance(node, ast.Import):
-                siblings.update(a.name for a in node.names
-                                if a.name.startswith(f"{package}."))
+                siblings.update(a.name for a in node.names if a.name.startswith(f"{package}."))
         allowed = {f"{package}.document"}
         extra = sorted(siblings - allowed)
         assert not extra, (
@@ -1661,25 +1815,34 @@ class TestTheRegistry:
         import sys
 
         done = subprocess.run(
-            [sys.executable, "-c",
-             "from rheplicant.config.preflight import CHECKS\n"
-             "print(sorted(k for k in CHECKS if k in ('A10', 'A45', 'A46')))"],
-            capture_output=True, text=True)
+            [
+                sys.executable,
+                "-c",
+                "from rheplicant.config.preflight import CHECKS\n"
+                "print(sorted(k for k in CHECKS if k in ('A10', 'A45', 'A46')))",
+            ],
+            capture_output=True,
+            text=True,
+        )
         assert done.returncode == 0, done.stdout + done.stderr
         assert done.stdout.strip() == "['A10', 'A45', 'A46']"
 
 
 class TestTheOneBinding:
-    @pytest.mark.parametrize("literal", [
-        # A10 -- the HOISTED row.  Bound in `sections/ingest.py` and called
-        # from the pass; a copy would make this two.
-        "freq_unit is required and has no default",
-        # A45 and A46 are INVENTIONS and owe no one-binding row, but each of
-        # their sentences must still be written once.
-        "is not a key this run writes into coords.extra",
-        "has no entry in observation.from_file.thermistor_columns",
-        "of observation.from_file.thermistor_columns, so their load",
-    ], ids=["A10", "A45", "A46-leg2", "A46-leg3"])
+    @pytest.mark.parametrize(
+        "literal",
+        [
+            # A10 -- the HOISTED row.  Bound in `sections/ingest.py` and called
+            # from the pass; a copy would make this two.
+            "freq_unit is required and has no default",
+            # A45 and A46 are INVENTIONS and owe no one-binding row, but each of
+            # their sentences must still be written once.
+            "is not a key this run writes into coords.extra",
+            "has no entry in observation.from_file.thermistor_columns",
+            "of observation.from_file.thermistor_columns, so their load",
+        ],
+        ids=["A10", "A45", "A46-leg2", "A46-leg3"],
+    )
     def test_every_literal_is_bound_once(self, literal):
         """§2.2's one-binding rule as a command rather than a review step."""
         assert_bound_once(literal)
@@ -1762,8 +1925,8 @@ class TestTheCost:
 
         document = ingested_document()
         document["variants"] = {
-            f"v{index}": {"observation": {"from_file": {"freq_unit": "Hz"}}}
-            for index in range(8)}
+            f"v{index}": {"observation": {"from_file": {"freq_unit": "Hz"}}} for index in range(8)
+        }
         document["model"]["noise_wave"] = noise_wave()
         mine = (_freq_unit, _switch_key, _thermistor_columns)
 

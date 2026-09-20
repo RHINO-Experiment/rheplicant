@@ -22,21 +22,23 @@ pytest.importorskip("limtod_jax", reason="limTOD[jax] not installed")
 pytest.importorskip("healpy", reason="healpy comes with limTOD")
 
 LMAX = 8
-HIGH_LMAX = 11                 # a second projector, everything else equal
+HIGH_LMAX = 11  # a second projector, everything else equal
 NSIDE = 4
-N_PIX = 12 * NSIDE**2          # 192, what _validate_sky demands at nside 4
-N_FREQ = 8                     # synthetic_document's own freq grid
-N_TIME = 16                    # synthetic_document's own time grid
-N_ALM = (LMAX + 1) * (LMAX + 2) // 2          # 45 -- the SKY's alm width
-HIGH_N_ALM = (HIGH_LMAX + 1) * (HIGH_LMAX + 2) // 2   # 78
+N_PIX = 12 * NSIDE**2  # 192, what _validate_sky demands at nside 4
+N_FREQ = 8  # synthetic_document's own freq grid
+N_TIME = 16  # synthetic_document's own time grid
+N_ALM = (LMAX + 1) * (LMAX + 2) // 2  # 45 -- the SKY's alm width
+HIGH_N_ALM = (HIGH_LMAX + 1) * (HIGH_LMAX + 2) // 2  # 78
 SPECTRAL_INDEX = 4.0
-FREQ_LO_MHZ = 60.0             # synthetic_document's linspace endpoints
+FREQ_LO_MHZ = 60.0  # synthetic_document's linspace endpoints
 FREQ_HI_MHZ = 85.0
-LST0_DEG = 30.0                # NOT zero: see TestTheProduct's anchor test
+LST0_DEG = 30.0  # NOT zero: see TestTheProduct's anchor test
 
-RUN = {"kind": "mmodes",
-       "projector": {"ref": "resources.projectors.drift"},
-       "sky": {"ref": "resources.sky_models.fg"}}
+RUN = {
+    "kind": "mmodes",
+    "projector": {"ref": "resources.projectors.drift"},
+    "sky": {"ref": "resources.sky_models.fg"},
+}
 
 
 def _projector(beam, lmax, **overrides):
@@ -55,21 +57,35 @@ def _projector(beam, lmax, **overrides):
 
 
 def _gaussian(fwhm_deg):
-    return {"format": "gaussian",
-            "fwhm_deg": {"value": fwhm_deg, "unit": "deg"},
-            "nside": NSIDE, "normalize": "pixel_sum", "frame": "beam_local"}
+    return {
+        "format": "gaussian",
+        "fwhm_deg": {"value": fwhm_deg, "unit": "deg"},
+        "nside": NSIDE,
+        "normalize": "pixel_sum",
+        "frame": "beam_local",
+    }
 
 
 def _power_law(amplitude):
-    return {"kind": "power_law", "amplitude": amplitude,
-            "spectral_index": SPECTRAL_INDEX,
-            "ref_freq": {"value": FREQ_LO_MHZ, "unit": "MHz"},
-            "n_pix": N_PIX}
+    return {
+        "kind": "power_law",
+        "amplitude": amplitude,
+        "spectral_index": SPECTRAL_INDEX,
+        "ref_freq": {"value": FREQ_LO_MHZ, "unit": "MHz"},
+        "n_pix": N_PIX,
+    }
 
 
-def document(run, *, normalize_beam=False, optimizations=None,
-             lst0_deg=LST0_DEG, el_deg=90.0, materialise=("pointing",),
-             lst=True):
+def document(
+    run,
+    *,
+    normalize_beam=False,
+    optimizations=None,
+    lst0_deg=LST0_DEG,
+    el_deg=90.0,
+    materialise=("pointing",),
+    lst=True,
+):
     """The synthetic document plus a drift scan it can actually m-mode.
 
     ``pointing.mode: drift`` is what writes ``coords.extra["lst_deg"]``, and
@@ -100,8 +116,10 @@ def document(run, *, normalize_beam=False, optimizations=None,
     }
     if lst:
         doc["observation"]["pointing"]["lst"] = {
-            "mode": "uniform_turn", "n_time": "n_time",
-            "lst0_deg": {"value": lst0_deg, "unit": "deg"}}
+            "mode": "uniform_turn",
+            "n_time": "n_time",
+            "lst0_deg": {"value": lst0_deg, "unit": "deg"},
+        }
     drift = _projector("horn", LMAX, normalize_beam=normalize_beam)
     if optimizations is not None:
         # cache_beam_rotation is refused without lst_ref_deg
@@ -114,25 +132,32 @@ def document(run, *, normalize_beam=False, optimizations=None,
             "drift": drift,
             "narrow_beam": _projector("narrow", LMAX),
             "high_lmax": _projector("horn", HIGH_LMAX),
-            "general": {"engine": "general_pointing",
-                        "beam": {"ref": "resources.beams.horn"},
-                        "lmax": LMAX, "nside": NSIDE,
-                        "lat_deg": {"value": 53.2367, "unit": "deg"},
-                        "normalize_beam": False,
-                        "acknowledge_float32_sky": True},
+            "general": {
+                "engine": "general_pointing",
+                "beam": {"ref": "resources.beams.horn"},
+                "lmax": LMAX,
+                "nside": NSIDE,
+                "lat_deg": {"value": 53.2367, "unit": "deg"},
+                "normalize_beam": False,
+                "acknowledge_float32_sky": True,
+            },
         },
         # Two callables that are not sky models, delivered by the front door:
         # a `python:` value node with no `args:` hands over the UNCALLED
         # attribute (hatch.py's presence-of-the-key rule), so `{ref}` to one
         # of these reaches the exit as an object that passes `callable()`.
-        "arrays": {"two_argument": {"python": "operator:add"},
-                   "shapeless": {"python": "builtins:repr"}},
+        "arrays": {
+            "two_argument": {"python": "operator:add"},
+            "shapeless": {"python": "builtins:repr"},
+        },
         "sky_models": {
             "fg": _power_law({"value": 300.0, "unit": "K"}),
-            "mottled": _power_law({"linspace": {"start": 100.0, "stop": 400.0,
-                                                "num": N_PIX,
-                                                "endpoint": True},
-                                   "unit": "K"}),
+            "mottled": _power_law(
+                {
+                    "linspace": {"start": 100.0, "stop": 400.0, "num": N_PIX, "endpoint": True},
+                    "unit": "K",
+                }
+            ),
         },
     }
     doc["runs"] = [run]
@@ -144,13 +169,14 @@ def product(run=RUN, **kwargs):
     return np.asarray(run_document(document(run, **kwargs))["mmodes"].product)
 
 
-def _by_hand(doc, projector="resources.projectors.drift",
-             sky="resources.sky_models.fg"):
+def _by_hand(doc, projector="resources.projectors.drift", sky="resources.sky_models.fg"):
     """The two calls the exit is supposed to make, spelled out."""
     built = load_document(doc)
-    return (resolve_reference(projector, built.context),
-            resolve_reference(sky, built.context),
-            built.state.coords)
+    return (
+        resolve_reference(projector, built.context),
+        resolve_reference(sky, built.context),
+        built.state.coords,
+    )
 
 
 class TestTheProduct:
@@ -185,10 +211,8 @@ class TestTheProduct:
         the axis off anything else -- the sky's alm width, n_freq, a
         constant -- returns (8, 9) for both refs and passes the test above.
         """
-        assert len({HIGH_LMAX + 1, HIGH_N_ALM, N_FREQ, N_TIME, N_PIX,
-                    LMAX + 1}) == 6
-        high = product({**RUN,
-                        "projector": {"ref": "resources.projectors.high_lmax"}})
+        assert len({HIGH_LMAX + 1, HIGH_N_ALM, N_FREQ, N_TIME, N_PIX, LMAX + 1}) == 6
+        high = product({**RUN, "projector": {"ref": "resources.projectors.high_lmax"}})
         assert high.shape == (N_FREQ, HIGH_LMAX + 1) == (8, 12)
 
     def test_the_sky_model_is_evaluated_on_the_runs_own_frequency_grid(self):
@@ -203,7 +227,8 @@ class TestTheProduct:
         """
         magnitude = np.abs(product())
         assert magnitude[-1, 0] / magnitude[0, 0] == pytest.approx(
-            (FREQ_HI_MHZ / FREQ_LO_MHZ) ** -SPECTRAL_INDEX, rel=1e-4)
+            (FREQ_HI_MHZ / FREQ_LO_MHZ) ** -SPECTRAL_INDEX, rel=1e-4
+        )
 
     def test_the_product_is_the_projectors_own_mmodes_of_the_models_maps(self):
         """Element for element, against the two calls spelled out by hand.
@@ -232,10 +257,7 @@ class TestTheProduct:
         """
         run = {**RUN, "sky": {"ref": "resources.sky_models.mottled"}}
         wide = np.abs(product(run))
-        narrow = np.abs(product({**run,
-                                 "projector": {"ref":
-                                               "resources.projectors."
-                                               "narrow_beam"}}))
+        narrow = np.abs(product({**run, "projector": {"ref": "resources.projectors.narrow_beam"}}))
         assert wide.shape == narrow.shape
         assert wide[0, 0] == pytest.approx(146.44, rel=1e-3)
         assert narrow[0, 0] == pytest.approx(167.53, rel=1e-3)
@@ -262,13 +284,11 @@ class TestTheProduct:
         """
         run = {**RUN, "sky": {"ref": "resources.sky_models.mottled"}}
         doc = document(run)
-        projector, sky, coords = _by_hand(doc, sky="resources.sky_models."
-                                                   "mottled")
+        projector, sky, coords = _by_hand(doc, sky="resources.sky_models.mottled")
         tod = np.asarray(projector.forward(sky(coords.freq), coords))
         assert tod.shape == (N_TIME, N_FREQ)
         spectrum = np.fft.rfft(tod, axis=0) / N_TIME
-        assert np.allclose(product(run)[:, :LMAX], spectrum[:LMAX].T,
-                           rtol=1e-2, atol=1e-4)
+        assert np.allclose(product(run)[:, :LMAX], spectrum[:LMAX].T, rtol=1e-2, atol=1e-4)
 
     def test_the_phases_are_anchored_on_the_documents_own_lst_grid(self):
         """coords come off built.state, and the anchor is visible in them.
@@ -306,8 +326,7 @@ class TestThePackagesOwnPointingRefusal:
         """
         from rheplicant.core.errors import StateValidationError
 
-        with pytest.raises(StateValidationError,
-                           match="pointing this projector would ignore") as e:
+        with pytest.raises(StateValidationError, match="pointing this projector would ignore") as e:
             run_document(document(RUN, el_deg=45.0))
         assert not isinstance(e.value, ConfigError)
 
@@ -334,8 +353,7 @@ class TestThePackagesOwnPointingRefusal:
         """
         from rheplicant.core.errors import StateValidationError
 
-        with pytest.raises(StateValidationError,
-                           match=r'requires coords\.extra\["lst_deg"\]') as e:
+        with pytest.raises(StateValidationError, match=r'requires coords\.extra\["lst_deg"\]') as e:
             run_document(document(RUN, lst=False))
         assert not isinstance(e.value, ConfigError)
 
@@ -378,8 +396,7 @@ class TestTheNormalizeBeamRefusal:
         assert not issubclass(ConfigError, StateValidationError)
         doc = document(RUN, normalize_beam=True)
         built = built_run(doc)
-        projector = resolve_reference("resources.projectors.drift",
-                                      built.context)
+        projector = resolve_reference("resources.projectors.drift", built.context)
         sky = resolve_reference("resources.sky_models.fg", built.context)
         coords = built.state.coords
         assert projector.normalize_beam is True
@@ -403,10 +420,8 @@ class TestTheNormalizeBeamRefusal:
         access to the projector IS the built object on the parse context, so
         a check that read the spec could not have fired it.
         """
-        doc = document(RUN, normalize_beam=True,
-                       optimizations=["cache_beam_rotation"])
-        projector = resolve_reference("resources.projectors.drift",
-                                      built_run(doc).context)
+        doc = document(RUN, normalize_beam=True, optimizations=["cache_beam_rotation"])
+        projector = resolve_reference("resources.projectors.drift", built_run(doc).context)
         assert projector.beam_frame == "reference"
         assert projector.normalize_beam is True
         with pytest.raises(ConfigError, match=r"measured ~18x off"):
@@ -417,8 +432,7 @@ class TestTheNormalizeBeamRefusal:
         projector is an ordinary run, so the refusal above is about the flag
         and not about the frame."""
         doc = document(RUN, optimizations=["cache_beam_rotation"])
-        assert np.asarray(
-            run_document(doc)["mmodes"].product).shape == (N_FREQ, LMAX + 1)
+        assert np.asarray(run_document(doc)["mmodes"].product).shape == (N_FREQ, LMAX + 1)
 
 
 class TestTheGrammar:
@@ -429,8 +443,7 @@ class TestTheGrammar:
         not be quietly accepted and dropped.
         """
         with pytest.raises(ConfigError, match=r"does not take \['beam'\]"):
-            run_document(document({**RUN,
-                                   "beam": {"ref": "resources.beams.horn"}}))
+            run_document(document({**RUN, "beam": {"ref": "resources.beams.horn"}}))
 
     def test_coords_are_not_an_exit_option_either(self):
         """They come off built.state; a coords: key names nothing."""
@@ -441,8 +454,7 @@ class TestTheGrammar:
     def test_both_refs_are_required(self, key):
         """And the refusal names the RUN, not just the key."""
         run = {name: value for name, value in RUN.items() if name != key}
-        with pytest.raises(ConfigError,
-                           match=rf"runs\['mmodes'\]: {key}: is \{{ref"):
+        with pytest.raises(ConfigError, match=rf"runs\['mmodes'\]: {key}: is \{{ref"):
             run_document(document(run))
 
     @pytest.mark.parametrize("key", ["projector", "sky"])
@@ -456,15 +468,13 @@ class TestTheGrammar:
         keys because a guard closed on one route and open on its twin is the
         shape this layer keeps rediscovering.
         """
-        written = {"dotted": RUN[key]["ref"],
-                   "extra_key": {**RUN[key], "unit": "K"},
-                   "null": None}[form]
-        with pytest.raises(ConfigError,
-                           match=rf"runs\['mmodes'\]: {key}: is \{{ref"):
+        written = {"dotted": RUN[key]["ref"], "extra_key": {**RUN[key], "unit": "K"}, "null": None}[
+            form
+        ]
+        with pytest.raises(ConfigError, match=rf"runs\['mmodes'\]: {key}: is \{{ref"):
             run_document(document({**RUN, key: written}))
 
-    def test_a_general_pointing_projector_names_the_engine_that_has_mmodes(
-            self):
+    def test_a_general_pointing_projector_names_the_engine_that_has_mmodes(self):
         """grep 'def mmodes' src/ returns two hits, both on
         DriftScanProjector.
 
@@ -472,20 +482,17 @@ class TestTheGrammar:
         refusal is an AttributeError from inside the executor, which breaks
         the layer's single-ConfigError contract.
         """
-        with pytest.raises(ConfigError,
-                           match=r"GeneralPointingProjector, which has no "
-                                 r"mmodes\(\)"):
-            run_document(document(
-                {**RUN,
-                 "projector": {"ref": "resources.projectors.general"}}))
+        with pytest.raises(
+            ConfigError,
+            match=r"GeneralPointingProjector, which has no "
+            r"mmodes\(\)",
+        ):
+            run_document(document({**RUN, "projector": {"ref": "resources.projectors.general"}}))
 
-    def test_a_projector_ref_that_is_not_a_projector_names_the_same_thing(
-            self):
+    def test_a_projector_ref_that_is_not_a_projector_names_the_same_thing(self):
         """resources.beams.<name> resolves; it simply has no mmodes()."""
-        with pytest.raises(ConfigError,
-                           match=r"Beam, which has no mmodes\(\)"):
-            run_document(document(
-                {**RUN, "projector": {"ref": "resources.beams.horn"}}))
+        with pytest.raises(ConfigError, match=r"Beam, which has no mmodes\(\)"):
+            run_document(document({**RUN, "projector": {"ref": "resources.beams.horn"}}))
 
     def test_a_sky_ref_that_is_not_a_model_names_the_kind_that_is(self):
         """resources.beams.<name> resolves to a Beam, which is not callable.
@@ -494,10 +501,8 @@ class TestTheGrammar:
         anything else must be refused by name rather than raising TypeError
         halfway into a trace.
         """
-        with pytest.raises(ConfigError,
-                           match=r"Beam, which is not a sky model") as caught:
-            run_document(document({**RUN,
-                                   "sky": {"ref": "resources.beams.horn"}}))
+        with pytest.raises(ConfigError, match=r"Beam, which is not a sky model") as caught:
+            run_document(document({**RUN, "sky": {"ref": "resources.beams.horn"}}))
         assert "resources.sky_models.<name>" in str(caught.value)
         assert "runs['mmodes']" in str(caught.value)
 
@@ -512,14 +517,11 @@ class TestTheGrammar:
         same hole ``_scores_a_pair`` was written to close on
         ``objective: {python: ...}``.  Measured before the guard existed.
         """
-        with pytest.raises(ConfigError,
-                           match=r"cannot be called as \(freq\)") as caught:
-            run_document(document(
-                {**RUN, "sky": {"ref": "resources.arrays.two_argument"}}))
+        with pytest.raises(ConfigError, match=r"cannot be called as \(freq\)") as caught:
+            run_document(document({**RUN, "sky": {"ref": "resources.arrays.two_argument"}}))
         assert "runs['mmodes']" in str(caught.value)
 
-    def test_a_sky_whose_call_returns_no_maps_is_refused_before_the_package(
-            self):
+    def test_a_sky_whose_call_returns_no_maps_is_refused_before_the_package(self):
         """The other end of the same callable: right arity, wrong product.
 
         ``repr`` takes one argument and returns a str.  _validate_sky
@@ -528,21 +530,20 @@ class TestTheGrammar:
         a bare AttributeError; the extents themselves are still left to it,
         because its message names the nside they follow from.
         """
-        with pytest.raises(ConfigError,
-                           match=r"returned a str, not maps"):
-            run_document(document(
-                {**RUN, "sky": {"ref": "resources.arrays.shapeless"}}))
+        with pytest.raises(ConfigError, match=r"returned a str, not maps"):
+            run_document(document({**RUN, "sky": {"ref": "resources.arrays.shapeless"}}))
 
     def test_a_sky_ref_naming_a_projector_is_refused_before_it_is_traced(self):
         """The twin of the case above: a projector INSTANCE is not callable
         either (measured), so the same guard catches the swap of the two
         refs -- which is otherwise a run that traces and then dies inside
         jax."""
-        with pytest.raises(ConfigError,
-                           match=r"DriftScanProjector, which is not a sky "
-                                 r"model"):
-            run_document(document(
-                {**RUN, "sky": {"ref": "resources.projectors.drift"}}))
+        with pytest.raises(
+            ConfigError,
+            match=r"DriftScanProjector, which is not a sky "
+            r"model",
+        ):
+            run_document(document({**RUN, "sky": {"ref": "resources.projectors.drift"}}))
 
 
 class TestTheExecutorReadsOnlyTheParsedView:
@@ -559,9 +560,12 @@ class TestTheExecutorReadsOnlyTheParsedView:
         doc = document(RUN)
         built = load_document(doc)
         (spec,) = parse_runs(doc["runs"])
-        parsed = parse_run(spec, built, index=0,
-                           layer=LayerRef(kind="base", name=None, prefix="",
-                                          document={}, declared_runs=None))
+        parsed = parse_run(
+            spec,
+            built,
+            index=0,
+            layer=LayerRef(kind="base", name=None, prefix="", document={}, declared_runs=None),
+        )
         # poison AFTER the parse: the mottled sky differs from fg in the
         # m > 0 coefficients, so a raw-reading executor cannot pass.
         spec.options["sky"] = {"ref": "resources.sky_models.mottled"}

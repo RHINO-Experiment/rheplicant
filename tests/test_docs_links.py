@@ -286,7 +286,10 @@ def test_every_documentation_page_is_tracked_by_git() -> None:
 
     tracked = subprocess.run(
         ["git", "ls-files", "docs/*.md"],
-        cwd=ROOT, capture_output=True, text=True, check=True,
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
     ).stdout.split()
     tracked_names = {Path(p).name for p in tracked}
     on_disk = {p.name for p in DOCS.glob("*.md")}
@@ -312,9 +315,7 @@ def test_every_example_script_is_mentioned_in_the_docs() -> None:
     scripts = sorted(p.name for p in (ROOT / "examples").glob("*.py"))
     assert scripts, "No example scripts found -- has examples/ moved?"
 
-    prose = "\n".join(
-        p.read_text() for p in list(DOCS.glob("*.md")) + [ROOT / "README.md"]
-    )
+    prose = "\n".join(p.read_text() for p in list(DOCS.glob("*.md")) + [ROOT / "README.md"])
     missing = [s for s in scripts if s not in prose]
     assert not missing, (
         f"{missing} exist in examples/ but are named nowhere in docs/*.md or "
@@ -326,8 +327,13 @@ def test_the_examples_page_states_the_real_count() -> None:
     """``examples.md`` and ``README.md`` both count the scripts in words."""
     n = len(list((ROOT / "examples").glob("*.py")))
     words = {
-        10: "Ten", 11: "Eleven", 12: "Twelve", 13: "Thirteen",
-        14: "Fourteen", 15: "Fifteen", 16: "Sixteen",
+        10: "Ten",
+        11: "Eleven",
+        12: "Twelve",
+        13: "Thirteen",
+        14: "Fourteen",
+        15: "Fifteen",
+        16: "Sixteen",
     }
     assert n in words, f"{n} example scripts -- extend the number words above"
     word = words[n]
@@ -340,8 +346,12 @@ def test_the_examples_page_states_the_real_count() -> None:
         # Case-insensitive: the count reads "Fourteen scripts" at the start of
         # a sentence and "fourteen runnable scripts" inside one, and both are
         # the same claim. A case-sensitive match called the second one absent.
-        stated = re.search(r"\b(Ten|Eleven|Twelve|Thirteen|Fourteen|Fifteen|Sixteen)\b"
-                           r"[^.\n|]*(runnable|scripts|demos)", text, re.IGNORECASE)
+        stated = re.search(
+            r"\b(Ten|Eleven|Twelve|Thirteen|Fourteen|Fifteen|Sixteen)\b"
+            r"[^.\n|]*(runnable|scripts|demos)",
+            text,
+            re.IGNORECASE,
+        )
         assert stated, f"{path.name} no longer states how many examples there are"
         assert stated.group(1).capitalize() == word, (
             f"{path.name} says '{stated.group(1)}' examples; there are {n} ({word})."

@@ -14,8 +14,9 @@ from rheplicant.radio import RadiometerNoiseOperator
 def make_state(data, seed=7):
     return State(
         data=data,
-        coords=Coordinates(time=jnp.arange(float(data.shape[0])),
-                           freq=jnp.linspace(60e6, 85e6, data.shape[1])),
+        coords=Coordinates(
+            time=jnp.arange(float(data.shape[0])), freq=jnp.linspace(60e6, 85e6, data.shape[1])
+        ),
         key=jax.random.key(seed),
     )
 

@@ -112,8 +112,7 @@ def every_registry(priced_registry):
     try:
         yield
     finally:
-        for registry, was in zip((TEXT_CHECKS, AXIS_CHECKS, BUILT_CHECKS),
-                                 saved, strict=True):
+        for registry, was in zip((TEXT_CHECKS, AXIS_CHECKS, BUILT_CHECKS), saved, strict=True):
             registry.clear()
             registry.update(was)
 
@@ -143,8 +142,7 @@ class TestThePayload:
         field list in a second place that has to be kept in step by hand.
         ``run`` is the whole object, so there is nothing to keep in step.
         """
-        assert tuple(field.name for field in dataclasses.fields(Priced)) == (
-            "run", "gates")
+        assert tuple(field.name for field in dataclasses.fields(Priced)) == ("run", "gates")
 
     def test_the_payload_is_frozen(self):
         """A check receives the payload and must not be able to edit the run
@@ -254,8 +252,7 @@ class TestThePayload:
         )
         assert not isinstance(raised.value, ConfigError)
 
-    def test_a_check_that_writes_into_the_gates_fails_the_pass_by_name(
-            self, priced_registry):
+    def test_a_check_that_writes_into_the_gates_fails_the_pass_by_name(self, priced_registry):
         """The property, not the type.  A check that assigns is stopped, and
         the sentence names the check rather than the user's document."""
 
@@ -266,11 +263,9 @@ class TestThePayload:
 
         with pytest.raises(ConfigError) as raised:
             priced(priced_run(_document()))
-        assert str(raised.value).startswith(
-            "post-flight check 'C12' RAISED TypeError: ")
+        assert str(raised.value).startswith("post-flight check 'C12' RAISED TypeError: ")
 
-    def test_the_gates_carry_the_defaults_a_document_did_not_write(
-            self, priced_registry):
+    def test_the_gates_carry_the_defaults_a_document_did_not_write(self, priced_registry):
         """Cardinality is THREE, always -- a check never writes
         ``gates.get("linearity", <its own default>)``, which is how two
         default tables come to exist and one of them to be wrong."""
@@ -286,8 +281,7 @@ class TestThePayload:
         assert seen["linearity"].state == "refuse"
         assert seen["identifiability"].state == "off"
 
-    def test_the_gates_are_this_documents_and_not_the_default_table(
-            self, priced_registry):
+    def test_the_gates_are_this_documents_and_not_the_default_table(self, priced_registry):
         """**The gates are READ OFF THE DOCUMENT**, and this is the only test
         in this file that says so.
 
@@ -309,10 +303,16 @@ class TestThePayload:
             seen.update(payload.gates)
             return ()
 
-        load_document(_document(inference={"checks": {
-            "linearity": {"mode": "warn"},
-            "identifiability": {"mode": "report", "rtol": 1e-6},
-        }}))
+        load_document(
+            _document(
+                inference={
+                    "checks": {
+                        "linearity": {"mode": "warn"},
+                        "identifiability": {"mode": "report", "rtol": 1e-6},
+                    }
+                }
+            )
+        )
         assert seen["linearity"].state == "warn"
         assert seen["identifiability"].state == "report"
         assert seen["identifiability"].rtol == 1e-6
@@ -343,8 +343,7 @@ class TestThePayload:
         """
         assert priced_findings(_document()) == ()
 
-    def test_the_run_carries_every_finding_earned_before_this_pass(
-            self, every_registry):
+    def test_the_run_carries_every_finding_earned_before_this_pass(self, every_registry):
         """``Priced.run.report`` is pre-flight + axes + built, in run order.
 
         **This is the contract a priced check leans on to not restate an
@@ -353,18 +352,13 @@ class TestThePayload:
         no accumulation, ``built_run(preflight_document()).report`` is
         ``Report(findings=())``.
         """
-        register_text("C11")(
-            lambda doc: (report("C11", "runtime.dtype", "text."),))
-        register_axes("B3")(
-            lambda facts: (report("B3", "observation.time", "axes."),))
-        register_built("A9")(
-            lambda run: (report("A9", "model.gain", "built."),))
+        register_text("C11")(lambda doc: (report("C11", "runtime.dtype", "text."),))
+        register_axes("B3")(lambda facts: (report("B3", "observation.time", "axes."),))
+        register_built("A9")(lambda run: (report("A9", "model.gain", "built."),))
         payload = priced_run(_document())
-        assert [one.check for one in payload.run.report.findings] == [
-            "C11", "B3", "A9"]
+        assert [one.check for one in payload.run.report.findings] == ["C11", "B3", "A9"]
 
-    def test_a_priced_check_cannot_see_an_earlier_priced_checks_finding(
-            self, priced_registry):
+    def test_a_priced_check_cannot_see_an_earlier_priced_checks_finding(self, priced_registry):
         """B1's correction, as a pin rather than a corrected sentence.
 
         ``Priced.run.report`` is pre-flight + axes + built -- **NOT this
@@ -412,8 +406,7 @@ class TestTheRegistry:
 
         assert CHECKS["C12"] is _one
 
-    def test_register_writes_into_this_packages_registry_alone(
-            self, priced_registry):
+    def test_register_writes_into_this_packages_registry_alone(self, priced_registry):
         """``register`` is a SECOND function and not an import of
         ``preflight.register``.
 
@@ -445,22 +438,26 @@ class TestTheRegistry:
         other too, so this stays the whole-layer statement rather than a
         statement about the newest pass.
         """
-        named = {"pre-flight": TEXT_CHECKS, "axes": AXIS_CHECKS,
-                 "built": BUILT_CHECKS, "post-flight": CHECKS}
+        named = {
+            "pre-flight": TEXT_CHECKS,
+            "axes": AXIS_CHECKS,
+            "built": BUILT_CHECKS,
+            "post-flight": CHECKS,
+        }
         for one, first in named.items():
             for two, second in named.items():
                 if one >= two:
                     continue
                 shared_ids = sorted(set(first) & set(second))
                 assert not shared_ids, (one, two, shared_ids)
-                shared = set(map(id, first.values())) & set(
-                    map(id, second.values()))
-                assert not shared, (one, two, sorted(
-                    fn.__qualname__ for fn in first.values()
-                    if id(fn) in shared))
+                shared = set(map(id, first.values())) & set(map(id, second.values()))
+                assert not shared, (
+                    one,
+                    two,
+                    sorted(fn.__qualname__ for fn in first.values() if id(fn) in shared),
+                )
 
-    def test_run_order_is_slot_order_whatever_the_registration_order(
-            self, priced_registry):
+    def test_run_order_is_slot_order_whatever_the_registration_order(self, priced_registry):
         """**Not insertion order**, which under discovery is the IMPORT
         GRAPH's rather than the filename's: measured, ``digitising``
         head-importing ``fitting`` gives ``['C12','C13','C19','C16','C18']``
@@ -473,9 +470,9 @@ class TestTheRegistry:
         ``sorted(['C9','C12'])`` is ``['C12','C9']``, and a reader expecting
         C9 first should find the answer here rather than in a bug report.
         """
+
         def _emit(check):
-            return lambda payload, check=check: (
-                refuse(check, "model.gain", f"{check}!"),)
+            return lambda payload, check=check: (refuse(check, "model.gain", f"{check}!"),)
 
         for order in (("C16", "C12"), ("C12", "C16")):
             CHECKS.clear()
@@ -484,8 +481,7 @@ class TestTheRegistry:
             found = priced(priced_run(_document())).refusals()
             assert [one.check for one in found] == ["C12", "C16"], order
 
-    def test_a_function_bound_to_several_ids_runs_exactly_once(
-            self, priced_registry):
+    def test_a_function_bound_to_several_ids_runs_exactly_once(self, priced_registry):
         """One function carries several ids and this plan does it twice --
         C13 and C19 both escalate through C14, and Task 5's C16 is one
         function over two thresholds.  Kills a walk with no de-duplication by
@@ -501,15 +497,15 @@ class TestTheRegistry:
         assert calls == [1]
         assert [one.check for one in found] == ["C13"]
 
-    def test_a_check_that_raises_names_itself_and_this_pass(
-            self, priced_registry):
+    def test_a_check_that_raises_names_itself_and_this_pass(self, priced_registry):
         """WHOLE-STRING, because the label is the one word that separates this
         sentence from the three other passes' and a ``match=`` substring
         beginning after it discriminates nothing.  Measured while ``passes.py``
         was written: rewriting every ``pre-flight`` to ``in-flight`` left the
         whole of ``tests/config`` at exit 0."""
-        register("C12")(lambda payload: (_ for _ in ()).throw(
-            RuntimeError("the Jacobian went missing")))
+        register("C12")(
+            lambda payload: (_ for _ in ()).throw(RuntimeError("the Jacobian went missing"))
+        )
         with pytest.raises(ConfigError) as raised:
             priced(priced_run(_document()))
         assert str(raised.value) == (
@@ -526,9 +522,11 @@ class TestTheRegistry:
         calling it would report its own defect as a pre-flight one.
         ``passes.sweep`` does the guarding with this pass's label instead, and
         this is the pin that says so."""
-        register("C12")(lambda payload: (
-            refuse("C12", "src/rheplicant/config/postflight/fitting.py",
-                   "wrong."),))
+        register("C12")(
+            lambda payload: (
+                refuse("C12", "src/rheplicant/config/postflight/fitting.py", "wrong."),
+            )
+        )
         with pytest.raises(ConfigError) as raised:
             priced(priced_run(_document()))
         assert str(raised.value).startswith("post-flight check 'C12' emitted ")
@@ -547,8 +545,7 @@ class TestTheRegistry:
         ``test_config_inflight.py::TestEveryRefusalOfTHESEPassesIsPinnedWHOLE.test_a_where_whose_head_is_not_a_section``);
         this is this pass's own copy.
         """
-        register("C12")(lambda payload: (
-            refuse("C12", "beam.horn", "reserved."),))
+        register("C12")(lambda payload: (refuse("C12", "beam.horn", "reserved."),))
         with pytest.raises(ConfigError) as raised:
             priced(priced_run(_document()))
         assert str(raised.value) == (
@@ -600,8 +597,7 @@ class TestTheRegistry:
         register("C12")(lambda payload: ())
         with pytest.raises(ConfigError) as raised:
             register("C12")(lambda payload: ())
-        assert str(raised.value).startswith(
-            "post-flight check 'C12' is registered twice, by ")
+        assert str(raised.value).startswith("post-flight check 'C12' is registered twice, by ")
 
 
 # ---------------------------------------------------------------------------
@@ -614,27 +610,26 @@ class TestTheHookIsPositioned:
     the fit twin do not exist yet; the pass never being called at all; a
     refusal that lets a ``ConfiguredRun`` out of the door anyway."""
 
-    def test_the_pass_runs_after_build_inference(self, priced_registry,
-                                                 monkeypatch):
+    def test_the_pass_runs_after_build_inference(self, priced_registry, monkeypatch):
         """It needs the space, the fit twin and the observed data, and all
         three are ``build_inference``'s.  The hook is ONE call in
         ``load_document``; moving it above that builder is a green edit that
         hands every priced check an ``InferenceBuild`` that does not exist."""
         order = []
         real = document_module.build_inference
-        monkeypatch.setattr(document_module, "build_inference",
-                            lambda *a, **k: (order.append("inference"),
-                                             real(*a, **k))[1])
+        monkeypatch.setattr(
+            document_module,
+            "build_inference",
+            lambda *a, **k: (order.append("inference"), real(*a, **k))[1],
+        )
         register("C12")(lambda payload: (order.append("priced"), ())[1])
         load_document(_document())
         assert order == ["inference", "priced"]
 
-    def test_a_refusal_stops_the_load_and_hands_back_no_object(
-            self, priced_registry):
+    def test_a_refusal_stops_the_load_and_hands_back_no_object(self, priced_registry):
         """**Before the return**, so no caller ever holds a ``ConfiguredRun``
         whose priced checks have not run."""
-        register("C12")(lambda payload: (
-            refuse("C12", "inference.parameters", "not linear."),))
+        register("C12")(lambda payload: (refuse("C12", "inference.parameters", "not linear."),))
         with pytest.raises(ConfigError, match="not linear."):
             load_document(_document())
 
@@ -642,29 +637,23 @@ class TestTheHookIsPositioned:
         """Collect, do not raise: a user with two problems sees two.  Read off
         ``raise_if_refused``'s tail, which is the only place the second one
         reaches a user."""
-        register("C12")(lambda payload: (
-            refuse("C12", "inference.parameters", "first."),))
-        register("C16")(lambda payload: (
-            refuse("C16", "model.adc", "second."),))
+        register("C12")(lambda payload: (refuse("C12", "inference.parameters", "first."),))
+        register("C16")(lambda payload: (refuse("C16", "model.adc", "second."),))
         with pytest.raises(ConfigError) as raised:
             load_document(_document())
-        assert str(raised.value) == (
-            "first.\n(This document has 1 more refusal, at model.adc.)")
+        assert str(raised.value) == ("first.\n(This document has 1 more refusal, at model.adc.)")
 
-    def test_the_pass_runs_when_the_document_has_no_inference_section(
-            self, priced_registry):
+    def test_the_pass_runs_when_the_document_has_no_inference_section(self, priced_registry):
         """A document with no latents has ``space is None`` and every gate
         stands down -- but C16 needs no space, and C16 is exactly the check a
         ``kind: forward`` document wants.  A pass that short-circuited on
         ``inference is None`` would lose it."""
         seen = []
-        register("C16")(lambda payload: (seen.append(payload.gates["linearity"]),
-                                         ())[1])
+        register("C16")(lambda payload: (seen.append(payload.gates["linearity"]), ())[1])
         load_document(_document(inference=None))
         assert [one.state for one in seen] == ["refuse"]
 
-    def test_a_priced_refusal_never_reaches_the_built_helper(
-            self, priced_registry):
+    def test_a_priced_refusal_never_reaches_the_built_helper(self, priced_registry):
         """**The trap this task exists to not fall into.**
 
         ``inflight_helpers.built_run`` calls ``_assemble`` precisely so a
@@ -675,14 +664,12 @@ class TestTheHookIsPositioned:
         for Tasks 4-6's own helpers, and every other test in this file stays
         green while it does.
         """
-        register("C12")(lambda payload: (
-            refuse("C12", "inference.parameters", "priced refusal."),))
+        register("C12")(lambda payload: (refuse("C12", "inference.parameters", "priced refusal."),))
         assert built_run(_document()) is not None
         assert priced_run(_document()) is not None
         assert [one.check for one in priced_findings(_document())] == ["C12"]
 
-    def test_the_accessor_a_later_task_writes_with_sees_this_pass(
-            self, priced_registry):
+    def test_the_accessor_a_later_task_writes_with_sees_this_pass(self, priced_registry):
         """``preflight_helpers.only()`` calls ``preflight(document)`` -- the
         TEXT pass alone -- so a Task 4, 5 or 6 assertion written with it
         **passes against an empty implementation**.  Measured on a document
@@ -694,12 +681,10 @@ class TestTheHookIsPositioned:
         across all three severities, and a refusals-only reading would make
         every test about a ``mode: warn`` gate unwritable.
         """
-        register("C12")(lambda payload: (
-            warn("C12", "inference.parameters", "one warning."),))
+        register("C12")(lambda payload: (warn("C12", "inference.parameters", "one warning."),))
         assert priced_only(_document(), "C12").message == "one warning."
 
-    def test_expect_refuse_cannot_catch_a_priced_refusal(self, priced_registry,
-                                                         monkeypatch):
+    def test_expect_refuse_cannot_catch_a_priced_refusal(self, priced_registry, monkeypatch):
         """§2.1's TRAP, as a test rather than as a sentence.
 
         ``expect:`` is PER RUN and this pass raises out of ``load_document``,
@@ -709,13 +694,12 @@ class TestTheHookIsPositioned:
         claim is "never reached" rather than "returned no product".
         """
         reached = []
-        monkeypatch.setattr(exits_module, "execute_run",
-                            lambda *a, **k: reached.append(1))
-        register("C12")(lambda payload: (
-            refuse("C12", "inference.parameters", "the gate refuses."),))
+        monkeypatch.setattr(exits_module, "execute_run", lambda *a, **k: reached.append(1))
+        register("C12")(
+            lambda payload: (refuse("C12", "inference.parameters", "the gate refuses."),)
+        )
         with pytest.raises(ConfigError, match="the gate refuses."):
-            run_document(_document(
-                runs=[{"kind": "forward", "expect": "refuse"}]))
+            run_document(_document(runs=[{"kind": "forward", "expect": "refuse"}]))
         assert reached == []
 
 
@@ -749,76 +733,63 @@ class TestTheReportAccumulates:
         range (``A1..A52``, ``B1..B9``, ``C1..C19``) so it also cannot be
         mistaken for a future real id.
         """
-        register_text("C11")(
-            lambda doc: (report("C11", "runtime.dtype", "text."),))
-        register_axes("B3")(
-            lambda facts: (report("B3", "observation.time", "axes."),))
-        register_built("A9")(
-            lambda run: (report("A9", "model.gain", "built."),))
-        register("C97")(
-            lambda payload: (report("C97", "inference.parameters", "priced."),))
+        register_text("C11")(lambda doc: (report("C11", "runtime.dtype", "text."),))
+        register_axes("B3")(lambda facts: (report("B3", "observation.time", "axes."),))
+        register_built("A9")(lambda run: (report("A9", "model.gain", "built."),))
+        register("C97")(lambda payload: (report("C97", "inference.parameters", "priced."),))
         run = load_document(_document())
         assert run.report.checks() == frozenset({"C11", "B3", "A9", "C97"})
-        assert [one.check for one in run.report.findings] == [
-            "C11", "B3", "A9", "C97"]
+        assert [one.check for one in run.report.findings] == ["C11", "B3", "A9", "C97"]
 
-    def test_the_built_payload_carries_pre_flight_and_axes(self,
-                                                           every_registry):
+    def test_the_built_payload_carries_pre_flight_and_axes(self, every_registry):
         """``Built.report`` is everything earned BEFORE the built pass, which
         is the docstring line D-3 ships -- and it is true only once the
         accumulation is in place.  Measured with the field alone and no
         accumulation: ``built_run(preflight_document()).report`` is
         ``Report(findings=())``."""
-        register_text("C11")(
-            lambda doc: (report("C11", "runtime.dtype", "text."),))
-        register_axes("B3")(
-            lambda facts: (report("B3", "observation.time", "axes."),))
-        assert [one.check for one in built_run(_document()).report.findings
-                ] == ["C11", "B3"]
+        register_text("C11")(lambda doc: (report("C11", "runtime.dtype", "text."),))
+        register_axes("B3")(lambda facts: (report("B3", "observation.time", "axes."),))
+        assert [one.check for one in built_run(_document()).report.findings] == ["C11", "B3"]
 
-    def test_a_report_finding_never_reaches_warnings_warn(self,
-                                                          priced_registry):
+    def test_a_report_finding_never_reaches_warnings_warn(self, priced_registry):
         """``mode: report`` exists so a check can record a number without
         interrupting anybody.  ``emit_warnings`` walks ``self.warnings()`` and
         not ``self.findings``; the difference is one word and it converts the
         whole feature into ``warn``."""
-        register("C12")(lambda payload: (
-            report("C12", "inference.parameters", "recorded, not shouted."),))
+        register("C12")(
+            lambda payload: (report("C12", "inference.parameters", "recorded, not shouted."),)
+        )
         with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter("always")
             run = load_document(_document())
-        assert [one for one in caught
-                if issubclass(one.category, ConfigWarning)] == []
+        assert [one for one in caught if issubclass(one.category, ConfigWarning)] == []
         assert "C12" in run.report.checks()
 
     def test_a_warn_finding_does(self, priced_registry):
         """ANTI-VACUITY for the test above: it passes trivially if the hook
         stopped calling ``emit_warnings`` at all, or if the pass stopped
         running."""
-        register("C12")(lambda payload: (
-            warn("C12", "inference.parameters", "worth saying out loud."),))
+        register("C12")(
+            lambda payload: (warn("C12", "inference.parameters", "worth saying out loud."),)
+        )
         with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter("always")
             load_document(_document())
-        assert [str(one.message) for one in caught
-                if issubclass(one.category, ConfigWarning)] == [
-                    "worth saying out loud."]
+        assert [str(one.message) for one in caught if issubclass(one.category, ConfigWarning)] == [
+            "worth saying out loud."
+        ]
 
-    def test_the_report_survives_onto_the_object_the_caller_holds(
-            self, priced_registry):
+    def test_the_report_survives_onto_the_object_the_caller_holds(self, priced_registry):
         """The record is in memory, on the object the caller already has --
         which is the whole of "3C can gate but cannot durably record".  Kills
         ``report=`` being dropped from the final ``_replace``, under which the
         priced findings are computed, emitted and thrown away."""
-        register("C12")(lambda payload: (
-            report("C12", "inference.parameters", "kept."),))
+        register("C12")(lambda payload: (report("C12", "inference.parameters", "kept."),))
         run = load_document(_document())
         # The pre-flight A53 notice is in `findings` and is not what this
         # test is about: the question is whether a POSTFLIGHT finding
         # survives onto the object the caller holds.
-        assert [one.message for one in run.report.findings if one.check != "A53"] == [
-            "kept."
-        ]
+        assert [one.message for one in run.report.findings if one.check != "A53"] == ["kept."]
 
 
 # ---------------------------------------------------------------------------
@@ -861,8 +832,7 @@ assert not contributing - present, (
 """
 
 
-def _uncontributing(directory: pathlib.Path,
-                    registry: dict) -> set[str]:
+def _uncontributing(directory: pathlib.Path, registry: dict) -> set[str]:
     """Module stems under ``directory`` that own no slot in ``registry``.
 
     Both sides derived -- one by ``pkgutil`` over the directory, one by
@@ -871,8 +841,7 @@ def _uncontributing(directory: pathlib.Path,
     partner below, so the two cannot disagree about what "contributes" means.
     """
     present = {name for _, name, _ in pkgutil.iter_modules([str(directory)])}
-    contributing = {fn.__module__.rsplit(".", 1)[-1]
-                    for fn in registry.values()}
+    contributing = {fn.__module__.rsplit(".", 1)[-1] for fn in registry.values()}
     return present - contributing
 
 
@@ -905,9 +874,13 @@ class TestTheScopeOfThisPackage:
             "print(sorted(m for m in ('numpyro', 'limtod_jax', 'healpy', "
             "'h5py', 'pyuvdata', 'rhino_cal_jax') if m in sys.modules))\n"
         )
-        done = subprocess.run([sys.executable, "-c", source],
-                              capture_output=True, text=True, check=True,
-                              cwd=str(_ROOT))
+        done = subprocess.run(
+            [sys.executable, "-c", source],
+            capture_output=True,
+            text=True,
+            check=True,
+            cwd=str(_ROOT),
+        )
         assert done.stdout.strip() == "[]", done.stdout
 
 
@@ -966,12 +939,17 @@ class TestTheDiscoveryMechanism:
         """
         done = subprocess.run(
             [sys.executable, "-c", _WIRING_PROBE],
-            capture_output=True, text=True, cwd=str(_ROOT), check=False)
+            capture_output=True,
+            text=True,
+            cwd=str(_ROOT),
+            check=False,
+        )
         assert done.returncode == 0, (
             "importing rheplicant.config.postflight does not leave every "
             "module under postflight/ owning a slot. In THIS process the same "
             "question answers 'fine', because the test modules import them "
-            "directly.\n" + done.stdout + done.stderr)
+            "directly.\n" + done.stdout + done.stderr
+        )
 
     def test_the_subprocess_probe_can_fail(self):
         """ANTI-VACUITY for the child, and it is not ceremony.
@@ -984,11 +962,17 @@ class TestTheDiscoveryMechanism:
         """
         done = subprocess.run(
             [sys.executable, "-c", _WIRING_PROBE, "no_such_priced_module"],
-            capture_output=True, text=True, cwd=str(_ROOT), check=False)
+            capture_output=True,
+            text=True,
+            cwd=str(_ROOT),
+            check=False,
+        )
         assert done.returncode != 0, (
             "the child accepted a module that owns no slot, so its assertions "
             "are not running and the wiring test above proves nothing.\n"
-            + done.stdout + done.stderr)
+            + done.stdout
+            + done.stderr
+        )
         assert "no_such_priced_module" in done.stderr, done.stderr
 
     def test_the_walk_reports_a_module_that_owns_no_slot(self, tmp_path):
@@ -1018,8 +1002,7 @@ class TestTheDiscoveryMechanism:
         assert _uncontributing(package, {"C12": _claimed}) == {"bystander"}
         assert _uncontributing(package, {}) == {"bystander", "fitting"}
 
-    def test_a_module_named_after_one_of_this_packages_own_names_is_refused(
-            self, tmp_path):
+    def test_a_module_named_after_one_of_this_packages_own_names_is_refused(self, tmp_path):
         """The failure discovery has that a foot-import list does not.
 
         Importing a submodule SETS IT as an attribute of the package, so a
@@ -1050,7 +1033,7 @@ class TestTheDiscoveryMechanism:
             "as an attribute of its package -- so `from "
             "rheplicant.config.postflight import priced` would bind a MODULE "
             "and the hook in document.py would raise \"'module' object is not "
-            "callable\". Rename the module; the reserved names are "
+            'callable". Rename the module; the reserved names are '
             f"{sorted(_RESERVED)}."
         )
 
@@ -1070,13 +1053,13 @@ class TestTheDiscoveryMechanism:
         """
         import rheplicant.config.postflight as package
 
-        stems = tuple(sorted(name for _, name, _ in
-                             pkgutil.iter_modules(package.__path__)))
+        stems = tuple(sorted(name for _, name, _ in pkgutil.iter_modules(package.__path__)))
         assert stems, "discovery found no module at all -- the pin is vacuous"
         assert set(stems).isdisjoint(_RESERVED), sorted(stems)
         assert set(stems) <= set(_reserved()), (
             "the recomputed set is expected to hold every imported stem -- "
-            "that is the defect _RESERVED exists to freeze out")
+            "that is the defect _RESERVED exists to freeze out"
+        )
         assert _discoverable(package.__path__) == stems
 
     def test_the_found_modules_come_back_sorted(self, tmp_path):
@@ -1093,8 +1076,7 @@ class TestTheDiscoveryMechanism:
             (tmp_path / f"{stem}.py").touch()
         assert _discoverable([str(tmp_path)]) == ("alpha", "mu", "zeta")
 
-    def test_the_reserved_names_are_derived_from_this_module_and_not_listed(
-            self):
+    def test_the_reserved_names_are_derived_from_this_module_and_not_listed(self):
         """A hand-written list is a list that goes stale.
 
         Measured: the four-name literal this replaced held ``gates`` and
@@ -1105,8 +1087,18 @@ class TestTheDiscoveryMechanism:
         prevent.
         """
         reserved = _reserved()
-        assert {"priced", "register", "sweep", "binder", "CHECKS", "Priced",
-                "PostCheck", "Report", "Finding", "Gate"} <= reserved
+        assert {
+            "priced",
+            "register",
+            "sweep",
+            "binder",
+            "CHECKS",
+            "Priced",
+            "PostCheck",
+            "Report",
+            "Finding",
+            "Gate",
+        } <= reserved
         assert "gates" not in reserved
         (tmp := pathlib.Path(tempfile.mkdtemp())) and None
         (tmp / "sweep.py").touch()

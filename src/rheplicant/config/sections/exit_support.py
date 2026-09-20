@@ -83,6 +83,7 @@ class RunParseContext:
     spec: RunSpec
     configured_run: ConfiguredRun
 
+
 @dataclass(frozen=True, slots=True)
 class ParsedRun:
     """A ``RunSpec`` after its kind's parser: the spec, plus the two frozen
@@ -130,12 +131,8 @@ class ParsedRun:
 
 
 ParseExit = Callable[[Mapping[str, object], RunParseContext], ParsedOptions]
-PreExecute = Callable[
-    [ParsedRun, "ConfiguredRun", Mapping[str, "RunResult"]], None
-]
-ExecuteExit = Callable[
-    [ParsedRun, "ConfiguredRun", Mapping[str, "RunResult"]], object
-]
+PreExecute = Callable[[ParsedRun, "ConfiguredRun", Mapping[str, "RunResult"]], None]
+ExecuteExit = Callable[[ParsedRun, "ConfiguredRun", Mapping[str, "RunResult"]], object]
 
 
 @dataclass(frozen=True, slots=True)
@@ -202,20 +199,15 @@ def parsed_options(
         )
     if not isinstance(resolved, Mapping):
         raise ConfigError(
-            "runs[].options: resolved options are a mapping; got "
-            f"{type(resolved).__name__}."
+            f"runs[].options: resolved options are a mapping; got {type(resolved).__name__}."
         )
-    frozen_resolved = freeze_evidence(
-        resolved, where="runs[].options resolved view"
-    )
+    frozen_resolved = freeze_evidence(resolved, where="runs[].options resolved view")
     _require_yaml_safe(frozen_resolved, "resolved")
     frozen_execution = freeze(execution)
     return ParsedOptions(execution=frozen_execution, resolved=frozen_resolved)
 
 
-def _legacy_freeze_parse(
-    options: Mapping[str, object], context: RunParseContext
-) -> ParsedOptions:
+def _legacy_freeze_parse(options: Mapping[str, object], context: RunParseContext) -> ParsedOptions:
     """The transitional parser the unmigrated built-ins sit on (Tasks 8-9).
 
     Both views are the entry's own options, frozen independently -- the same
@@ -321,27 +313,18 @@ def register(
     def bind(execute: ExecuteExit) -> ExecuteExit:
         registries = (PARSERS, PRE_EXECUTORS, EXECUTORS, DEFERRED_CHECKS)
         if not callable(execute) or not callable(pre_execute):
-            raise TypeError(
-                "exit parser, pre-executor, and executor are callable"
-            )
+            raise TypeError("exit parser, pre-executor, and executor are callable")
         chosen_parse = _legacy_freeze_parse if parse is None else parse
         if not callable(chosen_parse):
-            raise TypeError(
-                "exit parser, pre-executor, and executor are callable"
-            )
+            raise TypeError("exit parser, pre-executor, and executor are callable")
         if isinstance(deferred_checks, (str, bytes)):
-            raise ValueError(
-                "deferred check names are unique non-empty strings"
-            )
+            raise ValueError("deferred check names are unique non-empty strings")
         checks = tuple(deferred_checks)
         if len(checks) != len(set(checks)) or not all(
-                isinstance(check, str) and check for check in checks):
-            raise ValueError(
-                "deferred check names are unique non-empty strings"
-            )
-        stored_execute = (
-            execute if parse is not None else _adapt_legacy_executor(execute)
-        )
+            isinstance(check, str) and check for check in checks
+        ):
+            raise ValueError("deferred check names are unique non-empty strings")
+        stored_execute = execute if parse is not None else _adapt_legacy_executor(execute)
         with _HANDLER_LOCK:
             if any(kind in registry for registry in registries):
                 incumbent = EXECUTORS[kind]
@@ -369,12 +352,12 @@ def handler_for(kind: str) -> ExitHandler:
     """The complete live handler for ``kind``, assembled at call time."""
     with _HANDLER_LOCK:
         try:
-            return ExitHandler(PARSERS[kind], PRE_EXECUTORS[kind],
-                               EXECUTORS[kind], DEFERRED_CHECKS[kind])
+            return ExitHandler(
+                PARSERS[kind], PRE_EXECUTORS[kind], EXECUTORS[kind], DEFERRED_CHECKS[kind]
+            )
         except KeyError:
             raise ConfigError(
-                f"runs[].kind: {kind!r} is not registered; it takes "
-                f"{sorted(EXECUTORS)}."
+                f"runs[].kind: {kind!r} is not registered; it takes {sorted(EXECUTORS)}."
             ) from None
 
 
@@ -397,13 +380,11 @@ def parse_run(
     ``{index, name, kind, variant}``.
     """
     handler = handler_for(spec.kind)
-    context = RunParseContext(index=index, layer=layer, spec=spec,
-                              configured_run=configured)
+    context = RunParseContext(index=index, layer=layer, spec=spec, configured_run=configured)
     parsed = handler.parse(spec.options, context)
     if not isinstance(parsed, ParsedOptions):
         raise TypeError(
-            f"exit parser for {spec.kind!r} returned "
-            f"{type(parsed).__name__}, not ParsedOptions."
+            f"exit parser for {spec.kind!r} returned {type(parsed).__name__}, not ParsedOptions."
         )
     run = ParsedRun(
         index=index,
@@ -414,8 +395,12 @@ def parse_run(
     )
     if trace is not None:
         audit_row = {
-            "descriptor": {"index": index, "name": spec.name,
-                           "kind": spec.kind, "variant": spec.variant},
+            "descriptor": {
+                "index": index,
+                "name": spec.name,
+                "kind": spec.kind,
+                "variant": spec.variant,
+            },
             "resolved_options": parsed.resolved,
             "deferred_checks": handler.deferred_checks,
         }
@@ -432,12 +417,9 @@ def _sweep(run: Any, allowed: frozenset[str]) -> None:
         )
 
 
-def _number(run: Any, key: str, value: Any, *, kind: type,
-            minimum: float | None = None) -> Any:
+def _number(run: Any, key: str, value: Any, *, kind: type, minimum: float | None = None) -> Any:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
-        raise ConfigError(
-            f"runs[{run.name!r}]: {key}: is a number; got {value!r}."
-        )
+        raise ConfigError(f"runs[{run.name!r}]: {key}: is a number; got {value!r}.")
     if kind is int and not isinstance(value, int):
         # `int(2.5)` is 2, so a count declared 2.5 used to RUN as 2 -- the
         # document says one thing and the run does another, with nothing to
@@ -453,10 +435,7 @@ def _number(run: Any, key: str, value: Any, *, kind: type,
             "and only one of them is what this document asked for."
         )
     if minimum is not None and not value >= minimum:
-        raise ConfigError(
-            f"runs[{run.name!r}]: {key}: must be >= {minimum:g}; got "
-            f"{value!r}."
-        )
+        raise ConfigError(f"runs[{run.name!r}]: {key}: must be >= {minimum:g}; got {value!r}.")
     return kind(value)
 
 
@@ -633,8 +612,9 @@ def _decided_sigma(run: Any, built: Any) -> Any:
     return decided.std(jnp.zeros(shape))
 
 
-def _decided_model(run: Any, built: Any, *, wants: str, reads: str,
-                   because: str, instead: str) -> Any:
+def _decided_model(
+    run: Any, built: Any, *, wants: str, reads: str, because: str, instead: str
+) -> Any:
     """The noise MODEL an exit that reads the noise as a rule needs (A28).
 
     The mirror of :func:`_decided_sigma`.  ``decided_noise`` returns either a

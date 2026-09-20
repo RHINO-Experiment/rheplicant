@@ -51,6 +51,7 @@ class UniformSkyModel(AbstractSkyModel):
         amplitude: brightness temperature [K] — differentiable scalar.
         n_pix: number of sky pixels (static configuration).
     """
+
     maturity: ClassVar[Maturity] = Maturity.PLACEHOLDER
 
     amplitude: jax.Array
@@ -78,6 +79,7 @@ class PowerLawSkyModel(AbstractSkyModel):
         ref_freq: reference frequency [Hz] (static configuration).
         n_pix: number of sky pixels (static configuration).
     """
+
     maturity: ClassVar[Maturity] = Maturity.PLACEHOLDER
 
     amplitude: jax.Array
@@ -121,6 +123,7 @@ class MapSky(AbstractSkyModel):
             differentiable leaf, so a sky can be inferred rather than assumed.
         freq: ``(n_freq,)`` the frequency grid the maps were built on [Hz].
     """
+
     maturity: ClassVar[Maturity] = Maturity.MAINTAINED
 
     maps: jax.Array

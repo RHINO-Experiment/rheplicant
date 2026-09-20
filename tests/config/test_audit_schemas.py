@@ -43,9 +43,7 @@ def is_map(node):
     """
     if node.get("properties") or node.get("required"):
         return False
-    return bool(node.get("patternProperties")) or isinstance(
-        node.get("additionalProperties"), dict
-    )
+    return bool(node.get("patternProperties")) or isinstance(node.get("additionalProperties"), dict)
 
 
 @pytest.mark.parametrize("name", SCHEMA_NAMES)
@@ -163,9 +161,7 @@ def test_the_presets_shape_is_covered_by_a_populated_case():
     jsonschema.validate(populated, schema)
 
     widened = copy.deepcopy(value)
-    widened["bootstrap"]["presets"] = [
-        {"name": "rhino_v1", "sha256": "0" * 64}
-    ]
+    widened["bootstrap"]["presets"] = [{"name": "rhino_v1", "sha256": "0" * 64}]
     with pytest.raises(jsonschema.ValidationError):
         jsonschema.validate(widened, schema)
 
@@ -223,6 +219,7 @@ def test_unknown_properties_are_refused_at_every_present_object_path(kind, path)
         assert errors
         assert any(tuple(error.absolute_path) == path for error in errors)
 
+
 @pytest.mark.parametrize("kind", ("provenance", "diagnostics"))
 def test_every_declared_array_is_populated_by_some_golden(kind):
     """An empty array validates against ANY item type, so a corpus of goldens
@@ -250,9 +247,7 @@ def test_every_declared_array_is_populated_by_some_golden(kind):
     """
     root = load_schema(f"{kind}-v1")
     declared = set(declared_array_pointers(root, root))
-    required = {
-        pointer for pointer in declared if at_pointer(root, pointer).get("maxItems") != 0
-    }
+    required = {pointer for pointer in declared if at_pointer(root, pointer).get("maxItems") != 0}
 
     populated = set()
     for path in goldens(kind):

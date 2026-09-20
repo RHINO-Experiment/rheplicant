@@ -50,6 +50,4 @@ runs:
     kind: forward
 """
 
-STARTER_YAML = STARTER_YAML.replace(
-    "{SCHEMA_VERSION}", str(SCHEMA_VERSION)
-)
+STARTER_YAML = STARTER_YAML.replace("{SCHEMA_VERSION}", str(SCHEMA_VERSION))

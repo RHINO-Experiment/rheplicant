@@ -117,9 +117,7 @@ class TestTheOrderingConstraintIsEnforced:
 
     def test_upstream_of_the_gain_the_tone_response_is_b_times_g(self, state):
         """The correct placement, and the reason the constraint is stated."""
-        right = Pipeline(
-            _tone(), ReceiverOperator(bandpass=BANDPASS), GainOperator(gain=GAIN)
-        )
+        right = Pipeline(_tone(), ReceiverOperator(bandpass=BANDPASS), GainOperator(gain=GAIN))
         bare = Pipeline(ReceiverOperator(bandpass=BANDPASS), GainOperator(gain=GAIN))
         response = (right(state).data - bare(state).data)[:, TONE_CHANNEL]
         expected = TONE_KELVIN * BANDPASS[TONE_CHANNEL] * GAIN
@@ -162,9 +160,7 @@ class TestTheOrderingConstraintIsEnforced:
                 At("noise", _tone()),
             )
         with pytest.raises(PipelineError) as by_sequence:
-            Pipeline(
-                ReceiverOperator(bandpass=BANDPASS), GainOperator(gain=GAIN), _tone()
-            )
+            Pipeline(ReceiverOperator(bandpass=BANDPASS), GainOperator(gain=GAIN), _tone())
         for excinfo in (by_graph, by_sequence):
             message = str(excinfo.value)
             assert "CWCalibrationOperator" in message  # the operator
@@ -175,9 +171,7 @@ class TestTheOrderingConstraintIsEnforced:
         assert type(by_graph.value) is not type(by_sequence.value)
 
     def test_assemble_accepts_the_tone_at_its_home_node(self, state):
-        twin = assemble(
-            _tone(), ReceiverOperator(bandpass=BANDPASS), GainOperator(gain=GAIN)
-        )
+        twin = assemble(_tone(), ReceiverOperator(bandpass=BANDPASS), GainOperator(gain=GAIN))
         assert twin.lit == ("cw_tone", "bandpass", "gain")
 
     def test_the_constraint_is_declared_where_the_graph_can_read_it(self):
@@ -248,8 +242,7 @@ class TestTheToneFrequencyIsInsideTheBand:
         does not, and that is what makes this a boundary test rather than a
         smoke test.
         """
-        for outside in (float(FREQ[-1]) + 0.01 * CHANNEL,
-                        float(FREQ[0]) - 0.01 * CHANNEL):
+        for outside in (float(FREQ[-1]) + 0.01 * CHANNEL, float(FREQ[0]) - 0.01 * CHANNEL):
             with pytest.raises(StateValidationError, match="outside the observed band"):
                 _tone(tone_freq=outside)(state)
 

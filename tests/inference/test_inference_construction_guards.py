@@ -441,6 +441,7 @@ def test_the_accepted_fractions_either_side_of_the_boundary_train(
 # parameters: Latent, Bind, ParameterSpace -- and one validate-time refusal.
 # --------------------------------------------------------------------------
 
+
 class _ShapedPrior:
     """Duck-typed stand-in for a NumPyro distribution.
 
@@ -473,18 +474,25 @@ PARAMETER_REFUSALS: dict[str, list[tuple[str, object, str]]] = {
         ),
     ],
     "Bind": [
-        ("no latents", lambda: Bind(latents=[], into=lambda p: p.gain),
-         "Bind needs at least one latent name"),
-        ("non-string latent", lambda: Bind(latents=[7], into=lambda p: p.gain),
-         "Bind latent names must be strings"),
-        ("non-callable selector", lambda: Bind("gain", into=[7]),
-         "`into` must hold callables"),
+        (
+            "no latents",
+            lambda: Bind(latents=[], into=lambda p: p.gain),
+            "Bind needs at least one latent name",
+        ),
+        (
+            "non-string latent",
+            lambda: Bind(latents=[7], into=lambda p: p.gain),
+            "Bind latent names must be strings",
+        ),
+        ("non-callable selector", lambda: Bind("gain", into=[7]), "`into` must hold callables"),
     ],
     "ParameterSpace": [
-        ("no latents", lambda: ParameterSpace(latents=[]),
-         "needs at least one Latent"),
-        ("no bindings", lambda: ParameterSpace(latents=[Latent("gain", init=2.0)]),
-         "needs bindings"),
+        ("no latents", lambda: ParameterSpace(latents=[]), "needs at least one Latent"),
+        (
+            "no bindings",
+            lambda: ParameterSpace(latents=[Latent("gain", init=2.0)]),
+            "needs bindings",
+        ),
     ],
 }
 

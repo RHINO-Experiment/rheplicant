@@ -92,9 +92,7 @@ def test_crash_after_fresh_publish_keeps_complete_new_target(tmp_path):
 
 
 @pytest.mark.parametrize("status", ("refused", "error"))
-def test_crash_after_failure_publish_completes_only_the_failure_sibling(
-    tmp_path, status
-):
+def test_crash_after_failure_publish_completes_only_the_failure_sibling(tmp_path, status):
     target, platform, lease, publication, _verified = lease_for(tmp_path)
     candidate = bundle(status)
     handle, _ = stage_bundle(
@@ -180,14 +178,10 @@ def test_recovery_never_deletes_unrecognized_backup(tmp_path):
         close_output_lease(lease)
 
 
-def test_failure_recovery_refuses_a_same_marker_replacement_inode(
-    tmp_path, monkeypatch
-):
+def test_failure_recovery_refuses_a_same_marker_replacement_inode(tmp_path, monkeypatch):
     _target, platform, lease, publication, _verified = lease_for(tmp_path)
     candidate = bundle("error")
-    handle, _ = stage_bundle(
-        publication, candidate, platform, publication="error"
-    )
+    handle, _ = stage_bundle(publication, candidate, platform, publication="error")
     replace_staged_metadata(handle, candidate, platform)
     original_finish = transaction._finish_journal
 

@@ -280,9 +280,7 @@ def gates(section: Any, *, audit: Any = None) -> dict[str, Gate]:
         elif name == "linearity":
             state = audit.use_default("inference.checks.linearity.mode", DEFAULT_MODE[name])
         elif name == "prior_sensitivity":
-            state = audit.use_default(
-                "inference.checks.prior_sensitivity.mode", DEFAULT_MODE[name]
-            )
+            state = audit.use_default("inference.checks.prior_sensitivity.mode", DEFAULT_MODE[name])
         else:
             state = audit.use_default("inference.checks.identifiability.mode", DEFAULT_MODE[name])
         rtol = spec.get("rtol") if name == "identifiability" else None
@@ -354,8 +352,14 @@ def auto_skipped(gate: Gate, reason: str) -> Gate:
     return gate._replace(state=AUTO_SKIP, record=False, reason=reason)
 
 
-def verdict(gate: Gate, *, failed: bool, where: str, message: str,
-            departure: findings.Departure | None = None) -> findings.Finding | None:
+def verdict(
+    gate: Gate,
+    *,
+    failed: bool,
+    where: str,
+    message: str,
+    departure: findings.Departure | None = None,
+) -> findings.Finding | None:
     """The cross-product of a mode and a ``report:``, in one place.
 
     **AT MOST ONE finding, ever.**  A failure with ``report: true`` is ONE

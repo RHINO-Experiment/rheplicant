@@ -30,8 +30,7 @@ def context():
 
 
 def compile(spec, context, site=SITE, epoch=EPOCH):
-    return compile_pointing(spec, context, time_s=TIME_S, epoch_unix_s=epoch,
-                            site=site)
+    return compile_pointing(spec, context, time_s=TIME_S, epoch_unix_s=epoch, site=site)
 
 
 class TestModeNone:
@@ -73,8 +72,14 @@ class TestDrift:
 
 class TestTheLstRoutes:
     def test_uniform_turn_excludes_the_endpoint(self, context):
-        spec = {**DRIFT, "lst": {"mode": "uniform_turn", "n_time": "n_time",
-                                 "lst0_deg": {"value": 10.0, "unit": "deg"}}}
+        spec = {
+            **DRIFT,
+            "lst": {
+                "mode": "uniform_turn",
+                "n_time": "n_time",
+                "lst0_deg": {"value": 10.0, "unit": "deg"},
+            },
+        }
         lst = compile(spec, context).extra["lst_deg"]
         assert lst.shape == (N_TIME,)
         assert float(lst[0]) == pytest.approx(10.0)
@@ -88,8 +93,7 @@ class TestTheLstRoutes:
     def test_from_file_reads_the_array(self, context, tmp_path):
         path = tmp_path / "lst.npy"
         np.save(path, np.linspace(0.0, 350.0, N_TIME))
-        ctx = ResolutionContext(freq=FREQ_HZ, time=TIME_S, dtype="float32",
-                                base_dir=str(tmp_path))
+        ctx = ResolutionContext(freq=FREQ_HZ, time=TIME_S, dtype="float32", base_dir=str(tmp_path))
         spec = {**DRIFT, "lst": {"from_file": {"path": "lst.npy", "format": "npy"}}}
         lst = compile(spec, ctx).extra["lst_deg"]
         assert lst.shape == (N_TIME,)
@@ -97,8 +101,7 @@ class TestTheLstRoutes:
     def test_a_wrong_length_lst_file_is_refused(self, context, tmp_path):
         path = tmp_path / "lst.npy"
         np.save(path, np.zeros(3))
-        ctx = ResolutionContext(freq=FREQ_HZ, time=TIME_S, dtype="float32",
-                                base_dir=str(tmp_path))
+        ctx = ResolutionContext(freq=FREQ_HZ, time=TIME_S, dtype="float32", base_dir=str(tmp_path))
         spec = {**DRIFT, "lst": {"from_file": {"path": "lst.npy", "format": "npy"}}}
         with pytest.raises(ConfigError, match=r"\(n_time,\)"):
             compile(spec, ctx)
@@ -126,38 +129,48 @@ class TestTheLstRoutes:
 class TestTracked:
     def test_the_table_becomes_pointing(self, context):
         table = [[float(i), 45.0] for i in range(N_TIME)]
-        spec = {"mode": "tracked", "table": {"list": table, "unit": "deg"},
-                "lst": {"mode": "from_site"}}
+        spec = {
+            "mode": "tracked",
+            "table": {"list": table, "unit": "deg"},
+            "lst": {"mode": "from_site"},
+        }
         build = compile(spec, context)
         assert build.pointing.shape == (N_TIME, 2)
         assert "lst_deg" in build.extra
 
     def test_lst_is_required(self, context):
-        spec = {"mode": "tracked",
-                "table": {"list": [[0.0, 45.0]] * N_TIME, "unit": "deg"}}
+        spec = {"mode": "tracked", "table": {"list": [[0.0, 45.0]] * N_TIME, "unit": "deg"}}
         with pytest.raises(ConfigError, match="lst"):
             compile(spec, context)
 
     def test_a_wrong_shape_table_is_refused(self, context):
-        spec = {"mode": "tracked", "table": {"list": [0.0] * N_TIME, "unit": "deg"},
-                "lst": {"mode": "from_site"}}
+        spec = {
+            "mode": "tracked",
+            "table": {"list": [0.0] * N_TIME, "unit": "deg"},
+            "lst": {"mode": "from_site"},
+        }
         with pytest.raises(ConfigError, match=r"\(n_time, 2\)"):
             compile(spec, context)
 
     def test_a_declared_selfrot_track_is_written(self, context):
         table = [[0.0, 45.0]] * N_TIME
-        spec = {"mode": "tracked", "table": {"list": table, "unit": "deg"},
-                "lst": {"mode": "from_site"},
-                "selfrot": {"list": [1.0] * N_TIME, "unit": "deg"}}
+        spec = {
+            "mode": "tracked",
+            "table": {"list": table, "unit": "deg"},
+            "lst": {"mode": "from_site"},
+            "selfrot": {"list": [1.0] * N_TIME, "unit": "deg"},
+        }
         build = compile(spec, context)
         assert build.extra["selfrot_deg"].shape == (N_TIME,)
         assert float(build.extra["selfrot_deg"][0]) == pytest.approx(1.0)
 
     def test_a_wrong_shape_selfrot_is_refused(self, context):
-        spec = {"mode": "tracked", "table": {"list": [[0.0, 45.0]] * N_TIME,
-                                             "unit": "deg"},
-                "lst": {"mode": "from_site"},
-                "selfrot": {"list": [1.0, 2.0], "unit": "deg"}}
+        spec = {
+            "mode": "tracked",
+            "table": {"list": [[0.0, 45.0]] * N_TIME, "unit": "deg"},
+            "lst": {"mode": "from_site"},
+            "selfrot": {"list": [1.0, 2.0], "unit": "deg"},
+        }
         with pytest.raises(ConfigError, match=r"\(n_time,\)"):
             compile(spec, context)
 
@@ -166,9 +179,8 @@ class TestBaked:
     def test_provenance_is_required_and_recorded(self, context):
         with pytest.raises(ConfigError, match="provenance"):
             compile({"mode": "baked"}, context)
-        build = compile({"mode": "baked",
-                         "provenance": {"built_by": "driftscan_v2", "lat_deg": 53.2}},
-                        context)
+        build = compile(
+            {"mode": "baked", "provenance": {"built_by": "driftscan_v2", "lat_deg": 53.2}}, context
+        )
         assert build.pointing is None
-        assert build.provenance == {"pointing/built_by": "driftscan_v2",
-                                    "pointing/lat_deg": 53.2}
+        assert build.provenance == {"pointing/built_by": "driftscan_v2", "pointing/lat_deg": 53.2}

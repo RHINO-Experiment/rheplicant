@@ -38,8 +38,7 @@ def _mean_std(kind: str, product: object) -> tuple[object | None, object | None]
         return product.values, None
     if kind in ("plan.sample", "nuts", "npe"):
         means = {
-            name: np.mean(np.asarray(stack), axis=0)
-            for name, stack in product.samples.items()
+            name: np.mean(np.asarray(stack), axis=0) for name, stack in product.samples.items()
         }
         stds = {name: np.std(np.asarray(stack), axis=0) for name, stack in product.samples.items()}
         return means, stds
@@ -53,7 +52,7 @@ def _mean_std(kind: str, product: object) -> tuple[object | None, object | None]
         offset = 0
         for name, value in mean.items():
             array = np.asarray(value)
-            stds[name] = diagonal[offset:offset + array.size].reshape(array.shape)
+            stds[name] = diagonal[offset : offset + array.size].reshape(array.shape)
             offset += array.size
         if offset != diagonal.size:
             raise ConfigError("report covariance does not match conjugate.wiener mean.")
@@ -138,9 +137,7 @@ def materialize_report(
     for name, statistics in computed.items():
         absent = [column for column in request.columns if column not in statistics]
         if absent:
-            raise ConfigError(
-                f"outputs.report.columns: row {name!r} has no statistics {absent}."
-            )
+            raise ConfigError(f"outputs.report.columns: row {name!r} has no statistics {absent}.")
     reference = None if request.reference is None else computed[request.reference]
     output_rows: list[dict[str, object]] = []
     for name in request.rows:
@@ -180,14 +177,8 @@ def materialize_report(
             lines = ["\t".join(headings)]
             for output in output_rows:
                 cells = [output["name"], output["kind"]]
-                cells.extend(
-                    _text_cell(output["statistics"][column])
-                    for column in request.columns
-                )
-                cells.extend(
-                    _text_cell(output["relative"][metric])
-                    for metric in request.relative
-                )
+                cells.extend(_text_cell(output["statistics"][column]) for column in request.columns)
+                cells.extend(_text_cell(output["relative"][metric]) for metric in request.relative)
                 lines.append("\t".join(cells))
             payload = ("\n".join(lines) + "\n").encode("utf-8")
             product_format = "txt"

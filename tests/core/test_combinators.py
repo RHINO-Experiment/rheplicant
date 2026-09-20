@@ -168,8 +168,9 @@ class TestSelectOperator:
         from rheplicant import Coordinates
 
         return State(
-            coords=Coordinates(time=jnp.arange(float(len(switch))),
-                               extra={"switch_state": jnp.asarray(switch)}),
+            coords=Coordinates(
+                time=jnp.arange(float(len(switch))), extra={"switch_state": jnp.asarray(switch)}
+            ),
         )
 
     def _branch(self, value):
@@ -226,9 +227,7 @@ class TestSelectOperator:
         s = self._state([0, 1]).replace(key=jax.random.key(0), data=jnp.ones((2, 1)))
         out = op(s)
         assert out.data.shape == (2, 1)
-        assert not jnp.array_equal(
-            jax.random.key_data(out.key), jax.random.key_data(s.key)
-        )
+        assert not jnp.array_equal(jax.random.key_data(out.key), jax.random.key_data(s.key))
 
     def test_jit_and_grad(self):
         from rheplicant.core.combinators import SelectOperator
@@ -253,8 +252,7 @@ class TestSelectOperator:
 
         op = SelectOperator(self._branch(1.0), self._branch(10.0))
         state = State(
-            coords=Coordinates(time=jnp.arange(4.0),
-                               extra={"switch_state": jnp.array([1])}),
+            coords=Coordinates(time=jnp.arange(4.0), extra={"switch_state": jnp.array([1])}),
         )
         with pytest.raises(StateValidationError, match="leading time axis"):
             op(state)
@@ -319,7 +317,8 @@ class TestSelectOperator:
 class TestReplaceBranch:
     def test_swaps_and_preserves_names(self):
         op = SumOperator(
-            Constant(value=jnp.array(1.0)), Constant(value=jnp.array(2.0)),
+            Constant(value=jnp.array(1.0)),
+            Constant(value=jnp.array(2.0)),
             names=("a", "b"),
         )
         op2 = op.replace_branch("b", Constant(value=jnp.array(10.0)))
@@ -352,9 +351,7 @@ class TestPRNGSemantics:
         op = SumOperator(Constant(value=jnp.array(1.0)))
         s = State(key=jax.random.key(0))
         out = op(s)
-        assert not jnp.array_equal(
-            jax.random.key_data(out.key), jax.random.key_data(s.key)
-        )
+        assert not jnp.array_equal(jax.random.key_data(out.key), jax.random.key_data(s.key))
 
     def test_reproducible(self):
         op = SumOperator(NoisySource(), NoisySource())

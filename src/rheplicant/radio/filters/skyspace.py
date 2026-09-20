@@ -151,17 +151,13 @@ class SkySpaceFilter(AbstractLinearFilter):
         """
         misfit = normal_op(sky_hat) - rhs
         residual = tree_norm(misfit) / jnp.maximum(tree_norm(rhs), 1e-30)
-        largest = largest_eigenvalue(
-            normal_op, rhs, jax.random.key(0), POWER_ITERATIONS
-        )
+        largest = largest_eigenvalue(normal_op, rhs, jax.random.key(0), POWER_ITERATIONS)
         # A^T W A is positive semi-definite, so lam_min cannot fall below the
         # ridge however little of the sky the scan actually saw. Taking the
         # smallest entry keeps the floor a true lower bound for a per-pixel lam.
         floor = jnp.min(self.regularization)
         kappa = largest / floor
-        bad = jnp.logical_or(
-            ~jnp.isfinite(residual), residual * kappa > self.require_convergence
-        )
+        bad = jnp.logical_or(~jnp.isfinite(residual), residual * kappa > self.require_convergence)
 
         # Below kappa * eps the arithmetic cannot represent an answer that
         # accurate, and the natural response to the other message -- tighten

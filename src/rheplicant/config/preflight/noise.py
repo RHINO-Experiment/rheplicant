@@ -110,9 +110,7 @@ _A26_NESTED_SHAPE_FORMS = frozenset({"full", "normal", "uniform"})
 #: BROADCASTS -- and ``_resolve_operand`` takes a whole value node for either
 #: operand, so ``shape:`` is not the last word on the rank.  ``full``'s
 #: ``value:`` is handed straight to ``jnp.full``.
-_A26_OPERANDS = {"normal": ("loc", "scale"),
-                 "uniform": ("low", "high"),
-                 "full": ("value",)}
+_A26_OPERANDS = {"normal": ("loc", "scale"), "uniform": ("low", "high"), "full": ("value",)}
 
 
 def _a26_literal_rank(literal: Any) -> int | None:
@@ -263,8 +261,9 @@ def _a26_in(layer: Mapping[str, Any]) -> Iterable[Finding]:
         # `build_noise` says "kind: homoscedastic requires sigma: -- a value
         # node", which names the fix.  A26 has no sigma to have a rank.
         return
-    message = _a26_sigma_axis_problem(rank=_a26_rank(noise["sigma"]),
-                                      axis=noise.get("axis", "none"))
+    message = _a26_sigma_axis_problem(
+        rank=_a26_rank(noise["sigma"]), axis=noise.get("axis", "none")
+    )
     if message is not None:
         yield refuse("A26", "inference.noise.sigma", message)
 
@@ -308,9 +307,13 @@ def _a49_in(layer: Mapping[str, Any]) -> Iterable[Finding]:
         return
     if "include_logdet" in set(noise) - _KIND_KEYS[kind]:
         try:
-            check_unknown_keys("inference.noise", dict(noise),
-                               _KIND_KEYS[kind], label=f"kind: {kind}",
-                               hints=_A49_HINTS)
+            check_unknown_keys(
+                "inference.noise",
+                dict(noise),
+                _KIND_KEYS[kind],
+                label=f"kind: {kind}",
+                hints=_A49_HINTS,
+            )
         except ConfigError as exc:
             yield refuse("A49", "inference.noise.include_logdet", str(exc))
         return

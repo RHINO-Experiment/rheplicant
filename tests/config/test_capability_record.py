@@ -58,17 +58,13 @@ class TestTheVocabulariesAreTheRuntimeOnes:
         what a SURFACE answers, not a level a class declares -- and the test
         below is what holds it, in the one place it is a fact about the code.
         """
-        assert tuple(SCHEMA["$defs"]["level"]["enum"]) == tuple(
-            level.value for level in Maturity
-        )
+        assert tuple(SCHEMA["$defs"]["level"]["enum"]) == tuple(level.value for level in Maturity)
 
     def test_the_reason_enum_is_the_runtime_vocabulary(self):
         assert tuple(SCHEMA["$defs"]["levelReason"]["enum"]) == LEVEL_REASONS
 
     def test_the_declared_format_version_is_the_schemas(self):
-        assert SCHEMA["properties"]["format_version"]["const"] == (
-            CAPABILITIES_FORMAT_VERSION
-        )
+        assert SCHEMA["properties"]["format_version"]["const"] == (CAPABILITIES_FORMAT_VERSION)
 
     def test_every_addressable_operator_declares_a_maturity(self):
         """Why ``LEVEL_REASONS`` has no entry for "the class declares none".
@@ -80,9 +76,7 @@ class TestTheVocabulariesAreTheRuntimeOnes:
         ``maturity``, this goes red and the vocabulary question is asked
         deliberately rather than answered by a silent ``null``.
         """
-        addressable = {
-            cls.__name__ for row in operator_table().values() for cls in row
-        }
+        addressable = {cls.__name__ for row in operator_table().values() for cls in row}
         assert addressable
         assert addressable <= set(capabilities())
 
@@ -103,9 +97,7 @@ class TestEveryReasonIsProducible:
         ]
 
     def test_both_reasons_are_reachable(self):
-        rows = node_levels(
-            graph(gain="not a mapping", noise={"type": "NoSuchOperator"})
-        )
+        rows = node_levels(graph(gain="not a mapping", noise={"type": "NoSuchOperator"}))
         assert {row.level_reason for row in rows} == set(LEVEL_REASONS)
 
     def test_a_node_that_resolves_carries_a_level_and_no_reason(self):
@@ -133,9 +125,7 @@ class TestTheNoticeAndTheRecordAreOneResolution:
             {},
         ],
     )
-    def test_every_node_the_notice_names_is_in_the_record_at_that_level(
-        self, document
-    ):
+    def test_every_node_the_notice_names_is_in_the_record_at_that_level(self, document):
         rows = node_levels(document)
         named = {
             f"{row.node_id} ({row.type})"
@@ -167,9 +157,7 @@ class TestTheManifest:
     def test_it_validates_and_carries_one_row_per_resolved_layer(self):
         document = graph(gain={"amplitude": 1.0})
         payload = json.loads(
-            capabilities_manifest(
-                (layer(document), layer(document, kind="variant", name="v"))
-            )
+            capabilities_manifest((layer(document), layer(document, kind="variant", name="v")))
         )
         jsonschema.validate(payload, SCHEMA)
         assert [row["layer"] for row in payload["layers"]] == [
@@ -195,9 +183,7 @@ class TestTheManifest:
 
     def test_it_keeps_the_documents_own_node_order(self):
         payload = json.loads(
-            capabilities_manifest(
-                (layer(graph(noise={"sigma": 1.0}, gain={"amplitude": 1.0})),)
-            )
+            capabilities_manifest((layer(graph(noise={"sigma": 1.0}, gain={"amplitude": 1.0})),))
         )
         assert [row["node_id"] for row in payload["layers"][0]["nodes"]] == [
             "noise",

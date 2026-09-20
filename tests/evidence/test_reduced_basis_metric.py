@@ -193,12 +193,8 @@ def test_at_the_operating_point_neither_projector_is_measurably_biased(seeded):
     """
     data, values = _noiseless()
     weight = rhino_bank.weight()
-    z_right, _ = _z_statistic(
-        _correct_projector_log_likelihood(seeded, data, weight), values
-    )
-    z_wrong, _ = _z_statistic(
-        _unweighted_projector_log_likelihood(seeded, data, weight), values
-    )
+    z_right, _ = _z_statistic(_correct_projector_log_likelihood(seeded, data, weight), values)
+    z_wrong, _ = _z_statistic(_unweighted_projector_log_likelihood(seeded, data, weight), values)
     assert abs(z_right) < NOISE_FLOOR, z_right
     assert abs(z_wrong) < NOISE_FLOOR, z_wrong
     assert 1.0 / z_wrong**2 > 1e18
@@ -206,12 +202,8 @@ def test_at_the_operating_point_neither_projector_is_measurably_biased(seeded):
 
 def test_the_truncating_basis_really_has_deleted_the_direction(truncating):
     """Otherwise the two tests below measure a projector against no residual."""
-    scores = score_directions(
-        rhino_bank.space(), rhino_bank.pipeline(), rhino_bank.state()
-    )
-    assert basis_fidelity(truncating, scores).residuals[TARGET] == pytest.approx(
-        0.5618, rel=5e-3
-    )
+    scores = score_directions(rhino_bank.space(), rhino_bank.pipeline(), rhino_bank.state())
+    assert basis_fidelity(truncating, scores).residuals[TARGET] == pytest.approx(0.5618, rel=5e-3)
 
 
 def test_the_correct_projector_has_zero_score_bias_however_badly_it_truncates(
@@ -226,9 +218,7 @@ def test_the_correct_projector_has_zero_score_bias_however_badly_it_truncates(
     """
     data, values = _noiseless()
     weight = rhino_bank.weight()
-    z, width = _z_statistic(
-        _correct_projector_log_likelihood(truncating, data, weight), values
-    )
+    z, width = _z_statistic(_correct_projector_log_likelihood(truncating, data, weight), values)
     assert abs(z) < NOISE_FLOOR, z
     assert width == pytest.approx(1.584e-02, rel=1e-2)
 
@@ -237,9 +227,7 @@ def test_the_unweighted_projector_does_not(truncating):
     """The genuine bias route, measured, with its own sqrt(N) crossing."""
     data, values = _noiseless()
     weight = rhino_bank.weight()
-    z_right, _ = _z_statistic(
-        _correct_projector_log_likelihood(truncating, data, weight), values
-    )
+    z_right, _ = _z_statistic(_correct_projector_log_likelihood(truncating, data, weight), values)
     z_wrong, _ = _z_statistic(
         _unweighted_projector_log_likelihood(truncating, data, weight), values
     )
@@ -274,9 +262,7 @@ def test_the_bias_vanishes_under_a_constant_sigma_which_is_why_the_fixture_is_no
         reference=data,
         support=rhino_bank.support(),
     )
-    z_wrong, _ = _z_statistic(
-        _unweighted_projector_log_likelihood(basis, data, flat), values
-    )
+    z_wrong, _ = _z_statistic(_unweighted_projector_log_likelihood(basis, data, flat), values)
     assert abs(z_wrong) < NOISE_FLOOR, z_wrong
 
 

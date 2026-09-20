@@ -48,9 +48,7 @@ def _finish(
     elif target is None:
         unit_token = None
     else:
-        unit_token = context.use_default(
-            f"{target.destination.document_path}.unit", None
-        )
+        unit_token = context.use_default(f"{target.destination.document_path}.unit", None)
     if unit_token is None:
         return ResolvedValue(array, None, form, {**modifiers, "_shadowed": shadowed})
     converted, unit = convert_to_canonical(array, unit_token)

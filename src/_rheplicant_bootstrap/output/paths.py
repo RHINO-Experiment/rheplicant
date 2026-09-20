@@ -51,10 +51,7 @@ def journal_temp_name(
     _require_transaction_id(transaction_id)
     if phase not in TRANSACTION_PHASES:
         raise ConfigError("unknown transaction phase.")
-    return (
-        f".rheplicant-jtmp-{target_digest(absolute_target)}-"
-        f"{transaction_id}-{phase}.tmp"
-    )
+    return f".rheplicant-jtmp-{target_digest(absolute_target)}-{transaction_id}-{phase}.tmp"
 
 
 def failure_name(absolute_target: str, publication: str, transaction_id: str) -> str:
@@ -91,8 +88,7 @@ def internal_names(absolute_target: str) -> tuple[str, ...]:
         failure_name(absolute_target, "error", transaction_id),
     ]
     names.extend(
-        journal_temp_name(absolute_target, transaction_id, phase)
-        for phase in TRANSACTION_PHASES
+        journal_temp_name(absolute_target, transaction_id, phase) for phase in TRANSACTION_PHASES
     )
     return tuple(names)
 

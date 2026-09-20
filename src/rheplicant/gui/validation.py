@@ -237,8 +237,7 @@ def _badges(
             section.section_id,
             sum(widget.must_decide for widget in section.widgets),
             sum(
-                row.severity == "refuse"
-                and _section_for(row.where) == section.section_id
+                row.severity == "refuse" and _section_for(row.where) == section.section_id
                 for row in findings
             ),
             sum(
@@ -246,8 +245,7 @@ def _badges(
                 for row in findings
             ),
             sum(
-                row.severity == "report"
-                and _section_for(row.where) == section.section_id
+                row.severity == "report" and _section_for(row.where) == section.section_id
                 for row in findings
             ),
             sum(_section_for(row.path) == section.section_id for row in changes),

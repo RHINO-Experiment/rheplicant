@@ -21,8 +21,14 @@ def context():
 class TestBuildingABasis:
     def test_it_builds_a_separable_basis_from_the_runs_own_grids(self, context):
         built = build_resources(
-            {"bases": {"t_ant": {"time": {"kind": "legendre", "n_basis": 3},
-                                 "freq": {"kind": "legendre", "n_basis": 2}}}},
+            {
+                "bases": {
+                    "t_ant": {
+                        "time": {"kind": "legendre", "n_basis": 3},
+                        "freq": {"kind": "legendre", "n_basis": 2},
+                    }
+                }
+            },
             context,
         )
         basis = built.resources["resources.bases.t_ant"]
@@ -36,8 +42,14 @@ class TestBuildingABasis:
         makes that structurally impossible."""
         with pytest.raises(ConfigError) as excinfo:
             build_resources(
-                {"bases": {"b": {"time": {"kind": "legendre", "n_basis": 3, "n": 16},
-                                 "freq": {"kind": "legendre", "n_basis": 2}}}},
+                {
+                    "bases": {
+                        "b": {
+                            "time": {"kind": "legendre", "n_basis": 3, "n": 16},
+                            "freq": {"kind": "legendre", "n_basis": 2},
+                        }
+                    }
+                },
                 context,
             )
         message = str(excinfo.value)
@@ -49,8 +61,14 @@ class TestBuildingABasis:
         A copied built_for: block is exactly what a copied basis comes with."""
         with pytest.raises(ConfigError) as excinfo:
             build_resources(
-                {"bases": {"b": {"time": {"file": {"path": "design.npy", "format": "npy"}},
-                                 "freq": {"kind": "legendre", "n_basis": 2}}}},
+                {
+                    "bases": {
+                        "b": {
+                            "time": {"file": {"path": "design.npy", "format": "npy"}},
+                            "freq": {"kind": "legendre", "n_basis": 2},
+                        }
+                    }
+                },
                 context,
             )
         message = str(excinfo.value)
@@ -67,8 +85,14 @@ class TestBuildingABasis:
 
         with pytest.raises(ConfigError) as excinfo:
             build_resources(
-                {"bases": {"b": {"time": {"kind": "chebyshev", "n_basis": 3},
-                                 "freq": {"kind": "legendre", "n_basis": 2}}}},
+                {
+                    "bases": {
+                        "b": {
+                            "time": {"kind": "chebyshev", "n_basis": 3},
+                            "freq": {"kind": "legendre", "n_basis": 2},
+                        }
+                    }
+                },
                 context,
             )
         message = str(excinfo.value)
@@ -83,8 +107,14 @@ class TestBuildingABasis:
         no_time = ResolutionContext(freq=jnp.linspace(60e6, 85e6, 8), time=None, dtype="float32")
         with pytest.raises(ConfigError) as excinfo:
             build_resources(
-                {"bases": {"b": {"time": {"kind": "legendre", "n_basis": 2},
-                                 "freq": {"kind": "legendre", "n_basis": 2}}}},
+                {
+                    "bases": {
+                        "b": {
+                            "time": {"kind": "legendre", "n_basis": 2},
+                            "freq": {"kind": "legendre", "n_basis": 2},
+                        }
+                    }
+                },
                 no_time,
             )
         assert "observation.time.grid" in str(excinfo.value)
@@ -93,8 +123,14 @@ class TestBuildingABasis:
 class TestBasisFit:
     def test_it_fits_a_field_onto_a_named_basis(self, context):
         built = build_resources(
-            {"bases": {"b": {"time": {"kind": "legendre", "n_basis": 3},
-                             "freq": {"kind": "legendre", "n_basis": 2}}}},
+            {
+                "bases": {
+                    "b": {
+                        "time": {"kind": "legendre", "n_basis": 3},
+                        "freq": {"kind": "legendre", "n_basis": 2},
+                    }
+                }
+            },
             context,
         )
         scoped = context
@@ -108,9 +144,13 @@ class TestBasisFit:
         # fitted coefficients are asymmetric in content as well as shape.
         field_values = [[float(t) for _ in range(8)] for t in range(16)]
         got = resolve_value(
-            {"basis_fit": {"basis": {"ref": "resources.bases.b"},
-                           "field": {"list": field_values, "unit": "K"}},
-             "unit": "K"},
+            {
+                "basis_fit": {
+                    "basis": {"ref": "resources.bases.b"},
+                    "field": {"list": field_values, "unit": "K"},
+                },
+                "unit": "K",
+            },
             scoped,
         )
         assert got.value.shape == (3, 2)
@@ -171,8 +211,13 @@ class TestBasisFitRefusals:
             resolve_value({"basis_fit": [1, 2]}, context)
 
     def test_an_unknown_key_is_refused(self, context):
-        node = {"basis_fit": {"basis": {"ref": "resources.bases.b"},
-                              "field": {"zeros": [2, 2]}, "amplitude": 1.0}}
+        node = {
+            "basis_fit": {
+                "basis": {"ref": "resources.bases.b"},
+                "field": {"zeros": [2, 2]},
+                "amplitude": 1.0,
+            }
+        }
         with pytest.raises(ConfigError, match=r"does not take \['amplitude'\]"):
             resolve_value(node, context)
 

@@ -11,9 +11,7 @@ from rheplicant.config.values import resolve_value
 
 
 def test_required_destination_refuses_a_bare_scalar():
-    destination = DestinationDescriptor(
-        "model.adc.scale", "model_field", "model.adc.scale"
-    )
+    destination = DestinationDescriptor("model.adc.scale", "model_field", "model.adc.scale")
     try:
         resolve_value(2.0, ResolutionContext(), destination=destination)
     except ConfigError as exc:
@@ -123,18 +121,14 @@ def test_fixed_derivation_keeps_its_destination_dimension():
         "observation.freq.grid", "config_path", "observation.freq.grid"
     )
     context = ResolutionContext(freq=jnp.asarray([1.0, 3.0, 5.0]))
-    resolved = resolve_value(
-        {"from": "channel_spacing"}, context, destination=destination
-    )
+    resolved = resolve_value({"from": "channel_spacing"}, context, destination=destination)
     assert resolved.unit.canonical == "Hz"
 
 
 def test_nested_run_target_has_concrete_path_and_patterned_selector():
     from rheplicant.config.values import make_resolution_target
 
-    destination = DestinationDescriptor(
-        "runs[3].at.g", "config_path", "runs[].at.*"
-    )
+    destination = DestinationDescriptor("runs[3].at.g", "config_path", "runs[].at.*")
     context = ResolutionContext(
         dimensions=DimensionEnvironment(latent_dimensions={"g": signature("K")})
     )

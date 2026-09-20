@@ -69,8 +69,7 @@ from tests.config.preflight_helpers import (
 _HERE = pathlib.Path(__file__).resolve().parent
 #: ``tests/config/`` -> the repository root.
 _ROOT = _HERE.parents[1]
-_SCHEMA = (_ROOT / "docs" / "superpowers" / "specs"
-           / "2026-08-09-rheplicant-config-schema-v1.md")
+_SCHEMA = _ROOT / "docs" / "superpowers" / "specs" / "2026-08-09-rheplicant-config-schema-v1.md"
 
 #: The preflight PACKAGE's directory, resolved through ``importlib`` rather
 #: than through ``from rheplicant.config import preflight``.  Task 13 exports
@@ -80,16 +79,14 @@ _SCHEMA = (_ROOT / "docs" / "superpowers" / "specs"
 #: ``AttributeError`` at import and this module would stop collecting entirely
 #: -- on the last task of the plan.  Only ``sys.modules[...]`` and
 #: ``importlib.import_module(...)`` return the module.
-_PREFLIGHT_DIR = pathlib.Path(
-    importlib.import_module("rheplicant.config.preflight").__file__
-).resolve().parent
+_PREFLIGHT_DIR = (
+    pathlib.Path(importlib.import_module("rheplicant.config.preflight").__file__).resolve().parent
+)
 
 #: ``config/passes.py`` -- the runner Plan 3B extracted out of this package's
 #: ``__init__``, so that the three passes this layer now has share one
 #: de-duplication, one raise-guard and one ``where`` guard.
-_PASSES = pathlib.Path(
-    importlib.import_module("rheplicant.config.passes").__file__
-).resolve()
+_PASSES = pathlib.Path(importlib.import_module("rheplicant.config.passes").__file__).resolve()
 
 
 def _preflight_sources() -> list[pathlib.Path]:
@@ -174,14 +171,14 @@ def _schema_ids_from_the_spec() -> list[str] | None:
     if not _SCHEMA.is_file():
         return None
     _, marker, after = _SCHEMA.read_text().partition(
-        "\n## 6. Validation: every check before anything expensive\n")
+        "\n## 6. Validation: every check before anything expensive\n"
+    )
     assert marker, "schema §6's heading has moved"
     body, _, _ = after.partition("\n## ")
     return re.findall(r"^\|\s*([ABC]\d+)\s*\|", body, re.M)
 
 
-def _foot_imports(source: str,
-                  package: str = "rheplicant.config.preflight") -> set[str]:
+def _foot_imports(source: str, package: str = "rheplicant.config.preflight") -> set[str]:
     """The modules ``preflight/__init__.py``'s foot import names.
 
     **``package`` is a parameter because ``inflight/`` needs the same answer
@@ -226,8 +223,8 @@ def _foot_imports(source: str,
     found = set()
     for node in ast.parse(source).body:
         if isinstance(node, ast.ImportFrom) and (
-                (node.module or "").startswith(package)
-                or (node.level == 1 and node.module is None)):
+            (node.module or "").startswith(package) or (node.level == 1 and node.module is None)
+        ):
             found.update(entry.name for entry in node.names)
         elif isinstance(node, ast.Import):
             for entry in node.names:
@@ -248,12 +245,21 @@ def _foot_imports(source: str,
 #: ``build_runtime`` is on the list because ``load_document`` calls it and a
 #: draft of this guard left it off -- a check importing and calling it passed
 #: every assertion in this module.
-_OUT_OF_SCOPE_NAMES = frozenset({
-    "build_resources", "build_model", "build_observation", "build_inference",
-    "build_runtime",
-    "resolve_value", "resolve_path_on", "resolve_file_path",
-    "load_document", "run_document", "run_forward",
-})
+_OUT_OF_SCOPE_NAMES = frozenset(
+    {
+        "build_resources",
+        "build_model",
+        "build_observation",
+        "build_inference",
+        "build_runtime",
+        "resolve_value",
+        "resolve_path_on",
+        "resolve_file_path",
+        "load_document",
+        "run_document",
+        "run_forward",
+    }
+)
 #: Modules no module under ``preflight/`` may import at all.  ``document``
 #: imports this package for the hook, so importing it back closes a cycle;
 #: **the umbrella package is banned for a sharper reason** -- it re-exports
@@ -262,8 +268,7 @@ _OUT_OF_SCOPE_NAMES = frozenset({
 #: cfg`` followed by ``cfg.resolve_value(...)`` needs no banned NAME and no
 #: alias trick.  A module here imports the specific module it wants
 #: (``from rheplicant.config.errors import ConfigError``), never the package.
-_OUT_OF_SCOPE_MODULES = frozenset({"rheplicant.config",
-                                   "rheplicant.config.document"})
+_OUT_OF_SCOPE_MODULES = frozenset({"rheplicant.config", "rheplicant.config.document"})
 
 #: Filesystem verbs a runtime patch takes away DIRECTLY: verb -> the target
 #: :func:`_forbid_the_filesystem` rebinds.  Read by that function, so the
@@ -340,9 +345,9 @@ _STATIC_ONLY_CALLS: dict[str, str] = {
 #: table.  Written as a UNION rather than as a literal so that adding a patch
 #: without adding the ban -- or the reverse, which is what shipped -- is not
 #: expressible.
-_FILESYSTEM_CALLS = (frozenset(_FILESYSTEM_PATCHES)
-                     | frozenset(_FLOORED_UNDER)
-                     | frozenset(_STATIC_ONLY_CALLS))
+_FILESYSTEM_CALLS = (
+    frozenset(_FILESYSTEM_PATCHES) | frozenset(_FLOORED_UNDER) | frozenset(_STATIC_ONLY_CALLS)
+)
 
 #: Called names no module under ``preflight/`` may write, whatever it imported
 #: to get them.  Filesystem verbs first, then the entry points out of P-1.
@@ -367,15 +372,14 @@ def _out_of_scope_imports(source: str) -> set[str]:
             # `from rheplicant import config` binds the package under a name
             # of its own, which is the same evasion as `import
             # rheplicant.config` and has a different AST shape.
-            found.update(f"{node.module}.{entry.name}"
-                         for entry in node.names
-                         if f"{node.module}.{entry.name}"
-                         in _OUT_OF_SCOPE_MODULES)
-            found.update(entry.name for entry in node.names
-                         if entry.name in _OUT_OF_SCOPE_NAMES)
+            found.update(
+                f"{node.module}.{entry.name}"
+                for entry in node.names
+                if f"{node.module}.{entry.name}" in _OUT_OF_SCOPE_MODULES
+            )
+            found.update(entry.name for entry in node.names if entry.name in _OUT_OF_SCOPE_NAMES)
         elif isinstance(node, ast.Import):
-            found.update(entry.name for entry in node.names
-                         if entry.name in _OUT_OF_SCOPE_MODULES)
+            found.update(entry.name for entry in node.names if entry.name in _OUT_OF_SCOPE_MODULES)
     return found
 
 
@@ -398,8 +402,7 @@ def _out_of_scope_calls(source: str) -> set[str]:
             continue
         if isinstance(node.func, ast.Name) and node.func.id in _OUT_OF_SCOPE_CALLS:
             found.add(node.func.id)
-        elif (isinstance(node.func, ast.Attribute)
-                and node.func.attr in _OUT_OF_SCOPE_CALLS):
+        elif isinstance(node.func, ast.Attribute) and node.func.attr in _OUT_OF_SCOPE_CALLS:
             found.add(node.func.attr)
     return found
 
@@ -435,7 +438,9 @@ class _GuardTripped(BaseException):
 #: for -- ``open`` -- already is: they are second targets for one banned name,
 #: not a sixteenth verb.
 _FILESYSTEM_TARGETS: tuple[str, ...] = (
-    "builtins.open", "pathlib.Path.open", "os.open",
+    "builtins.open",
+    "pathlib.Path.open",
+    "os.open",
     *sorted(set(_FILESYSTEM_PATCHES.values()) - {"builtins.open"}),
 )
 
@@ -471,6 +476,7 @@ def _forbid_the_filesystem(monkeypatch) -> None:
     two anti-vacuity cases named for them prove the FLOOR patch works, not
     these two, and saying otherwise would be a claim no run defends.
     """
+
     def refuse_to_open(*args, **kwargs):
         raise _GuardTripped("the pre-flight pass touched the filesystem")
 
@@ -486,9 +492,9 @@ def _forbid_operators(monkeypatch) -> None:
     ``type(AbstractOperator).__call__`` catches ``NoiseOperator(sigma=1.0)``
     and leaves ``parse_path`` untouched.
     """
+
     def refuse_to_build(cls, *args, **kwargs):
-        raise _GuardTripped(
-            f"the pre-flight pass constructed {cls.__name__}")
+        raise _GuardTripped(f"the pre-flight pass constructed {cls.__name__}")
 
     monkeypatch.setattr(type(AbstractOperator), "__call__", refuse_to_build)
 
@@ -524,11 +530,26 @@ _READING_CASES: tuple[tuple[str, Callable[[], object]], ...] = (
     ("is_file", lambda: pathlib.Path(__file__).is_file()),
     ("is_dir", lambda: pathlib.Path(__file__).parent.is_dir()),
 )
-_READING_IDS = ["builtins-open", "path-open", "os-open", "io-open-code",
-                "path-read-text", "path-read-bytes", "path-iterdir",
-                "path-glob", "path-rglob", "path-walk", "os-listdir",
-                "os-scandir", "os-stat", "os-statvfs", "sqlite3-connect",
-                "path-exists", "path-is-file", "path-is-dir"]
+_READING_IDS = [
+    "builtins-open",
+    "path-open",
+    "os-open",
+    "io-open-code",
+    "path-read-text",
+    "path-read-bytes",
+    "path-iterdir",
+    "path-glob",
+    "path-rglob",
+    "path-walk",
+    "os-listdir",
+    "os-scandir",
+    "os-stat",
+    "os-statvfs",
+    "sqlite3-connect",
+    "path-exists",
+    "path-is-file",
+    "path-is-dir",
+]
 
 
 #: ``(home module, name)`` for value resolution and the five builders
@@ -566,6 +587,7 @@ def _forbid_the_builders(monkeypatch) -> None:
     :func:`_out_of_scope_imports` as well, which is why the two guards ship
     together.
     """
+
     def refuse_to_build(*args, **kwargs):
         raise _GuardTripped("the pre-flight pass left P-1")
 
@@ -576,7 +598,7 @@ def _forbid_the_builders(monkeypatch) -> None:
                 continue
             try:
                 held = getattr(module, name, None)
-            except Exception:                       # a lazy module attribute
+            except Exception:  # a lazy module attribute
                 continue
             if held is real:
                 monkeypatch.setattr(module, name, refuse_to_build)
@@ -598,38 +620,58 @@ def _forbid_the_builders(monkeypatch) -> None:
 #: it reads the branch whether or not any document takes it.
 _BRANCH_DOCUMENTS = (
     ("base", {}),
-    ("observation-from-file",
-     {"observation": {"from_file": {"format": "rhino_hdf5",
-                                    "path": "obs.hd5f"}}}),
+    (
+        "observation-from-file",
+        {"observation": {"from_file": {"format": "rhino_hdf5", "path": "obs.hd5f"}}},
+    ),
     ("resources-beam", {"resources": UNREADABLE_BEAM}),
     ("resources-absent", {"resources": None}),
-    ("a-file-value-node",
-     {"observation": {"freq": {"grid": {"file": "grid.npy"}, "unit": "MHz"}}}),
-    ("a-ref-value-node",
-     {"model": {"gain": {"gain": {"ref": "resources.arrays.flat"}}}}),
-    ("a-python-resource",
-     {"resources": {"arrays": {"made": {"python": "numpy.ones",
-                                        "args": [8]}}}}),
-    ("a-typed-model-node",
-     {"model": {"bandpass": {"type": "NeuralOperator", "path": "net.eqx"}}}),
+    ("a-file-value-node", {"observation": {"freq": {"grid": {"file": "grid.npy"}, "unit": "MHz"}}}),
+    ("a-ref-value-node", {"model": {"gain": {"gain": {"ref": "resources.arrays.flat"}}}}),
+    (
+        "a-python-resource",
+        {"resources": {"arrays": {"made": {"python": "numpy.ones", "args": [8]}}}},
+    ),
+    ("a-typed-model-node", {"model": {"bandpass": {"type": "NeuralOperator", "path": "net.eqx"}}}),
     ("inference-absent", {"inference": None}),
     ("an-npe-block", {"inference": {"npe": {"bank": {"seed": 1, "n": 8}}}}),
-    ("several-runs",
-     {"runs": [{"kind": "forward", "name": "a"},
-               {"kind": "plan.estimate", "name": "b",
-                "blocks": [{"names": ["g"]}]}]}),
+    (
+        "several-runs",
+        {
+            "runs": [
+                {"kind": "forward", "name": "a"},
+                {"kind": "plan.estimate", "name": "b", "blocks": [{"names": ["g"]}]},
+            ]
+        },
+    ),
     # The path §5's 0.05 s is thinnest on, and it was in NO row of this table
     # -- `several-runs` carries `plan.estimate` and nothing carried
     # `plan.sample`, so the branch that used to drag 43 modules of
     # `rheplicant.inference` into the first call was driven by neither the
     # cost test nor any of the three runtime scope guards.
-    ("a-plan-sample-run",
-     {"runs": [{"kind": "plan.sample", "name": "s",
-                "seed": "runtime.seeds.a", "n_sweeps": 8, "warmup": 2,
-                "blocks": [{"names": ["g"], "engine": "conjugate"}]}]}),
-    ("a-variant-applied",
-     {"variants": {"other": {"model": {"gain": {"gain": {"value": 2.0,
-                                                         "unit": "dimensionless"}}}}}}),
+    (
+        "a-plan-sample-run",
+        {
+            "runs": [
+                {
+                    "kind": "plan.sample",
+                    "name": "s",
+                    "seed": "runtime.seeds.a",
+                    "n_sweeps": 8,
+                    "warmup": 2,
+                    "blocks": [{"names": ["g"], "engine": "conjugate"}],
+                }
+            ]
+        },
+    ),
+    (
+        "a-variant-applied",
+        {
+            "variants": {
+                "other": {"model": {"gain": {"gain": {"value": 2.0, "unit": "dimensionless"}}}}
+            }
+        },
+    ),
 )
 _BRANCH_IDS = [name for name, _ in _BRANCH_DOCUMENTS]
 _BRANCH_PATCHES = [patch for _, patch in _BRANCH_DOCUMENTS]
@@ -639,11 +681,19 @@ _BRANCH_PATCHES = [patch for _, patch in _BRANCH_DOCUMENTS]
 #: guards are only as good as the documents they are driven over, so pruning
 #: the list is a way of covering less while staying green, and a two-line edit
 #: would otherwise do it silently.
-_BRANCH_FLOOR = frozenset({
-    "base", "observation-from-file", "resources-beam", "a-file-value-node",
-    "a-ref-value-node", "a-python-resource", "a-typed-model-node",
-    "several-runs", "a-plan-sample-run",
-})
+_BRANCH_FLOOR = frozenset(
+    {
+        "base",
+        "observation-from-file",
+        "resources-beam",
+        "a-file-value-node",
+        "a-ref-value-node",
+        "a-python-resource",
+        "a-typed-model-node",
+        "several-runs",
+        "a-plan-sample-run",
+    }
+)
 
 
 #: The child of :meth:`TestTheCostAndTheBoundary.
@@ -656,7 +706,7 @@ _BRANCH_FLOOR = frozenset({
 #: what makes an ``open`` event mean "this check reads a file", and it is why
 #: this guard is blind to a read that happens once and never again.  A
 #: MODULE-SCOPE import is the other subprocess test's half.
-_AUDIT_CHILD = '''
+_AUDIT_CHILD = """
 import sys
 
 WATCHED = ("open", "sqlite3.connect", "os.listdir", "os.scandir",
@@ -701,7 +751,7 @@ finally:
 for line in SEEN:
     print(line)
 print("ANTI-VACUITY-OK" if CONTROL else "ANTI-VACUITY-BLIND")
-'''
+"""
 
 
 class TestTheStructuralSweepMoved:
@@ -714,53 +764,99 @@ class TestTheStructuralSweepMoved:
         against itself.  Kills a section quietly dropped in the move -- after
         which that section stops being refused and nothing says so."""
         assert _SECTIONS == (
-            "schema_version", "defaults", "plugins", "runtime", "observation",
-            "resources", "model", "variants", "inference", "runs", "outputs",
-            "campaign")
+            "schema_version",
+            "defaults",
+            "plugins",
+            "runtime",
+            "observation",
+            "resources",
+            "model",
+            "variants",
+            "inference",
+            "runs",
+            "outputs",
+            "campaign",
+        )
 
-    @pytest.mark.parametrize(("patch", "expected"), [
-        ({"observations": {}},
-         "This document declares ['observations']; the sections are "
-         "['schema_version', 'defaults', 'plugins', 'runtime', 'observation', "
-         "'resources', 'model', 'variants', 'inference', 'runs', 'outputs', "
-         "'campaign']."),
-        ({"campaign": {}},
-         "campaign: is reserved with capability 4 (streaming evidence, "
-         "schema §8.2) and refused in v1."),
-        ({"outputs": {}},
-         "outputs: is not read by this layer -- it is handled by the command "
-         "line, which owns the output tree, its provenance and its audit "
-         "trail."),
-        ({"defaults": {}},
-         "defaults: is not read by this layer -- it is handled by the command "
-         "line -- presets are YAML files, and that is where YAML first comes "
-         "off disk."),
-        ({"plugins": {}},
-         "plugins: is not read by this layer -- it is handled by the command "
-         "line -- importing a plugin belongs to the process entry point, not "
-         "to a mapping."),
-        ({"schema_version": 2},
-         "schema_version: 2 is newer than this rheplicant reads; it reads "
-         "schema_version 1. A later rheplicant is needed to read this "
-         "document."),
-        ({"schema_version": True},
-         "schema_version: 1 is required (got True); it is what lets a later "
-         "loader read an older document on purpose rather than by luck."),
-        ({"runtime": None},
-         "This document is missing ['runtime']; schema_version, runtime, "
-         "observation, model and runs are required."),
-        ({"observation": None},
-         "This document is missing ['observation']; schema_version, runtime, "
-         "observation, model and runs are required."),
-        ({"model": None},
-         "This document is missing ['model']; schema_version, runtime, "
-         "observation, model and runs are required."),
-        ({"runs": None},
-         "This document is missing ['runs']; schema_version, runtime, "
-         "observation, model and runs are required."),
-    ], ids=["unknown-section", "campaign", "outputs", "defaults", "plugins",
-            "version-two", "version-true", "missing-runtime",
-            "missing-observation", "missing-model", "missing-runs"])
+    @pytest.mark.parametrize(
+        ("patch", "expected"),
+        [
+            (
+                {"observations": {}},
+                "This document declares ['observations']; the sections are "
+                "['schema_version', 'defaults', 'plugins', 'runtime', 'observation', "
+                "'resources', 'model', 'variants', 'inference', 'runs', 'outputs', "
+                "'campaign'].",
+            ),
+            (
+                {"campaign": {}},
+                "campaign: is reserved with capability 4 (streaming evidence, "
+                "schema §8.2) and refused in v1.",
+            ),
+            (
+                {"outputs": {}},
+                "outputs: is not read by this layer -- it is handled by the command "
+                "line, which owns the output tree, its provenance and its audit "
+                "trail.",
+            ),
+            (
+                {"defaults": {}},
+                "defaults: is not read by this layer -- it is handled by the command "
+                "line -- presets are YAML files, and that is where YAML first comes "
+                "off disk.",
+            ),
+            (
+                {"plugins": {}},
+                "plugins: is not read by this layer -- it is handled by the command "
+                "line -- importing a plugin belongs to the process entry point, not "
+                "to a mapping.",
+            ),
+            (
+                {"schema_version": 2},
+                "schema_version: 2 is newer than this rheplicant reads; it reads "
+                "schema_version 1. A later rheplicant is needed to read this "
+                "document.",
+            ),
+            (
+                {"schema_version": True},
+                "schema_version: 1 is required (got True); it is what lets a later "
+                "loader read an older document on purpose rather than by luck.",
+            ),
+            (
+                {"runtime": None},
+                "This document is missing ['runtime']; schema_version, runtime, "
+                "observation, model and runs are required.",
+            ),
+            (
+                {"observation": None},
+                "This document is missing ['observation']; schema_version, runtime, "
+                "observation, model and runs are required.",
+            ),
+            (
+                {"model": None},
+                "This document is missing ['model']; schema_version, runtime, "
+                "observation, model and runs are required.",
+            ),
+            (
+                {"runs": None},
+                "This document is missing ['runs']; schema_version, runtime, "
+                "observation, model and runs are required.",
+            ),
+        ],
+        ids=[
+            "unknown-section",
+            "campaign",
+            "outputs",
+            "defaults",
+            "plugins",
+            "version-two",
+            "version-true",
+            "missing-runtime",
+            "missing-observation",
+            "missing-model",
+            "missing-runs",
+        ],
+    )
     def test_every_message_survived_the_move_verbatim(self, patch, expected):
         """Equality, not ``match=``.  Five of these are pinned by
         ``test_config_document.py`` with one-word patterns (``"observations"``,
@@ -776,24 +872,35 @@ class TestTheStructuralSweepMoved:
             _structural(preflight_document(**patch))
         assert str(caught.value) == expected
 
-    @pytest.mark.parametrize(("patch", "wins"), [
-        ({"observations": {}, "schema_version": 2}, "This document declares"),
-        ({"observations": {}, "campaign": {}}, "This document declares"),
-        ({"observations": {}, "outputs": {}}, "This document declares"),
-        ({"campaign": {}, "outputs": {}}, "campaign:"),
-        ({"campaign": {}, "schema_version": 2}, "campaign:"),
-        ({"campaign": {}, "model": None}, "campaign:"),
-        ({"outputs": {}, "defaults": {}}, "outputs:"),
-        ({"defaults": {}, "plugins": {}}, "defaults:"),
-        ({"outputs": {}, "schema_version": 2}, "outputs:"),
-        ({"plugins": {}, "model": None}, "plugins:"),
-        ({"schema_version": 2, "model": None}, "schema_version:"),
-    ], ids=["unknown-beats-version", "unknown-beats-campaign",
-            "unknown-beats-deferred", "campaign-beats-deferred",
-            "campaign-beats-version", "campaign-beats-missing",
-            "outputs-beats-defaults", "defaults-beats-plugins",
-            "deferred-beats-version", "deferred-beats-missing",
-            "version-beats-missing"])
+    @pytest.mark.parametrize(
+        ("patch", "wins"),
+        [
+            ({"observations": {}, "schema_version": 2}, "This document declares"),
+            ({"observations": {}, "campaign": {}}, "This document declares"),
+            ({"observations": {}, "outputs": {}}, "This document declares"),
+            ({"campaign": {}, "outputs": {}}, "campaign:"),
+            ({"campaign": {}, "schema_version": 2}, "campaign:"),
+            ({"campaign": {}, "model": None}, "campaign:"),
+            ({"outputs": {}, "defaults": {}}, "outputs:"),
+            ({"defaults": {}, "plugins": {}}, "defaults:"),
+            ({"outputs": {}, "schema_version": 2}, "outputs:"),
+            ({"plugins": {}, "model": None}, "plugins:"),
+            ({"schema_version": 2, "model": None}, "schema_version:"),
+        ],
+        ids=[
+            "unknown-beats-version",
+            "unknown-beats-campaign",
+            "unknown-beats-deferred",
+            "campaign-beats-deferred",
+            "campaign-beats-version",
+            "campaign-beats-missing",
+            "outputs-beats-defaults",
+            "defaults-beats-plugins",
+            "deferred-beats-version",
+            "deferred-beats-missing",
+            "version-beats-missing",
+        ],
+    )
     def test_the_clause_order_survived_the_move_too(self, patch, wins):
         """A message pinned verbatim says nothing about WHICH message a
         document with two problems is shown, and every case in the test above
@@ -844,25 +951,39 @@ class TestSchemaVersionIsTheIntegerOne:
     two verdicts, depending on the door it came in by.
     """
 
-    NOT_ONE = ("schema_version: 1 is required (got {}); it is what lets a "
-               "later loader read an older document on purpose rather than "
-               "by luck.")
+    NOT_ONE = (
+        "schema_version: 1 is required (got {}); it is what lets a "
+        "later loader read an older document on purpose rather than "
+        "by luck."
+    )
 
-    @pytest.mark.parametrize(("version", "expected"), [
-        (1.0, NOT_ONE.format("1.0")),
-        (True, NOT_ONE.format("True")),
-        ("1", NOT_ONE.format("'1'")),
-        (None, NOT_ONE.format("None")),
-        (2, "schema_version: 2 is newer than this rheplicant reads; it reads "
-            "schema_version 1. A later rheplicant is needed to read this "
-            "document."),
-        (0, "schema_version: 0 is older than any version this rheplicant "
-            "reads; it reads schema_version 1, the first."),
-        (-3, "schema_version: -3 is older than any version this rheplicant "
-             "reads; it reads schema_version 1, the first."),
-    ], ids=["float", "bool", "string", "null", "newer", "zero", "negative"])
-    def test_the_mapping_route_refuses_with_the_whole_sentence(
-            self, version, expected):
+    @pytest.mark.parametrize(
+        ("version", "expected"),
+        [
+            (1.0, NOT_ONE.format("1.0")),
+            (True, NOT_ONE.format("True")),
+            ("1", NOT_ONE.format("'1'")),
+            (None, NOT_ONE.format("None")),
+            (
+                2,
+                "schema_version: 2 is newer than this rheplicant reads; it reads "
+                "schema_version 1. A later rheplicant is needed to read this "
+                "document.",
+            ),
+            (
+                0,
+                "schema_version: 0 is older than any version this rheplicant "
+                "reads; it reads schema_version 1, the first.",
+            ),
+            (
+                -3,
+                "schema_version: -3 is older than any version this rheplicant "
+                "reads; it reads schema_version 1, the first.",
+            ),
+        ],
+        ids=["float", "bool", "string", "null", "newer", "zero", "negative"],
+    )
+    def test_the_mapping_route_refuses_with_the_whole_sentence(self, version, expected):
         with pytest.raises(ConfigError) as caught:
             _structural(preflight_document(schema_version=version))
         assert str(caught.value) == expected
@@ -880,25 +1001,25 @@ class TestSchemaVersionIsTheIntegerOne:
         with pytest.raises(ConfigError) as mapping_route:
             _structural(preflight_document(schema_version=version))
         with pytest.raises(ConfigError) as command_line:
-            parse_raw_process_mapping({"schema_version": version},
-                                      parse_outputs=lambda raw: ())
+            parse_raw_process_mapping({"schema_version": version}, parse_outputs=lambda raw: ())
         assert str(command_line.value) == str(mapping_route.value)
 
     def test_the_integer_one_is_accepted_on_both_routes(self):
         from _rheplicant_bootstrap.process import parse_raw_process_mapping
 
         _structural(preflight_document(schema_version=1))
-        entry = parse_raw_process_mapping({"schema_version": 1},
-                                          parse_outputs=lambda raw: ())
+        entry = parse_raw_process_mapping({"schema_version": 1}, parse_outputs=lambda raw: ())
         assert entry.schema_version == 1
 
-    @pytest.mark.parametrize(("text", "expected"), [
-        ("1.0", "(got 1.0)"),
-        ("2", "schema_version: 2 is newer than this rheplicant reads"),
-        ("0", "schema_version: 0 is older than any version"),
-    ])
-    def test_the_command_line_exits_two_with_the_sentence(
-            self, tmp_path, capsys, text, expected):
+    @pytest.mark.parametrize(
+        ("text", "expected"),
+        [
+            ("1.0", "(got 1.0)"),
+            ("2", "schema_version: 2 is newer than this rheplicant reads"),
+            ("0", "schema_version: 0 is older than any version"),
+        ],
+    )
+    def test_the_command_line_exits_two_with_the_sentence(self, tmp_path, capsys, text, expected):
         from _rheplicant_bootstrap.cli import main
 
         config = tmp_path / "config.yaml"
@@ -953,16 +1074,15 @@ class TestTheRegistry:
             register("A20", "A20")(lambda document: ())
         assert dict(CHECKS) == {}
 
-    def test_a_second_registration_of_one_id_is_refused_not_asserted(
-            self, registry):
+    def test_a_second_registration_of_one_id_is_refused_not_asserted(self, registry):
         register("A2")(lambda document: ())
         with pytest.raises(ConfigError, match="registered twice"):
             register("A2")(lambda document: ())
 
-    @pytest.mark.parametrize("pair", [("A23", "A21"), ("A21", "A23")],
-                             ids=["clash-last", "clash-first"])
-    def test_a_clash_on_any_id_refuses_and_binds_none_of_them(
-            self, registry, pair):
+    @pytest.mark.parametrize(
+        "pair", [("A23", "A21"), ("A21", "A23")], ids=["clash-last", "clash-first"]
+    )
+    def test_a_clash_on_any_id_refuses_and_binds_none_of_them(self, registry, pair):
         """Kills checking only ``checks[0]`` for a clash, kills checking only
         ``checks[-1]``, and kills a non-atomic bind.
 
@@ -994,8 +1114,9 @@ class TestTheRegistry:
             "except Exception as error:\n"
             "    print(type(error).__name__)\n"
         )
-        done = subprocess.run([sys.executable, "-O", "-c", source],
-                              capture_output=True, text=True, check=True)
+        done = subprocess.run(
+            [sys.executable, "-O", "-c", source], capture_output=True, text=True, check=True
+        )
         assert done.stdout.strip() == "ConfigError", done.stdout
 
     def test_insertion_order_is_run_order(self, registry):
@@ -1005,8 +1126,10 @@ class TestTheRegistry:
         tidier and reverses exactly that triple."""
         for check in ("A23", "A21", "A20"):
             register(check)(
-                lambda document, check=check:
-                    (refuse(check, "inference.parameters.g", f"{check}!"),))
+                lambda document, check=check: (
+                    refuse(check, "inference.parameters.g", f"{check}!"),
+                )
+            )
         found = preflight(preflight_document()).refusals()
         assert [one.check for one in found] == ["A23", "A21", "A20"]
 
@@ -1026,7 +1149,10 @@ class TestTheRegistry:
             return (refuse("A20", "inference.parameters.g", "one."),)
 
         assert {slot: fn is _three for slot, fn in CHECKS.items()} == {
-            "A20": True, "A21": True, "A23": True}
+            "A20": True,
+            "A21": True,
+            "A23": True,
+        }
         document = preflight_document()
         found = preflight(document).refusals()
         assert calls == [1] * len(_enumeration(document).layers)
@@ -1053,13 +1179,11 @@ class TestTheRegistry:
         with pytest.raises(ConfigError, match="not a schema §6 id"):
             register("A1.")(lambda document: ())
 
-    def test_a_dotted_slot_still_carries_the_bare_id_to_the_reader(
-            self, registry):
+    def test_a_dotted_slot_still_carries_the_bare_id_to_the_reader(self, registry):
         """§3.2 (a)'s other half: the SLOT may be dotted, the
         ``Finding.check`` never is.  ``Report.checks()`` is what a user greps
         and what every later task's ``ids(document)`` assertion reads."""
-        register("A1.runs")(
-            lambda document: (refuse("A1", "runs[0]", "one."),))
+        register("A1.runs")(lambda document: (refuse("A1", "runs[0]", "one."),))
         assert preflight(preflight_document()).checks() == frozenset({"A1"})
 
     def test_every_registered_id_is_a_schema_6_id(self):
@@ -1093,13 +1217,14 @@ class TestTheRegistry:
         from rheplicant.config.inflight import AXIS_CHECKS, BUILT_CHECKS
         from rheplicant.config.postflight import CHECKS as PRICED_CHECKS
 
-        for name, registry in (("pre-flight", CHECKS),
-                               ("axes", AXIS_CHECKS),
-                               ("built", BUILT_CHECKS),
-                               ("post-flight", PRICED_CHECKS)):
+        for name, registry in (
+            ("pre-flight", CHECKS),
+            ("axes", AXIS_CHECKS),
+            ("built", BUILT_CHECKS),
+            ("post-flight", PRICED_CHECKS),
+        ):
             bare = {slot.split(".", 1)[0] for slot in registry}
-            assert bare <= set(_schema_ids()), (
-                name, sorted(bare - set(_schema_ids())))
+            assert bare <= set(_schema_ids()), (name, sorted(bare - set(_schema_ids())))
 
     def test_the_schema_extractor_still_finds_the_table(self):
         """The partner.  Kills the §6 heading being renamed, the table losing
@@ -1277,8 +1402,7 @@ class TestThePassCollects:
         found = preflight(preflight_document()).refusals()
         assert [one.message for one in found] == ["first.", "second."]
 
-    def test_a_check_that_raises_fails_the_pass_loudly_and_names_itself(
-            self, registry):
+    def test_a_check_that_raises_fails_the_pass_loudly_and_names_itself(self, registry):
         """The §2.3 TRAP.  Kills a bare ``except: pass`` around the call --
         under which the raising check's findings AND every later check's
         vanish, and the document loads."""
@@ -1307,11 +1431,15 @@ class TestThePassCollects:
         with pytest.raises(ConfigError, match="'A16' RAISED ValueError"):
             preflight(preflight_document())
 
-    @pytest.mark.parametrize("make", [
-        lambda one: (one,),
-        lambda one: [one],
-        lambda one: iter((one,)),
-    ], ids=["tuple", "list", "generator"])
+    @pytest.mark.parametrize(
+        "make",
+        [
+            lambda one: (one,),
+            lambda one: [one],
+            lambda one: iter((one,)),
+        ],
+        ids=["tuple", "list", "generator"],
+    )
     def test_a_check_may_hand_back_any_iterable(self, registry, make):
         """``Check`` is typed ``-> Iterable[Finding]`` and Tasks 3-12 will
         write all three.  Kills ``findings.extend(fn(document))`` followed by
@@ -1320,10 +1448,12 @@ class TestThePassCollects:
         assert len(preflight(preflight_document()).refusals()) == 1
 
     def test_warnings_and_reports_are_collected_without_raising(self, registry):
-        register("A41")(lambda document: (
-            warn("A41", "resources.arrays.flat", "shadowed."),
-            report("A41", "resources.arrays.flat", "noted."),
-        ))
+        register("A41")(
+            lambda document: (
+                warn("A41", "resources.arrays.flat", "shadowed."),
+                report("A41", "resources.arrays.flat", "noted."),
+            )
+        )
         held = preflight(preflight_document())
         assert held.refusals() == ()
         assert len(held.warnings()) == 1
@@ -1363,16 +1493,16 @@ class TestTheOneDocumentBuilder:
         model = preflight_document(model={"gian": {}})["model"]
         assert "gian" in model
         assert set(BASE_MODEL) <= set(model)
-        assert set(BASE_MODEL) == {"global_signal", "uniform_sky", "gain",
-                                   "noise"}
+        assert set(BASE_MODEL) == {"global_signal", "uniform_sky", "gain", "noise"}
 
     def test_none_removes_a_section_and_a_non_mapping_replaces_it(self):
         """The two other patch forms.  ``None`` is how a check that fires on
         an ABSENT section is reached; the replacement form is how ``runs=[...]``
         gets a list where a merge makes no sense."""
         assert "inference" not in preflight_document(inference=None)
-        assert preflight_document(runs=[{"kind": "forward", "name": "a"}])[
-            "runs"] == [{"kind": "forward", "name": "a"}]
+        assert preflight_document(runs=[{"kind": "forward", "name": "a"}])["runs"] == [
+            {"kind": "forward", "name": "a"}
+        ]
 
     def test_each_call_hands_back_a_fresh_document(self):
         """Kills a module-level base handed out by reference: one test's patch
@@ -1385,16 +1515,17 @@ class TestTheOneDocumentBuilder:
         assert "gian" not in second["model"]
         assert second["inference"]["parameters"]["g"]["init"] == 1.0
 
-    def test_only_refuses_a_check_that_fired_more_or_less_than_once(
-            self, registry):
+    def test_only_refuses_a_check_that_fired_more_or_less_than_once(self, registry):
         """§3.2(b)'s reason for :func:`only` existing.  Kills it becoming
         ``found[0]``: a check that fires TWICE on one document -- a loop over
         nodes that forgot to ``break`` -- is a real defect that no ``in``
         assertion can see, and a plain ``[0]`` passes through it."""
-        register("A2")(lambda document: (
-            refuse("A2", "model.gain", "once."),
-            refuse("A2", "model.noise", "twice."),
-        ))
+        register("A2")(
+            lambda document: (
+                refuse("A2", "model.gain", "once."),
+                refuse("A2", "model.noise", "twice."),
+            )
+        )
         doc = preflight_document()
         with pytest.raises(AssertionError, match="produced 2 findings"):
             only(doc, "A2")
@@ -1419,24 +1550,41 @@ class TestTheWhereShape:
     """Kills: a check putting a ``src/`` path, a bare node name, or an empty
     string in front of a user.  §3.1's second non-negotiable rule."""
 
-    @pytest.mark.parametrize("bad", [
-        "src/rheplicant/config/sections/model.py",
-        "compose.py:262",
-        "",
-    ], ids=["source-path", "source-and-line", "empty"])
+    @pytest.mark.parametrize(
+        "bad",
+        [
+            "src/rheplicant/config/sections/model.py",
+            "compose.py:262",
+            "",
+        ],
+        ids=["source-path", "source-and-line", "empty"],
+    )
     def test_a_where_that_is_not_a_document_path_is_refused(self, registry, bad):
         register("A2")(lambda document: (refuse("A2", bad, "a sentence."),))
         with pytest.raises(ConfigError) as caught:
             preflight(preflight_document())
         assert "'A2' emitted where=" in str(caught.value)
 
-    @pytest.mark.parametrize("bad", [
-        "beam", "models.gain", "run", "variant", "inferences.parameters.g",
-        "Model.noise",
-    ], ids=["a-node-id", "a-plural-section", "a-truncated-section",
-            "a-singular-section", "a-pluralised-section", "wrong-case"])
-    def test_a_where_whose_head_is_not_a_section_is_refused(
-            self, registry, bad):
+    @pytest.mark.parametrize(
+        "bad",
+        [
+            "beam",
+            "models.gain",
+            "run",
+            "variant",
+            "inferences.parameters.g",
+            "Model.noise",
+        ],
+        ids=[
+            "a-node-id",
+            "a-plural-section",
+            "a-truncated-section",
+            "a-singular-section",
+            "a-pluralised-section",
+            "wrong-case",
+        ],
+    )
+    def test_a_where_whose_head_is_not_a_section_is_refused(self, registry, bad):
         """``beam`` is a real NODE and not a section; a check that wrote the
         node id alone would send the reader looking for a top-level key that
         does not exist.
@@ -1453,10 +1601,8 @@ class TestTheWhereShape:
         with pytest.raises(ConfigError, match="is not a document section"):
             preflight(preflight_document())
 
-    @pytest.mark.parametrize("position", [0, 1, 2],
-                             ids=["first", "middle", "last"])
-    def test_every_finding_is_checked_and_not_just_the_first(
-            self, registry, position):
+    @pytest.mark.parametrize("position", [0, 1, 2], ids=["first", "middle", "last"])
+    def test_every_finding_is_checked_and_not_just_the_first(self, registry, position):
         """Kills ``_check_where(check, found[0])`` and its twin
         ``found[-1]``, both of which survived a version of this class where
         every case registered a check returning exactly ONE finding.
@@ -1467,13 +1613,11 @@ class TestTheWhereShape:
         """
         wheres = ["model.gain", "model.gain", "model.gain"]
         wheres[position] = "compose.py:262"
-        register("A4")(lambda document: tuple(
-            refuse("A4", one, "a sentence.") for one in wheres))
+        register("A4")(lambda document: tuple(refuse("A4", one, "a sentence.") for one in wheres))
         with pytest.raises(ConfigError, match="'A4' emitted where="):
             preflight(preflight_document())
 
-    @pytest.mark.parametrize("make", [refuse, warn, report],
-                             ids=["refuse", "warn", "report"])
+    @pytest.mark.parametrize("make", [refuse, warn, report], ids=["refuse", "warn", "report"])
     def test_a_bad_where_is_refused_at_every_severity(self, registry, make):
         """Kills gating the check on ``severity == "refuse"``, which survived
         a version where every case here used :func:`refuse`.  **Task 12's A41
@@ -1492,12 +1636,20 @@ class TestTheWhereShape:
         with pytest.raises(ConfigError, match=r"check 'A1\.runs' emitted"):
             preflight(preflight_document())
 
-    @pytest.mark.parametrize("good", [
-        "model", "model.noise", "runs[2].blocks[0]", "inference.parameters.g",
-        "observation.freq.grid", "resources.beams.horn", "runtime.seeds",
-        "variants.unity_gain",
-    ], ids=["section", "node", "subscripted", "latent", "grid", "resource",
-            "seeds", "variant"])
+    @pytest.mark.parametrize(
+        "good",
+        [
+            "model",
+            "model.noise",
+            "runs[2].blocks[0]",
+            "inference.parameters.g",
+            "observation.freq.grid",
+            "resources.beams.horn",
+            "runtime.seeds",
+            "variants.unity_gain",
+        ],
+        ids=["section", "node", "subscripted", "latent", "grid", "resource", "seeds", "variant"],
+    )
     def test_every_real_document_path_passes(self, registry, good):
         """The other direction, and it is not decoration: a head check written
         as ``where.split(".")[0]`` rejects ``runs[2]`` -- measured,
@@ -1528,19 +1680,30 @@ class TestThePhaseGuard:
     are Tasks 3-12's, one each.
     """
 
-    @pytest.mark.parametrize(("check", "where", "message"), [
-        ("A2", "model.gian",
-         "model: 'gian' is not a node of graph 'single-antenna' (check A2)."),
-        ("A39", "model.bandpass",
-         "model.bandpass.type: NeuralOperator is deferred with capability 3 "
-         "(neural surrogates) -- schema §8.1 (check A39)."),
-        ("A30", "inference.twin",
-         "inference.twin: the fit twin keeps a stochastic stage (check A30)."),
-        ("A16", "runs[0].blocks[0]",
-         "runs[0].blocks[0]: 'g' appears in no block (check A16)."),
-    ], ids=["model-node", "capability-key", "fit-twin", "block"])
-    def test_a_registered_refusal_precedes_the_beam_read(
-            self, registry, check, where, message):
+    @pytest.mark.parametrize(
+        ("check", "where", "message"),
+        [
+            (
+                "A2",
+                "model.gian",
+                "model: 'gian' is not a node of graph 'single-antenna' (check A2).",
+            ),
+            (
+                "A39",
+                "model.bandpass",
+                "model.bandpass.type: NeuralOperator is deferred with capability 3 "
+                "(neural surrogates) -- schema §8.1 (check A39).",
+            ),
+            (
+                "A30",
+                "inference.twin",
+                "inference.twin: the fit twin keeps a stochastic stage (check A30).",
+            ),
+            ("A16", "runs[0].blocks[0]", "runs[0].blocks[0]: 'g' appears in no block (check A16)."),
+        ],
+        ids=["model-node", "capability-key", "fit-twin", "block"],
+    )
+    def test_a_registered_refusal_precedes_the_beam_read(self, registry, check, where, message):
         """Four shapes of ``where``, because the hook is one call and a test on
         one shape would not notice a guard that special-cased ``model.``.
 
@@ -1552,17 +1715,20 @@ class TestThePhaseGuard:
             load_document(preflight_document(resources=UNREADABLE_BEAM))
         assert str(caught.value) == message
 
-    @pytest.mark.parametrize(("patch", "fragment"), [
-        ({"campaign": {}}, "capability 4"),
-        ({"observations": {}}, "This document declares ['observations']"),
-    ], ids=["campaign", "unknown-section"])
+    @pytest.mark.parametrize(
+        ("patch", "fragment"),
+        [
+            ({"campaign": {}}, "capability 4"),
+            ({"observations": {}}, "This document declares ['observations']"),
+        ],
+        ids=["campaign", "unknown-section"],
+    )
     def test_the_structural_half_precedes_it_too(self, patch, fragment):
         """These two already won at ``be2027b`` -- ``_sweep`` was the one thing
         before ``build_resources``.  Kills the move putting ``_structural``
         behind the hook, or behind ``build_runtime``."""
         with pytest.raises(ConfigError, match=re.escape(fragment)):
-            load_document(preflight_document(resources=UNREADABLE_BEAM,
-                                             **patch))
+            load_document(preflight_document(resources=UNREADABLE_BEAM, **patch))
 
     def test_the_beam_still_refuses_when_nothing_else_does(self):
         """ANTI-VACUITY, and it is the assertion the whole class rests on.
@@ -1582,8 +1748,7 @@ class TestThePhaseGuard:
         ``raise_if_refused`` -- under which a document about to be refused
         first sprays warnings about lines the user is on their way to
         change."""
-        register("A41")(lambda document: (
-            warn("A41", "resources.arrays.flat", "shadowed."),))
+        register("A41")(lambda document: (warn("A41", "resources.arrays.flat", "shadowed."),))
         with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter("always")
             load_document(preflight_document())
@@ -1616,8 +1781,7 @@ class TestThePhaseGuard:
         assert seen == [1.0] * len(_enumeration(document).layers)
         assert 1.1 not in seen
 
-    def test_run_document_inherits_the_hook_and_adds_none_of_its_own(
-            self, registry):
+    def test_run_document_inherits_the_hook_and_adds_none_of_its_own(self, registry):
         """One attributed fan, each layer's own content, however many runs.
 
         Re-pinned at Task 10: the per-variant memoised ``load_document`` loop
@@ -1639,11 +1803,13 @@ class TestThePhaseGuard:
             seen.append(float(document["model"]["gain"]["gain"]["value"]))
             return ()
 
-        doc = preflight_document(runs=[
-            {"kind": "forward", "name": "a"},
-            {"kind": "forward", "name": "b"},
-            {"kind": "forward", "name": "c", "variant": "unity_gain"},
-        ])
+        doc = preflight_document(
+            runs=[
+                {"kind": "forward", "name": "a"},
+                {"kind": "forward", "name": "b"},
+                {"kind": "forward", "name": "c", "variant": "unity_gain"},
+            ]
+        )
         run_document(doc)
         assert seen == [1.1, 1.0]
 
@@ -1782,7 +1948,7 @@ class TestTheCostAndTheBoundary:
         document the plan is written around.
         """
         doc = preflight_document()
-        preflight(doc)                       # warm the import graph
+        preflight(doc)  # warm the import graph
         start = time.perf_counter()
         preflight(doc)
         elapsed = time.perf_counter() - start
@@ -1817,10 +1983,8 @@ class TestTheCostAndTheBoundary:
         finally:
             monkeypatch.undo()
 
-    @pytest.mark.parametrize(("verb", "read"), _READING_CASES,
-                             ids=_READING_IDS)
-    def test_that_guard_can_still_see_each_way_of_reading(
-            self, registry, monkeypatch, verb, read):
+    @pytest.mark.parametrize(("verb", "read"), _READING_CASES, ids=_READING_IDS)
+    def test_that_guard_can_still_see_each_way_of_reading(self, registry, monkeypatch, verb, read):
         """ANTI-VACUITY, one case per banned verb.  Without it, a target that
         stopped being the one the code reaches -- ``open`` moving inside a C
         extension, ``Path.read_text`` bypassed, a new ``os`` spelling -- makes
@@ -1834,6 +1998,7 @@ class TestTheCostAndTheBoundary:
         a claim with no measurement behind it, which is exactly how ``lstat``
         and ``rglob`` came to be banned and patched by nothing.
         """
+
         @register("A2")
         def _reader(document):
             read()
@@ -1865,14 +2030,12 @@ class TestTheCostAndTheBoundary:
             f"{sorted(wanted - cases)} are banned and no case above drives "
             "them, so nothing measures that the ban is enforced."
         )
-        assert cases <= wanted, (
-            f"{sorted(cases - wanted)} are driven above and banned by "
-            "nothing."
-        )
+        assert cases <= wanted, f"{sorted(cases - wanted)} are driven above and banned by nothing."
         assert len(_READING_IDS) == len(_READING_CASES)
 
     def test_a_check_cannot_swallow_a_guard_and_report_it_in_its_own_words(
-            self, registry, monkeypatch):
+        self, registry, monkeypatch
+    ):
         """ANTI-VACUITY for :class:`_GuardTripped`'s whole reason to exist.
 
         The route this closes is a check that CATCHES the guard rather than
@@ -1887,14 +2050,14 @@ class TestTheCostAndTheBoundary:
         the whole module at exit 0.  A `BaseException` is not catchable by
         `except Exception`, so it escapes the check, escapes `preflight`'s own
         wrapper, and lands here."""
+
         @register("A2")
         def _swallower(document):
-            reader = pathlib.Path.read_text          # not a Call node
+            reader = pathlib.Path.read_text  # not a Call node
             try:
                 reader(pathlib.Path(__file__))
             except Exception:
-                return (refuse("A2", "model",
-                               "the beam file could not be read."),)
+                return (refuse("A2", "model", "the beam file could not be read."),)
             return ()
 
         doc = preflight_document()
@@ -1916,16 +2079,16 @@ class TestTheCostAndTheBoundary:
         doc = preflight_document(**patch)
         _forbid_operators(monkeypatch)
         try:
-            preflight(doc)          # returns, or `_GuardTripped` escapes
+            preflight(doc)  # returns, or `_GuardTripped` escapes
         finally:
             monkeypatch.undo()
 
-    def test_that_guard_can_still_see_an_operator_being_built(
-            self, registry, monkeypatch):
+    def test_that_guard_can_still_see_an_operator_being_built(self, registry, monkeypatch):
         """ANTI-VACUITY: measured, a check constructing a ``NoiseOperator``
         trips it.  Kills the metaclass moving, or ``AbstractOperator`` ceasing
         to be an ``eqx.Module``, either of which makes the guard above green
         for every possible check."""
+
         @register("A2")
         def _builder(document):
             NoiseOperator(sigma=1.0)
@@ -1940,8 +2103,7 @@ class TestTheCostAndTheBoundary:
             monkeypatch.undo()
 
     @pytest.mark.parametrize("patch", _BRANCH_PATCHES, ids=_BRANCH_IDS)
-    def test_the_pass_resolves_no_value_node_and_builds_no_section(
-            self, monkeypatch, patch):
+    def test_the_pass_resolves_no_value_node_and_builds_no_section(self, monkeypatch, patch):
         """§2.4's TRAP: ``observation.freq.grid`` may be ``{value: [...]}`` or
         ``{file: ...}`` or ``{ref: ...}``, and a check that wants the resolved
         number has left P-1.  ``resolve_value`` and the five builders are the
@@ -1952,21 +2114,28 @@ class TestTheCostAndTheBoundary:
         doc = preflight_document(**patch)
         _forbid_the_builders(monkeypatch)
         try:
-            preflight(doc)          # returns, or `_GuardTripped` escapes
+            preflight(doc)  # returns, or `_GuardTripped` escapes
         finally:
             monkeypatch.undo()
 
-    @pytest.mark.parametrize("reach", [
-        lambda: values_module.resolve_value(1.0, None),
-        lambda: config_package.resolve_value(1.0, None),
-        lambda: importlib.import_module(
-            "rheplicant.config.values").resolve_value(1.0, None),
-        lambda: runtime_module.build_runtime({"seed": 1}),
-        lambda: config_package.build_resources({}, None),
-    ], ids=["the-home-module", "the-package-re-export", "via-importlib",
-            "build-runtime", "build-resources-re-exported"])
-    def test_that_guard_can_still_see_a_builder_reached_any_way(
-            self, registry, monkeypatch, reach):
+    @pytest.mark.parametrize(
+        "reach",
+        [
+            lambda: values_module.resolve_value(1.0, None),
+            lambda: config_package.resolve_value(1.0, None),
+            lambda: importlib.import_module("rheplicant.config.values").resolve_value(1.0, None),
+            lambda: runtime_module.build_runtime({"seed": 1}),
+            lambda: config_package.build_resources({}, None),
+        ],
+        ids=[
+            "the-home-module",
+            "the-package-re-export",
+            "via-importlib",
+            "build-runtime",
+            "build-resources-re-exported",
+        ],
+    )
+    def test_that_guard_can_still_see_a_builder_reached_any_way(self, registry, monkeypatch, reach):
         """ANTI-VACUITY, one case per route out.
 
         The second case is the measured hole: ``rheplicant/config/__init__.py``
@@ -1980,6 +2149,7 @@ class TestTheCostAndTheBoundary:
         ``resolve_value(1.0, None)`` is ``config/values.py::ResolvedValue``'s real two-argument
         signature, so the call is one a check could actually write.
         """
+
         @register("A2")
         def _resolver(document):
             reach()
@@ -1993,8 +2163,7 @@ class TestTheCostAndTheBoundary:
         finally:
             monkeypatch.undo()
 
-    def test_the_two_static_guards_still_walk_the_runner_they_were_written_for(
-            self):
+    def test_the_two_static_guards_still_walk_the_runner_they_were_written_for(self):
         """ANTI-VACUITY for the walk itself, and it is a measured hole.
 
         Both static guards below iterate :func:`_preflight_sources`.  Before
@@ -2091,17 +2260,11 @@ class TestTheCostAndTheBoundary:
                 if isinstance(node, ast.Attribute) and node.attr in deleted:
                     found.add(node.attr)
                 if isinstance(node, ast.ImportFrom):
-                    found.update(
-                        alias.name for alias in node.names if alias.name in deleted
-                    )
+                    found.update(alias.name for alias in node.names if alias.name in deleted)
                 if isinstance(node, ast.Call):
                     called = node.func
-                    if (
-                        isinstance(called, ast.Name)
-                        and called.id == "apply_variant"
-                    ) or (
-                        isinstance(called, ast.Attribute)
-                        and called.attr == "apply_variant"
+                    if (isinstance(called, ast.Name) and called.id == "apply_variant") or (
+                        isinstance(called, ast.Attribute) and called.attr == "apply_variant"
                     ):
                         found.add("apply_variant()")
             return found
@@ -2122,37 +2285,50 @@ class TestTheCostAndTheBoundary:
             "enumeration and attribution."
         )
 
-    @pytest.mark.parametrize(("source", "expected"), [
-        ("from rheplicant.config.sections.compose import build_model",
-         {"build_model"}),
-        ("from rheplicant.config.values import resolve_value as _rv",
-         {"resolve_value"}),
-        ("from rheplicant.config import load_document",
-         {"load_document", "rheplicant.config"}),
-        ("import rheplicant.config.document", {"rheplicant.config.document"}),
-        ("from rheplicant.config.document import ConfiguredRun",
-         {"rheplicant.config.document"}),
-        ("def f():\n    from rheplicant.config.resources import build_resources",
-         {"build_resources"}),
-        ("from rheplicant.config.sections.runtime import build_runtime",
-         {"build_runtime"}),
-        ("import rheplicant.config", {"rheplicant.config"}),
-        ("import rheplicant.config as cfg", {"rheplicant.config"}),
-        ("from rheplicant import config", {"rheplicant.config"}),
-        ("# from rheplicant.config.values import resolve_value", set()),
-        ('"""build_model is not imported here."""', set()),
-        ("from rheplicant.config.resources import check_unknown_keys", set()),
-        ("from rheplicant.config.paths import parse_path", set()),
-        ("from rheplicant.config.findings import refuse", set()),
-    ], ids=["builder", "aliased-resolver", "via-the-package-re-export",
-            "the-document-module", "a-name-from-the-document-module",
-            "deferred-inside-a-function", "build-runtime",
-            "the-umbrella-package", "the-umbrella-package-aliased",
-            "the-umbrella-package-from-rheplicant", "commented",
-            "in-a-docstring", "the-sanctioned-sweep",
-            "the-sanctioned-path-parser", "the-sanctioned-findings"])
-    def test_that_import_guard_reads_imports_and_not_mentions_of_them(
-            self, source, expected):
+    @pytest.mark.parametrize(
+        ("source", "expected"),
+        [
+            ("from rheplicant.config.sections.compose import build_model", {"build_model"}),
+            ("from rheplicant.config.values import resolve_value as _rv", {"resolve_value"}),
+            ("from rheplicant.config import load_document", {"load_document", "rheplicant.config"}),
+            ("import rheplicant.config.document", {"rheplicant.config.document"}),
+            (
+                "from rheplicant.config.document import ConfiguredRun",
+                {"rheplicant.config.document"},
+            ),
+            (
+                "def f():\n    from rheplicant.config.resources import build_resources",
+                {"build_resources"},
+            ),
+            ("from rheplicant.config.sections.runtime import build_runtime", {"build_runtime"}),
+            ("import rheplicant.config", {"rheplicant.config"}),
+            ("import rheplicant.config as cfg", {"rheplicant.config"}),
+            ("from rheplicant import config", {"rheplicant.config"}),
+            ("# from rheplicant.config.values import resolve_value", set()),
+            ('"""build_model is not imported here."""', set()),
+            ("from rheplicant.config.resources import check_unknown_keys", set()),
+            ("from rheplicant.config.paths import parse_path", set()),
+            ("from rheplicant.config.findings import refuse", set()),
+        ],
+        ids=[
+            "builder",
+            "aliased-resolver",
+            "via-the-package-re-export",
+            "the-document-module",
+            "a-name-from-the-document-module",
+            "deferred-inside-a-function",
+            "build-runtime",
+            "the-umbrella-package",
+            "the-umbrella-package-aliased",
+            "the-umbrella-package-from-rheplicant",
+            "commented",
+            "in-a-docstring",
+            "the-sanctioned-sweep",
+            "the-sanctioned-path-parser",
+            "the-sanctioned-findings",
+        ],
+    )
+    def test_that_import_guard_reads_imports_and_not_mentions_of_them(self, source, expected):
         """ANTI-VACUITY, and the reason this is ``ast`` and not ``grep``.  2D
         shipped a tripwire that greped four strings, got four hits from a
         COMMENT, and counted code that could have been deleted.
@@ -2194,38 +2370,54 @@ class TestTheCostAndTheBoundary:
             "-- that is a stop-and-ask, not a rename."
         )
 
-    @pytest.mark.parametrize(("source", "expected"), [
-        ("def f(p):\n    open(p).read()", {"open"}),
-        ("def f(p):\n    return p.read_text()", {"read_text"}),
-        ("def f(p):\n    return list(p.iterdir())", {"iterdir"}),
-        ("def f(p):\n    return p.exists()", {"exists"}),
-        ("def f(p):\n    return os.listdir(p)", {"listdir"}),
-        ("def f(p):\n    return numpy.fromfile(p)", {"fromfile"}),
-        ("def f(p):\n    return io.open_code(p)", {"open_code"}),
-        ("def f(p):\n    return sqlite3.connect(p)", {"connect"}),
-        ("def f(p):\n    return os.lstat(p).st_size", {"lstat"}),
-        ("def f(p):\n    return list(p.rglob('*.npy'))", {"rglob"}),
-        ("def f(p):\n    return os.getcwd()", {"getcwd"}),
-        ("def f(p):\n    return h5py.File(p)", set()),
-        ("def f(d):\n    return cfg.resolve_value(d, None)",
-         {"resolve_value"}),
-        ("def f(d):\n    return build_runtime(d)", {"build_runtime"}),
-        ("def f(d):\n    if False:\n        return open(d)\n    return ()",
-         {"open"}),
-        ("# open(path)", set()),
-        ('"""p.read_text() is never called here."""', set()),
-        ("def f(d):\n    return check_unknown_keys('m', d, frozenset())",
-         set()),
-        ("def f(d):\n    return parse_path(d)[0]", set()),
-        ("def f(d):\n    return dataclasses.fields(d)", set()),
-    ], ids=["open", "read-text", "iterdir", "exists", "os-listdir",
-            "numpy-fromfile", "io-open-code", "sqlite3-connect", "os-lstat",
-            "path-rglob", "os-getcwd", "h5py-File-NOT-caught",
-            "resolve-value", "build-runtime", "on-a-branch-never-taken",
-            "commented", "in-a-docstring", "the-sanctioned-sweep",
-            "the-sanctioned-path-parser", "class-introspection"])
-    def test_that_call_guard_reads_calls_and_not_mentions_of_them(
-            self, source, expected):
+    @pytest.mark.parametrize(
+        ("source", "expected"),
+        [
+            ("def f(p):\n    open(p).read()", {"open"}),
+            ("def f(p):\n    return p.read_text()", {"read_text"}),
+            ("def f(p):\n    return list(p.iterdir())", {"iterdir"}),
+            ("def f(p):\n    return p.exists()", {"exists"}),
+            ("def f(p):\n    return os.listdir(p)", {"listdir"}),
+            ("def f(p):\n    return numpy.fromfile(p)", {"fromfile"}),
+            ("def f(p):\n    return io.open_code(p)", {"open_code"}),
+            ("def f(p):\n    return sqlite3.connect(p)", {"connect"}),
+            ("def f(p):\n    return os.lstat(p).st_size", {"lstat"}),
+            ("def f(p):\n    return list(p.rglob('*.npy'))", {"rglob"}),
+            ("def f(p):\n    return os.getcwd()", {"getcwd"}),
+            ("def f(p):\n    return h5py.File(p)", set()),
+            ("def f(d):\n    return cfg.resolve_value(d, None)", {"resolve_value"}),
+            ("def f(d):\n    return build_runtime(d)", {"build_runtime"}),
+            ("def f(d):\n    if False:\n        return open(d)\n    return ()", {"open"}),
+            ("# open(path)", set()),
+            ('"""p.read_text() is never called here."""', set()),
+            ("def f(d):\n    return check_unknown_keys('m', d, frozenset())", set()),
+            ("def f(d):\n    return parse_path(d)[0]", set()),
+            ("def f(d):\n    return dataclasses.fields(d)", set()),
+        ],
+        ids=[
+            "open",
+            "read-text",
+            "iterdir",
+            "exists",
+            "os-listdir",
+            "numpy-fromfile",
+            "io-open-code",
+            "sqlite3-connect",
+            "os-lstat",
+            "path-rglob",
+            "os-getcwd",
+            "h5py-File-NOT-caught",
+            "resolve-value",
+            "build-runtime",
+            "on-a-branch-never-taken",
+            "commented",
+            "in-a-docstring",
+            "the-sanctioned-sweep",
+            "the-sanctioned-path-parser",
+            "class-introspection",
+        ],
+    )
+    def test_that_call_guard_reads_calls_and_not_mentions_of_them(self, source, expected):
         """ANTI-VACUITY, both directions.
 
         ``on-a-branch-never-taken`` is the whole point: the call is
@@ -2279,11 +2471,10 @@ class TestTheCostAndTheBoundary:
             f"{sorted(patched ^ set(_FILESYSTEM_PATCHES))}: the targets "
             "actually rebound and the verbs the ban names have drifted apart."
         )
-        assert not (frozenset(_STATIC_ONLY_CALLS)
-                    & (frozenset(_FILESYSTEM_PATCHES)
-                       | frozenset(_FLOORED_UNDER))), (
-            "a verb cannot be both patched and declared un-patchable."
-        )
+        assert not (
+            frozenset(_STATIC_ONLY_CALLS)
+            & (frozenset(_FILESYSTEM_PATCHES) | frozenset(_FLOORED_UNDER))
+        ), "a verb cannot be both patched and declared un-patchable."
         assert all(reason.strip() for reason in _STATIC_ONLY_CALLS.values()), (
             "every verb banned with no runtime partner states WHY, because "
             "'banned and patched by nothing' with no reason beside it is the "
@@ -2313,8 +2504,9 @@ class TestTheCostAndTheBoundary:
         level down.
         """
         source = _AUDIT_CHILD.replace("__BRANCHES__", repr(_BRANCH_DOCUMENTS))
-        done = subprocess.run([sys.executable, "-c", source],
-                              capture_output=True, text=True, cwd=str(_ROOT))
+        done = subprocess.run(
+            [sys.executable, "-c", source], capture_output=True, text=True, cwd=str(_ROOT)
+        )
         assert done.returncode == 0, done.stdout + done.stderr
         lines = done.stdout.strip().splitlines()
         assert lines and lines[-1] == "ANTI-VACUITY-OK", (
@@ -2322,8 +2514,7 @@ class TestTheCostAndTheBoundary:
             f"guard could not have seen one either: {done.stdout!r}"
         )
         assert lines[:-1] == [], (
-            "the pre-flight pass reached the OS on these documents:\n"
-            + "\n".join(lines[:-1])
+            "the pre-flight pass reached the OS on these documents:\n" + "\n".join(lines[:-1])
         )
 
     def test_importing_the_pass_drags_in_no_optional_dependency(self):
@@ -2337,8 +2528,9 @@ class TestTheCostAndTheBoundary:
             "print(sorted(m for m in ('numpyro', 'limtod_jax', 'healpy', "
             "'h5py', 'pyuvdata', 'rhino_cal_jax') if m in sys.modules))\n"
         )
-        done = subprocess.run([sys.executable, "-c", source],
-                              capture_output=True, text=True, check=True)
+        done = subprocess.run(
+            [sys.executable, "-c", source], capture_output=True, text=True, check=True
+        )
         assert done.stdout.strip() == "[]", done.stdout
 
 
@@ -2355,7 +2547,7 @@ class TestTheCostAndTheBoundary:
 #: document -- which is microseconds against a pass measured in milliseconds,
 #: so the same child can carry the clock and the counter without the counter
 #: moving the clock.
-_COLD_COST_CHILD = '''
+_COLD_COST_CHILD = """
 import sys, time
 
 import _rheplicant_bootstrap.variants as _variants
@@ -2394,7 +2586,7 @@ print(" ".join(sorted(name for name in sys.modules
                       or name in ("numpyro", "healpy", "h5py"))))
 print(len(_MERGES))
 print(len(document.get("variants") or {}))
-'''
+"""
 
 
 #: How many fresh processes the wall-clock backstop takes its minimum over.
@@ -2474,14 +2666,15 @@ class TestTheColdCostOnARealDocument:
     """
 
     def _run(self, runs: int, variants: int) -> _ColdRun:
-        source = (_COLD_COST_CHILD.replace("__RUNS__", str(runs))
-                  .replace("__VARIANTS__", str(variants)))
-        done = subprocess.run([sys.executable, "-c", source],
-                              capture_output=True, text=True, cwd=str(_ROOT))
+        source = _COLD_COST_CHILD.replace("__RUNS__", str(runs)).replace(
+            "__VARIANTS__", str(variants)
+        )
+        done = subprocess.run(
+            [sys.executable, "-c", source], capture_output=True, text=True, cwd=str(_ROOT)
+        )
         assert done.returncode == 0, done.stdout + done.stderr
         cold, found, dragged, merges, declared = done.stdout.split("\n")[:5]
-        return _ColdRun(float(cold), int(found), dragged.split(),
-                        int(merges), int(declared))
+        return _ColdRun(float(cold), int(found), dragged.split(), int(merges), int(declared))
 
     def test_the_layers_are_built_once_per_declared_variant(self):
         """THE instrument: a call count, which no load on this box can move.
@@ -2525,8 +2718,7 @@ class TestTheColdCostOnARealDocument:
             "layer memo: 210, at the ten merge sites this document reaches."
         )
 
-    def test_a_cold_pass_on_forty_runs_and_twenty_variants_is_under_the_budget(
-            self):
+    def test_a_cold_pass_on_forty_runs_and_twenty_variants_is_under_the_budget(self):
         """§5's cold-pass budget, as a BACKSTOP -- not as this class's
         instrument.
 
@@ -2592,8 +2784,7 @@ class TestTheColdCostOnARealDocument:
         ``plan.sample`` runs would take an exact count red in a file it never
         opened (R8).
         """
-        results = [self._run(runs=40, variants=20)
-                   for _ in range(_COLD_CHILDREN)]
+        results = [self._run(runs=40, variants=20) for _ in range(_COLD_CHILDREN)]
         for result in results:
             assert result.findings >= 40, (
                 f"a child's document earned {result.findings} findings, fewer "
@@ -2637,9 +2828,7 @@ class TestTheColdCostOnARealDocument:
 
 def _enumeration(document):
     merged = initial_merge(document, origin=Origin("user"))
-    return enumerate_layers_once(
-        merged.document, merged.origins, merged.deletions
-    )
+    return enumerate_layers_once(merged.document, merged.origins, merged.deletions)
 
 
 def _prefixes(document) -> list[str]:
@@ -2652,8 +2841,8 @@ class TestCanonicalLayerEnumeration:
 
     def _document(self, **variants):
         return preflight_document(
-            variants={name: {"runtime": {"seed": seed}}
-                      for name, seed in variants.items()})
+            variants={name: {"runtime": {"seed": seed}} for name, seed in variants.items()}
+        )
 
     def test_each_enumeration_returns_a_fresh_frozen_record(self):
         document = self._document(a=1, b=2)
@@ -2687,16 +2876,14 @@ class TestCanonicalLayerEnumeration:
 
     def test_an_unused_variant_is_seen_by_every_registered_check(self):
         """Layer fan-out belongs to the driver, not to selected checks."""
-        document = preflight_document(
-            variants={"unused": {"model": {"ghost": {}}}}
-        )
-        found = [one for one in findings(document)
-                 if one.check == "A2"
-                 and one.where == "variants.unused.model"]
+        document = preflight_document(variants={"unused": {"model": {"ghost": {}}}})
+        found = [
+            one
+            for one in findings(document)
+            if one.check == "A2" and one.where == "variants.unused.model"
+        ]
         assert len(found) == 1
-        assert found[0].message.startswith(
-            "variants.unused: model: 'ghost' is not a node"
-        )
+        assert found[0].message.startswith("variants.unused: model: 'ghost' is not a node")
 
     def test_a_document_edited_between_two_passes_is_read_afresh(self):
         """And the limit stops at the pass boundary, which is not optional.
@@ -2715,20 +2902,17 @@ class TestCanonicalLayerEnumeration:
         to do with this variant.
         """
         document = preflight_document(variants={"v": {"campaign": {"of": 1}}})
-        assert any(finding.where == "variants.v.campaign"
-                   for finding in findings(document)), (
+        assert any(finding.where == "variants.v.campaign" for finding in findings(document)), (
             "the variant this test edits earns nothing, so the second read "
             "below could not tell a fresh walk from a stale one"
         )
         del document["variants"]["v"]["campaign"]
-        assert not any(finding.where == "variants.v.campaign"
-                       for finding in findings(document)), (
+        assert not any(finding.where == "variants.v.campaign" for finding in findings(document)), (
             "a second pass answered from the first pass's layers: the "
             "document was edited between them and preflight() is supposed to "
             "drop the layer memo at the head of every pass"
         )
-        assert _prefixes(document) == [""] + [
-            f"variants.{name}" for name in document["variants"]]
+        assert _prefixes(document) == [""] + [f"variants.{name}" for name in document["variants"]]
 
 
 #: A placeholder inside a harvested message: where an f-string interpolated
@@ -2767,12 +2951,13 @@ def _message_texts(source: str) -> set[str]:
     tree = ast.parse(source)
     docstrings = set()
     for node in ast.walk(tree):
-        if isinstance(node, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef,
-                             ast.ClassDef)):
+        if isinstance(node, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
             first = node.body[0] if node.body else None
-            if (isinstance(first, ast.Expr)
-                    and isinstance(first.value, ast.Constant)
-                    and isinstance(first.value.value, str)):
+            if (
+                isinstance(first, ast.Expr)
+                and isinstance(first.value, ast.Constant)
+                and isinstance(first.value.value, str)
+            ):
                 docstrings.add(id(first.value))
     found = set()
     for node in ast.walk(tree):
@@ -2782,9 +2967,11 @@ def _message_texts(source: str) -> set[str]:
             text = node.value
         elif isinstance(node, ast.JoinedStr):
             text = "".join(
-                part.value if (isinstance(part, ast.Constant)
-                               and isinstance(part.value, str)) else _HOLE
-                for part in node.values)
+                part.value
+                if (isinstance(part, ast.Constant) and isinstance(part.value, str))
+                else _HOLE
+                for part in node.values
+            )
         else:
             continue
         flat = re.sub(r"\s+", " ", text).strip()
@@ -2814,8 +3001,7 @@ _BASE_MESSAGE_FLOOR = 800
 #: because ``npe`` needed different words for two of its fragments and
 #: ``conjugate.gls`` had to keep ``be2027b``'s to the character.
 _ASSEMBLED_ELSEWHERE: dict[str, str] = {
-    literal: "test_config_conjugate_shared.py::"
-             "test_the_gls_refusal_is_be2027b_verbatim"
+    literal: "test_config_conjugate_shared.py::test_the_gls_refusal_is_be2027b_verbatim"
     for literal in (
         "runs[" + _HOLE + "]: kind: " + _HOLE + " solves for the covariance a "
         "PREDICTION-DEPENDENT sigma implies, so it reads inference.noise as a "
@@ -2824,10 +3010,8 @@ _ASSEMBLED_ELSEWHERE: dict[str, str] = {
         "to iterate (check A28). Declare inference.noise.kind: radiometer to "
         "iterate the rule, or run kind: conjugate.wiener, which is what a "
         "decided sigma wants.",
-
         "solves for the covariance a PREDICTION-DEPENDENT sigma implies, so "
         "it reads inference.noise as a model; inference.noise.kind:",
-
         "decides its sigma into an array before any run sees it, and a "
         "decided array has no fixed point to iterate (check A28). Declare "
         "inference.noise.kind: radiometer to iterate the rule, or run kind: "
@@ -2840,7 +3024,7 @@ _ASSEMBLED_ELSEWHERE: dict[str, str] = {
 #: sentence and concrete type remain.  These are not Task 4 message moves.
 _TASK3_SAFE_CORRECTIONS: dict[str, str] = {
     literal: "test_config_preflight.py::"
-             "test_task3_compatibility_diagnostics_keep_static_whole_strings"
+    "test_task3_compatibility_diagnostics_keep_static_whole_strings"
     for literal in (
         "recursive_update: … is a mapping; got … (…).",
         "variants: is a mapping of name -> patch; got … (…).",
@@ -2878,47 +3062,45 @@ _CORRECTED_BY_PLAN: dict[str, str] = {
     "infers it from the map length -- nside is inferred, not declared -- and "
     "passes it to the constructor itself, so a config that also passed it "
     "raises 'got multiple values for keyword argument nside'. The beam's own "
-    "nside: is where the resolution is declared.":
-        "test_config_kind_projectors.py::"
-        "test_nside_is_required_on_the_alms_route_and_refused_on_the_beam_route",
+    "nside: is where the resolution is declared.": "test_config_kind_projectors.py::"
+    "test_nside_is_required_on_the_alms_route_and_refused_on_the_beam_route",
     ": nside is not written for engine: driftscan. from_beam_maps() infers it "
     "from the map length -- nside is inferred, not declared -- and passes it "
     "to the constructor itself, so a config that also passed it raises 'got "
     "multiple values for keyword argument nside'. The beam's own nside: is "
-    "where the resolution is declared.":
-        "test_config_kind_projectors.py::"
-        "test_nside_is_required_on_the_alms_route_and_refused_on_the_beam_route",
-    _HOLE + ": the file holds shape " + _HOLE + "; this run's grids say "
+    "where the resolution is declared.": "test_config_kind_projectors.py::"
+    "test_nside_is_required_on_the_alms_route_and_refused_on_the_beam_route",
+    _HOLE
+    + ": the file holds shape "
     + _HOLE
-    + ". Exactly -- broadcast-compatible is the dangerous case (check C11).":
-        "test_config_section_observed.py::"
-        "test_the_refusal_names_the_prediction_and_keeps_the_clause_that_was_right",
-    "arrives with Plan 4 (D-C16), with the outputs that make it reportable.":
-        "test_config_exit_support.py::TestTheDeferredKindsNameTheirPlan.test_compare_and_benchmark_are_both_live",
-    _HOLE + ": kind: " + _HOLE
-    + " arrives with Plan 4 (D-C16), with the outputs that make it reportable.":
-        "test_config_exit_support.py::TestTheDeferredKindsNameTheirPlan.test_compare_and_benchmark_are_both_live",
+    + "; this run's grids say "
+    + _HOLE
+    + ". Exactly -- broadcast-compatible is the dangerous case (check C11).": "test_config_section_observed.py::"  # noqa: E501
+    "test_the_refusal_names_the_prediction_and_keeps_the_clause_that_was_right",
+    "arrives with Plan 4 (D-C16), with the outputs that make it reportable.": "test_config_exit_support.py::TestTheDeferredKindsNameTheirPlan.test_compare_and_benchmark_are_both_live",  # noqa: E501
+    _HOLE
+    + ": kind: "
+    + _HOLE
+    + " arrives with Plan 4 (D-C16), with the outputs that make it reportable.": "test_config_exit_support.py::TestTheDeferredKindsNameTheirPlan.test_compare_and_benchmark_are_both_live",  # noqa: E501
     # The three _NOT_YET routes, reworded on purpose. They named an internal
     # plan number in a message a USER reads, and the number had gone stale: the
     # work it pointed at has shipped, so a reader was told to wait for the
     # command line that was already installed alongside them. The replacements
     # say where the section is handled instead, and are equality-pinned in the
     # structural sweep's own table above.
-    "Plan 4 (outputs, provenance, the CLI)":
-        "test_config_preflight.py::TestTheStructuralSweepMoved.test_every_message_survived_the_move_verbatim",
+    "Plan 4 (outputs, provenance, the CLI)": "test_config_preflight.py::TestTheStructuralSweepMoved.test_every_message_survived_the_move_verbatim",  # noqa: E501
     "Plan 4 (presets are YAML files, and the CLI is where YAML "
-    "first comes off disk)":
-        "test_config_preflight.py::TestTheStructuralSweepMoved.test_every_message_survived_the_move_verbatim",
-    "Plan 4 (plugin import belongs to the process entry point)":
-        "test_config_preflight.py::TestTheStructuralSweepMoved.test_every_message_survived_the_move_verbatim",
+    "first comes off disk)": "test_config_preflight.py::TestTheStructuralSweepMoved.test_every_message_survived_the_move_verbatim",  # noqa: E501
+    "Plan 4 (plugin import belongs to the process entry point)": "test_config_preflight.py::TestTheStructuralSweepMoved.test_every_message_survived_the_move_verbatim",  # noqa: E501
     # Two harvested forms of one sentence: the f-string's own pieces, and the
     # hole-decorated whole. Forgiving one and not the other leaves half the
     # rewording unchecked, which is what the first two attempts at this entry
     # each did in turn.
-    _HOLE + ": is not read by this layer yet -- it arrives with " + _HOLE + ".":
-        "test_config_preflight.py::TestTheStructuralSweepMoved.test_every_message_survived_the_move_verbatim",
-    ": is not read by this layer yet -- it arrives with":
-        "test_config_preflight.py::TestTheStructuralSweepMoved.test_every_message_survived_the_move_verbatim",
+    _HOLE
+    + ": is not read by this layer yet -- it arrives with "
+    + _HOLE
+    + ".": "test_config_preflight.py::TestTheStructuralSweepMoved.test_every_message_survived_the_move_verbatim",  # noqa: E501
+    ": is not read by this layer yet -- it arrives with": "test_config_preflight.py::TestTheStructuralSweepMoved.test_every_message_survived_the_move_verbatim",  # noqa: E501
     # T-002 U7 (the horizon ruling): the truncate_map el_deg refusal sent the
     # reader to `horizon.mode: projector_mask` alone, and that mode masks
     # nothing unless the projector reading the beam also sets
@@ -2927,15 +3109,13 @@ _CORRECTED_BY_PLAN: dict[str, str] = {
     _HOLE + ": horizon.el_deg=" + _HOLE + ". truncate_map accepts only 90 -- "
     "limTOD's horizon partition is defined at the horizon and nowhere else. "
     "For a different cut, mask in the projector instead (horizon.mode: "
-    "projector_mask), which applies it in the horizontal frame.":
-        "test_config_kind_beams.py::"
-        "test_the_el_deg_refusal_names_both_settings_a_projector_mask_needs",
+    "projector_mask), which applies it in the horizontal frame.": "test_config_kind_beams.py::"
+    "test_the_el_deg_refusal_names_both_settings_a_projector_mask_needs",
     ". truncate_map accepts only 90 -- limTOD's horizon partition is defined "
     "at the horizon and nowhere else. For a different cut, mask in the "
     "projector instead (horizon.mode: projector_mask), which applies it in "
-    "the horizontal frame.":
-        "test_config_kind_beams.py::"
-        "test_the_el_deg_refusal_names_both_settings_a_projector_mask_needs",
+    "the horizontal frame.": "test_config_kind_beams.py::"
+    "test_the_el_deg_refusal_names_both_settings_a_projector_mask_needs",
 }
 
 
@@ -3018,12 +3198,13 @@ class TestNoMovedMessageWasReworded:
         store -- one ``git archive``, no checkout, no network."""
         try:
             done = subprocess.run(
-                ["git", "archive", "--format=tar", _BASE_COMMIT,
-                 "src/rheplicant/config"],
-                cwd=str(_ROOT), capture_output=True)
-        except OSError as error:                       # pragma: no cover
+                ["git", "archive", "--format=tar", _BASE_COMMIT, "src/rheplicant/config"],
+                cwd=str(_ROOT),
+                capture_output=True,
+            )
+        except OSError as error:  # pragma: no cover
             pytest.skip(f"git is not runnable here: {error}")
-        if done.returncode != 0:                       # pragma: no cover
+        if done.returncode != 0:  # pragma: no cover
             pytest.skip(
                 f"{_BASE_COMMIT} is not in this repository "
                 f"({done.stderr.decode(errors='replace').strip()}), so the "
@@ -3056,8 +3237,10 @@ class TestNoMovedMessageWasReworded:
             f"against {_BASE_MESSAGE_FLOOR} expected -- the harvester has "
             "stopped seeing messages and this guard is checking nothing."
         )
-        assert ("campaign: is reserved with capability 4 (streaming evidence, "
-                "schema §8.2) and refused in v1.") in harvested, (
+        assert (
+            "campaign: is reserved with capability 4 (streaming evidence, "
+            "schema §8.2) and refused in v1."
+        ) in harvested, (
             "a message this plan is known to have MOVED verbatim is not in "
             "the harvest, so the harvest is not reading messages."
         )
@@ -3072,15 +3255,21 @@ class TestNoMovedMessageWasReworded:
         for source in self._base_sources().values():
             base |= _message_texts(source)
         head = set()
-        roots = [(_ROOT / "src" / "rheplicant" / "config"),
-                 (_ROOT / "src" / "_rheplicant_bootstrap")]
+        roots = [
+            (_ROOT / "src" / "rheplicant" / "config"),
+            (_ROOT / "src" / "_rheplicant_bootstrap"),
+        ]
         for root in roots:
             for path in sorted(root.rglob("*.py")):
                 head |= _message_texts(path.read_text())
 
-        missing = (base - head - set(_ASSEMBLED_ELSEWHERE)
-                   - set(_TASK3_SAFE_CORRECTIONS)
-                   - set(_CORRECTED_BY_PLAN))
+        missing = (
+            base
+            - head
+            - set(_ASSEMBLED_ELSEWHERE)
+            - set(_TASK3_SAFE_CORRECTIONS)
+            - set(_CORRECTED_BY_PLAN)
+        )
         assert missing == set(), (
             f"{len(missing)} message(s) this layer shipped at {_BASE_COMMIT} "
             "are gone. A MOVED check keeps its message verbatim. The known "
@@ -3090,8 +3279,7 @@ class TestNoMovedMessageWasReworded:
             "replacement by EQUALITY; if the sentence is merely assembled "
             "from clauses now rather than written out, add it to "
             "_ASSEMBLED_ELSEWHERE the same way. The two are different claims "
-            "and are deliberately not one list.\n\n"
-            + "\n\n".join(sorted(missing))
+            "and are deliberately not one list.\n\n" + "\n\n".join(sorted(missing))
         )
 
     def test_every_forgiven_message_names_a_pin_that_exists(self):
@@ -3111,9 +3299,9 @@ class TestNoMovedMessageWasReworded:
             **_TASK3_SAFE_CORRECTIONS,
             **_CORRECTED_BY_PLAN,
         }
-        assert len(forgiven) == (len(_ASSEMBLED_ELSEWHERE)
-                                 + len(_TASK3_SAFE_CORRECTIONS)
-                                 + len(_CORRECTED_BY_PLAN)), (
+        assert len(forgiven) == (
+            len(_ASSEMBLED_ELSEWHERE) + len(_TASK3_SAFE_CORRECTIONS) + len(_CORRECTED_BY_PLAN)
+        ), (
             "a literal is forgiven by BOTH lists, so one of the two claims "
             "about it -- 'assembled from clauses' and 'reworded on purpose' "
             "-- is untrue and nothing here says which."
@@ -3141,12 +3329,15 @@ class TestNoMovedMessageWasReworded:
         from _rheplicant_bootstrap.layering import apply_variant, recursive_update
 
         cases = (
-            (lambda: recursive_update([], {}),
-             "recursive_update: base is a mapping; got list."),
-            (lambda: apply_variant({"variants": []}, "v"),
-             "variants: is a mapping of name -> patch; got list."),
-            (lambda: apply_variant({"variants": {"v": []}}, "v"),
-             "variant 'v': the patch is a mapping of sections; got list."),
+            (lambda: recursive_update([], {}), "recursive_update: base is a mapping; got list."),
+            (
+                lambda: apply_variant({"variants": []}, "v"),
+                "variants: is a mapping of name -> patch; got list.",
+            ),
+            (
+                lambda: apply_variant({"variants": {"v": []}}, "v"),
+                "variant 'v': the patch is a mapping of sections; got list.",
+            ),
         )
         for callback, expected in cases:
             with pytest.raises(ConfigError) as caught:
@@ -3160,8 +3351,7 @@ class TestTheFootImportCannotRot:
     nothing, one level down.  Kills exactly that."""
 
     def test_every_module_under_preflight_is_imported_at_the_foot(self):
-        present = {path.stem for path in _PREFLIGHT_DIR.glob("*.py")
-                   if path.stem != "__init__"}
+        present = {path.stem for path in _PREFLIGHT_DIR.glob("*.py") if path.stem != "__init__"}
         declared = _foot_imports((_PREFLIGHT_DIR / "__init__.py").read_text())
         assert present <= declared, (
             f"{sorted(present - declared)} live under preflight/ and are "
@@ -3170,8 +3360,7 @@ class TestTheFootImportCannotRot:
             "import in preflight/__init__.py."
         )
         assert declared <= present, (
-            f"{sorted(declared - present)} are imported at the foot and do "
-            "not exist."
+            f"{sorted(declared - present)} are imported at the foot and do not exist."
         )
         # This second direction lost one case when `_foot_imports` narrowed to
         # module-level statements: a name imported only inside a function, for
@@ -3203,10 +3392,8 @@ class TestTheFootImportCannotRot:
         the alternative is a silent hole shaped exactly like the one that
         shipped.
         """
-        present = {path.stem for path in _PREFLIGHT_DIR.glob("*.py")
-                   if path.stem != "__init__"}
-        contributing = {fn.__module__.rsplit(".", 1)[-1]
-                        for fn in CHECKS.values()}
+        present = {path.stem for path in _PREFLIGHT_DIR.glob("*.py") if path.stem != "__init__"}
+        contributing = {fn.__module__.rsplit(".", 1)[-1] for fn in CHECKS.values()}
         assert present <= contributing, (
             f"{sorted(present - contributing)} live under preflight/ and own "
             "no slot in CHECKS, so nothing they contain ever runs and the "
@@ -3214,31 +3401,43 @@ class TestTheFootImportCannotRot:
             "registers at least one check."
         )
         assert contributing <= present, (
-            f"{sorted(contributing - present)} own a slot and are not "
-            "modules under preflight/."
+            f"{sorted(contributing - present)} own a slot and are not modules under preflight/."
         )
 
-    @pytest.mark.parametrize(("source", "expected"), [
-        ("from rheplicant.config.preflight import document", {"document"}),
-        ("from rheplicant.config.preflight import document, model",
-         {"document", "model"}),
-        ("from rheplicant.config.preflight import document as _d", {"document"}),
-        ("from rheplicant.config.preflight import document as _document_checks",
-         {"document"}),
-        ("from . import document", {"document"}),
-        ("import rheplicant.config.preflight.document", {"document"}),
-        ("# from rheplicant.config.preflight import document", set()),
-        ('"""from rheplicant.config.preflight import document."""', set()),
-        ("from rheplicant.config.findings import Finding", set()),
-        ("def preflight(document):\n"
-         "    from rheplicant.config.preflight import document as _d\n", set()),
-        ("if True:\n"
-         "    from rheplicant.config.preflight import document\n", set()),
-    ], ids=["plain", "several", "aliased", "the-shipped-alias", "relative",
-            "import-form", "commented", "in-a-docstring", "another-package",
-            "in-a-function", "in-a-branch"])
-    def test_the_matcher_reads_the_import_and_not_a_mention_of_one(
-            self, source, expected):
+    @pytest.mark.parametrize(
+        ("source", "expected"),
+        [
+            ("from rheplicant.config.preflight import document", {"document"}),
+            ("from rheplicant.config.preflight import document, model", {"document", "model"}),
+            ("from rheplicant.config.preflight import document as _d", {"document"}),
+            ("from rheplicant.config.preflight import document as _document_checks", {"document"}),
+            ("from . import document", {"document"}),
+            ("import rheplicant.config.preflight.document", {"document"}),
+            ("# from rheplicant.config.preflight import document", set()),
+            ('"""from rheplicant.config.preflight import document."""', set()),
+            ("from rheplicant.config.findings import Finding", set()),
+            (
+                "def preflight(document):\n"
+                "    from rheplicant.config.preflight import document as _d\n",
+                set(),
+            ),
+            ("if True:\n    from rheplicant.config.preflight import document\n", set()),
+        ],
+        ids=[
+            "plain",
+            "several",
+            "aliased",
+            "the-shipped-alias",
+            "relative",
+            "import-form",
+            "commented",
+            "in-a-docstring",
+            "another-package",
+            "in-a-function",
+            "in-a-branch",
+        ],
+    )
+    def test_the_matcher_reads_the_import_and_not_a_mention_of_one(self, source, expected):
         """ANTI-VACUITY, and the reason this is ``ast`` and not ``grep``.
 
         Every case here is a mutation the test above would otherwise pass

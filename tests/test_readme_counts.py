@@ -168,8 +168,9 @@ def _coverage_floor() -> int:
     # run-to-run noise rather than the worker count. Coverage stays out of
     # `addopts` for the second reason only: a partial run should not trip a
     # whole-package gate. This is still the one place the floor lives.
-    found = re.search(r"^fail_under\s*=\s*(\d+)",
-                      (ROOT / "pyproject.toml").read_text(), re.MULTILINE)
+    found = re.search(
+        r"^fail_under\s*=\s*(\d+)", (ROOT / "pyproject.toml").read_text(), re.MULTILINE
+    )
     assert found, (
         "pyproject.toml no longer carries [tool.coverage.report] fail_under. "
         "It is the only thing that holds the coverage floor, and the README's "

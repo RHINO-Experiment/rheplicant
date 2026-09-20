@@ -129,9 +129,7 @@ def test_every_class_a_document_can_name_is_in_the_walk():
     exact hole that hid ``NeuralOperator`` before the walk was widened, in the
     other direction.
     """
-    addressable = {
-        cls.__name__ for classes in operator_table().values() for cls in classes
-    }
+    addressable = {cls.__name__ for classes in operator_table().values() for cls in classes}
     walked = {name for name, _ in SHIPPED}
     missed = sorted(addressable - walked)
     assert not missed, (
@@ -412,10 +410,7 @@ def test_the_refusal_message_quotes_the_registry():
     """
     from rheplicant.config.preflight.document import _task3_capability
 
-    row = next(
-        r for r in REGISTRY
-        if r.surface is Surface.DOCUMENT and r.name == "campaign"
-    )
+    row = next(r for r in REGISTRY if r.surface is Surface.DOCUMENT and r.name == "campaign")
     finding = _task3_capability("campaign", "campaign")
     assert row.what in finding.message, (
         f"the A39 message does not contain {row.what!r}: the table and the "

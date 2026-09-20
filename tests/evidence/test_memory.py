@@ -37,8 +37,7 @@ def _factorization():
     space = ParameterSpace(
         latents=latents,
         bindings=tuple(
-            Bind(latent.name, into=lambda p, n=latent.name: getattr(p, n))
-            for latent in latents
+            Bind(latent.name, into=lambda p, n=latent.name: getattr(p, n)) for latent in latents
         ),
     )
     return Factorization(space)
@@ -53,9 +52,11 @@ def _term(epoch_id, key=None, rows=1):
         factor = jax.random.normal(kf, (rows, 2))
         target = jax.random.normal(kt, (rows,))
     return QuadraticLikelihood(
-        info=SqrtInfo(factor=factor, target=target, offset=jnp.array(0.0),
-                      names=names, shapes=shapes),
-        epoch_id=epoch_id, n_observed=1024,
+        info=SqrtInfo(
+            factor=factor, target=target, offset=jnp.array(0.0), names=names, shapes=shapes
+        ),
+        epoch_id=epoch_id,
+        n_observed=1024,
     )
 
 
@@ -119,7 +120,9 @@ def test_two_estimators_cannot_be_summed():
     memory = BayesMemory(_factorization()).remember(_term("a", jax.random.key(0)))
     gls = QuadraticLikelihood(
         info=_term("b", jax.random.key(1)).info,
-        epoch_id="b", n_observed=1024, include_logdet=False,
+        epoch_id="b",
+        n_observed=1024,
+        include_logdet=False,
     )
     with pytest.raises(StateValidationError, match="estimator"):
         memory.remember(gls)
@@ -128,9 +131,15 @@ def test_two_estimators_cannot_be_summed():
 def test_a_term_over_different_latents_is_refused():
     memory = BayesMemory(_factorization())
     other = QuadraticLikelihood(
-        info=SqrtInfo(factor=jnp.zeros((1, 1)), target=jnp.zeros(1),
-                      offset=jnp.array(0.0), names=("depth",), shapes=((),)),
-        epoch_id="x", n_observed=1,
+        info=SqrtInfo(
+            factor=jnp.zeros((1, 1)),
+            target=jnp.zeros(1),
+            offset=jnp.array(0.0),
+            names=("depth",),
+            shapes=((),),
+        ),
+        epoch_id="x",
+        n_observed=1,
     )
     with pytest.raises(StateValidationError, match="different latents"):
         memory.remember(other)
@@ -140,7 +149,9 @@ def test_a_term_carrying_a_prior_share_is_refused_on_the_streaming_path():
     memory = BayesMemory(_factorization())
     tempered = QuadraticLikelihood(
         info=_term("a", jax.random.key(0)).info,
-        epoch_id="a", n_observed=1024, prior_share=(1, 300),
+        epoch_id="a",
+        n_observed=1024,
+        prior_share=(1, 300),
     )
     with pytest.raises(StateValidationError, match="prior-free"):
         memory.remember(tempered)
@@ -206,14 +217,10 @@ def test_remembering_a_late_epoch_costs_what_an_early_one_did():
     def _span(start, stop):
         nonlocal memory
         while len(memory.archive) < start:
-            memory = memory.remember(
-                _term(f"n{len(memory.archive)}", jax.random.key(0))
-            )
+            memory = memory.remember(_term(f"n{len(memory.archive)}", jax.random.key(0)))
         begin = time.perf_counter()
         while len(memory.archive) < stop:
-            memory = memory.remember(
-                _term(f"n{len(memory.archive)}", jax.random.key(0))
-            )
+            memory = memory.remember(_term(f"n{len(memory.archive)}", jax.random.key(0)))
         return (time.perf_counter() - begin) / (stop - start)
 
     memory.remember(term)  # pay the first-call tracing cost outside the timing
@@ -252,8 +259,7 @@ def test_fisher_spans_index_the_flat_vector_not_the_latent_list():
     space = ParameterSpace(
         latents=latents,
         bindings=tuple(
-            Bind(latent.name, into=lambda p, n=latent.name: getattr(p, n))
-            for latent in latents
+            Bind(latent.name, into=lambda p, n=latent.name: getattr(p, n)) for latent in latents
         ),
     )
     fisher = BayesMemory(Factorization(space)).fisher()
@@ -297,8 +303,7 @@ def test_fisher_is_permuted_into_flatten_order_not_declared_order():
     space = ParameterSpace(
         latents=latents,
         bindings=tuple(
-            Bind(latent.name, into=lambda p, n=latent.name: getattr(p, n))
-            for latent in latents
+            Bind(latent.name, into=lambda p, n=latent.name: getattr(p, n)) for latent in latents
         ),
     )
     factorization = Factorization(space)
@@ -320,9 +325,7 @@ def test_fisher_is_permuted_into_flatten_order_not_declared_order():
     fisher = memory.fisher()
 
     assert fisher.names == ("depth", "width")
-    assert fisher.structure == jax.tree.structure(
-        {"width": jnp.zeros(()), "depth": jnp.zeros(())}
-    )
+    assert fisher.structure == jax.tree.structure({"width": jnp.zeros(()), "depth": jnp.zeros(())})
     # width carried 3**2, depth 7**2; after the permutation depth leads.
     np.testing.assert_allclose(np.diag(np.asarray(fisher.matrix)), [49.0, 9.0])
     assert fisher.span("width") == (1, 2)
@@ -343,8 +346,7 @@ def test_the_permuted_fisher_composes_with_propagate_covariance():
     space = ParameterSpace(
         latents=latents,
         bindings=tuple(
-            Bind(latent.name, into=lambda p, n=latent.name: getattr(p, n))
-            for latent in latents
+            Bind(latent.name, into=lambda p, n=latent.name: getattr(p, n)) for latent in latents
         ),
     )
     factorization = Factorization(space)

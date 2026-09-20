@@ -402,7 +402,7 @@ def reap_group(group: int | None, *, grace_seconds: float) -> None:
         try:
             os.killpg(group, 0)  # a membership probe; signal 0 sends nothing
         except (ProcessLookupError, PermissionError):
-            return               # nothing left in it that we can kill
+            return  # nothing left in it that we can kill
         if time.monotonic() >= deadline:
             break
         time.sleep(0.05)
@@ -619,15 +619,12 @@ def drained_run(
             os.close(err_write)
             deadline = time.monotonic() + drain_seconds
             ended = tuple(
-                reader.finish(max(0.0, deadline - time.monotonic()))
-                for reader in readers
+                reader.finish(max(0.0, deadline - time.monotonic())) for reader in readers
             )
     finally:
         _sweep(anchor, grace_seconds=grace_seconds)
     abandoned = tuple(
-        name
-        for name, over in zip(("stdout", "stderr"), ended, strict=True)
-        if not over
+        name for name, over in zip(("stdout", "stderr"), ended, strict=True) if not over
     )
     if abandoned:
         raise ChildStreamAbandoned(

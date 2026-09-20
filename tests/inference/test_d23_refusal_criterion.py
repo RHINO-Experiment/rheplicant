@@ -91,15 +91,11 @@ class NearCollinearDesign(AbstractOperator):
 
     def __call__(self, state):
         grid = jnp.linspace(0.0, 1.0, N_FREQ)
-        return state.with_data(
-            self.a * grid + self.b * (grid + self.separation * grid**2)
-        )
+        return state.with_data(self.a * grid + self.b * (grid + self.separation * grid**2))
 
 
 def _problem(separation: float):
-    pipeline = NearCollinearDesign(
-        a=jnp.asarray(1.0), b=jnp.asarray(0.5), separation=separation
-    )
+    pipeline = NearCollinearDesign(a=jnp.asarray(1.0), b=jnp.asarray(0.5), separation=separation)
     state = State(
         coords=Coordinates(freq=jnp.linspace(60e6, 85e6, N_FREQ)),
         meta={"telescope": "RHINO", "obs_id": "d23-000"},

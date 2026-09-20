@@ -48,8 +48,7 @@ class TestTheNamesGuardStandsForBothKinds:
         with pytest.raises(ConfigError, match="non-empty list of latent"):
             run_document(diagnostic_document({"kind": kind, "names": names}))
 
-    def test_a_repeated_latent_is_refused_before_either_package_sees_it(
-            self, kind):
+    def test_a_repeated_latent_is_refused_before_either_package_sees_it(self, kind):
         """``identifiability`` refuses ``['g', 'g']`` itself, because two
         copies of one latent are exactly degenerate; ``score_directions``
         returns ONE key for the two-name ask, silently, so the measured
@@ -58,10 +57,8 @@ class TestTheNamesGuardStandsForBothKinds:
         permutation bug ``reduced_basis.py::score_directions`` is named after, reached
         from the far side.  Only this layer can refuse it for both kinds.
         """
-        with pytest.raises(ConfigError,
-                           match=r"lists \['g'\] more than once") as caught:
-            run_document(diagnostic_document(
-                {"kind": kind, "names": ["g", "d", "g"]}))
+        with pytest.raises(ConfigError, match=r"lists \['g'\] more than once") as caught:
+            run_document(diagnostic_document({"kind": kind, "names": ["g", "d", "g"]}))
         assert "off by one" in str(caught.value)
 
     def test_a_declared_null_at_is_refused_rather_than_ignored(self, kind):
@@ -92,14 +89,12 @@ class TestTheRankToleranceHasBothBounds:
         carries.
         """
         with pytest.raises(ConfigError, match=r"rtol: must be < 1") as caught:
-            run_document(diagnostic_document(
-                {"kind": "identifiability", "rtol": 1.0}))
+            run_document(diagnostic_document({"kind": "identifiability", "rtol": 1.0}))
         assert "runs['identifiability']: " in str(caught.value)
 
     def test_an_rtol_above_one_is_refused_by_the_same_clause(self):
         with pytest.raises(ConfigError, match=r"rtol: must be < 1"):
-            run_document(diagnostic_document(
-                {"kind": "identifiability", "rtol": 2.0}))
+            run_document(diagnostic_document({"kind": "identifiability", "rtol": 2.0}))
 
     def test_the_ceiling_is_exclusive_and_0_999_still_discriminates(self):
         """The other side of the boundary, which is what keeps the ceiling
@@ -108,7 +103,6 @@ class TestTheRankToleranceHasBothBounds:
         refusal begins exactly where the arithmetic goes vacuous.  A ceiling
         clamped low -- or a ``> 1.0`` written where ``>= 1.0`` belongs --
         fails one of these two tests."""
-        near = diagnostic_report({"kind": "identifiability", "rtol": 0.999},
-                      IDENTIFIED_PAIR)
+        near = diagnostic_report({"kind": "identifiability", "rtol": 0.999}, IDENTIFIED_PAIR)
         assert (near.rank, near.nullity) == (1, 1)
         assert near.rtol == pytest.approx(0.999)

@@ -46,14 +46,21 @@ def _alms(lmax):
 
 def _projector(nside, lmax, **kwargs):
     return DriftScanProjector(
-        beam_alms=_alms(lmax), lat_deg=LAT, az_deg=AZ, el_deg=EL,
-        lmax=lmax, nside=nside, selfrot_deg=SELFROT, **kwargs,
+        beam_alms=_alms(lmax),
+        lat_deg=LAT,
+        az_deg=AZ,
+        el_deg=EL,
+        lmax=lmax,
+        nside=nside,
+        selfrot_deg=SELFROT,
+        **kwargs,
     )
 
 
 def _coords():
     return Coordinates(
-        time=jnp.arange(float(N_TIME)), freq=jnp.asarray([60e6]),
+        time=jnp.arange(float(N_TIME)),
+        freq=jnp.asarray([60e6]),
         extra={"lst_deg": jnp.linspace(0.0, 40.0, N_TIME)},
     )
 
@@ -117,9 +124,7 @@ class TestTheCrashDomain:
         assert "forward_alms() and mmodes_alms()" in message  # what does run
 
     @pytest.mark.parametrize("flag", ["normalize_beam", "horizon_mask"])
-    def test_a_flag_that_analyses_on_every_call_is_refused_at_construction(
-        self, nside, lmax, flag
-    ):
+    def test_a_flag_that_analyses_on_every_call_is_refused_at_construction(self, nside, lmax, flag):
         """Early: with either flag, every forward and adjoint runs an analysis."""
         with pytest.raises(StateValidationError) as excinfo:
             _projector(nside, lmax, **{flag: True})

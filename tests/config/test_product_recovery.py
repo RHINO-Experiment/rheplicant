@@ -47,9 +47,7 @@ def test_recovery_records_missing_truth_and_declared_truth_omissions():
         inference({}, {"gain": "bound through inference.bindings"}),
     )
     assert record["latents"] == []
-    assert record["omissions"] == [
-        {"name": "gain", "reason": "bound through inference.bindings"}
-    ]
+    assert record["omissions"] == [{"name": "gain", "reason": "bound through inference.bindings"}]
 
 
 def test_point_recovery_has_no_invented_sigma():

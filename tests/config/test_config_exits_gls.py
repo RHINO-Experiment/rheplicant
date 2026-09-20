@@ -89,10 +89,8 @@ class TestTheKindIsRunnable:
         # share nothing with that body -- and _conjugate_block hands gls a
         # sigma of None, which _wiener_product's prologue would pass straight
         # to wiener_solve.
-        assert (exits.EXECUTORS["conjugate.gls"]
-                is not exits.EXECUTORS["conjugate.wiener"])
-        assert (exits.EXECUTORS["conjugate.gls"]
-                is not exits.EXECUTORS["conjugate.gcr"])
+        assert exits.EXECUTORS["conjugate.gls"] is not exits.EXECUTORS["conjugate.wiener"]
+        assert exits.EXECUTORS["conjugate.gls"] is not exits.EXECUTORS["conjugate.gcr"]
 
 
 class TestTheProduct:
@@ -103,8 +101,14 @@ class TestTheProduct:
         # the result with _replace, and a product that had become a plain dict
         # -- or that had dropped a field -- is the shape a report reads.
         product = gls_product()
-        assert product._fields == ("noise_std", "solution", "residual",
-                                   "iterations", "delta", "converged")
+        assert product._fields == (
+            "noise_std",
+            "solution",
+            "residual",
+            "iterations",
+            "delta",
+            "converged",
+        )
         assert product.converged is True
         assert product.iterations == 5
         # `delta` is trajectory, and the trajectory is not portable: 3.9736e-07
@@ -118,16 +122,14 @@ class TestTheProduct:
         # not a missing one.
         assert 0.0 <= float(product.delta) < 1e-5, product.delta
         assert set(product.solution) == {"g"}
-        assert float(product.solution["g"]) == pytest.approx(TRUTH_G,
-                                                             abs=1e-4)
+        assert float(product.solution["g"]) == pytest.approx(TRUTH_G, abs=1e-4)
         # Full-shaped rather than scalar: the radiometer sigma is per sample,
         # and the mean is the discriminating number -- a run that handed the
         # package the DATA's sigma rather than the fixed point's, or that
         # returned the relative residual in noise_std's place, cannot produce
         # it.
         assert product.noise_std.shape == (16, 8)
-        assert float(jnp.mean(product.noise_std)) == pytest.approx(
-            SIGMA_MEAN, rel=1e-4)
+        assert float(jnp.mean(product.noise_std)) == pytest.approx(SIGMA_MEAN, rel=1e-4)
 
     def test_the_jax_diagnostics_arrive_as_python_scalars(self):
         # gls.py builds iterations/delta/converged as jax.Arrays, and
@@ -149,11 +151,10 @@ class TestTheProduct:
         # cannot track the declaration.  Measured: 2.30699312e-04 against
         # 1.15349656e-04, which is the halving to every digit float32 has.
         narrow = gls_product()
-        wide = gls_product(noise={**RADIOMETER,
-                                  "channel_width": {"value": 4.0,
-                                                    "unit": "MHz"}})
+        wide = gls_product(noise={**RADIOMETER, "channel_width": {"value": 4.0, "unit": "MHz"}})
         assert float(jnp.mean(wide.noise_std)) == pytest.approx(
-            0.5 * float(jnp.mean(narrow.noise_std)), rel=1e-4)
+            0.5 * float(jnp.mean(narrow.noise_std)), rel=1e-4
+        )
 
     def test_the_observation_the_run_names_is_the_one_it_solves(self):
         # `observed` is the third thing _conjugate_block hands back and the
@@ -165,8 +166,7 @@ class TestTheProduct:
         # argument.  Measured: g = 1.2000014, sigma mean 1.84559394e-04.
         moved = gls_product(at={"g": 1.2})
         assert float(moved.solution["g"]) == pytest.approx(1.2, abs=1e-4)
-        assert float(jnp.mean(moved.noise_std)) == pytest.approx(
-            1.84559e-4, rel=1e-4)
+        assert float(jnp.mean(moved.noise_std)) == pytest.approx(1.84559e-4, rel=1e-4)
         # And `residual` is the package's own, carried through _replace
         # untouched: on the shipped document it is exactly 0.0, which a
         # hard-coded zero would also satisfy; here it is 1.725e-06.
@@ -187,8 +187,7 @@ class TestTheConvergenceGate:
     """
 
     def test_an_unconverged_covariance_is_refused_quoting_what_it_reached(self):
-        with pytest.raises(ConfigError,
-                           match="never fell below reweight_tol") as caught:
+        with pytest.raises(ConfigError, match="never fell below reweight_tol") as caught:
             gls_product(dict(SQUEEZED))
         message = str(caught.value)
         # The prefix is `where`, and GLS names its run `gls` rather than
@@ -209,14 +208,12 @@ class TestTheConvergenceGate:
         # on x86_64), so pinning its digits tested the machine. This still
         # fails if the number stops being quoted, if the format changes, or if
         # the quoted number is not the one the run actually reached.
-        reached = gls_product({**SQUEEZED,
-                               "acknowledge_unconverged_covariance": True})
+        reached = gls_product({**SQUEEZED, "acknowledge_unconverged_covariance": True})
         assert f"{float(reached.delta):.4g}" in message
         assert "acknowledge_unconverged_covariance: true" in message
 
     def test_the_acknowledgement_lets_that_covariance_through(self):
-        product = gls_product({**SQUEEZED,
-                               "acknowledge_unconverged_covariance": True})
+        product = gls_product({**SQUEEZED, "acknowledge_unconverged_covariance": True})
         assert product.converged is False
         assert product.iterations == 1
         # Unconverged is the property; the delta is the trajectory. SQUEEZED's
@@ -235,8 +232,7 @@ class TestTheConvergenceGate:
         # converged one.  What distinguishes this branch is `converged`,
         # `iterations` and `delta` above; the sigma is here only to say a
         # product was returned rather than a refusal raised.
-        assert float(jnp.mean(product.noise_std)) == pytest.approx(
-            SIGMA_MEAN, rel=1e-4)
+        assert float(jnp.mean(product.noise_std)) == pytest.approx(SIGMA_MEAN, rel=1e-4)
 
     def test_reweight_tol_reaches_the_solver_exactly_as_written(self, monkeypatch):
         """This kills an implementation that swept ``reweight_tol`` and dropped it.
@@ -281,9 +277,14 @@ class TestTheConvergenceGate:
             return real(*args, **kwargs)
 
         monkeypatch.setattr(inference, "iterative_gls", spy)
-        gls_product({"min_reweights": 1, "max_reweights": 2,
-                     "reweight_tol": 3.7e-09,
-                     "acknowledge_unconverged_covariance": True})
+        gls_product(
+            {
+                "min_reweights": 1,
+                "max_reweights": 2,
+                "reweight_tol": 3.7e-09,
+                "acknowledge_unconverged_covariance": True,
+            }
+        )
         assert len(seen) == 1, seen
         assert seen[0]["reweight_tol"] == pytest.approx(3.7e-09)
 
@@ -333,9 +334,9 @@ class TestTheConvergenceGate:
         # its presence: at the default this same run returns a product.
         control = gls_product(at={"g": 1.2})
         assert control.converged is True
-        result = run_document(gls_document(
-            {"expect": "refuse", "require_convergence": 1.0e-30},
-            at={"g": 1.2}))["gls"]
+        result = run_document(
+            gls_document({"expect": "refuse", "require_convergence": 1.0e-30}, at={"g": 1.2})
+        )["gls"]
         assert result.product is None
         assert isinstance(result.error, eqx.EquinoxRuntimeError)
         assert "cannot reach require_convergence" in str(result.error)
@@ -375,8 +376,7 @@ class TestWhatReachesTheLoop:
         # CALLER, so the bare phrase "needs a prior_std" is carried by
         # wiener_solve's, gcr_sample's and iterative_gls' refusals alike, and
         # a looser match would prove nothing about which one ran.
-        with pytest.raises(ParameterSpaceError,
-                           match="iterative_gls needs a prior_std"):
+        with pytest.raises(ParameterSpaceError, match="iterative_gls needs a prior_std"):
             gls_product(parameters=PRIOR_FREE)
         # Three distinguishable outcomes, because three hypotheses have to
         # die.  A prior_std of 1e-5 is tight enough to pull the answer off the
@@ -401,19 +401,14 @@ class TestWhatReachesTheLoop:
         # exceed what float32 can certify), while 5e-7 and above return.  1e-5
         # sits 20x above that edge, against the 2-3x the first draft had
         # (boundary-validation.md).
-        centred = gls_product({"prior_std": 1.0e-5, "prior_mean": 1.0},
-                              parameters=PRIOR_FREE)
-        assert float(centred.solution["g"]) == pytest.approx(1.0121891,
-                                                             abs=1e-4)
-        moved = gls_product({"prior_std": 1.0e-5, "prior_mean": 1.4},
-                            parameters=PRIOR_FREE)
+        centred = gls_product({"prior_std": 1.0e-5, "prior_mean": 1.0}, parameters=PRIOR_FREE)
+        assert float(centred.solution["g"]) == pytest.approx(1.0121891, abs=1e-4)
+        moved = gls_product({"prior_std": 1.0e-5, "prior_mean": 1.4}, parameters=PRIOR_FREE)
         assert float(moved.solution["g"]) == pytest.approx(1.4012868, abs=1e-4)
-        wide = gls_product({"prior_std": 0.5, "prior_mean": 1.0},
-                           parameters=PRIOR_FREE)
+        wide = gls_product({"prior_std": 0.5, "prior_mean": 1.0}, parameters=PRIOR_FREE)
         assert wide.iterations == 5
         assert float(wide.solution["g"]) == pytest.approx(TRUTH_G, abs=1e-4)
-        assert float(jnp.mean(wide.noise_std)) == pytest.approx(SIGMA_MEAN,
-                                                                rel=1e-4)
+        assert float(jnp.mean(wide.noise_std)) == pytest.approx(SIGMA_MEAN, rel=1e-4)
 
     def test_the_solver_knobs_reach_the_loop(self):
         # `solve` is _knobs(run, _SOLVER_KNOBS), compiled by the executor and
@@ -445,8 +440,7 @@ class TestWhatReachesTheLoop:
         # Both halves DECLARE the key: the shipped default became null when
         # kappa became a bound (inference/linear.py::condition_bound), so
         # omitting it would make the two halves the same call.
-        with pytest.raises(eqx.EquinoxRuntimeError,
-                           match="wiener_solve/gcr_sample"):
+        with pytest.raises(eqx.EquinoxRuntimeError, match="wiener_solve/gcr_sample"):
             gls_product({"tol": 2.0, "require_convergence": 1e-3})
         product = gls_product({"tol": 2.0, "require_convergence": None})
         assert float(jnp.max(jnp.abs(product.noise_std))) == 0.0
@@ -477,10 +471,8 @@ class TestWhatReachesTheLoop:
         # (boundary-validation.md: recorded rather than sat on).
         capped = gls_pair_product({"maxiter": 1})
         uncapped = gls_pair_product({"maxiter": 20})
-        assert float(capped.solution["dep"]) == pytest.approx(-2.71e-5,
-                                                              abs=1.0e-5)
-        assert float(capped.solution["c"]) == pytest.approx(0.0184463,
-                                                            rel=1e-3)
+        assert float(capped.solution["dep"]) == pytest.approx(-2.71e-5, abs=1.0e-5)
+        assert float(capped.solution["c"]) == pytest.approx(0.0184463, rel=1e-3)
         assert float(uncapped.solution["dep"]) == pytest.approx(1.0, abs=1e-4)
         assert float(uncapped.solution["c"]) == pytest.approx(0.02, abs=1e-5)
         # The reweight counts are NOT asserted absolutely. They are trajectory:
@@ -493,7 +485,8 @@ class TestWhatReachesTheLoop:
         # rather than by anything the pair does on its own.
         absent = gls_pair_product()
         assert float(absent.solution["dep"]) == pytest.approx(
-            float(uncapped.solution["dep"]), rel=1e-6)
+            float(uncapped.solution["dep"]), rel=1e-6
+        )
         assert absent.iterations == uncapped.iterations
 
     def test_the_noise_rule_reaches_the_loop_as_a_model(self):
@@ -507,8 +500,7 @@ class TestWhatReachesTheLoop:
         # under conjugate.gls it is the document the exit exists to serve.
         assert gls_product().converged is True
         refused = gls_document()
-        refused["runs"][0] = {**refused["runs"][0],
-                              "kind": "conjugate.wiener", "width": "none"}
+        refused["runs"][0] = {**refused["runs"][0], "kind": "conjugate.wiener", "width": "none"}
         with pytest.raises(ConfigError, match="check A27"):
             run_document(refused)
         # And the mirror, check A28: a sigma already decided into an array has
@@ -529,8 +521,7 @@ class TestGlsGrammar:
         # _GLS_KEYS is built from the SHARED _SOLVE_KEYS, never from
         # _WIENER_KEYS: width: asks the reweighting for an error bar it does
         # not compute.
-        with pytest.raises(ConfigError,
-                           match=r"does not take \['width'\]") as caught:
+        with pytest.raises(ConfigError, match=r"does not take \['width'\]") as caught:
             gls_product({"width": "none"})
         message = str(caught.value)
         assert "kind: conjugate.gls" in message
@@ -539,10 +530,19 @@ class TestGlsGrammar:
         # three reweight knobs and the acknowledgement, because the set is
         # built from a tuple and a member dropped from it goes quiet: the key
         # would then be refused by the sweep before _gls_result could read it.
-        for key in ("'names'", "'check'", "'prior_std'", "'prior_mean'",
-                    "'tol'", "'maxiter'", "'require_convergence'",
-                    "'reweight_tol'", "'min_reweights'", "'max_reweights'",
-                    "'acknowledge_unconverged_covariance'"):
+        for key in (
+            "'names'",
+            "'check'",
+            "'prior_std'",
+            "'prior_mean'",
+            "'tol'",
+            "'maxiter'",
+            "'require_convergence'",
+            "'reweight_tol'",
+            "'min_reweights'",
+            "'max_reweights'",
+            "'acknowledge_unconverged_covariance'",
+        ):
             assert key in message, f"{key} is not offered back"
 
     def test_the_drawing_siblings_keys_are_refused(self):
@@ -550,11 +550,12 @@ class TestGlsGrammar:
         # it would be a declared key that decides nothing -- and _gcr_plan's
         # own refusal names this exit as one of the two that refuse one.
         # n_draws: and noise_from: go with it; all three are conjugate.gcr's.
-        for key, value in (("seed", {"from": "runtime.seeds.draws"}),
-                           ("n_draws", 4),
-                           ("noise_from", "gls")):
-            with pytest.raises(ConfigError,
-                               match=rf"does not take \['{key}'\]"):
+        for key, value in (
+            ("seed", {"from": "runtime.seeds.draws"}),
+            ("n_draws", 4),
+            ("noise_from", "gls"),
+        ):
+            with pytest.raises(ConfigError, match=rf"does not take \['{key}'\]"):
                 gls_product({key: value})
 
     def test_unknown_keys_are_swept(self):
@@ -573,9 +574,7 @@ class TestGlsGrammar:
             gls_product({"reweight_tol": "tight"})
         with pytest.raises(ConfigError, match=r"min_reweights: must be >= 1"):
             gls_product({"min_reweights": 0})
-        with pytest.raises(
-                ConfigError,
-                match="acknowledge_unconverged_covariance: is a bool"):
+        with pytest.raises(ConfigError, match="acknowledge_unconverged_covariance: is a bool"):
             gls_product({"acknowledge_unconverged_covariance": "yes"})
 
     def test_the_reweight_knobs_are_not_nullable(self):
@@ -595,8 +594,7 @@ class TestGlsGrammar:
         # reweight_tol from tol when it is absent, and absent is spelled by
         # leaving the key out.
         for key in ("reweight_tol", "min_reweights", "max_reweights"):
-            with pytest.raises(ConfigError,
-                               match=rf"{key}: is a number; got None"):
+            with pytest.raises(ConfigError, match=rf"{key}: is a number; got None"):
                 gls_product({key: None})
 
     def test_names_is_required(self):
@@ -619,14 +617,10 @@ class TestRefusalsPrecedeTheOperator:
     """Plan 4A Task 8: the acknowledgement boolean was judged after the
     block was built."""
 
-    def test_a_non_bool_acknowledgement_speaks_before_the_block_is_built(
-            self, monkeypatch):
+    def test_a_non_bool_acknowledgement_speaks_before_the_block_is_built(self, monkeypatch):
         import rheplicant.inference as inference
 
         monkeypatch.setattr(inference, "linear_operator", _explode)
         monkeypatch.setattr(inference, "iterative_gls", _explode)
-        with pytest.raises(ConfigError,
-                           match="acknowledge_unconverged_covariance: is a "
-                                 "bool"):
-            run_document(gls_document(
-                {"acknowledge_unconverged_covariance": "yes"}))
+        with pytest.raises(ConfigError, match="acknowledge_unconverged_covariance: is a bool"):
+            run_document(gls_document({"acknowledge_unconverged_covariance": "yes"}))

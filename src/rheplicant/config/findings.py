@@ -64,9 +64,21 @@ import warnings
 
 from rheplicant.config.errors import ConfigError
 
-__all__ = ["AUDIT_KEYS", "REFUSE", "REPORT", "SEVERITIES", "WARN",
-           "ConfigWarning", "Departure", "Finding", "Report", "audit_record",
-           "refuse", "report", "warn"]
+__all__ = [
+    "AUDIT_KEYS",
+    "REFUSE",
+    "REPORT",
+    "SEVERITIES",
+    "WARN",
+    "ConfigWarning",
+    "Departure",
+    "Finding",
+    "Report",
+    "audit_record",
+    "refuse",
+    "report",
+    "warn",
+]
 
 #: :attr:`Finding.departure`'s shape, named once so the four places that pass
 #: one through do not each re-spell it.
@@ -254,25 +266,19 @@ class Report:
         return bool(self.findings)
 
 
-def refuse(check: str, where: str, message: str, *,
-           departure: Departure | None = None) -> Finding:
+def refuse(check: str, where: str, message: str, *, departure: Departure | None = None) -> Finding:
     """This document cannot be run as written."""
-    return Finding(check=check, severity=REFUSE, where=where, message=message,
-                   departure=departure)
+    return Finding(check=check, severity=REFUSE, where=where, message=message, departure=departure)
 
 
-def warn(check: str, where: str, message: str, *,
-         departure: Departure | None = None) -> Finding:
+def warn(check: str, where: str, message: str, *, departure: Departure | None = None) -> Finding:
     """This document will run and is probably not what its author meant."""
-    return Finding(check=check, severity=WARN, where=where, message=message,
-                   departure=departure)
+    return Finding(check=check, severity=WARN, where=where, message=message, departure=departure)
 
 
-def report(check: str, where: str, message: str, *,
-           departure: Departure | None = None) -> Finding:
+def report(check: str, where: str, message: str, *, departure: Departure | None = None) -> Finding:
     """Worth recording beside the run; not worth interrupting anyone over."""
-    return Finding(check=check, severity=REPORT, where=where, message=message,
-                   departure=departure)
+    return Finding(check=check, severity=REPORT, where=where, message=message, departure=departure)
 
 
 #: The keys ONE finding contributes to the audit trace -- and, through it, to

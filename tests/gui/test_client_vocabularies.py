@@ -24,13 +24,17 @@ import pytest
 
 CLIENT = (
     pathlib.Path(__file__).resolve().parents[2]
-    / "src" / "rheplicant" / "gui" / "react" / "types.ts"
+    / "src"
+    / "rheplicant"
+    / "gui"
+    / "react"
+    / "types.ts"
 )
 
 #: A union in ``types.ts`` -- either ``export type X =`` or a field ``x:`` --
 #: whose members are two or more quoted strings.
 _UNION = re.compile(
-    r'(?:export type (?P<alias>\w+)\s*=|(?P<field>\w+)\??:)\s*'
+    r"(?:export type (?P<alias>\w+)\s*=|(?P<field>\w+)\??:)\s*"
     r'(?P<members>(?:\s*\|?\s*"[^"]+"\s*\|)+\s*"[^"]+")'
 )
 
@@ -137,15 +141,9 @@ EXEMPT = {
         "bound as an inline Literal in `gui/outputs.py`'s projection and not "
         "exported; worth binding, and not while this census is being written"
     ),
-    "preview_id": (
-        "an inline Literal in `gui/previews.py`, not bound to a name there"
-    ),
-    "cadence": (
-        "an inline Literal in `gui/previews.py`, not bound to a name there"
-    ),
-    "axis": (
-        "an inline Literal in `gui/previews.py`, not bound to a name there"
-    ),
+    "preview_id": ("an inline Literal in `gui/previews.py`, not bound to a name there"),
+    "cadence": ("an inline Literal in `gui/previews.py`, not bound to a name there"),
+    "axis": ("an inline Literal in `gui/previews.py`, not bound to a name there"),
 }
 
 
@@ -159,9 +157,7 @@ def test_every_client_vocabulary_is_matched_or_exempted():
     """Both directions, so neither table can go stale quietly."""
     names = {name for name, _line in client_vocabularies()}
     classified = set(MATCHED) | set(EXEMPT)
-    assert names <= classified, {
-        "in types.ts and unclassified": sorted(names - classified)
-    }
+    assert names <= classified, {"in types.ts and unclassified": sorted(names - classified)}
     assert classified <= names, {
         "classified here and gone from types.ts": sorted(classified - names)
     }

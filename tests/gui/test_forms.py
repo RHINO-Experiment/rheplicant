@@ -297,9 +297,7 @@ class TestUnitSpellingsReachTheWidget:
         """``unit_policy == "forbidden"`` means a unit is a refusal, so a
         control that offered one would be inviting an error."""
         forbidden = [
-            widget
-            for widget in widget_catalog().widgets
-            if widget.unit_policy == "forbidden"
+            widget for widget in widget_catalog().widgets if widget.unit_policy == "forbidden"
         ]
         assert forbidden
         assert all(widget.units == () for widget in forbidden)
@@ -474,7 +472,6 @@ def test_reading_the_conjugate_knobs_does_not_hand_them_defaults(path):
     silently stop ``condition`` having to decide it.
     """
     assert _widget(path).has_default is False
-
 
 
 class TestAContestedDefaultReachesNoReader:

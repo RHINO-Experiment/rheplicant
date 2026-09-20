@@ -62,9 +62,7 @@ def _physical_evidence_slots(*roots: object) -> int:
             continue
         seen.add(identity)
         if overlay_type and type(value) is overlay_type:
-            slots += (
-                len(value._delta) + len(value._hidden) + len(value._end_keys)
-            )
+            slots += len(value._delta) + len(value._hidden) + len(value._end_keys)
             pending.append(value._base)
             pending.extend(value._delta.values())
         elif type(value) is MappingProxyType:
@@ -100,9 +98,7 @@ def no_presets(name: str) -> PresetSnapshot:
 def jax_modules() -> frozenset[str]:
     import sys
 
-    return frozenset(
-        name for name in sys.modules if name == "jax" or name.startswith("jax.")
-    )
+    return frozenset(name for name in sys.modules if name == "jax" or name.startswith("jax."))
 
 
 def test_prepare_records_only_the_four_successful_boundaries_in_order():
@@ -120,20 +116,17 @@ def test_prepare_records_only_the_four_successful_boundaries_in_order():
         ("preset_layering", None),
         ("effective_process_entry", None),
     ]
-    assert prepared.source.input_bytes == (
-        b"schema_version: 1\nruntime: {}\nruns: []\n"
+    assert prepared.source.input_bytes == (b"schema_version: 1\nruntime: {}\nruns: []\n")
+    assert (
+        prepared.source.bootstrap_manifest.input_sha256
+        == hashlib.sha256(prepared.source.input_bytes).hexdigest()
     )
-    assert prepared.source.bootstrap_manifest.input_sha256 == hashlib.sha256(
-        prepared.source.input_bytes
-    ).hexdigest()
     assert len(prepared.layers) == 1
 
 
 def test_prepare_data_is_frozen_and_builder_copies_are_detached():
     prepared = prepare_config(
-        source(
-            b"schema_version: 1\nruntime:\n  seeds: {a: 1}\nruns: []\n"
-        ),
+        source(b"schema_version: 1\nruntime:\n  seeds: {a: 1}\nruns: []\n"),
         preset_provider=no_presets,
         parse_outputs=fake_parse_outputs,
     )
@@ -183,9 +176,7 @@ variants:
         ),
     ],
 )
-def test_explicit_null_is_refused_at_its_first_validation_boundary(
-    section, expected_boundaries
-):
+def test_explicit_null_is_refused_at_its_first_validation_boundary(section, expected_boundaries):
     boundaries: list[tuple[str, object]] = []
     raw = f"schema_version: 1\n{section}: null\nruns: []\n".encode()
 
@@ -194,9 +185,7 @@ def test_explicit_null_is_refused_at_its_first_validation_boundary(
             source(raw),
             preset_provider=no_presets,
             parse_outputs=fake_parse_outputs,
-            boundary_completed=lambda stage, layer: boundaries.append(
-                (stage, layer)
-            ),
+            boundary_completed=lambda stage, layer: boundaries.append((stage, layer)),
         )
 
     assert boundaries == expected_boundaries
@@ -248,9 +237,7 @@ def test_aggregate_budget_refuses_the_crossing_snapshot_before_layering_gets_it(
             returned_to_layering.append(name)
             return chosen
 
-        return real_layer_presets(
-            document, requests, preset_provider=observe
-        )
+        return real_layer_presets(document, requests, preset_provider=observe)
 
     monkeypatch.setattr(prepare_module, "layer_presets", observing_layer_presets)
 
@@ -337,9 +324,7 @@ def test_budget_rejects_a_snapshot_subclass_before_reading_its_fields():
         def __getattribute__(self, name):
             if name in {"input_bytes", "expanded_nodes"}:
                 state = object.__getattribute__(self, "__dict__")
-                state["budget_field_reads"] = state.get(
-                    "budget_field_reads", 0
-                ) + 1
+                state["budget_field_reads"] = state.get("budget_field_reads", 0) + 1
             return super().__getattribute__(name)
 
     given = HostileSnapshot(
@@ -360,9 +345,7 @@ def test_budget_rejects_a_snapshot_subclass_before_reading_its_fields():
         )
 
     assert given.budget_field_reads == 0
-    assert str(caught.value) == (
-        "defaults: preset provider for 'one' must return PresetSnapshot."
-    )
+    assert str(caught.value) == ("defaults: preset provider for 'one' must return PresetSnapshot.")
 
 
 def test_prepare_rejects_a_source_subclass_before_reading_its_fields():
@@ -370,9 +353,7 @@ def test_prepare_rejects_a_source_subclass_before_reading_its_fields():
         def __getattribute__(self, name):
             if name in {"input_bytes", "source_name"}:
                 state = object.__getattribute__(self, "__dict__")
-                state["source_field_reads"] = state.get(
-                    "source_field_reads", 0
-                ) + 1
+                state["source_field_reads"] = state.get("source_field_reads", 0) + 1
             return super().__getattribute__(name)
 
     given = HostileSource(
@@ -408,10 +389,7 @@ def test_prepare_rejects_a_source_subclass_before_reading_its_fields():
 def test_invalid_source_facts_are_refused_before_any_pipeline_effect(patch):
     events: list[object] = []
     fields = dict(
-        input_bytes=(
-            b"schema_version: 1\ndefaults: [one]\n"
-            b"runtime: {}\nruns: []\n"
-        ),
+        input_bytes=(b"schema_version: 1\ndefaults: [one]\nruntime: {}\nruns: []\n"),
         source_path="/tmp/config.yaml",
         source_realpath="/tmp/config.yaml",
         source_name="/tmp/config.yaml",
@@ -432,9 +410,7 @@ def test_invalid_source_facts_are_refused_before_any_pipeline_effect(patch):
             SourceInput(**{**fields, **patch}),
             preset_provider=provider,
             parse_outputs=parse_outputs,
-            boundary_completed=lambda stage, layer: events.append(
-                (stage, layer)
-            ),
+            boundary_completed=lambda stage, layer: events.append((stage, layer)),
         )
 
     assert events == []
@@ -457,9 +433,7 @@ def test_source_scalar_subclasses_and_mutable_bytes_are_copied_without_hooks():
 
     prepared = prepare_config(
         SourceInput(
-            input_bytes=HostileBytes(
-                b"schema_version: 1\nruntime: {}\nruns: []\n"
-            ),
+            input_bytes=HostileBytes(b"schema_version: 1\nruntime: {}\nruns: []\n"),
             source_path=HostileText("/tmp/config.yaml"),
             source_realpath=HostileText("/tmp/config.yaml"),
             source_name=HostileText("/tmp/config.yaml"),
@@ -494,9 +468,7 @@ def test_preset_sources_are_published_by_bytes_not_only_by_name():
     one = SelectedPreset(PresetRequest("rhino_v1", None), snapshot("rhino_v1", raw=raw))
     two = SelectedPreset(PresetRequest("extra", None), snapshot("extra", raw=b"other\n"))
     prepared = SimpleNamespace(
-        source=SimpleNamespace(
-            bootstrap_manifest=SimpleNamespace(presets=(one, two))
-        )
+        source=SimpleNamespace(bootstrap_manifest=SimpleNamespace(presets=(one, two)))
     )
 
     files = presets_bundle_files(prepared)
@@ -575,9 +547,7 @@ def test_manifest_direct_construction_validates_scalars_and_nested_records():
     with pytest.raises(ConfigError, match="source_realpath"):
         BootstrapManifest(**{**file_source, "source_realpath": None})
     with pytest.raises(ConfigError, match="stdin source_realpath"):
-        BootstrapManifest(
-            **{**valid, "source_realpath": "/tmp/config.yaml"}
-        )
+        BootstrapManifest(**{**valid, "source_realpath": "/tmp/config.yaml"})
     with pytest.raises(ConfigError, match="base_dir"):
         BootstrapManifest(**{**valid, "base_dir": "relative"})
 
@@ -654,11 +624,7 @@ def test_config_source_direct_construction_validates_bytes_hash_and_source():
                 **fields,
                 "origins": OriginNode(
                     origin=None,
-                    children={
-                        "schema_version": OriginNode(
-                            origin=None, children={}
-                        )
-                    },
+                    children={"schema_version": OriginNode(origin=None, children={})},
                 ),
             }
         )
@@ -675,7 +641,7 @@ def test_config_source_direct_construction_validates_bytes_hash_and_source():
 
 
 def test_direct_record_validation_still_runs_under_python_optimized_mode():
-    code = r'''
+    code = r"""
 import hashlib
 from _rheplicant_bootstrap.layering import OriginNode
 from _rheplicant_bootstrap.prepare import BootstrapManifest, ConfigSource
@@ -703,7 +669,7 @@ outcome(lambda: ConfigSource(
     b"a", "<stdin>", None, "<stdin>", "/tmp", {}, {"x": 1},
     OriginNode(None, {}), manifest,
 ))
-'''
+"""
     done = subprocess.run(
         [sys.executable, "-O", "-c", code],
         capture_output=True,
@@ -780,27 +746,21 @@ def test_prepared_config_validates_parallel_origins_and_mapping_protocols():
         PreparedConfig(
             **{
                 **fields,
-                "layer_origins": {
-                    base.identity: OriginNode(None, {})
-                },
+                "layer_origins": {base.identity: OriginNode(None, {})},
             }
         )
     with pytest.raises(ConfigError, match="mapping traversal"):
         PreparedConfig(
             **{
                 **fields,
-                "layer_origins": _BrokenPreparedEvidence(
-                    RuntimeError("boom")
-                ),
+                "layer_origins": _BrokenPreparedEvidence(RuntimeError("boom")),
             }
         )
     with pytest.raises(_AbortPreparedEvidence, match="stop"):
         PreparedConfig(
             **{
                 **fields,
-                "layer_origins": _BrokenPreparedEvidence(
-                    _AbortPreparedEvidence("stop")
-                ),
+                "layer_origins": _BrokenPreparedEvidence(_AbortPreparedEvidence("stop")),
             }
         )
 
@@ -809,9 +769,7 @@ def test_prepared_config_validates_parallel_origins_and_mapping_protocols():
             **{
                 **fields,
                 "layer_deletions": {
-                    base.identity: _BrokenPreparedDeletionSequence(
-                        RuntimeError("boom")
-                    )
+                    base.identity: _BrokenPreparedDeletionSequence(RuntimeError("boom"))
                 },
             }
         )
@@ -820,9 +778,7 @@ def test_prepared_config_validates_parallel_origins_and_mapping_protocols():
             **{
                 **fields,
                 "layer_deletions": {
-                    base.identity: _BrokenPreparedDeletionSequence(
-                        _AbortPreparedEvidence("stop")
-                    )
+                    base.identity: _BrokenPreparedDeletionSequence(_AbortPreparedEvidence("stop"))
                 },
             }
         )
@@ -839,23 +795,18 @@ def test_pipeline_preserves_the_trusted_deletion_ledger_objects(monkeypatch):
 
     monkeypatch.setattr(prepare_module, "enumerate_layers_once", observing)
     prepared = prepare_config(
-        source(
-            b"schema_version: 1\nruntime: {}\nruns: []\n"
-            b"variants:\n  x: {}\n"
-        ),
+        source(b"schema_version: 1\nruntime: {}\nruns: []\nvariants:\n  x: {}\n"),
         preset_provider=no_presets,
         parse_outputs=fake_parse_outputs,
     )
 
     assert captured is not None
     assert all(
-        type(rows) is prepare_module._DeletionLedger
-        for rows in prepared.layer_deletions.values()
+        type(rows) is prepare_module._DeletionLedger for rows in prepared.layer_deletions.values()
     )
     assert prepared.layer_deletions is captured.deletions
     assert all(
-        prepared.layer_deletions[identity]
-        is captured.deletions[identity]
+        prepared.layer_deletions[identity] is captured.deletions[identity]
         for identity in captured.deletions
     )
 
@@ -866,29 +817,16 @@ def test_pipeline_preserves_the_trusted_deletion_ledger_objects(monkeypatch):
         layer_origins=prepared.layer_origins,
         layer_deletions=prepared.layer_deletions,
     )
-    assert all(
-        type(layer.document) is MappingProxyType for layer in ordinary.layers
-    )
-    assert all(
-        type(root.children) is MappingProxyType
-        for root in ordinary.layer_origins.values()
-    )
-    assert all(
-        type(rows) is tuple for rows in ordinary.layer_deletions.values()
-    )
+    assert all(type(layer.document) is MappingProxyType for layer in ordinary.layers)
+    assert all(type(root.children) is MappingProxyType for root in ordinary.layer_origins.values())
+    assert all(type(rows) is tuple for rows in ordinary.layer_deletions.values())
 
     forged = object.__new__(LayerEnumeration)
     object.__setattr__(forged, "layers", ordinary.layers)
     object.__setattr__(forged, "origins", ordinary.layer_origins)
-    object.__setattr__(
-        forged, "deletions", prepared.layer_deletions
-    )
-    with pytest.raises(
-        ConfigError, match="trusted prepared enumeration"
-    ):
-        prepare_module._trusted_prepared_config(
-            prepared.source, prepared.process, forged
-        )
+    object.__setattr__(forged, "deletions", prepared.layer_deletions)
+    with pytest.raises(ConfigError, match="trusted prepared enumeration"):
+        prepare_module._trusted_prepared_config(prepared.source, prepared.process, forged)
 
 
 def test_prepare_before_preflight_shares_wide_root_evidence():
@@ -897,16 +835,9 @@ def test_prepare_before_preflight_shares_wide_root_evidence():
     variant_count = 100
     slot_ceiling = 30_000
     peak_ceiling = 64 * 1024 * 1024
-    unknown = "".join(
-        f"unknown_{index}: null\n" for index in range(width)
-    )
-    variants = "variants:\n" + "".join(
-        f"  v{index}: {{}}\n" for index in range(variant_count)
-    )
-    raw = (
-        "schema_version: 1\nruntime: {}\nruns: []\n"
-        f"{unknown}{variants}"
-    ).encode()
+    unknown = "".join(f"unknown_{index}: null\n" for index in range(width))
+    variants = "variants:\n" + "".join(f"  v{index}: {{}}\n" for index in range(variant_count))
+    raw = (f"schema_version: 1\nruntime: {{}}\nruns: []\n{unknown}{variants}").encode()
 
     from rheplicant.config.preflight import preflight
 
@@ -926,19 +857,14 @@ def test_prepare_before_preflight_shares_wide_root_evidence():
         preflight(thaw(prepared.source.layered_document))
 
     document_entries = sum(len(layer.document) for layer in prepared.layers)
-    origin_entries = sum(
-        len(root.children) for root in prepared.layer_origins.values()
-    )
+    origin_entries = sum(len(root.children) for root in prepared.layer_origins.values())
     physical_document_slots = _physical_evidence_slots(
         *(layer.document for layer in prepared.layers)
     )
-    physical_origin_slots = _physical_evidence_slots(
-        *prepared.layer_origins.values()
-    )
+    physical_origin_slots = _physical_evidence_slots(*prepared.layer_origins.values())
     assert document_entries > 1_000_000 and origin_entries > 1_000_000
     assert (
-        max(physical_document_slots, physical_origin_slots) <= slot_ceiling
-        and peak <= peak_ceiling
+        max(physical_document_slots, physical_origin_slots) <= slot_ceiling and peak <= peak_ceiling
     ), (
         "prepare_config materialized "
         f"{physical_document_slots} document slots and "
@@ -957,8 +883,7 @@ def test_prepare_shares_inherited_sequence_prefixes_across_append_variants():
     slot_ceiling = 25_000
     runs = "runs:\n" + "  - {kind: forward}\n" * width
     variants = "variants:\n" + "".join(
-        f"  v{index}:\n"
-        "    runs: {append: [{kind: forward}]}\n"
+        f"  v{index}:\n    runs: {{append: [{{kind: forward}}]}}\n"
         for index in range(variant_count)
     )
     raw = f"schema_version: 1\nruntime: {{}}\n{runs}{variants}".encode()
@@ -988,16 +913,11 @@ def test_prepare_shares_wide_nested_mappings_and_parallel_origins():
     width = 10_000
     variant_count = 100
     slot_ceiling = 35_000
-    model = "model:\n" + "".join(
-        f"  base_{index}: null\n" for index in range(width)
-    )
+    model = "model:\n" + "".join(f"  base_{index}: null\n" for index in range(width))
     variants = "variants:\n" + "".join(
-        f"  v{index}:\n    model: {{added_{index}: null}}\n"
-        for index in range(variant_count)
+        f"  v{index}:\n    model: {{added_{index}: null}}\n" for index in range(variant_count)
     )
-    raw = (
-        f"schema_version: 1\nruntime: {{}}\nruns: []\n{model}{variants}"
-    ).encode()
+    raw = (f"schema_version: 1\nruntime: {{}}\nruns: []\n{model}{variants}").encode()
 
     started = perf_counter()
     prepared = prepare_config(
@@ -1007,22 +927,15 @@ def test_prepare_shares_wide_nested_mappings_and_parallel_origins():
     )
     elapsed = perf_counter() - started
     models = tuple(layer.document["model"] for layer in prepared.layers)
-    origin_models = tuple(
-        root.children["model"]
-        for root in prepared.layer_origins.values()
-    )
+    origin_models = tuple(root.children["model"] for root in prepared.layer_origins.values())
     logical_document_entries = sum(len(model) for model in models)
-    logical_origin_entries = sum(
-        len(root.children) for root in origin_models
-    )
+    logical_origin_entries = sum(len(root.children) for root in origin_models)
     physical_document_slots = _physical_evidence_slots(*models)
     physical_origin_slots = _physical_evidence_slots(*origin_models)
 
     assert logical_document_entries > 1_000_000
     assert logical_origin_entries > 1_000_000
-    assert max(
-        physical_document_slots, physical_origin_slots
-    ) <= slot_ceiling, (
+    assert max(physical_document_slots, physical_origin_slots) <= slot_ceiling, (
         "prepare_config materialized "
         f"{physical_document_slots} nested document slots and "
         f"{physical_origin_slots} parallel-origin slots; "
@@ -1032,7 +945,7 @@ def test_prepare_shares_wide_nested_mappings_and_parallel_origins():
 
 
 def test_importing_all_four_task_modules_in_a_clean_process_adds_no_jax():
-    code = r'''
+    code = r"""
 import sys
 before = set(sys.modules)
 import _rheplicant_bootstrap.path_syntax
@@ -1042,7 +955,7 @@ import _rheplicant_bootstrap.variants
 banned = {"jax", "jaxlib", "equinox", "numpyro", "rheplicant"}
 print(sorted(name for name in set(sys.modules) - before
              if name.split(".", 1)[0] in banned))
-'''
+"""
     done = subprocess.run(
         [sys.executable, "-c", code],
         capture_output=True,

@@ -42,28 +42,34 @@ from tests.config.test_config_section_inference import PARAMS, infer
 #: bank, 1/60 of the steps. Nothing here runs, but a document a reader
 #: copies out of a test should be one they can afford to run.
 SECTION = {
-    "bank": {"n_simulations": 64,
-             "seed": {"from": "runtime.seeds.npe_bank"}},
-    "create": {"n_components": 1, "width": 16, "depth": 2,
-               "min_scale": 1.0e-3,
-               "seed": {"from": "runtime.seeds.npe_create"}},
-    "train": {"n_steps": 50, "batch_size": 16, "learning_rate": 1.0e-3,
-              "validation_fraction": 0.25, "beta1": 0.9, "beta2": 0.999,
-              "eps": 1.0e-8,
-              "seed": {"from": "runtime.seeds.npe_train"}},
-    "sample": {"n_draws": 100,
-               "seed": {"from": "runtime.seeds.npe_sample"}},
+    "bank": {"n_simulations": 64, "seed": {"from": "runtime.seeds.npe_bank"}},
+    "create": {
+        "n_components": 1,
+        "width": 16,
+        "depth": 2,
+        "min_scale": 1.0e-3,
+        "seed": {"from": "runtime.seeds.npe_create"},
+    },
+    "train": {
+        "n_steps": 50,
+        "batch_size": 16,
+        "learning_rate": 1.0e-3,
+        "validation_fraction": 0.25,
+        "beta1": 0.9,
+        "beta2": 0.999,
+        "eps": 1.0e-8,
+        "seed": {"from": "runtime.seeds.npe_train"},
+    },
+    "sample": {"n_draws": 100, "seed": {"from": "runtime.seeds.npe_sample"}},
 }
 
 #: The four seeds, minimal: every subsection with its seed and its required
 #: count and nothing else, so a test that adds ONE key is testing that key.
 BARE = {
-    "bank": {"n_simulations": 64,
-             "seed": {"from": "runtime.seeds.npe_bank"}},
+    "bank": {"n_simulations": 64, "seed": {"from": "runtime.seeds.npe_bank"}},
     "create": {"seed": {"from": "runtime.seeds.npe_create"}},
     "train": {"seed": {"from": "runtime.seeds.npe_train"}},
-    "sample": {"n_draws": 8,
-               "seed": {"from": "runtime.seeds.npe_sample"}},
+    "sample": {"n_draws": 8, "seed": {"from": "runtime.seeds.npe_sample"}},
 }
 
 
@@ -120,17 +126,18 @@ class TestTheGrammarMatchesTheSignatures:
             train_posterior,
         )
 
-        return {"bank": (_BANK_KEYS, simulate_pairs),
-                "create": (_CREATE_KEYS, NeuralPosterior.create),
-                "train": (_TRAIN_KEYS, train_posterior),
-                "sample": (_SAMPLE_KEYS, NeuralPosterior.sample)}
+        return {
+            "bank": (_BANK_KEYS, simulate_pairs),
+            "create": (_CREATE_KEYS, NeuralPosterior.create),
+            "train": (_TRAIN_KEYS, train_posterior),
+            "sample": (_SAMPLE_KEYS, NeuralPosterior.sample),
+        }
 
     @staticmethod
     def _split(fn):
         """``(every parameter, the required ones, the defaulted ones)``."""
         params = inspect.signature(fn).parameters
-        required = {name for name, p in params.items()
-                    if p.default is p.empty}
+        required = {name for name, p in params.items() if p.default is p.empty}
         return set(params), required, set(params) - required
 
     def test_the_translation_table_is_these_two_and_no_others(self):
@@ -141,8 +148,7 @@ class TestTheGrammarMatchesTheSignatures:
         # would go green again. This is the assertion that does not.
         assert _TRANSLATED == {"seed": "key", "n_draws": "n_samples"}
 
-    @pytest.mark.parametrize("subsection",
-                             ["bank", "create", "train", "sample"])
+    @pytest.mark.parametrize("subsection", ["bank", "create", "train", "sample"])
     def test_every_key_is_a_parameter_of_the_call_it_feeds(self, subsection):
         keys, fn = self.calls()[subsection]
         names, _, _ = self._split(fn)
@@ -223,8 +229,7 @@ class TestTheGrammarMatchesTheSignatures:
         # and be different jit cache entries.
         from rheplicant.inference.npe import NeuralPosterior
 
-        default = inspect.signature(
-            NeuralPosterior.create).parameters["embed"].default
+        default = inspect.signature(NeuralPosterior.create).parameters["embed"].default
         assert parsed().embed is default
 
 
@@ -276,34 +281,34 @@ class TestTheSectionParses:
         assert isinstance(spec.train["validation_fraction"], float)
 
     def test_the_section_itself_must_be_a_mapping(self):
-        with pytest.raises(ConfigError,
-                           match=r"inference\.npe: is a mapping with bank:"):
+        with pytest.raises(ConfigError, match=r"inference\.npe: is a mapping with bank:"):
             parse_npe(["bank"], context())
 
     def test_an_unknown_top_level_key_is_swept(self):
-        with pytest.raises(ConfigError,
-                           match=r"inference\.npe: the npe section does not "
-                                 r"take \['embedding'\]"):
+        with pytest.raises(
+            ConfigError,
+            match=r"inference\.npe: the npe section does not "
+            r"take \['embedding'\]",
+        ):
             parse_npe({**BARE, "embedding": "ravel"}, context())
 
-    @pytest.mark.parametrize("missing",
-                             ["bank", "create", "train", "sample"])
+    @pytest.mark.parametrize("missing", ["bank", "create", "train", "sample"])
     def test_each_of_the_four_subsections_is_required(self, missing):
         # Four sibling refusals whose only difference is the prefix; the
         # match carries it. Parametrized rather than written once, because
         # "the subsection is required" is exactly the branch an
         # implementation is most likely to write for one and forget for
         # three -- and three of the four are the ones nothing else reaches.
-        with pytest.raises(ConfigError,
-                           match=rf"inference\.npe\.{missing}: is required\."):
+        with pytest.raises(ConfigError, match=rf"inference\.npe\.{missing}: is required\."):
             parsed(**{missing: None})
 
-    @pytest.mark.parametrize("subsection",
-                             ["bank", "create", "train", "sample"])
+    @pytest.mark.parametrize("subsection", ["bank", "create", "train", "sample"])
     def test_each_subsection_must_be_a_mapping(self, subsection):
-        with pytest.raises(ConfigError,
-                           match=rf"inference\.npe\.{subsection}: is a "
-                                 r"mapping; got 4"):
+        with pytest.raises(
+            ConfigError,
+            match=rf"inference\.npe\.{subsection}: is a "
+            r"mapping; got 4",
+        ):
             parsed(**{subsection: 4})
 
 
@@ -323,12 +328,13 @@ class TestTheFourSeeds:
         # dicts satisfies every refusal test in this class and fails here.
         # Unresolved, too: parse_npe reads a document, and a key is a draw.
         spec = parse_npe(SECTION, context())
-        seeds = [spec.bank["seed"], spec.create["seed"],
-                 spec.train["seed"], spec.sample["seed"]]
-        assert seeds == [{"from": "runtime.seeds.npe_bank"},
-                         {"from": "runtime.seeds.npe_create"},
-                         {"from": "runtime.seeds.npe_train"},
-                         {"from": "runtime.seeds.npe_sample"}]
+        seeds = [spec.bank["seed"], spec.create["seed"], spec.train["seed"], spec.sample["seed"]]
+        assert seeds == [
+            {"from": "runtime.seeds.npe_bank"},
+            {"from": "runtime.seeds.npe_create"},
+            {"from": "runtime.seeds.npe_train"},
+            {"from": "runtime.seeds.npe_sample"},
+        ]
         assert len({entry["from"] for entry in seeds}) == 4
 
     def test_no_seed_is_resolved_to_a_key_at_parse_time(self):
@@ -340,34 +346,34 @@ class TestTheFourSeeds:
         for held in (spec.bank, spec.create, spec.train, spec.sample):
             assert isinstance(held["seed"], dict)
 
-    @pytest.mark.parametrize("subsection",
-                             ["bank", "create", "train", "sample"])
-    def test_a_missing_seed_is_refused_naming_its_own_subsection(
-            self, subsection):
+    @pytest.mark.parametrize("subsection", ["bank", "create", "train", "sample"])
+    def test_a_missing_seed_is_refused_naming_its_own_subsection(self, subsection):
         spec = dict(BARE[subsection])
         spec.pop("seed")
-        with pytest.raises(ConfigError,
-                           match=rf"inference\.npe\.{subsection}: 'seed' is "
-                                 r"required and has no default"):
+        with pytest.raises(
+            ConfigError,
+            match=rf"inference\.npe\.{subsection}: 'seed' is "
+            r"required and has no default",
+        ):
             parse_npe({**section(), subsection: spec}, context())
 
-    @pytest.mark.parametrize("subsection",
-                             ["bank", "create", "train", "sample"])
-    def test_a_literal_seed_is_refused_naming_its_own_subsection(
-            self, subsection):
-        with pytest.raises(ConfigError,
-                           match=rf"inference\.npe\.{subsection}: seed must "
-                                 r"NAME an entry of runtime\.seeds"):
+    @pytest.mark.parametrize("subsection", ["bank", "create", "train", "sample"])
+    def test_a_literal_seed_is_refused_naming_its_own_subsection(self, subsection):
+        with pytest.raises(
+            ConfigError,
+            match=rf"inference\.npe\.{subsection}: seed must "
+            r"NAME an entry of runtime\.seeds",
+        ):
             parsed(**{subsection: {"seed": 11}})
 
-    @pytest.mark.parametrize("subsection",
-                             ["bank", "create", "train", "sample"])
-    def test_a_seed_outside_the_namespace_is_refused_by_subsection(
-            self, subsection):
-        with pytest.raises(ConfigError,
-                           match=rf"inference\.npe\.{subsection}: seed names "
-                                 r"'seeds\.oops'; it must be under "
-                                 r"runtime\.seeds\."):
+    @pytest.mark.parametrize("subsection", ["bank", "create", "train", "sample"])
+    def test_a_seed_outside_the_namespace_is_refused_by_subsection(self, subsection):
+        with pytest.raises(
+            ConfigError,
+            match=rf"inference\.npe\.{subsection}: seed names "
+            r"'seeds\.oops'; it must be under "
+            r"runtime\.seeds\.",
+        ):
             parsed(**{subsection: {"seed": {"from": "seeds.oops"}}})
 
 
@@ -377,75 +383,86 @@ class TestTheCacheKeyBelongsToPlan4:
     overridable."""
 
     def test_cache_is_refused_by_name_and_the_message_says_plan_4(self):
-        with pytest.raises(ConfigError,
-                           match=r"inference\.npe\.bank: the bank does not "
-                                 r"take \['cache'\].*Plan 4"):
+        with pytest.raises(
+            ConfigError,
+            match=r"inference\.npe\.bank: the bank does not "
+            r"take \['cache'\].*Plan 4",
+        ):
             parsed(bank={"cache": {"file": {"path": "bank.npz"}}})
 
     def test_width_size_is_answered_with_the_key_that_does_exist(self):
         # A reader who took 2C's own note literally writes width_size:. The
         # sweep alone would offer the five create: keys and let them guess;
         # the hint names width: and says why the two words both exist.
-        with pytest.raises(ConfigError,
-                           match=r"inference\.npe\.create: the estimator does "
-                                 r"not take \['width_size'\].*the config key "
-                                 r"is width:"):
+        with pytest.raises(
+            ConfigError,
+            match=r"inference\.npe\.create: the estimator does "
+            r"not take \['width_size'\].*the config key "
+            r"is width:",
+        ):
             parsed(create={"width_size": 64})
 
     def test_n_samples_under_sample_is_answered_with_n_draws(self):
         # The other half of the rename: a reader who read the package's
         # signature writes n_samples:, and the sweep hands back n_draws.
-        with pytest.raises(ConfigError,
-                           match=r"inference\.npe\.sample: the draw does not "
-                                 r"take \['n_samples'\]; it takes "
-                                 r"\['n_draws', 'seed'\]"):
+        with pytest.raises(
+            ConfigError,
+            match=r"inference\.npe\.sample: the draw does not "
+            r"take \['n_samples'\]; it takes "
+            r"\['n_draws', 'seed'\]",
+        ):
             parsed(sample={"n_samples": 8})
 
 
 class TestTheRequiredCounts:
-    def test_n_simulations_is_required_and_the_message_names_simulate_pairs(
-            self):
+    def test_n_simulations_is_required_and_the_message_names_simulate_pairs(self):
         spec = {"seed": BARE["bank"]["seed"]}
-        with pytest.raises(ConfigError,
-                           match=r"inference\.npe\.bank\.n_simulations: is "
-                                 r"required -- simulate_pairs"):
+        with pytest.raises(
+            ConfigError,
+            match=r"inference\.npe\.bank\.n_simulations: is "
+            r"required -- simulate_pairs",
+        ):
             parse_npe({**section(), "bank": spec}, context())
 
     def test_n_draws_is_required_and_the_message_names_sample(self):
         spec = {"seed": BARE["sample"]["seed"]}
-        with pytest.raises(ConfigError,
-                           match=r"inference\.npe\.sample\.n_draws: is "
-                                 r"required -- NeuralPosterior\.sample"):
+        with pytest.raises(
+            ConfigError,
+            match=r"inference\.npe\.sample\.n_draws: is "
+            r"required -- NeuralPosterior\.sample",
+        ):
             parse_npe({**section(), "sample": spec}, context())
 
-    @pytest.mark.parametrize("subsection,key", [("bank", "n_simulations"),
-                                                ("sample", "n_draws")])
-    def test_a_required_count_that_is_not_whole_is_refused(self, subsection,
-                                                           key):
+    @pytest.mark.parametrize("subsection,key", [("bank", "n_simulations"), ("sample", "n_draws")])
+    def test_a_required_count_that_is_not_whole_is_refused(self, subsection, key):
         # int(2.5) is 2, so a bank declared 2.5 used to RUN as 2: the
         # document says one thing and the run does another.
-        with pytest.raises(ConfigError,
-                           match=rf"inference\.npe\.{subsection}\.{key}: is "
-                                 r"an integer >= 1; got 2\.5"):
+        with pytest.raises(
+            ConfigError,
+            match=rf"inference\.npe\.{subsection}\.{key}: is "
+            r"an integer >= 1; got 2\.5",
+        ):
             parsed(**{subsection: {key: 2.5}})
 
-    @pytest.mark.parametrize("subsection,key", [("bank", "n_simulations"),
-                                                ("sample", "n_draws")])
+    @pytest.mark.parametrize("subsection,key", [("bank", "n_simulations"), ("sample", "n_draws")])
     def test_a_required_count_of_zero_is_refused(self, subsection, key):
-        with pytest.raises(ConfigError,
-                           match=rf"inference\.npe\.{subsection}\.{key}: is "
-                                 r"an integer >= 1; got 0"):
+        with pytest.raises(
+            ConfigError,
+            match=rf"inference\.npe\.{subsection}\.{key}: is "
+            r"an integer >= 1; got 0",
+        ):
             parsed(**{subsection: {key: 0}})
 
-    @pytest.mark.parametrize("subsection,key", [("bank", "n_simulations"),
-                                                ("sample", "n_draws")])
+    @pytest.mark.parametrize("subsection,key", [("bank", "n_simulations"), ("sample", "n_draws")])
     def test_true_is_not_a_count(self, subsection, key):
         # bool is an int in Python, so `n_draws: true` would otherwise draw
         # once. _whole refuses bool first, and this is the leg of that guard
         # nothing else reaches.
-        with pytest.raises(ConfigError,
-                           match=rf"inference\.npe\.{subsection}\.{key}: is "
-                                 r"an integer >= 1; got True"):
+        with pytest.raises(
+            ConfigError,
+            match=rf"inference\.npe\.{subsection}\.{key}: is "
+            r"an integer >= 1; got True",
+        ):
             parsed(**{subsection: {key: True}})
 
 
@@ -464,19 +481,27 @@ class TestTheOptionalNumbers:
     raw passthrough, left all 89 tests green.
     """
 
-    @pytest.mark.parametrize("subsection,key",
-                             [("create", "n_components"),
-                              ("create", "width"),
-                              ("train", "n_steps"),
-                              ("train", "batch_size")])
+    @pytest.mark.parametrize(
+        "subsection,key",
+        [
+            ("create", "n_components"),
+            ("create", "width"),
+            ("train", "n_steps"),
+            ("train", "batch_size"),
+        ],
+    )
     def test_the_counts_are_whole_and_at_least_one(self, subsection, key):
-        with pytest.raises(ConfigError,
-                           match=rf"inference\.npe\.{subsection}\.{key}: is "
-                                 r"an integer >= 1; got 0"):
+        with pytest.raises(
+            ConfigError,
+            match=rf"inference\.npe\.{subsection}\.{key}: is "
+            r"an integer >= 1; got 0",
+        ):
             parsed(**{subsection: {key: 0}})
-        with pytest.raises(ConfigError,
-                           match=rf"inference\.npe\.{subsection}\.{key}: is "
-                                 r"an integer >= 1; got 1\.5"):
+        with pytest.raises(
+            ConfigError,
+            match=rf"inference\.npe\.{subsection}\.{key}: is "
+            r"an integer >= 1; got 1\.5",
+        ):
             parsed(**{subsection: {key: 1.5}})
 
     def test_width_zero_is_refused_although_equinox_accepts_it(self):
@@ -486,9 +511,11 @@ class TestTheOptionalNumbers:
         # what it reports is the prior. width_size=1 is NOT structurally
         # dead (measured: it separates those inputs at key 2), so 1 is the
         # right floor and 0 is the refusal.
-        with pytest.raises(ConfigError,
-                           match=r"inference\.npe\.create\.width: is an "
-                                 r"integer >= 1; got 0"):
+        with pytest.raises(
+            ConfigError,
+            match=r"inference\.npe\.create\.width: is an "
+            r"integer >= 1; got 0",
+        ):
             parsed(create={"width": 0})
 
     def test_depth_zero_is_accepted_because_equinox_accepts_it(self):
@@ -498,10 +525,8 @@ class TestTheOptionalNumbers:
         # reject a document the package runs.
         assert parsed(create={"depth": 0}).create["depth"] == 0
 
-    @pytest.mark.parametrize("value,shown", [(-1, r"-1"), (1.5, r"1\.5"),
-                                             (True, r"True")])
-    def test_depth_is_still_checked_although_its_floor_is_zero(self, value,
-                                                               shown):
+    @pytest.mark.parametrize("value,shown", [(-1, r"-1"), (1.5, r"1\.5"), (True, r"True")])
+    def test_depth_is_still_checked_although_its_floor_is_zero(self, value, shown):
         # The leg the acceptance test above cannot supply. A floor of 0
         # reads like "anything goes", and both of depth's other tests assert
         # ACCEPTANCE, so neither can tell _whole(..., 0) from a raw
@@ -515,30 +540,33 @@ class TestTheOptionalNumbers:
         #   True   BUILDS SILENTLY, two layers -- identical to depth: 1,
         #          because bool is an int in Python. That is the one this
         #          leg exists for: the other three are loud.
-        with pytest.raises(ConfigError,
-                           match=rf"inference\.npe\.create\.depth: is an "
-                                 rf"integer >= 0; got {shown}"):
+        with pytest.raises(
+            ConfigError,
+            match=rf"inference\.npe\.create\.depth: is an "
+            rf"integer >= 0; got {shown}",
+        ):
             parsed(create={"depth": value})
 
-    @pytest.mark.parametrize("subsection,key",
-                             [("create", "min_scale"),
-                              ("train", "learning_rate"),
-                              ("train", "eps")])
-    def test_the_positive_reals_refuse_zero_and_negatives(self, subsection,
-                                                          key):
+    @pytest.mark.parametrize(
+        "subsection,key", [("create", "min_scale"), ("train", "learning_rate"), ("train", "eps")]
+    )
+    def test_the_positive_reals_refuse_zero_and_negatives(self, subsection, key):
         for value in (0.0, -1.0):
-            with pytest.raises(ConfigError,
-                               match=rf"inference\.npe\.{subsection}\.{key}: "
-                                     r"is greater than zero"):
+            with pytest.raises(
+                ConfigError,
+                match=rf"inference\.npe\.{subsection}\.{key}: "
+                r"is greater than zero",
+            ):
                 parsed(**{subsection: {key: value}})
 
-    @pytest.mark.parametrize("key",
-                             ["validation_fraction", "beta1", "beta2"])
+    @pytest.mark.parametrize("key", ["validation_fraction", "beta1", "beta2"])
     def test_the_fractions_refuse_one_and_above_and_negatives(self, key):
         for value in (1.0, 1.5, -0.1):
-            with pytest.raises(ConfigError,
-                               match=rf"inference\.npe\.train\.{key}: is in "
-                                     r"\[0, 1\)"):
+            with pytest.raises(
+                ConfigError,
+                match=rf"inference\.npe\.train\.{key}: is in "
+                r"\[0, 1\)",
+            ):
                 parsed(train={key: value})
 
     def test_validation_fraction_zero_is_accepted(self):
@@ -546,32 +574,38 @@ class TestTheOptionalNumbers:
         # documented "train on everything" setting (inference/npe.py::train_posterior). A
         # config layer that refused it would reject the faster path the
         # package offers on purpose.
-        assert parsed(train={"validation_fraction": 0.0}
-                      ).train["validation_fraction"] == 0.0
+        assert parsed(train={"validation_fraction": 0.0}).train["validation_fraction"] == 0.0
 
-    @pytest.mark.parametrize("subsection,key",
-                             [("create", "min_scale"),
-                              ("train", "learning_rate"),
-                              ("train", "eps"),
-                              ("train", "validation_fraction"),
-                              ("train", "beta1"),
-                              ("train", "beta2")])
+    @pytest.mark.parametrize(
+        "subsection,key",
+        [
+            ("create", "min_scale"),
+            ("train", "learning_rate"),
+            ("train", "eps"),
+            ("train", "validation_fraction"),
+            ("train", "beta1"),
+            ("train", "beta2"),
+        ],
+    )
     def test_a_real_that_is_not_a_number_is_refused(self, subsection, key):
-        with pytest.raises(ConfigError,
-                           match=rf"inference\.npe\.{subsection}\.{key}: is a "
-                                 r"number; got 'fast'"):
+        with pytest.raises(
+            ConfigError,
+            match=rf"inference\.npe\.{subsection}\.{key}: is a "
+            r"number; got 'fast'",
+        ):
             parsed(**{subsection: {key: "fast"}})
 
-    @pytest.mark.parametrize("subsection,key",
-                             [("create", "min_scale"),
-                              ("train", "learning_rate"),
-                              ("train", "beta1")])
+    @pytest.mark.parametrize(
+        "subsection,key", [("create", "min_scale"), ("train", "learning_rate"), ("train", "beta1")]
+    )
     def test_true_is_not_a_real_either(self, subsection, key):
         # bool passes isinstance(x, int), so True would otherwise be 1.0 --
         # a legal beta1 and a legal learning_rate. The leg exists for that.
-        with pytest.raises(ConfigError,
-                           match=rf"inference\.npe\.{subsection}\.{key}: is a "
-                                 r"number; got True"):
+        with pytest.raises(
+            ConfigError,
+            match=rf"inference\.npe\.{subsection}\.{key}: is a "
+            r"number; got True",
+        ):
             parsed(**{subsection: {key: True}})
 
     def test_an_unknown_key_in_each_subsection_is_swept(self):
@@ -581,14 +615,17 @@ class TestTheOptionalNumbers:
         # measured, label="training" -> label="the bank" left this module
         # green while a stray key under train: was answered in the bank's
         # vocabulary.
-        for subsection, label, stray in (("bank", "the bank", "n_sims"),
-                                         ("create", "the estimator",
-                                          "n_layers"),
-                                         ("train", "training", "lr"),
-                                         ("sample", "the draw", "draws")):
-            with pytest.raises(ConfigError,
-                               match=rf"inference\.npe\.{subsection}: {label} "
-                                     rf"does not take \['{stray}'\]"):
+        for subsection, label, stray in (
+            ("bank", "the bank", "n_sims"),
+            ("create", "the estimator", "n_layers"),
+            ("train", "training", "lr"),
+            ("sample", "the draw", "draws"),
+        ):
+            with pytest.raises(
+                ConfigError,
+                match=rf"inference\.npe\.{subsection}: {label} "
+                rf"does not take \['{stray}'\]",
+            ):
                 parsed(**{subsection: {stray: 1}})
 
 
@@ -618,9 +655,11 @@ class TestTheEmbedding:
         # positional arguments. Without the probe it reaches the user as a
         # raw TypeError from inside jax.vmap, naming no section -- the same
         # shape gradient's objective: and optimize's loss: already guard.
-        with pytest.raises(ConfigError,
-                           match=r"inference\.npe\.embed: 'operator:add' "
-                                 r"cannot be called as \(datum\)"):
+        with pytest.raises(
+            ConfigError,
+            match=r"inference\.npe\.embed: 'operator:add' "
+            r"cannot be called as \(datum\)",
+        ):
             parsed(embed={"python": "operator:add"})
 
     def test_an_uncallable_target_is_refused_by_a_check_of_its_own(self):
@@ -631,49 +670,53 @@ class TestTheEmbedding:
         # target resolves cleanly and dies inside jax.vmap with a raw
         # TypeError naming no section. gradient's objective: and mmodes'
         # sky: have the same hole today (Plan 3's ledger).
-        with pytest.raises(ConfigError,
-                           match=r"inference\.npe\.embed: 'jax\.numpy:pi' is "
-                                 r"a float and embed: takes a callable"):
+        with pytest.raises(
+            ConfigError,
+            match=r"inference\.npe\.embed: 'jax\.numpy:pi' is "
+            r"a float and embed: takes a callable",
+        ):
             parsed(embed={"python": "jax.numpy:pi"})
 
     def test_a_missing_attribute_is_refused_by_the_hatch(self):
         # import_target speaks for itself here, exactly as it does for
         # gradient's objective: -- one seam, one message, and this test
         # exists so a later author does not wrap it in a second one.
-        with pytest.raises(ConfigError,
-                           match=r"'jax\.numpy' has no attribute 'flatten'"):
+        with pytest.raises(ConfigError, match=r"'jax\.numpy' has no attribute 'flatten'"):
             parsed(embed={"python": "jax.numpy:flatten"})
 
     def test_an_unimportable_module_is_refused_by_the_hatch(self):
-        with pytest.raises(ConfigError,
-                           match=r"cannot import 'nosuchmodule'"):
+        with pytest.raises(ConfigError, match=r"cannot import 'nosuchmodule'"):
             parsed(embed={"python": "nosuchmodule:fn"})
 
-    def test_args_beside_python_is_refused_with_what_it_would_have_meant(
-            self):
+    def test_args_beside_python_is_refused_with_what_it_would_have_meant(self):
         # {python: "mod:factory", args: {...}} reads as reasonable and is
         # the hatch's spelling for CALLING the target. embed: hands over a
         # callable, so there is no spelling for a factory here, and the
         # refusal says that rather than "not a mapping".
-        with pytest.raises(ConfigError,
-                           match=r"inference\.npe\.embed: \['args'\] rides "
-                                 r"beside python:"):
+        with pytest.raises(
+            ConfigError,
+            match=r"inference\.npe\.embed: \['args'\] rides "
+            r"beside python:",
+        ):
             parsed(embed={"python": "jax.numpy:ravel", "args": {}})
 
     def test_literal_beside_python_is_refused_the_same_way(self):
         # The twin leg. `args` and `literal` are siblings in the hatch and
         # a guard written for one is routinely left open on the other.
-        with pytest.raises(ConfigError,
-                           match=r"inference\.npe\.embed: \['literal'\] rides "
-                                 r"beside python:"):
+        with pytest.raises(
+            ConfigError,
+            match=r"inference\.npe\.embed: \['literal'\] rides "
+            r"beside python:",
+        ):
             parsed(embed={"python": "jax.numpy:ravel", "literal": {}})
 
-    @pytest.mark.parametrize("node", ["flatten", 4, ["ravel"],
-                                      {"ref": "resources.arrays.embed"}])
+    @pytest.mark.parametrize("node", ["flatten", 4, ["ravel"], {"ref": "resources.arrays.embed"}])
     def test_anything_else_is_refused_naming_the_two_forms(self, node):
-        with pytest.raises(ConfigError,
-                           match=r"inference\.npe\.embed: is 'ravel' or "
-                                 r"\{python: 'mod:fn'\}"):
+        with pytest.raises(
+            ConfigError,
+            match=r"inference\.npe\.embed: is 'ravel' or "
+            r"\{python: 'mod:fn'\}",
+        ):
             parsed(embed=node)
 
 
@@ -706,11 +749,12 @@ class TestTheSeamInBuildInference:
         # both and the winner says which ran first -- so a parse_npe placed
         # after build_fit_twin fails this test loudly, and no rewording of
         # either message can make it pass.
-        with pytest.raises(ConfigError,
-                           match=r"inference\.npe\.bank\.n_simulations: is an "
-                                 r"integer >= 1; got 0"):
-            infer({"twin": {"without": ["nonesuch"]},
-                   "npe": section(bank={"n_simulations": 0})})
+        with pytest.raises(
+            ConfigError,
+            match=r"inference\.npe\.bank\.n_simulations: is an "
+            r"integer >= 1; got 0",
+        ):
+            infer({"twin": {"without": ["nonesuch"]}, "npe": section(bank={"n_simulations": 0})})
 
     def test_the_inference_sweep_still_speaks_first(self):
         # check_unknown_keys("inference", ...) stays ahead of parse_npe: a

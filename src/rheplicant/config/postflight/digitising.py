@@ -256,8 +256,7 @@ def _upstream_of_adc() -> frozenset[str]:
     return frozenset(seen)
 
 
-def _escalating_latents(document: Mapping[str, Any],
-                        upstream: frozenset[str]) -> frozenset[str]:
+def _escalating_latents(document: Mapping[str, Any], upstream: frozenset[str]) -> frozenset[str]:
     """The bound latent NAMES whose ``into:`` reaches a node in ``upstream``.
 
     Delegates the actual walk -- both ``inference.parameters.<n>.into`` and
@@ -277,8 +276,7 @@ def _escalating_latents(document: Mapping[str, Any],
     return frozenset(hit)
 
 
-def _t5_message(node: Any, *, peak: float, fraction: float, n: int,
-                latents: frozenset[str]) -> str:
+def _t5_message(node: Any, *, peak: float, fraction: float, n: int, latents: frozenset[str]) -> str:
     """The one sentence both severities share -- WARN never names a latent,
     because ``latents`` is only ever non-empty on the branch that already
     refuses (see :func:`_adc_saturation`).
@@ -382,14 +380,12 @@ def _adc_saturation(payload: Priced) -> Iterable[Finding]:
     if not isinstance(node, ADCOperator):
         return
 
-    peak, fraction, n = _saturation_stats(payload.run.twin, payload.run.state,
-                                          node)
+    peak, fraction, n = _saturation_stats(payload.run.twin, payload.run.state, node)
     if fraction <= _T5_WARN_ABOVE:
         return
 
     latents = _escalating_latents(payload.run.document, _upstream_of_adc())
-    message = _t5_message(node, peak=peak, fraction=fraction, n=n,
-                          latents=latents)
+    message = _t5_message(node, peak=peak, fraction=fraction, n=n, latents=latents)
     where = "model.adc"
     if fraction > _T5_REFUSE_ABOVE or latents:
         yield findings.refuse("C16", where, message)

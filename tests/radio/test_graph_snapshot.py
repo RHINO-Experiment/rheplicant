@@ -47,24 +47,24 @@ def test_snapshot_is_a_transform():
 
 
 def test_an_assembly_without_a_snapshot_skips_it(state):
-    twin = assemble(ADCOperator(scale=jnp.array(1.0), n_bits=14),
-                    FlaggingOperator(threshold=1e9))
+    twin = assemble(ADCOperator(scale=jnp.array(1.0), n_bits=14), FlaggingOperator(threshold=1e9))
     assert "snapshot" not in twin.lit
     assert "snapshot" in twin.skipped
     assert twin(state).data.shape == (N_TIME, N_FREQ)
 
 
 def test_a_snapshot_placed_by_name_lights_that_node(state):
-    twin = assemble(ADCOperator(scale=jnp.array(1.0), n_bits=14),
-                    At("snapshot", SnapshotOperator(name="raw")),
-                    FlaggingOperator(threshold=1e9))
+    twin = assemble(
+        ADCOperator(scale=jnp.array(1.0), n_bits=14),
+        At("snapshot", SnapshotOperator(name="raw")),
+        FlaggingOperator(threshold=1e9),
+    )
     assert "snapshot" in twin.lit
     assert "snapshot/raw" in twin(state).aux
 
 
 def test_the_snapshot_holds_the_data_as_it_was_before_flagging(state):
-    twin = assemble(At("snapshot", SnapshotOperator(name="raw")),
-                    FlaggingOperator(threshold=1e9))
+    twin = assemble(At("snapshot", SnapshotOperator(name="raw")), FlaggingOperator(threshold=1e9))
     out = twin(state)
     assert jnp.array_equal(out.aux["snapshot/raw"], state.data)
 

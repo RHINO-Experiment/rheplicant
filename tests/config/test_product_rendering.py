@@ -14,7 +14,7 @@ class FakeAssembly:
     instances = (("receiver", ("receiver-1", "receiver-2")),)
     materialized = ("sum",)
     aliased = ("antenna",)
-    placements = ((('antenna',), "antenna"),)
+    placements = ((("antenna",), "antenna"),)
 
     def to_svg(self, title=None, theme="light"):
         return f'<svg data-theme="{theme}"><title>{title}</title></svg>'
@@ -47,7 +47,7 @@ def test_assembly_record_has_no_live_operator_objects():
         "instances": [["receiver", ["receiver-1", "receiver-2"]]],
         "lit": ["antenna", "receiver"],
         "materialized": ["sum"],
-        "placements": [[['antenna'], "antenna"]],
+        "placements": [[["antenna"], "antenna"]],
         "skipped": ["cable"],
     }
 

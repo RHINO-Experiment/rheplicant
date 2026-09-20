@@ -33,9 +33,7 @@ def make_owned_result(tmp_path, marker=None):
     target.mkdir()
     target.chmod(0o700)
     marker_path = target / ".rheplicant-results.json"
-    marker_path.write_bytes(
-        canonical_marker() if marker is None else marker
-    )
+    marker_path.write_bytes(canonical_marker() if marker is None else marker)
     marker_path.chmod(0o600)
     return target
 
@@ -159,9 +157,7 @@ def test_adapter_identity_is_bound_to_inspection_and_lease(tmp_path):
         close_output_lease(lease)
 
 
-def test_name_max_is_sourced_and_rechecked_from_the_leased_parent_fd(
-    tmp_path, monkeypatch
-):
+def test_name_max_is_sourced_and_rechecked_from_the_leased_parent_fd(tmp_path, monkeypatch):
     target = tmp_path / "result"
     platform = SafePlatform()
     expected = (tmp_path.stat().st_dev, tmp_path.stat().st_ino)
@@ -259,9 +255,7 @@ def test_ancestor_replacement_after_acquisition_is_refused(tmp_path):
     original_parent = tmp_path / "private"
     target = original_parent / "result"
     platform = SafePlatform()
-    lease = acquire_output_lease(
-        inspect_output_path(run_request(target), platform), platform
-    )
+    lease = acquire_output_lease(inspect_output_path(run_request(target), platform), platform)
     try:
         original_parent.rename(tmp_path / "held-private")
         original_parent.mkdir(mode=0o700)
@@ -366,8 +360,15 @@ class TestARecordOwnsItsOwnBinding:
         )
         try:
             forged = manager.OutputLease(
-                real.request, 1, "/", "result", 2, ".lock", ".journal",
-                real.ancestry, real.component_limit,
+                real.request,
+                1,
+                "/",
+                "result",
+                2,
+                ".lock",
+                ".journal",
+                real.ancestry,
+                real.component_limit,
             )
             with pytest.raises(ConfigError, match="lease is closed"):
                 manager.require_open_output_lease(forged, platform)
@@ -383,6 +384,7 @@ class TestARecordOwnsItsOwnBinding:
         everything separates them: it is still not the object that walked the
         ancestry under those descriptors.
         """
+
         class AgreeablePlatform(SafePlatform):
             def __eq__(self, other):
                 return True

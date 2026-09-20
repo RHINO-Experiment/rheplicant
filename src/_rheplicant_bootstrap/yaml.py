@@ -80,9 +80,7 @@ class BoundedSafeLoader(yaml.SafeLoader):
         try:
             scalar_size = len(event.value.encode("utf-8"))
         except UnicodeError as exc:
-            raise ConfigError(
-                f"{self._source_name}: invalid YAML scalar: {exc}"
-            ) from exc
+            raise ConfigError(f"{self._source_name}: invalid YAML scalar: {exc}") from exc
         if scalar_size > self._limits.scalar_bytes:
             self._refuse_limit("scalar bytes", scalar_size, self._limits.scalar_bytes)
         self._count_node()
@@ -105,9 +103,7 @@ def decode_utf8_yaml(data: bytes, *, source_name: str) -> str:
         raise ConfigError(f"{source_name}: YAML input is not valid UTF-8: {exc}") from exc
 
 
-def compose_one_bounded(
-    text: str, *, source_name: str, limits: YamlLimits
-) -> ComposedYaml:
+def compose_one_bounded(text: str, *, source_name: str, limits: YamlLimits) -> ComposedYaml:
     """Compose at most one YAML document and dispose the loader on every path."""
     loader: BoundedSafeLoader | None = None
     try:

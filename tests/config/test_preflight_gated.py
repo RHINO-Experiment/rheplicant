@@ -71,8 +71,7 @@ def checks_document(checks, **patch):
 _UNSET = object()
 
 
-def sigma_document(drawn, weighed, *, observed=_UNSET, runs=_UNSET,
-                   model=_UNSET):
+def sigma_document(drawn, weighed, *, observed=_UNSET, runs=_UNSET, model=_UNSET):
     """A document that DRAWS with ``drawn`` and WEIGHS with ``weighed``.
 
     ``observed`` is left as the base document's unless a caller says
@@ -141,27 +140,29 @@ def observed_as(document, **keys):
 _IS_A_MAPPING = "inference.checks: is a mapping; got 'banana'."
 _UNKNOWN_NAME = (
     "inference.checks.linearty: 'linearty' is not a check; v1 knows "
-    "['identifiability', 'linearity', 'prior_sensitivity'].")
-_ENTRY_IS_A_MAPPING = (
-    "inference.checks.linearity: is a mapping with mode:; got 'banana'.")
+    "['identifiability', 'linearity', 'prior_sensitivity']."
+)
+_ENTRY_IS_A_MAPPING = "inference.checks.linearity: is a mapping with mode:; got 'banana'."
 _UNKNOWN_KEY = (
     "inference.checks.linearity: a check: does not take ['rtol']; it takes "
-    "['mode', 'reason', 'report'].")
+    "['mode', 'reason', 'report']."
+)
 _MODE_ENUM = (
-    "inference.checks.linearity.mode: is one of ['refuse', 'warn', 'report', "
-    "'skip']; got 'banana'.")
+    "inference.checks.linearity.mode: is one of ['refuse', 'warn', 'report', 'skip']; got 'banana'."
+)
 A37_SKIP_WITHOUT_REASON = (
     "inference.checks.linearity: mode: skip carries its own reason: (check "
-    "A37) -- three unrelated skips sharing one sentence was v0's mistake.")
-_REASON_WITHOUT_SKIP = (
-    "inference.checks.linearity: reason: belongs to mode: skip alone.")
+    "A37) -- three unrelated skips sharing one sentence was v0's mistake."
+)
+_REASON_WITHOUT_SKIP = "inference.checks.linearity: reason: belongs to mode: skip alone."
 
 #: The one NEW cell (§2.3), which moved from nowhere.
 _SKIP_WITH_REPORT = (
     "inference.checks.linearity: mode: skip and report: true together ask to "
     "record the numbers of a check that will not run. Drop report:, or drop "
     "reason: and change mode: skip to mode: report so the check runs and has "
-    "numbers to record (check A1).")
+    "numbers to record (check A1)."
+)
 
 #: ``(the section a document writes, the sentence it earns, the id)``.  SEVEN
 #: moved rows and one new one.
@@ -172,10 +173,8 @@ MOVED = [
     ({"linearity": {"mode": "warn", "rtol": 1e-8}}, _UNKNOWN_KEY, "A1"),
     ({"linearity": {"mode": "banana"}}, _MODE_ENUM, "A1"),
     ({"linearity": {"mode": "skip"}}, A37_SKIP_WITHOUT_REASON, "A37"),
-    ({"linearity": {"mode": "warn", "reason": "x"}}, _REASON_WITHOUT_SKIP,
-     "A1"),
-    ({"linearity": {"mode": "skip", "reason": "x", "report": True}},
-     _SKIP_WITH_REPORT, "A1"),
+    ({"linearity": {"mode": "warn", "reason": "x"}}, _REASON_WITHOUT_SKIP, "A1"),
+    ({"linearity": {"mode": "skip", "reason": "x", "report": True}}, _SKIP_WITH_REPORT, "A1"),
 ]
 
 
@@ -190,11 +189,12 @@ class TestItRunsBeforeTheBeam:
     a user who typed ``mode: sipk`` was told about a file they had not
     touched."""
 
-    @pytest.mark.parametrize("section, message, check", MOVED,
-                             ids=[one[2] + "-" + str(index)
-                                  for index, one in enumerate(MOVED)])
-    def test_a_checks_fault_beats_an_unreadable_beam(self, section, message,
-                                                      check):
+    @pytest.mark.parametrize(
+        "section, message, check",
+        MOVED,
+        ids=[one[2] + "-" + str(index) for index, one in enumerate(MOVED)],
+    )
+    def test_a_checks_fault_beats_an_unreadable_beam(self, section, message, check):
         """**Kills the whole task being registered and never reached.**
 
         MINOR 3 (Plan 3C fix round): parametrised over every one of
@@ -255,12 +255,9 @@ class TestTheSlots:
     def test_the_findings_carry_the_bare_ids(self):
         """§3.2(a)'s other half: the SLOT may be dotted, ``Finding.check``
         never is.  ``Report.checks()`` is what a user greps."""
-        assert only(checks_document({"linearty": {"mode": "warn"}}),
-                    "A1").check == "A1"
-        assert only(checks_document({"linearity": {"mode": "skip"}}),
-                    "A37").check == "A37"
-        assert only(sigma_document(MODEL_NOISE, RADIOMETER),
-                    "C18").check == "C18"
+        assert only(checks_document({"linearty": {"mode": "warn"}}), "A1").check == "A1"
+        assert only(checks_document({"linearity": {"mode": "skip"}}), "A37").check == "A37"
+        assert only(sigma_document(MODEL_NOISE, RADIOMETER), "C18").check == "C18"
 
     def test_a_check_is_never_run_twice_for_its_two_slots(self):
         """``sweep`` de-duplicates by ``id(fn)``.  **Kills** the guard being
@@ -276,18 +273,19 @@ class TestTheSlots:
 
 
 class TestTheMovedMessages:
-    @pytest.mark.parametrize("section, message, check",
-                             MOVED, ids=[one[2] + "-" + str(index)
-                                         for index, one in enumerate(MOVED)])
-    def test_each_sentence_arrives_through_the_pass_whole(self, section,
-                                                          message, check):
+    @pytest.mark.parametrize(
+        "section, message, check",
+        MOVED,
+        ids=[one[2] + "-" + str(index) for index, one in enumerate(MOVED)],
+    )
+    def test_each_sentence_arrives_through_the_pass_whole(self, section, message, check):
         """**Kills** a re-word anywhere in any of the eight."""
         assert only(checks_document(section), check).message == message
 
-    @pytest.mark.parametrize("section, message, check", MOVED,
-                             ids=[str(index) for index in range(len(MOVED))])
-    def test_the_section_still_refuses_on_its_own_path(self, section, message,
-                                                       check):
+    @pytest.mark.parametrize(
+        "section, message, check", MOVED, ids=[str(index) for index in range(len(MOVED))]
+    )
+    def test_the_section_still_refuses_on_its_own_path(self, section, message, check):
         """``build_inference`` directly, with no ``load_document`` in front of
         it.
 
@@ -299,8 +297,9 @@ class TestTheMovedMessages:
         sentence and this asserts it by equality rather than trusting it.
         """
         with pytest.raises(ConfigError) as caught:
-            build_inference({"checks": section}, twin=None, state=None,
-                            observation=None, context=None)
+            build_inference(
+                {"checks": section}, twin=None, state=None, observation=None, context=None
+            )
         assert str(caught.value) == message
 
     def test_check_gates_yields_at_most_one_finding_per_entry(self):
@@ -308,49 +307,61 @@ class TestTheMovedMessages:
         entry wrong in three ways earns the FIRST decision's sentence, in the
         order ``check_gates``' docstring lists -- **kills** a rewrite that
         collected every fault and changed which one a user reads."""
-        section = {"linearty": {"mode": "banana", "rtol": 1e-8,
-                                "reason": "x"}}
+        section = {"linearty": {"mode": "banana", "rtol": 1e-8, "reason": "x"}}
         assert len(check_gates(section)) == 1
         assert check_gates(section)[0].message == _UNKNOWN_NAME
 
     def test_a_legal_checks_block_earns_nothing(self):
         """The anti-vacuity partner of every row above."""
         assert mine(checks_document(CHECKS_SKIP)) == frozenset()
-        assert mine(checks_document({
-            "identifiability": {"mode": "refuse", "rtol": 1e-8,
-                                "report": True},
-            "linearity": {"mode": "warn"},
-            "prior_sensitivity": {"mode": "report"}})) == frozenset()
+        assert (
+            mine(
+                checks_document(
+                    {
+                        "identifiability": {"mode": "refuse", "rtol": 1e-8, "report": True},
+                        "linearity": {"mode": "warn"},
+                        "prior_sensitivity": {"mode": "report"},
+                    }
+                )
+            )
+            == frozenset()
+        )
 
     def test_an_absent_or_unreadable_inference_section_is_silent(self):
         """``inference: 7`` is ``build_inference``'s own refusal, with the
         value the user wrote; answering here would pre-empt it."""
         assert mine(preflight_document(inference=None)) == frozenset()
         assert mine(preflight_document(inference=7)) == frozenset()
-        assert mine(preflight_document(inference={"checks": None})) \
-            == frozenset()
+        assert mine(preflight_document(inference={"checks": None})) == frozenset()
 
 
 class TestTheNewCell:
     def test_skip_with_report_true_is_refused(self):
-        assert only(checks_document({"linearity": {
-            "mode": "skip", "reason": "x", "report": True}}),
-            "A1").message == _SKIP_WITH_REPORT
+        assert (
+            only(
+                checks_document({"linearity": {"mode": "skip", "reason": "x", "report": True}}),
+                "A1",
+            ).message
+            == _SKIP_WITH_REPORT
+        )
 
     def test_skip_without_report_is_not(self):
         """**Kills** the cell being written as "refuse any ``report:`` on a
         ``skip``" rather than "refuse ``report: true``" -- measured,
         ``report: false`` beside a skip is coherent and must pass."""
-        assert mine(checks_document({"linearity": {
-            "mode": "skip", "reason": "x", "report": False}})) == frozenset()
+        assert (
+            mine(checks_document({"linearity": {"mode": "skip", "reason": "x", "report": False}}))
+            == frozenset()
+        )
         assert mine(checks_document(CHECKS_SKIP)) == frozenset()
 
     def test_report_true_on_a_running_mode_is_not_refused(self):
         """The other anti-vacuity direction: ``report: true`` is the whole
         point of the key, and only ``skip`` cannot honour it."""
         for mode in ("refuse", "warn", "report"):
-            assert mine(checks_document({
-                "linearity": {"mode": mode, "report": True}})) == frozenset()
+            assert (
+                mine(checks_document({"linearity": {"mode": mode, "report": True}})) == frozenset()
+            )
 
 
 # --- C18.kind ---------------------------------------------------------------
@@ -369,11 +380,12 @@ FAMILIES = [
 
 
 class TestSigmaFamilies:
-    @pytest.mark.parametrize("drawn, weighed, refuses", FAMILIES,
-                             ids=[f"{one[0]['type']}-{one[1]['kind']}"
-                                  for one in FAMILIES])
-    def test_C18_kind_refuses_each_cross_family_cell(self, drawn, weighed,
-                                                     refuses):
+    @pytest.mark.parametrize(
+        "drawn, weighed, refuses",
+        FAMILIES,
+        ids=[f"{one[0]['type']}-{one[1]['kind']}" for one in FAMILIES],
+    )
+    def test_C18_kind_refuses_each_cross_family_cell(self, drawn, weighed, refuses):
         """**Kills** a table with one row transposed, which no single-cell
         test can see."""
         document = sigma_document(drawn, weighed)
@@ -393,8 +405,7 @@ class TestSigmaFamilies:
 
         weighing = frozenset().union(*_DRAWING_TYPES.values())
         assert weighing == frozenset(_KIND_KEYS) - frozenset({"none"})
-        assert len(weighing) == sum(len(one) for one in
-                                    _DRAWING_TYPES.values())
+        assert len(weighing) == sum(len(one) for one in _DRAWING_TYPES.values())
 
     def test_the_message_names_the_gate_and_the_escape(self):
         """§3.2(i): a refusal that does not name its own off switch is a
@@ -423,13 +434,12 @@ class TestSigmaFamiliesStandsDown:
         decision being dropped, after which every ingested document is
         refused."""
         document = sigma_document(
-            MODEL_NOISE, RADIOMETER,
-            observed={"file": {"path": str(tmp_path / "d.npy")}})
+            MODEL_NOISE, RADIOMETER, observed={"file": {"path": str(tmp_path / "d.npy")}}
+        )
         assert mine(document) == frozenset()
 
     def test_C18_kind_stands_down_with_no_observed_at_all(self):
-        assert mine(sigma_document(MODEL_NOISE, RADIOMETER,
-                                   observed=None)) == frozenset()
+        assert mine(sigma_document(MODEL_NOISE, RADIOMETER, observed=None)) == frozenset()
 
     def test_C18_kind_stands_down_on_a_fit_twin_observation(self):
         """**Scoped exactly as the numeric C18 is** (D-10).  On the
@@ -445,8 +455,7 @@ class TestSigmaFamiliesStandsDown:
         ``twin: fit``.
         """
         base = sigma_document(MODEL_NOISE, RADIOMETER)
-        document = sigma_document(MODEL_NOISE, RADIOMETER,
-                                  observed=observed_as(base, twin="fit"))
+        document = sigma_document(MODEL_NOISE, RADIOMETER, observed=observed_as(base, twin="fit"))
         assert mine(document) == frozenset()
 
     def test_twin_fit_alone_is_not_enough_with_zero_declared_latents(self):
@@ -468,8 +477,12 @@ class TestSigmaFamiliesStandsDown:
         """
         document = repatch(
             preflight_document(),
-            inference={"parameters": {}, "noise": RADIOMETER,
-                      "observed": {"from": "simulation", "twin": "fit"}})
+            inference={
+                "parameters": {},
+                "noise": RADIOMETER,
+                "observed": {"from": "simulation", "twin": "fit"},
+            },
+        )
         found = only(document, "C18")
         assert found.severity == REFUSE
         with pytest.raises(ConfigError) as caught:
@@ -483,53 +496,59 @@ class TestSigmaFamiliesStandsDown:
         answers ``None`` for every document that does not spell it out."""
         assert _T2C_GENERATING_TWIN == "full"
         base = sigma_document(MODEL_NOISE, RADIOMETER)
-        document = sigma_document(MODEL_NOISE, RADIOMETER,
-                                  observed=observed_as(base, twin=None))
+        document = sigma_document(MODEL_NOISE, RADIOMETER, observed=observed_as(base, twin=None))
         assert only(document, "C18").severity == REFUSE
 
-    @pytest.mark.parametrize("node", [
-        {"compose": [{"type": "NoiseOperator",
-                      "sigma": {"value": 0.5, "unit": "K"}}]},
-        # A `compose:` block that ALSO carries a `type:`.  Without the
-        # explicit `"compose" in spec` guard this one reads as a single
-        # drawing operator, because `spec.get("type")` answers happily --
-        # measured, the other five cells all stand down on the type lookup
-        # alone and leave that guard unexercised.
-        {"compose": [{"type": "NoiseOperator",
-                      "sigma": {"value": 0.5, "unit": "K"}}],
-         "type": "NoiseOperator"},
-        [{"type": "NoiseOperator", "sigma": {"value": 0.5, "unit": "K"}}],
-        7, None, "NoiseOperator", {"python": "rheplicant:NoiseOperator"}])
+    @pytest.mark.parametrize(
+        "node",
+        [
+            {"compose": [{"type": "NoiseOperator", "sigma": {"value": 0.5, "unit": "K"}}]},
+            # A `compose:` block that ALSO carries a `type:`.  Without the
+            # explicit `"compose" in spec` guard this one reads as a single
+            # drawing operator, because `spec.get("type")` answers happily --
+            # measured, the other five cells all stand down on the type lookup
+            # alone and leave that guard unexercised.
+            {
+                "compose": [{"type": "NoiseOperator", "sigma": {"value": 0.5, "unit": "K"}}],
+                "type": "NoiseOperator",
+            },
+            [{"type": "NoiseOperator", "sigma": {"value": 0.5, "unit": "K"}}],
+            7,
+            None,
+            "NoiseOperator",
+            {"python": "rheplicant:NoiseOperator"},
+        ],
+    )
     def test_C18_kind_stands_down_on_a_composed_noise_node(self, node):
         """**Kills** a bare ``model["noise"]["type"]``, which raises
         ``TypeError`` on a list -- and a check that raises aborts the pass and
         hides every later finding.  A composed node has no single drawing
         operator, and a check that guessed would refuse a document it cannot
         read."""
-        document = sigma_document(MODEL_NOISE, RADIOMETER,
-                                  model={**BASE_MODEL, "noise": node})
+        document = sigma_document(MODEL_NOISE, RADIOMETER, model={**BASE_MODEL, "noise": node})
         assert mine(document) == frozenset()
 
-    @pytest.mark.parametrize("model", [
-        {"kind": "pipeline", "stages": []},
-        # A pipeline model carrying a `noise:` key.  Without the
-        # `kind: graph` guard this one is read as a graph node and refused --
-        # measured, the bare pipeline above has no `noise:` at all and so
-        # stands down on the node lookup, leaving the guard unexercised.
-        # `model.kind: pipeline` has no node registry; a `noise:` beside
-        # `stages:` is an unknown key the build names itself.
-        {"kind": "pipeline", "stages": [], "noise": MODEL_NOISE}])
+    @pytest.mark.parametrize(
+        "model",
+        [
+            {"kind": "pipeline", "stages": []},
+            # A pipeline model carrying a `noise:` key.  Without the
+            # `kind: graph` guard this one is read as a graph node and refused --
+            # measured, the bare pipeline above has no `noise:` at all and so
+            # stands down on the node lookup, leaving the guard unexercised.
+            # `model.kind: pipeline` has no node registry; a `noise:` beside
+            # `stages:` is an unknown key the build names itself.
+            {"kind": "pipeline", "stages": [], "noise": MODEL_NOISE},
+        ],
+    )
     def test_C18_kind_stands_down_on_a_pipeline_model(self, model):
         """``sections/compose.py::model_nodes`` gates on ``kind: graph`` for the
         same reason: reading a pipeline's keys as graph nodes invents a
         placement the build does not make."""
-        assert mine(sigma_document(MODEL_NOISE, RADIOMETER,
-                                   model=model)) == frozenset()
+        assert mine(sigma_document(MODEL_NOISE, RADIOMETER, model=model)) == frozenset()
 
-    @pytest.mark.parametrize("weighed", [7, "radiometer", {"kind": 7},
-                                         {"kind": "banana"}])
-    def test_an_unreadable_inference_noise_is_left_to_build_noise(self,
-                                                                  weighed):
+    @pytest.mark.parametrize("weighed", [7, "radiometer", {"kind": 7}, {"kind": "banana"}])
+    def test_an_unreadable_inference_noise_is_left_to_build_noise(self, weighed):
         """``inference.noise.kind: banana`` is ``build_noise``'s own refusal,
         naming the value and the enum.  Answering here would pre-empt a more
         specific sentence, and RAISING here would abort the pass."""
@@ -540,9 +559,14 @@ class TestSigmaFamiliesStandsDown:
         With two named records, dropping it falls through to ``elif
         len(named) == 1``, which is false with two, and the check goes
         silent about a primary observation it should still have read."""
-        document = sigma_document(MODEL_NOISE, RADIOMETER, observed={
-            "primary": {"from": "simulation", "twin": "full"},
-            "night": {"from": "simulation", "twin": "full"}})
+        document = sigma_document(
+            MODEL_NOISE,
+            RADIOMETER,
+            observed={
+                "primary": {"from": "simulation", "twin": "full"},
+                "night": {"from": "simulation", "twin": "full"},
+            },
+        )
         assert only(document, "C18").severity == REFUSE
 
 
@@ -565,9 +589,14 @@ class TestSigmaFamiliesWidensPerRecord:
         told, because neither ``'alpha'`` nor ``'beta'`` is literally named
         ``primary``.  ``'alpha'`` is the one the twin generated; the finding
         must name it."""
-        document = sigma_document(MODEL_NOISE, RADIOMETER, observed={
-            "alpha": {"from": "simulation", "twin": "full"},
-            "beta": {"from": "file", "path": "d.npy"}})
+        document = sigma_document(
+            MODEL_NOISE,
+            RADIOMETER,
+            observed={
+                "alpha": {"from": "simulation", "twin": "full"},
+                "beta": {"from": "file", "path": "d.npy"},
+            },
+        )
         found = only(document, "C18")
         assert found.severity == REFUSE
         assert found.where == "model.noise"
@@ -577,9 +606,14 @@ class TestSigmaFamiliesWidensPerRecord:
         """The partner: ``'beta'`` came from a file, not the twin, so it
         never enters the comparison and its name is not in the message --
         only the record that actually disagreed is named."""
-        document = sigma_document(MODEL_NOISE, RADIOMETER, observed={
-            "alpha": {"from": "simulation", "twin": "full"},
-            "beta": {"from": "file", "path": "d.npy"}})
+        document = sigma_document(
+            MODEL_NOISE,
+            RADIOMETER,
+            observed={
+                "alpha": {"from": "simulation", "twin": "full"},
+                "beta": {"from": "file", "path": "d.npy"},
+            },
+        )
         found = only(document, "C18")
         assert "'beta'" not in found.message
 
@@ -591,9 +625,14 @@ class TestSigmaFamiliesWidensPerRecord:
         :data:`FAMILIES`' own first agreeing row -- so nothing fires.
         **Kills** the fix being written as "no primary -> refuse", which
         would trip on this document too."""
-        document = sigma_document(MODEL_NOISE, HOMOSCEDASTIC, observed={
-            "alpha": {"from": "simulation", "twin": "full"},
-            "beta": {"from": "simulation", "twin": "full"}})
+        document = sigma_document(
+            MODEL_NOISE,
+            HOMOSCEDASTIC,
+            observed={
+                "alpha": {"from": "simulation", "twin": "full"},
+                "beta": {"from": "simulation", "twin": "full"},
+            },
+        )
         assert mine(document) == frozenset()
 
     def test_a_record_named_primary_still_checks_only_that_one(self):
@@ -603,9 +642,14 @@ class TestSigmaFamiliesWidensPerRecord:
         A1.2 -- even though the sibling ``'night'`` record also disagrees.
         The sibling is never read: a literal ``primary`` is resolved exactly
         as it always was, and is not BLOCKER 2's own case."""
-        document = sigma_document(MODEL_NOISE, RADIOMETER, observed={
-            "primary": {"from": "simulation", "twin": "full"},
-            "night": {"from": "simulation", "twin": "full"}})
+        document = sigma_document(
+            MODEL_NOISE,
+            RADIOMETER,
+            observed={
+                "primary": {"from": "simulation", "twin": "full"},
+                "night": {"from": "simulation", "twin": "full"},
+            },
+        )
         found = only(document, "C18")
         assert found.severity == REFUSE
         assert "this document's data" in found.message
@@ -619,10 +663,8 @@ class TestTheKindNoneWarning:
     other way round, ``exit_helpers.diagnostic_document()`` trips this warning
     and the shipped WARN census is ONE rather than zero."""
 
-    def test_a_drawing_operator_with_no_likelihood_warns_on_a_fitting_run(
-            self):
-        document = sigma_document(MODEL_NOISE, None,
-                                   runs=[{"kind": "conjugate.gls"}])
+    def test_a_drawing_operator_with_no_likelihood_warns_on_a_fitting_run(self):
+        document = sigma_document(MODEL_NOISE, None, runs=[{"kind": "conjugate.gls"}])
         found = only(document, "C18")
         assert found.severity == WARN
         assert found.where == "model.noise"
@@ -633,17 +675,14 @@ class TestTheKindNoneWarning:
         The base document's run is ``kind: forward``, so nothing here fits
         and there is nothing to weigh.
         """
-        assert _T2C_NOT_FITTING == frozenset(
-            {"forward", "mmodes", "compare", "benchmark"}
-        )
+        assert _T2C_NOT_FITTING == frozenset({"forward", "mmodes", "compare", "benchmark"})
         assert mine(sigma_document(MODEL_NOISE, None)) == frozenset()
 
     def test_an_explicit_kind_none_is_the_same_cell(self):
         """``build_noise`` answers ``NoiseBuild(kind="none")`` for an absent
         section AND for an explicit ``kind: none``, so the two are one cell
         here.  **Kills** a check that read only the absence."""
-        document = sigma_document(MODEL_NOISE, {"kind": "none"},
-                                   runs=[{"kind": "conjugate.gls"}])
+        document = sigma_document(MODEL_NOISE, {"kind": "none"}, runs=[{"kind": "conjugate.gls"}])
         assert only(document, "C18").severity == WARN
 
     def test_a_run_expecting_a_refusal_is_not_a_fit(self):
@@ -652,26 +691,25 @@ class TestTheKindNoneWarning:
         deliberately keeps.  **Kills** re-deriving the fitting set from
         ``_kinds``, which would warn about a run written to assert a
         refusal."""
-        for run in ({"kind": "conjugate.gls", "expect": "refuse"},
-                    {"kind": "banana"}):
-            assert mine(sigma_document(MODEL_NOISE, None,
-                                       runs=[run])) == frozenset()
+        for run in ({"kind": "conjugate.gls", "expect": "refuse"}, {"kind": "banana"}):
+            assert mine(sigma_document(MODEL_NOISE, None, runs=[run])) == frozenset()
 
     def test_the_warning_names_the_gate_and_the_escape(self):
-        document = sigma_document(MODEL_NOISE, None,
-                                   runs=[{"kind": "conjugate.gls"}])
+        document = sigma_document(MODEL_NOISE, None, runs=[{"kind": "conjugate.gls"}])
         found = only(document, "C18")
         assert "inference.noise: {kind: homoscedastic}" in found.message
         assert "inference.twin.without: [noise]" in found.message
         assert found.message.endswith("(check C18).")
 
-    @pytest.mark.parametrize("observed, why", [
-        (None, "no observation at all"),
-        ({"file": {"path": "d.npy"}}, "the data came from a file"),
-        ({"from": "simulation", "twin": "fit"}, "the fit twin drew it")])
-    def test_the_stand_down_rows_are_evaluated_before_the_warning(self,
-                                                                  observed,
-                                                                  why):
+    @pytest.mark.parametrize(
+        "observed, why",
+        [
+            (None, "no observation at all"),
+            ({"file": {"path": "d.npy"}}, "the data came from a file"),
+            ({"from": "simulation", "twin": "fit"}, "the fit twin drew it"),
+        ],
+    )
+    def test_the_stand_down_rows_are_evaluated_before_the_warning(self, observed, why):
         """**The ordering P14 is about, as a regression test.**
 
         Read top-to-bottom as the plan's table was originally written, the
@@ -683,8 +721,9 @@ class TestTheKindNoneWarning:
 
         Each row here is a document the WARN must not reach: ``{why}``.
         """
-        document = sigma_document(MODEL_NOISE, None, observed=observed,
-                                   runs=[{"kind": "conjugate.gls"}])
+        document = sigma_document(
+            MODEL_NOISE, None, observed=observed, runs=[{"kind": "conjugate.gls"}]
+        )
         assert mine(document) == frozenset(), why
 
     def test_a_kind_the_run_grammar_does_not_know_is_not_a_fit(self):
@@ -718,12 +757,9 @@ class TestApplyingTheAdviceLiterally:
 
     def test_dropping_report_clears_the_skip_cell(self):
         """Escape 1 of ``_SKIP_WITH_REPORT``: *"Drop report:"*."""
-        before = checks_document({"linearity": {"mode": "skip",
-                                                "reason": "x",
-                                                "report": True}})
+        before = checks_document({"linearity": {"mode": "skip", "reason": "x", "report": True}})
         assert only(before, "A1").message == _SKIP_WITH_REPORT
-        after = checks_document({"linearity": {"mode": "skip",
-                                               "reason": "x"}})
+        after = checks_document({"linearity": {"mode": "skip", "reason": "x"}})
         assert mine(after) == frozenset()
         load_document(after)
 
@@ -731,15 +767,16 @@ class TestApplyingTheAdviceLiterally:
         """Escape 2, which is the one wave 1's advice loop broke: *"drop
         reason: and change mode: skip to mode: report"*.  Following it must
         not earn ``_REASON_WITHOUT_SKIP`` on the way out."""
-        after = checks_document({"linearity": {"mode": "report",
-                                               "report": True}})
+        after = checks_document({"linearity": {"mode": "report", "report": True}})
         assert mine(after) == frozenset()
         load_document(after)
 
     def test_the_a37_advice_clears_a37(self):
         """A37's own sentence: *"mode: skip carries its own reason:"*."""
-        assert only(checks_document({"linearity": {"mode": "skip"}}),
-                    "A37").message == A37_SKIP_WITHOUT_REASON
+        assert (
+            only(checks_document({"linearity": {"mode": "skip"}}), "A37").message
+            == A37_SKIP_WITHOUT_REASON
+        )
         after = checks_document(CHECKS_SKIP)
         assert mine(after) == frozenset()
         load_document(after)
@@ -747,8 +784,7 @@ class TestApplyingTheAdviceLiterally:
     def test_drawing_what_you_weigh_clears_C18_kind(self):
         """Escape 1 of the cross-family refusal: *"Write
         model.noise.type: RadiometerNoiseOperator to draw what you weigh"*."""
-        assert only(sigma_document(MODEL_NOISE, RADIOMETER),
-                    "C18").severity == REFUSE
+        assert only(sigma_document(MODEL_NOISE, RADIOMETER), "C18").severity == REFUSE
         after = sigma_document(RADIOMETER_DRAWN, RADIOMETER)
         assert mine(after) == frozenset()
         load_document(after)
@@ -764,23 +800,22 @@ class TestApplyingTheAdviceLiterally:
     def test_the_transposed_rows_advice_clears_it_too(self):
         """Both escapes of the OTHER refusing row, so a copied sentence that
         names the wrong type is caught."""
-        assert only(sigma_document(RADIOMETER_DRAWN, HOMOSCEDASTIC),
-                    "C18").severity == REFUSE
-        for after in (sigma_document(MODEL_NOISE, HOMOSCEDASTIC),
-                      sigma_document(RADIOMETER_DRAWN, RADIOMETER)):
+        assert only(sigma_document(RADIOMETER_DRAWN, HOMOSCEDASTIC), "C18").severity == REFUSE
+        for after in (
+            sigma_document(MODEL_NOISE, HOMOSCEDASTIC),
+            sigma_document(RADIOMETER_DRAWN, RADIOMETER),
+        ):
             assert mine(after) == frozenset()
             load_document(after)
 
     def test_declaring_the_likelihood_clears_the_warning(self):
         """The WARN's escape 1: *"Declare inference.noise: {kind:
         homoscedastic}"*."""
-        before = sigma_document(MODEL_NOISE, None,
-                                runs=[{"kind": "conjugate.gls",
-                                       "names": ["g"]}])
+        before = sigma_document(MODEL_NOISE, None, runs=[{"kind": "conjugate.gls", "names": ["g"]}])
         assert only(before, "C18").severity == WARN
-        after = sigma_document(MODEL_NOISE, HOMOSCEDASTIC,
-                               runs=[{"kind": "conjugate.gls",
-                                      "names": ["g"]}])
+        after = sigma_document(
+            MODEL_NOISE, HOMOSCEDASTIC, runs=[{"kind": "conjugate.gls", "names": ["g"]}]
+        )
         assert mine(after) == frozenset()
         load_document(after)
 
@@ -803,15 +838,12 @@ class TestApplyingTheAdviceLiterally:
         'noise' in this assembly.`` -- so the ``twin:`` key is dropped
         whole, which is the escape's own second clause.
         """
-        before = sigma_document(MODEL_NOISE, None,
-                                runs=[{"kind": "conjugate.gls",
-                                       "names": ["g"]}])
+        before = sigma_document(MODEL_NOISE, None, runs=[{"kind": "conjugate.gls", "names": ["g"]}])
         after = repatch(
             before,
-            model={key: value for key, value in BASE_MODEL.items()
-                   if key != "noise"},
-            inference={key: value for key, value in before["inference"].items()
-                       if key != "twin"})
+            model={key: value for key, value in BASE_MODEL.items() if key != "noise"},
+            inference={key: value for key, value in before["inference"].items() if key != "twin"},
+        )
         assert mine(after) == frozenset()
         load_document(after)
 
@@ -823,11 +855,18 @@ class TestNeitherCheckEverRaises:
     """``sweep`` turns any exception out of a check into a ``ConfigError``
     that aborts the whole pass and hides every finding after it."""
 
-    @pytest.mark.parametrize("checks", [
-        {"a b": {"mode": "warn"}},
-        {"": {"mode": "warn"}},
-        {"linearity": {"mode": ["warn"]}},
-        [], 7, True, ("linearity",)])
+    @pytest.mark.parametrize(
+        "checks",
+        [
+            {"a b": {"mode": "warn"}},
+            {"": {"mode": "warn"}},
+            {"linearity": {"mode": ["warn"]}},
+            [],
+            7,
+            True,
+            ("linearity",),
+        ],
+    )
     def test_a_hostile_checks_section_does_not_abort_the_pass(self, checks):
         """**The measured trap.**  ``check_gates`` composes
         ``inference.checks.<name>`` from the KEY, and
@@ -847,13 +886,16 @@ class TestNeitherCheckEverRaises:
             if one.check in ("A1", "A37"):
                 assert one.where.startswith("inference.checks")
 
-    @pytest.mark.parametrize(("checks", "key_type"), [
-        ({7: {"mode": "warn"}}, "int"),
-        ({None: {"mode": "warn"}}, "NoneType"),
-        ({(1, 2): {"mode": "warn"}}, "tuple"),
-    ], ids=["an-int-key", "a-none-key", "a-tuple-key"])
-    def test_a_non_string_check_name_is_refused_by_the_evidence_freeze(
-            self, checks, key_type):
+    @pytest.mark.parametrize(
+        ("checks", "key_type"),
+        [
+            ({7: {"mode": "warn"}}, "int"),
+            ({None: {"mode": "warn"}}, "NoneType"),
+            ({(1, 2): {"mode": "warn"}}, "tuple"),
+        ],
+        ids=["an-int-key", "a-none-key", "a-tuple-key"],
+    )
+    def test_a_non_string_check_name_is_refused_by_the_evidence_freeze(self, checks, key_type):
         """The boundary Task 4 hardened: ``initial_merge``'s evidence freeze
         requires exact string mapping keys, because the origin tree cannot
         tell a mapping key from a sequence index otherwise.  A YAML scalar
@@ -862,26 +904,32 @@ class TestNeitherCheckEverRaises:
         with pytest.raises(ConfigError) as caught:
             preflight(checks_document(checks))
         assert str(caught.value) == (
-            "initial_merge document: unsupported evidence mapping key type "
-            f"{key_type}.")
+            f"initial_merge document: unsupported evidence mapping key type {key_type}."
+        )
 
     def test_the_re_homed_finding_still_names_the_key_the_user_wrote(self):
         found = only(checks_document({"a b": {"mode": "warn"}}), "A1")
         assert found.where == "inference.checks"
         assert "'a b' is not a check" in found.message
 
-    @pytest.mark.parametrize("observed", [7, [], "simulation", {"primary": 7},
-                                          {"a": {"from": "simulation"},
-                                           "b": {"from": "simulation"}}])
+    @pytest.mark.parametrize(
+        "observed",
+        [
+            7,
+            [],
+            "simulation",
+            {"primary": 7},
+            {"a": {"from": "simulation"}, "b": {"from": "simulation"}},
+        ],
+    )
     def test_a_hostile_observed_block_does_not_abort_the_pass(self, observed):
-        preflight(sigma_document(MODEL_NOISE, RADIOMETER,
-                                 observed=observed))
+        preflight(sigma_document(MODEL_NOISE, RADIOMETER, observed=observed))
 
-    @pytest.mark.parametrize("patch", [
-        {"model": {"noise": {"type": {"a": 1}}}},
-        {"inference": {"noise": {"kind": ["x"]}}}])
-    def test_a_hostile_drawn_or_weighed_kind_does_not_abort_the_pass(self,
-                                                                     patch):
+    @pytest.mark.parametrize(
+        "patch",
+        [{"model": {"noise": {"type": {"a": 1}}}}, {"inference": {"noise": {"kind": ["x"]}}}],
+    )
+    def test_a_hostile_drawn_or_weighed_kind_does_not_abort_the_pass(self, patch):
         """MINOR 8: **kills either ``isinstance(..., str)`` guard.**  Without
         the drawn-side one, ``{'a': 1} in _DRAWING_TYPES`` is a bare
         ``TypeError: unhashable type: 'dict'``; without the weighed-side

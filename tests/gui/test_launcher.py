@@ -25,7 +25,6 @@ runs:
 """
 
 
-
 def refused(capsys, call, *, naming: str) -> None:
     """A refused invocation: exit ``REFUSAL_EXIT``, message on stderr.
 
@@ -40,6 +39,7 @@ def refused(capsys, call, *, naming: str) -> None:
         call()
     assert excinfo.value.code == launcher.REFUSAL_EXIT, excinfo.value.code
     assert naming in capsys.readouterr().err
+
 
 def test_selected_gui_extra_and_console_launcher_are_public() -> None:
     project = tomllib.loads((PROJECT_ROOT / "pyproject.toml").read_text())["project"]
@@ -70,9 +70,7 @@ def test_bundled_frontend_is_a_closed_production_build() -> None:
     assert not tuple(root.rglob("*.map"))
     assert not tuple(root.rglob("*.tsx"))
     javascript = "\n".join(
-        (root / reference).read_text()
-        for reference in references
-        if reference.endswith(".js")
+        (root / reference).read_text() for reference in references if reference.endswith(".js")
     )
     assert "/api/sessions" in javascript
     assert "Rheplicant configuration workbench" in javascript
@@ -112,8 +110,7 @@ def test_launcher_defaults_to_loopback_and_remote_binding_is_explicit(monkeypatc
     assert launcher.main(["--port", "9123", "--log-level", "error"]) == 0
     assert calls == [("127.0.0.1", 9123, "error")]
 
-    refused(capsys, lambda: launcher.main(["--host", "0.0.0.0"]),
-            naming="--allow-remote")
+    refused(capsys, lambda: launcher.main(["--host", "0.0.0.0"]), naming="--allow-remote")
     assert len(calls) == 1
 
     assert launcher.main(["--host", "::1", "--port", "9124"]) == 0
@@ -123,17 +120,20 @@ def test_launcher_defaults_to_loopback_and_remote_binding_is_explicit(monkeypatc
         naming="--allowed-host",
     )
     assert len(calls) == 2
-    assert launcher.main(
-        [
-            "--host",
-            "0.0.0.0",
-            "--allow-remote",
-            "--allowed-host",
-            "gui.example.org",
-            "--port",
-            "9125",
-        ]
-    ) == 0
+    assert (
+        launcher.main(
+            [
+                "--host",
+                "0.0.0.0",
+                "--allow-remote",
+                "--allowed-host",
+                "gui.example.org",
+                "--port",
+                "9125",
+            ]
+        )
+        == 0
+    )
     assert calls[-1] == ("0.0.0.0", 9125, "info")
 
 
@@ -203,7 +203,7 @@ def test_serve_allows_loopback_ipv4_without_acknowledgement(monkeypatch) -> None
 
 
 def test_serve_allows_localhost_without_acknowledgement(monkeypatch) -> None:
-    """"localhost" is not a literal loopback address but `_is_loopback`
+    """ "localhost" is not a literal loopback address but `_is_loopback`
     treats it as one; serve() must honour the same exemption rather than
     only recognising numeric loopback addresses.
     """
@@ -218,9 +218,7 @@ def test_serve_allows_localhost_without_acknowledgement(monkeypatch) -> None:
 
 
 GUI_SERVER_MISSING = "The GUI server is not installed. Install `rheplicant[gui]`."
-GUI_DEPENDENCIES_MISSING = (
-    "The GUI dependencies are not installed. Install `rheplicant[gui]`."
-)
+GUI_DEPENDENCIES_MISSING = "The GUI dependencies are not installed. Install `rheplicant[gui]`."
 
 
 def test_main_exits_with_the_message_when_the_server_is_not_installed(monkeypatch) -> None:
@@ -284,7 +282,7 @@ def _resolves_to(monkeypatch, *addresses: str) -> None:
 def test_localhost_is_a_loopback_bind_only_when_every_address_is_loopback(
     monkeypatch, capsys
 ) -> None:
-    """"localhost" used to be accepted by name. It is now resolved, and a
+    """ "localhost" used to be accepted by name. It is now resolved, and a
     hosts file that points it anywhere else needs --allow-remote like any
     other non-loopback bind."""
     pytest.importorskip("uvicorn")
@@ -296,8 +294,7 @@ def test_localhost_is_a_loopback_bind_only_when_every_address_is_loopback(
     _resolves_to(monkeypatch, "127.0.0.1", "203.0.113.7")
     with pytest.raises(RuntimeError, match="--allow-remote"):
         launcher.serve(host="localhost", port=8000, log_level="info")
-    refused(capsys, lambda: launcher.main(["--host", "LOCALHOST"]),
-            naming="--allow-remote")
+    refused(capsys, lambda: launcher.main(["--host", "LOCALHOST"]), naming="--allow-remote")
 
     _resolves_to(monkeypatch)
     with pytest.raises(RuntimeError, match="--allow-remote"):
@@ -320,8 +317,7 @@ def test_localhost_that_does_not_resolve_is_not_a_loopback_bind(monkeypatch, cap
         raise socket.gaierror(socket.EAI_NONAME, "nodename nor servname provided")
 
     monkeypatch.setattr(launcher.socket, "getaddrinfo", unresolvable)
-    refused(capsys, lambda: launcher.main(["--host", "localhost"]),
-            naming="--allow-remote")
+    refused(capsys, lambda: launcher.main(["--host", "localhost"]), naming="--allow-remote")
     assert calls == []
 
 

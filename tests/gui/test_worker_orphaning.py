@@ -48,7 +48,7 @@ _SRC = Path(__file__).resolve().parents[2] / "src"
 #: group and the real stream draining.  The only thing added is that the
 #: anchor's pid is recorded, because a test cannot otherwise learn the name of
 #: a group the production code opens for itself.
-_SERVER = '''
+_SERVER = """
 import json
 import os
 import sys
@@ -88,13 +88,13 @@ gui_child.drained_run(
     stderr=gui_child.StreamTail(limit=1024),
     timeout=3600,
 )
-'''
+"""
 
 #: The real ``gui_worker.main``, with only the science replaced: a long-lived
 #: child -- what a JAX or GPU context would be -- and then a wait that outlives
 #: any deadline in this file.  Going through ``main`` is the point: whatever
 #: arms the watch has to be armed by the entry point the worker really uses.
-_WORKER = '''
+_WORKER = """
 import json
 import os
 import subprocess
@@ -126,7 +126,7 @@ def _science(_yaml_text):
 
 gui_worker._run_validation = _science
 raise SystemExit(gui_worker.main(["validate"]))
-'''
+"""
 
 
 #: The same worker, except that it says who it is BEFORE ``main`` runs and
@@ -135,7 +135,7 @@ raise SystemExit(gui_worker.main(["validate"]))
 #: aimed into it deterministically instead of raced for.  A worker orphaned in
 #: that window captures init as its parent and the ppid it watches never
 #: changes again, so nothing but the anchor's death can tell it what happened.
-_WORKER_SLOW_TO_ARM = '''
+_WORKER_SLOW_TO_ARM = """
 import json
 import os
 import sys
@@ -160,7 +160,7 @@ def _science(_yaml_text):
 
 gui_worker._run_validation = _science
 raise SystemExit(gui_worker.main(["validate"]))
-'''
+"""
 
 
 def _alive(pid: int) -> bool:
@@ -274,7 +274,10 @@ def test_a_worker_whose_server_is_killed_takes_its_whole_group_with_it(
     """
     process, pids = orphaned_job()
     server, worker, science, anchor = (
-        pids["server"], pids["worker"], pids["science"], pids["anchor"]
+        pids["server"],
+        pids["worker"],
+        pids["science"],
+        pids["anchor"],
     )
     assert pids["group"] == anchor, "the worker did not run in the anchor's group"
     assert pids["group"] != os.getpgrp(), "the job ran in the test runner's group"

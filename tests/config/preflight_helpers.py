@@ -46,9 +46,15 @@ from tests.config.exit_helpers import (
 #: that is expensive-and-broken in a way that has nothing to do with the
 #: violation under test.
 UNREADABLE_BEAM = {
-    "beams": {"horn": {"format": "npy", "path": "no_such_beam.npy",
-                       "nside": 4, "normalize": "pixel_sum",
-                       "frame": "beam_local"}},
+    "beams": {
+        "horn": {
+            "format": "npy",
+            "path": "no_such_beam.npy",
+            "nside": 4,
+            "normalize": "pixel_sum",
+            "frame": "beam_local",
+        }
+    },
 }
 
 #: THE BASE MUST EARN NO FINDING OF ITS OWN.  ``exit_helpers._repaired``
@@ -88,8 +94,7 @@ def _base() -> dict:
     patch documents; the copy is what makes "a valid document with one thing
     wrong in it" true of one document rather than of the process.
     """
-    return copy.deepcopy(conjugate_document({"kind": "forward"},
-                                            inference=_INFERENCE))
+    return copy.deepcopy(conjugate_document({"kind": "forward"}, inference=_INFERENCE))
 
 
 #: The base document's ``model:`` and ``observation:`` sections, so a test can
@@ -133,8 +138,7 @@ RADIOMETER_NODE = {
 #: The base model with the receiver's ``bandpass`` node lit as well as its
 #: ``gain`` -- the pair A33 is about.  ``ReceiverOperator``'s only field is
 #: ``bandpass`` (measured with ``dataclasses.fields``).
-BANDPASS_MODEL = {**BASE_MODEL,
-                  "bandpass": {"bandpass": {"ones": ["n_freq"]}}}
+BANDPASS_MODEL = {**BASE_MODEL, "bandpass": {"bandpass": {"ones": ["n_freq"]}}}
 
 #: An ``inference:`` patch freeing one latent into ``bandpass`` and one into
 #: ``gain``, with no identifiability convention on either -- A33's document.
@@ -142,9 +146,10 @@ BANDPASS_MODEL = {**BASE_MODEL,
 #: leaves is one parameter and no null direction, which is a case A33 must
 #: stand down on rather than refuse.
 BANDPASS_AND_GAIN = {
-    "parameters": {"b": {"init": {"ones": ["n_freq"]},
-                         "into": "bandpass.bandpass"},
-                   "g": {"init": 1.0, "into": "gain.gain"}},
+    "parameters": {
+        "b": {"init": {"ones": ["n_freq"]}, "into": "bandpass.bandpass"},
+        "g": {"init": 1.0, "into": "gain.gain"},
+    },
     "noise": HOMOSCEDASTIC,
 }
 
@@ -237,12 +242,13 @@ RADIOMETER_DRAWN = {"type": "RadiometerNoiseOperator", **RADIOMETER_NODE}
 #: than the base document's 1.  C15's ``min(n_source, k)`` cap is invisible on
 #: a one-load document, where the product is ``min(1, k) * n_freq`` whatever
 #: ``k`` is.
-NOISE_WAVE_SWITCHING = {"mode": "cycle", "order": ["antenna", "ambient",
-                                                   "hot"]}
+NOISE_WAVE_SWITCHING = {"mode": "cycle", "order": ["antenna", "ambient", "hot"]}
 
 #: The two calibration loads :data:`NOISE_WAVE_SWITCHING`'s order names.
-NOISE_WAVE_LOADS = {"ambient": {"t_load": {"value": 300.0, "unit": "K"}},
-                    "hot": {"t_load": {"value": 400.0, "unit": "K"}}}
+NOISE_WAVE_LOADS = {
+    "ambient": {"t_load": {"value": 300.0, "unit": "K"}},
+    "hot": {"t_load": {"value": 400.0, "unit": "K"}},
+}
 
 #: A ``model:`` PATCH lighting the ``noise_wave`` node -- C15's subject.  A
 #: patch and not a whole model, because ``preflight_document`` merges one
@@ -253,15 +259,17 @@ NOISE_WAVE_LOADS = {"ambient": {"t_load": {"value": 300.0, "unit": "K"}},
 #: counts which of them a LATENT frees, and a node that omitted one would make
 #: the freed-set assertions read against a field that is not there.
 NOISE_WAVE_MODEL = {
-    "noise_wave": {"type": "NoiseWaveOperator",
-                   "t_unc": {"value": 1.0, "unit": "K"},
-                   "t_cos": {"value": 1.0, "unit": "K"},
-                   "t_sin": {"value": 1.0, "unit": "K"},
-                   "t_rx": {"value": 1.0, "unit": "K"},
-                   "gamma_src_re": {"zeros": ["n_source", "n_freq"]},
-                   "gamma_src_im": {"zeros": ["n_source", "n_freq"]},
-                   "gamma_rec_re": {"zeros": ["n_freq"]},
-                   "gamma_rec_im": {"zeros": ["n_freq"]}},
+    "noise_wave": {
+        "type": "NoiseWaveOperator",
+        "t_unc": {"value": 1.0, "unit": "K"},
+        "t_cos": {"value": 1.0, "unit": "K"},
+        "t_sin": {"value": 1.0, "unit": "K"},
+        "t_rx": {"value": 1.0, "unit": "K"},
+        "gamma_src_re": {"zeros": ["n_source", "n_freq"]},
+        "gamma_src_im": {"zeros": ["n_source", "n_freq"]},
+        "gamma_rec_re": {"zeros": ["n_freq"]},
+        "gamma_rec_im": {"zeros": ["n_freq"]},
+    },
 }
 
 #: A ``model.t_sys_extra`` entry of the type C15 declines under.  **Its
@@ -289,10 +297,12 @@ NOISE_WAVE_MODEL = {
 #: what those two design matrices take: 2 time functions by 3 frequency
 #: ones (``BasisTemperatureOperator.__check_init__``).
 NOISE_WAVE_BASIS = [
-    {"type": "BasisTemperatureOperator",
-     "coeff": {"zeros": [2, 3], "unit": "K"},
-     "time_basis": {"ones": ["n_time", 2]},
-     "freq_basis": {"ones": ["n_freq", 3]}},
+    {
+        "type": "BasisTemperatureOperator",
+        "coeff": {"zeros": [2, 3], "unit": "K"},
+        "time_basis": {"ones": ["n_time", 2]},
+        "freq_basis": {"ones": ["n_freq", 3]},
+    },
 ]
 
 
@@ -319,9 +329,7 @@ T5_MODEL_NOISE = {"type": "NoiseOperator", "sigma": {"value": 0.5, "unit": "K"}}
 def t5_model(adc: dict) -> dict:
     """A ``model:`` patch: this task's pinned ``noise`` plus an ``adc`` node."""
     adc = dict(adc)
-    if "scale" in adc and not (
-        isinstance(adc["scale"], dict) and "unit" in adc["scale"]
-    ):
+    if "scale" in adc and not (isinstance(adc["scale"], dict) and "unit" in adc["scale"]):
         adc["scale"] = {"value": adc["scale"], "unit": "adc_count/K"}
     return {"noise": T5_MODEL_NOISE, "adc": adc}
 
@@ -351,8 +359,7 @@ T5_BOUNDARY_SCALES = (168.861336, 169.030367, 169.199397)
 #: arithmetic and not for realism** -- 256 was chosen over the nearer 128
 #: because ``1/1024`` sits only 2% under the threshold, too close to read
 #: as "clearly inside the band" against float noise.
-WIDE_GRID = {"time": {"grid": {"arange": {"start": 0.0, "step": 2.0, "num": 256},
-                               "unit": "s"}}}
+WIDE_GRID = {"time": {"grid": {"arange": {"start": 0.0, "step": 2.0, "num": 256}, "unit": "s"}}}
 
 #: The ``model.adc.scale`` that lands exactly one of :data:`WIDE_GRID`'s 2048
 #: samples on the clip, measured: peak 2121.74 ``adc_count``, fraction
@@ -368,8 +375,9 @@ T5_WIDE_WARN_SCALE = 162.532644
 #: of its own here -- ``build_space`` refuses a latent naming both a sugared
 #: ``into:`` and a ``bindings:`` entry as mutually exclusive.
 T5_BINDING_LATENT = {
-    "parameters": {"g": {"init": 1.0, "linear": True,
-                         "prior": {"normal": {"loc": 1.0, "scale": 0.5}}}},
+    "parameters": {
+        "g": {"init": 1.0, "linear": True, "prior": {"normal": {"loc": 1.0, "scale": 0.5}}}
+    },
     "bindings": [{"latents": ["g"], "into": "gain.gain"}],
     "noise": HOMOSCEDASTIC,
     "observed": {"from": "simulation", "at": {"g": TRUTH_G}, "twin": "full"},
@@ -383,18 +391,19 @@ T5_BINDING_LATENT = {
 #: ``model.noise``: a scalar ``NoiseOperator`` disagreeing with the base
 #: document's ``inference.noise`` (``HOMOSCEDASTIC``, ``SIGMA_K`` = 0.05 K)
 #: by ten-fold -- C18's own numeric check's subject.
-SIGMA_MISMATCHED_K = {"type": "NoiseOperator",
-                      "sigma": {"value": 0.5, "unit": "K"}}
+SIGMA_MISMATCHED_K = {"type": "NoiseOperator", "sigma": {"value": 0.5, "unit": "K"}}
 
 #: ``inference.noise``: a ``(1, n_freq)`` sigma, every entry
 #: ``HOMOSCEDASTIC``'s own scalar -- broadcastable agreement against a scalar
 #: drawn sigma, not a shape match.  Reads ``HOMOSCEDASTIC``'s own value rather
 #: than restating ``SIGMA_K`` as a second literal, so the two cannot drift.
 SIGMA_BROADCAST_FREQ = {
-    "kind": "homoscedastic", "axis": "freq",
-    "sigma": {"full": {"value": HOMOSCEDASTIC["sigma"]["value"],
-                       "shape": ["n_freq"]},
-             "unit": HOMOSCEDASTIC["sigma"]["unit"]},
+    "kind": "homoscedastic",
+    "axis": "freq",
+    "sigma": {
+        "full": {"value": HOMOSCEDASTIC["sigma"]["value"], "shape": ["n_freq"]},
+        "unit": HOMOSCEDASTIC["sigma"]["unit"],
+    },
 }
 
 #: ``inference.noise``: ``radiometer``, its ``channel_width`` and
@@ -405,7 +414,8 @@ SIGMA_BROADCAST_FREQ = {
 #: "swapped" row -- units swapped, values kept -- is a DIFFERENT document and
 #: is refused by a dimension guard before this check ever sees it (D-21).
 T6_RADIOMETER_VALUES_SWAPPED = {
-    "kind": "radiometer", "include_logdet": True,
+    "kind": "radiometer",
+    "include_logdet": True,
     "channel_width": {"value": 2.0, "unit": "MHz"},
     "integration_time": {"value": 1.0, "unit": "s"},
 }
@@ -416,7 +426,8 @@ T6_RADIOMETER_VALUES_SWAPPED = {
 #: product).  The measured document named in the plan:
 #: ``(1 MHz, 2 s)`` against ``(100 MHz, 2 s)``.
 T6_RADIOMETER_TEN_FOLD = {
-    "kind": "radiometer", "include_logdet": True,
+    "kind": "radiometer",
+    "include_logdet": True,
     "channel_width": {"value": 100.0, "unit": "MHz"},
     "integration_time": {"value": 2.0, "unit": "s"},
 }
@@ -426,7 +437,8 @@ T6_RADIOMETER_TEN_FOLD = {
 #: ``model:``, so :data:`T6_RADIOMETER_TEN_FOLD`'s document cannot exercise
 #: this kind; this is the twin that does.
 T6_FROZEN_HUNDRED_FOLD = {
-    "kind": "radiometer_frozen", "source": "observed",
+    "kind": "radiometer_frozen",
+    "source": "observed",
     "channel_width": {"value": 100.0, "unit": "MHz"},
     "integration_time": {"value": 2.0, "unit": "s"},
 }
@@ -495,8 +507,13 @@ def only(document, check: str) -> Finding:
 #: from the model, and a check that refused this document would be refusing
 #: physics nobody claimed anything about.
 NONLINEAR_NOT_DECLARED = {
-    "parameters": {"w": {"init": 5.0, "into": "global_signal.width",
-                         "prior": {"normal": {"loc": 5.0, "scale": 1.0}}}},
+    "parameters": {
+        "w": {
+            "init": 5.0,
+            "into": "global_signal.width",
+            "prior": {"normal": {"loc": 5.0, "scale": 1.0}},
+        }
+    },
     "noise": HOMOSCEDASTIC,
     "observed": {"from": "simulation", "at": {"w": 6.0}},
 }
@@ -524,9 +541,13 @@ T4_DEGENERATE_PAIR = {
         "g1": {"init": 0.55, "prior": {"normal": {"loc": 0.55, "scale": 0.5}}},
         "g2": {"init": 0.55, "prior": {"normal": {"loc": 0.55, "scale": 0.5}}},
     },
-    "bindings": [{"latents": ["g1", "g2"], "into": "gain.gain",
-                  "transform": {"python": "jax.numpy:add",
-                                "fan": "broadcast"}}],
+    "bindings": [
+        {
+            "latents": ["g1", "g2"],
+            "into": "gain.gain",
+            "transform": {"python": "jax.numpy:add", "fan": "broadcast"},
+        }
+    ],
     "noise": HOMOSCEDASTIC,
     "observed": {"from": "simulation"},
     "twin": {"without": ["noise"]},
@@ -540,9 +561,9 @@ T4_DEGENERATE_PAIR = {
 #: Derived from :func:`_base` rather than written out, so the twin repair and
 #: the noise block travel with it.  **For** :func:`repatch`: a one-level merge
 #: cannot express a removal (:func:`preflight_document`'s own docstring).
-T4_NO_OBSERVED_INFERENCE = {key: value
-                            for key, value in _base()["inference"].items()
-                            if key != "observed"}
+T4_NO_OBSERVED_INFERENCE = {
+    key: value for key, value in _base()["inference"].items() if key != "observed"
+}
 
 #: The base document's inference block with its ONE observation replaced by
 #: TWO named ones, neither called ``primary``.  ``observed.py::build_observed``
@@ -557,10 +578,11 @@ T4_NO_OBSERVED_INFERENCE = {key: value
 #: ``observed.entries[None]`` and dies as ``post-flight check 'C19' RAISED
 #: KeyError: None`` -- laundered blame.  **For** :func:`repatch`.
 T4_TWO_NAMED_OBSERVATIONS = {
-    **{key: value for key, value in _base()["inference"].items()
-       if key != "observed"},
-    "observed": {"night": dict(_base()["inference"]["observed"]),
-                 "day": dict(_base()["inference"]["observed"])},
+    **{key: value for key, value in _base()["inference"].items() if key != "observed"},
+    "observed": {
+        "night": dict(_base()["inference"]["observed"]),
+        "day": dict(_base()["inference"]["observed"]),
+    },
 }
 
 #: An ``inference:`` PATCH turning the noise off.  ``decided_noise`` returns
@@ -583,49 +605,54 @@ T4_NOISE_NONE = {"noise": {"kind": "none"}}
 #: the day the config layer starts admitting a complex latent, at which point
 #: the four unit tests over a doctored build stop being hypothetical.
 COMPLEX_INIT_LATENT = {
-    "parameters": {"g": {"init": {"value": 1.0, "dtype": "complex64"},
-                         "linear": True, "into": "gain.gain",
-                         "prior": {"normal": {"loc": 1.0, "scale": 0.5}}}},
+    "parameters": {
+        "g": {
+            "init": {"value": 1.0, "dtype": "complex64"},
+            "linear": True,
+            "into": "gain.gain",
+            "prior": {"normal": {"loc": 1.0, "scale": 0.5}},
+        }
+    },
 }
 
 #: All three gates at ``mode: refuse`` -- the anti-vacuity partner of the
 #: call-count property.  With no ``inference.checks:`` at all the counts are
 #: ``(one per linear latent, 0, 0)``; with this they are ``(n, 1, 1)``, and a
 #: default table quietly reversed cannot satisfy both.
-T4_CHECKS_ALL_REFUSE = {"linearity": {"mode": "refuse"},
-                        "identifiability": {"mode": "refuse"},
-                        "prior_sensitivity": {"mode": "refuse"}}
+T4_CHECKS_ALL_REFUSE = {
+    "linearity": {"mode": "refuse"},
+    "identifiability": {"mode": "refuse"},
+    "prior_sensitivity": {"mode": "refuse"},
+}
 
 #: ``identifiability`` turned on at ``mode: refuse``.  Off by default, so
 #: every C13 test has to write something.
 T4_CHECKS_IDENTIFIABILITY_REFUSE = {"identifiability": {"mode": "refuse"}}
 
 #: ``identifiability`` turned on and asked to record its numbers on a PASS.
-T4_CHECKS_IDENTIFIABILITY_REPORT = {"identifiability": {"mode": "report",
-                                                        "report": True}}
+T4_CHECKS_IDENTIFIABILITY_REPORT = {"identifiability": {"mode": "report", "report": True}}
 
 #: ``identifiability`` declined in writing -- the shape
 #: :meth:`~rheplicant.config.gating.Gate.runs` is false for with a ``reason:``
 #: the record keeps.  Used to show that one gate standing down does not silence
 #: another.
 T4_CHECKS_IDENTIFIABILITY_SKIP = {
-    "identifiability": {"mode": "skip",
-                        "reason": "the joint rank is checked by hand"}}
+    "identifiability": {"mode": "skip", "reason": "the joint rank is checked by hand"}
+}
 
 #: ``identifiability`` with its own ``rtol:`` -- the ONLY check whose entry may
 #: carry one (``gating.check_gates``'s ``allowed`` set).  ``1e-2`` is four
 #: decades above ``DEFAULT_RANK_RTOL`` and is chosen to be visibly not the
 #: default in the recorded numbers.
-T4_CHECKS_IDENTIFIABILITY_RTOL = {"identifiability": {"mode": "report",
-                                                      "report": True,
-                                                      "rtol": 1e-2}}
+T4_CHECKS_IDENTIFIABILITY_RTOL = {
+    "identifiability": {"mode": "report", "report": True, "rtol": 1e-2}
+}
 
 #: ``prior_sensitivity`` turned on and asked to record its numbers on a PASS.
 #: **This is the one fixture in Task 4 that pays the real cold cost** of the
 #: two Newton solves; every other C19 test either stands down before the call
 #: or drives a stub.
-T4_CHECKS_PRIOR_SENSITIVITY_REPORT = {
-    "prior_sensitivity": {"mode": "report", "report": True}}
+T4_CHECKS_PRIOR_SENSITIVITY_REPORT = {"prior_sensitivity": {"mode": "report", "report": True}}
 
 #: ``linearity`` downgraded -- the first escape C12's own refusal names, applied
 #: literally by the advice-loop test.
@@ -636,9 +663,11 @@ T4_CHECKS_LINEARITY_WARN = {"linearity": {"mode": "warn"}}
 #: kept apart because the advice-loop test asserts the sentence a reader would
 #: actually have copied out of the refusal.
 T4_CHECKS_LINEARITY_SKIP = {
-    "linearity": {"mode": "skip",
-                  "reason": "this block's linearity is checked in the campaign "
-                            "notebook"}}
+    "linearity": {
+        "mode": "skip",
+        "reason": "this block's linearity is checked in the campaign notebook",
+    }
+}
 
 #: ``linearity`` asked to record its margins on a PASS.  Without ``report:
 #: true`` a passing check says nothing at all (§2.3's table, rows 3, 6 and 9),
@@ -667,9 +696,10 @@ T4_CHECKS_LINEARITY_REPORT = {"linearity": {"mode": "refuse", "report": True}}
 #: ``K``.  Reads the drawn value rather than restating 0.5 as a second literal,
 #: so the numerical pair cannot drift apart while each side keeps its own
 #: physical trunk.
-T5_LIKELIHOOD_NOISE = {"kind": "homoscedastic",
-                       "sigma": {"value": T5_MODEL_NOISE["sigma"]["value"],
-                                 "unit": "adc_count"}}
+T5_LIKELIHOOD_NOISE = {
+    "kind": "homoscedastic",
+    "sigma": {"value": T5_MODEL_NOISE["sigma"]["value"], "unit": "adc_count"},
+}
 
 #: ``linearity`` declined, in the shape and for the reason
 #: ``test_config_exits_conjugate.LINEARITY_DECLINED`` established: a document
@@ -680,12 +710,15 @@ T5_LIKELIHOOD_NOISE = {"kind": "homoscedastic",
 #: names.  Measured: 5.32 departure against ``rtol=1.19e-03`` on the base
 #: document's ``g`` -> ``gain.gain`` at ``adc.scale: 1.0, n_bits: 12``.
 T5_LINEARITY_DECLINED = {
-    "linearity": {"mode": "skip",
-                  "reason": "these documents digitise on purpose: an ADC clip "
-                            "is a deliberate non-linearity, and check_linearity "
-                            "probes at 1000x the latent's scale, where the "
-                            "converter saturates, so the prediction really is "
-                            "not affine in a latent bound upstream of adc"}}
+    "linearity": {
+        "mode": "skip",
+        "reason": "these documents digitise on purpose: an ADC clip "
+        "is a deliberate non-linearity, and check_linearity "
+        "probes at 1000x the latent's scale, where the "
+        "converter saturates, so the prediction really is "
+        "not affine in a latent bound upstream of adc",
+    }
+}
 
 
 def t5_case(**patch) -> dict:
@@ -719,9 +752,10 @@ def t5_case(**patch) -> dict:
     inference = document.get("inference")
     if not isinstance(inference, dict):
         return document
-    return repatch(document, inference={**inference,
-                                        "noise": T5_LIKELIHOOD_NOISE,
-                                        "checks": T5_LINEARITY_DECLINED})
+    return repatch(
+        document,
+        inference={**inference, "noise": T5_LIKELIHOOD_NOISE, "checks": T5_LINEARITY_DECLINED},
+    )
 
 
 def unsaturated_linear_case() -> dict:

@@ -24,9 +24,7 @@ from _rheplicant_bootstrap.runtime import (
 )
 from _rheplicant_bootstrap.types import LayerIdentity
 
-TRUSTED_CODE_WARNING = (
-    "warning: trusted plugin/python code may perform unobserved filesystem I/O\n"
-)
+TRUSTED_CODE_WARNING = "warning: trusted plugin/python code may perform unobserved filesystem I/O\n"
 
 
 @dataclass(slots=True)
@@ -79,9 +77,7 @@ def prepare_execution_environment(
 ) -> PreparedExecution:
     session, orchestration = establish_runtime(
         prepared.process.runtime,
-        import_main=lambda: importlib.import_module(
-            "rheplicant.config.orchestration"
-        ),
+        import_main=lambda: importlib.import_module("rheplicant.config.orchestration"),
     )
     trace.record_runtime(runtime_audit_row(session))
     trace.boundary_completed("runtime")

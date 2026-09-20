@@ -215,7 +215,10 @@ def _assemble_s(flat: np.ndarray, n_port: int) -> np.ndarray:
     else:
         # Touchstone 2-port order: S11 S21 S12 S22.
         s[:, 0, 0], s[:, 1, 0], s[:, 0, 1], s[:, 1, 1] = (
-            flat[:, 0], flat[:, 1], flat[:, 2], flat[:, 3]
+            flat[:, 0],
+            flat[:, 1],
+            flat[:, 2],
+            flat[:, 3],
         )
     return s
 

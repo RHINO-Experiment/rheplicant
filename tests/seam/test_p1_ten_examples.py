@@ -112,9 +112,7 @@ def dense_posterior(block, sigma, *, obs=OBSERVATION):
         mean = np.broadcast_to(np.asarray(block.prior_mean[name]), block.shape[name])
         width = np.broadcast_to(np.asarray(block.prior_std[name]), block.shape[name])
         if len(units) == 2:
-            centres.append(
-                np.stack([np.real(mean).ravel(), np.imag(mean).ravel()], axis=1).ravel()
-            )
+            centres.append(np.stack([np.real(mean).ravel(), np.imag(mean).ravel()], axis=1).ravel())
             # Each half of a complex latent carries scale**2 -- the convention
             # ComplexNormal states and variance_parts duplicates. Reading it as
             # a split of one variance would report a sqrt(2) as physics.
@@ -260,9 +258,7 @@ class TestExample2ComplexAlm:
         mean, _ = dense_posterior(block, np.full(alm_data.shape, self.SIGMA))
         assert relative(as_real_vector(block, solved), mean) < DENSE_RTOL
 
-    def test_the_imaginary_half_is_constrained_and_not_merely_carried(
-        self, alm_block, alm_data
-    ):
+    def test_the_imaginary_half_is_constrained_and_not_merely_carried(self, alm_block, alm_data):
         """A complex fixture whose imaginary part is a null direction would pass
         the test above while asserting nothing about half the latent.
 
@@ -449,9 +445,7 @@ class TestExample5IterativeGLS:
     def test_the_answer_is_a_fixed_point_of_the_reweighting(
         self, instrument, gain_space, radiometer_data, radiometer, gain_truth, template_state
     ):
-        graph = to_graph(
-            gain_space, instrument, template_state, radiometer_data, radiometer
-        )
+        graph = to_graph(gain_space, instrument, template_state, radiometer_data, radiometer)
         block = bayesmith.linear_operator(graph, ("gains",))
         result = bayesmith.iterative_gls(
             block, bayesmith.sigma_from_graph(graph, {"gains": gain_truth})
@@ -459,9 +453,9 @@ class TestExample5IterativeGLS:
         again, _ = bayesmith.wiener_solve(
             block, precision=bayesmith.precision_at(graph, {"gains": result.solution["gains"]})
         )
-        assert relative(
-            np.asarray(again["gains"]), np.asarray(result.solution["gains"])
-        ) < DENSE_RTOL
+        assert (
+            relative(np.asarray(again["gains"]), np.asarray(result.solution["gains"])) < DENSE_RTOL
+        )
 
     def test_the_fixed_point_matches_a_dense_solve_at_its_own_sigma(
         self, instrument, gain_space, radiometer_data, radiometer, gain_truth, template_state
@@ -472,9 +466,7 @@ class TestExample5IterativeGLS:
         test above; this one forms the dense normal equations at the sigma the
         answer implies and requires the same vector.
         """
-        graph = to_graph(
-            gain_space, instrument, template_state, radiometer_data, radiometer
-        )
+        graph = to_graph(gain_space, instrument, template_state, radiometer_data, radiometer)
         block = bayesmith.linear_operator(graph, ("gains",))
         result = bayesmith.iterative_gls(
             block, bayesmith.sigma_from_graph(graph, {"gains": gain_truth})
@@ -574,9 +566,7 @@ class TestExample7And8GCR:
         assert worst_z < Z_CEILING
         assert worst_cov < COV_TOL
 
-    def test_example_8_the_vmapped_path_reproduces_them_too(
-        self, block_and_precision, observed
-    ):
+    def test_example_8_the_vmapped_path_reproduces_them_too(self, block_and_precision, observed):
         block, precision = block_and_precision
         drawn_tree = jax.vmap(
             lambda key: bayesmith.gcr_sample(block, precision=precision, key=key)[0]
@@ -597,9 +587,7 @@ class TestExample7And8GCR:
         """
         block, precision = block_and_precision
         shape = jax.eval_shape(
-            jax.vmap(
-                lambda key: bayesmith.gcr_sample(block, precision=precision, key=key)[0]
-            ),
+            jax.vmap(lambda key: bayesmith.gcr_sample(block, precision=precision, key=key)[0]),
             jax.random.split(jax.random.key(0), 3),
         )
         assert shape["gains"].shape == (3, N_TIME)
@@ -652,16 +640,10 @@ class TestExample9LogSpaceGCR:
         )
 
     @pytest.fixture
-    def log_graph(
-        self, log_instrument, log_space_space, multiplicative, template_state
-    ):
+    def log_graph(self, log_instrument, log_space_space, multiplicative, template_state):
         forward, _ = log_space_space.forward_fn(log_instrument, template_state)
-        data = multiplicative.realise(
-            forward({"log_gain": self.LOG_TRUTH}), key=jax.random.key(5)
-        )
-        return to_graph(
-            log_space_space, log_instrument, template_state, data, multiplicative
-        )
+        data = multiplicative.realise(forward({"log_gain": self.LOG_TRUTH}), key=jax.random.key(5))
+        return to_graph(log_space_space, log_instrument, template_state, data, multiplicative)
 
     def test_the_adapter_s_graph_has_a_log_route(self, log_graph):
         transformed = bayesmith.log_space(log_graph)

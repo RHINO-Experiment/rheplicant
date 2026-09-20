@@ -192,9 +192,7 @@ def test_the_accumulated_fisher_plus_the_prior_is_positive_definite(n_epochs, ta
 
 @pytest.mark.parametrize("n_epochs", N_VALUES)
 @pytest.mark.parametrize("tau", TAU_VALUES)
-def test_the_square_root_form_is_never_worse_than_the_explicit_schur_complement(
-    n_epochs, tau
-):
+def test_the_square_root_form_is_never_worse_than_the_explicit_schur_complement(n_epochs, tau):
     """Section 3's measurement, on this fixture, with the digits recorded.
 
     The spec's numbers -- float64 ``lambda_min = -1.4e-8`` at ``tau = 5e4``,
@@ -212,21 +210,16 @@ def test_the_square_root_form_is_never_worse_than_the_explicit_schur_complement(
     ``srif > 0``, and it is not relaxed.
     """
     memory = _campaign(n_epochs, tau)
-    srif = np.linalg.eigvalsh(
-        np.asarray(memory.fisher(at=AT).matrix) + _prior_fisher()
-    )[0]
+    srif = np.linalg.eigvalsh(np.asarray(memory.fisher(at=AT).matrix) + _prior_fisher())[0]
     # The prior is permuted INTO declared order here rather than the Schur
     # complement out of it, so that both spectra are of matrices in the same
     # basis. Both entries are 0.25 on this fixture, so the permutation changes
     # nothing arithmetically -- it is written because the next fixture's will not
     # be, and a spectrum is exactly the quantity that would not say so.
-    explicit = np.linalg.eigvalsh(
-        _explicit_schur(memory, AT) + SWAP @ _prior_fisher() @ SWAP.T
-    )[0]
+    explicit = np.linalg.eigvalsh(_explicit_schur(memory, AT) + SWAP @ _prior_fisher() @ SWAP.T)[0]
     assert not (srif <= 0.0), f"SRIF lambda_min = {srif:.6e}"
     assert srif >= explicit - 1e-12 * abs(srif), (
-        f"SRIF {srif:.6e} vs explicit Schur {explicit:.6e} at N = {n_epochs}, "
-        f"tau = {tau}"
+        f"SRIF {srif:.6e} vs explicit Schur {explicit:.6e} at N = {n_epochs}, tau = {tau}"
     )
 
 
@@ -304,9 +297,7 @@ def test_a_rank_deficient_night_is_not_an_error_and_the_prior_is_the_floor():
     eigenvalues = np.linalg.eigvalsh(fisher)
     assert eigenvalues[0] == pytest.approx(0.0, abs=1e-12)
     assert eigenvalues[-1] == pytest.approx(13.262953, rel=1e-6)
-    assert np.linalg.eigvalsh(fisher + _prior_fisher())[0] == pytest.approx(
-        0.25, rel=1e-9
-    )
+    assert np.linalg.eigvalsh(fisher + _prior_fisher())[0] == pytest.approx(0.25, rel=1e-9)
     assert float(memory.log_likelihood(AT)) == pytest.approx(-9.367610, rel=1e-6)
 
 

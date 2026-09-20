@@ -44,9 +44,7 @@ class SafePlatform:
             None,
         )
 
-    def inspect_ancestor_entry(
-        self, containing_fd, containing_path, child_name, child_stat
-    ):
+    def inspect_ancestor_entry(self, containing_fd, containing_path, child_name, child_stat):
         row = os.fstat(containing_fd)
         sticky = bool(row.st_mode & stat.S_ISVTX)
         writable = bool(stat.S_IMODE(row.st_mode) & 0o022)

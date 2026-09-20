@@ -124,7 +124,6 @@ _NO_DEFAULT = object()
 _RUN_HANDLER_REGISTRIES = (PARSERS, PRE_EXECUTORS, EXECUTORS, DEFERRED_CHECKS)
 
 
-
 #: A non-empty mapping, so :func:`_is_fan` keeps answering correctly if the
 #: FAN branch ever grows the non-emptiness rule the list branch already has.
 _FAN_PROBE = {"probe": {}}
@@ -841,9 +840,7 @@ def _run_widgets(builder: _Builder) -> None:
     #: unique.
     required_by_kind = {
         "seed": frozenset({"plan.sample", "conjugate.gcr", "nuts"}),
-        "names": frozenset(
-            {"conjugate.wiener", "conjugate.gcr", "conjugate.gls", "condition"}
-        ),
+        "names": frozenset({"conjugate.wiener", "conjugate.gcr", "conjugate.gls", "condition"}),
     }
     all_keys = set().union(*tables.values())
     for key in sorted(all_keys):
@@ -873,9 +870,7 @@ def _run_widgets(builder: _Builder) -> None:
             widget="select" if choices else "value",
             choices=tuple(choices),
             required=demanding is None and key in required,
-            required_when=(
-                None if not demanded_by else _rule("runs[].kind", "in", demanded_by)
-            ),
+            required_when=(None if not demanded_by else _rule("runs[].kind", "in", demanded_by)),
             default=(
                 _NO_DEFAULT if _contested(key, default_owners) else defaults.get(key, _NO_DEFAULT)
             ),

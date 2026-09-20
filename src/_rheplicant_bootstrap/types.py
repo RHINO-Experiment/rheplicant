@@ -74,9 +74,7 @@ class Origin:
 
     def __post_init__(self) -> None:
         if not static_isinstance(self.kind, str):
-            raise ValueError(
-                f"unknown origin kind type: {static_type_name(self.kind)}"
-            )
+            raise ValueError(f"unknown origin kind type: {static_type_name(self.kind)}")
         kind = str.__str__(self.kind)
         if self.name is None:
             name = None
@@ -84,8 +82,7 @@ class Origin:
             name = str.__str__(self.name)
         else:
             raise ValueError(
-                f"origin name must be a string or null; got "
-                f"{static_type_name(self.name)}"
+                f"origin name must be a string or null; got {static_type_name(self.name)}"
             )
         object.__setattr__(self, "kind", kind)
         object.__setattr__(self, "name", name)
@@ -128,9 +125,7 @@ class CompletedBoundary:
 class TraceSink(Protocol):
     """Layer-aware, JAX-free append seam implemented by Task 14."""
 
-    def boundary_completed(
-        self, stage: Stage, layer: LayerIdentity | None = None
-    ) -> None: ...
+    def boundary_completed(self, stage: Stage, layer: LayerIdentity | None = None) -> None: ...
 
     def record_findings(
         self,
@@ -139,9 +134,7 @@ class TraceSink(Protocol):
         findings: Sequence[Mapping[str, str]],
     ) -> None: ...
 
-    def record_default(
-        self, layer: LayerIdentity, path: str, value: JsonValue
-    ) -> None: ...
+    def record_default(self, layer: LayerIdentity, path: str, value: JsonValue) -> None: ...
 
     def record_delivery(
         self,
@@ -153,21 +146,13 @@ class TraceSink(Protocol):
         unit: str | None,
     ) -> None: ...
 
-    def record_input(
-        self, layer: LayerIdentity, row: Mapping[str, JsonValue]
-    ) -> None: ...
+    def record_input(self, layer: LayerIdentity, row: Mapping[str, JsonValue]) -> None: ...
 
-    def record_parsed_run(
-        self, layer: LayerIdentity, row: Mapping[str, JsonValue]
-    ) -> None: ...
+    def record_parsed_run(self, layer: LayerIdentity, row: Mapping[str, JsonValue]) -> None: ...
 
-    def record_run_outcome(
-        self, layer: LayerIdentity, row: Mapping[str, JsonValue]
-    ) -> None: ...
+    def record_run_outcome(self, layer: LayerIdentity, row: Mapping[str, JsonValue]) -> None: ...
 
-    def freeze_layer(
-        self, layer: LayerIdentity, row: Mapping[str, JsonValue]
-    ) -> None: ...
+    def freeze_layer(self, layer: LayerIdentity, row: Mapping[str, JsonValue]) -> None: ...
 
     def completed_boundaries(self) -> Sequence[CompletedBoundary]: ...
 
@@ -191,9 +176,7 @@ class DestinationDescriptor:
         domain: DimensionDomain | None = None,
         selector: str | int | None = None,
     ) -> DestinationDescriptor:
-        document_suffix = (
-            f"[{segment}]" if static_isinstance(segment, int) else f".{segment}"
-        )
+        document_suffix = f"[{segment}]" if static_isinstance(segment, int) else f".{segment}"
         chosen = segment if selector is None else selector
         if static_isinstance(chosen, int) or chosen == "[]":
             selector_suffix = "[]"
@@ -206,9 +189,7 @@ class DestinationDescriptor:
         )
 
     def nested(self, segment: str | int) -> DestinationDescriptor:
-        document_suffix = (
-            f"[{segment}]" if static_isinstance(segment, int) else f".{segment}"
-        )
+        document_suffix = f"[{segment}]" if static_isinstance(segment, int) else f".{segment}"
         return DestinationDescriptor(
             document_path=f"{self.document_path}{document_suffix}",
             domain=self.domain,

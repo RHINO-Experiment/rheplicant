@@ -72,9 +72,7 @@ def _require_numpyro():
         import numpyro  # noqa: F401
         import numpyro.distributions  # noqa: F401
     except ImportError as exc:  # pragma: no cover
-        raise ImportError(
-            "This feature needs numpyro: pip install 'rheplicant[numpyro]'."
-        ) from exc
+        raise ImportError("This feature needs numpyro: pip install 'rheplicant[numpyro]'.") from exc
 
 
 def _require_priors(space: ParameterSpace) -> None:
@@ -98,9 +96,7 @@ def _require_priors(space: ParameterSpace) -> None:
         )
 
 
-def _refuse_a_latent_named_like_the_sampled_sigma(
-    space: ParameterSpace, noise_std: Any
-) -> None:
+def _refuse_a_latent_named_like_the_sampled_sigma(space: ParameterSpace, noise_std: Any) -> None:
     """A sampled sigma takes the site ``"noise_std"``; a latent cannot have it too.
 
     The site below is named ``"noise_std"`` and belongs to no
@@ -321,9 +317,7 @@ def to_numpyro_model(
     _require_priors(space)
     _refuse_a_joint_prior_in_single_precision(space)
     _refuse_a_latent_named_like_the_sampled_sigma(space, noise_std)
-    _refuse_sampled_noise_std_under_a_joint_prior(
-        space, noise_std, allow_sampled_noise_std
-    )
+    _refuse_sampled_noise_std_under_a_joint_prior(space, noise_std, allow_sampled_noise_std)
     space.validate(pipeline)
 
     joint = space.joint_prior
@@ -332,9 +326,7 @@ def to_numpyro_model(
         # traced decision is one no branch can be taken on. This is the refusal;
         # the eigenvalue floor inside `log_density` is only the arithmetic that
         # keeps a degenerate block finite if one ever gets past it.
-        joint.check_identified(
-            space, pipeline, state_template, caller="to_numpyro_model"
-        )
+        joint.check_identified(space, pipeline, state_template, caller="to_numpyro_model")
 
     # The prediction's shape, asked of the declaration rather than of a traced
     # array: `to_graph` needs data at BUILD time and this function is not given
@@ -362,7 +354,11 @@ def to_numpyro_model(
     check_noise_std_axis(noise, prediction_shape, "to_numpyro_model")
 
     graph = to_graph(
-        space, pipeline, state_template, jnp.zeros(prediction_shape), noise,
+        space,
+        pipeline,
+        state_template,
+        jnp.zeros(prediction_shape),
+        noise,
         prediction_name=PREDICTION_SITE,
         observation_name=obs_name,
         scale_prior=("noise_std", noise_std) if sampled_scale else None,

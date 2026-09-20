@@ -132,8 +132,7 @@ class TestEnvironmentComponents:
 class TestInstrumentComponents:
     def test_noise_wave_linear_in_parameters(self, data_state):
         """The GCR-critical property: output is linear in (T_unc, T_cos, T_sin, T_rx)."""
-        pytest.importorskip("rhino_cal_jax",
-                            reason="rhino_cal_jax comes with rheplicant[cal]")
+        pytest.importorskip("rhino_cal_jax", reason="rhino_cal_jax comes with rheplicant[cal]")
         assert data_state.coords.freq.shape[0] == N_FREQ
 
         def build(t_unc, t_cos, t_sin, t_rx):
@@ -164,10 +163,11 @@ class TestInstrumentComponents:
         survives as a special case of the real model rather than an assumption
         it makes.
         """
-        pytest.importorskip("rhino_cal_jax",
-                            reason="rhino_cal_jax comes with rheplicant[cal]")
+        pytest.importorskip("rhino_cal_jax", reason="rhino_cal_jax comes with rheplicant[cal]")
         op = NoiseWaveOperator(
-            t_unc=jnp.array(0.0), t_cos=jnp.array(0.0), t_sin=jnp.array(0.0),
+            t_unc=jnp.array(0.0),
+            t_cos=jnp.array(0.0),
+            t_sin=jnp.array(0.0),
             t_rx=jnp.array(0.0),
             gamma_src_re=jnp.full((1, N_FREQ), 0.3),
             gamma_src_im=jnp.full((1, N_FREQ), 0.4),
@@ -193,9 +193,7 @@ class TestInstrumentComponents:
         """Both sides of a CLOSED boundary: 0 Hz is not a frequency either, and
         it is the value a missing setting defaults to."""
         with pytest.raises(StateValidationError, match="tone_freq"):
-            CWCalibrationOperator(
-                amplitude=jnp.array(1.0), tone_freq=tone_freq, line_width=1e6
-            )
+            CWCalibrationOperator(amplitude=jnp.array(1.0), tone_freq=tone_freq, line_width=1e6)
 
     def test_emi_comb(self, data_state):
         out = EMIOperator(amplitude=jnp.array(5.0), period=2)(data_state)

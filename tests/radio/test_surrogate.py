@@ -70,9 +70,7 @@ class TestHybridTraining:
         """The headline hybrid demo: physics chain + neural stage recovers
         a rippled bandpass by gradient descent on the MLP weights only."""
         freq = template_state.coords.freq
-        ripple = 1.0 + 0.3 * jnp.sin(
-            2 * jnp.pi * 3 * (freq - F_MIN) / (F_MAX - F_MIN)
-        )
+        ripple = 1.0 + 0.3 * jnp.sin(2 * jnp.pi * 3 * (freq - F_MIN) / (F_MAX - F_MIN))
         truth = assemble(
             SkyOperator(amplitude=jnp.array(1.0)),
             ReceiverOperator(bandpass=ripple),
@@ -88,19 +86,16 @@ class TestHybridTraining:
         # train ONLY the MLP weights (is_inexact_array skips the activation fn)
         spec = jax.tree.map(lambda _: False, surrogate_twin)
         spec = eqx.tree_at(
-            lambda p: p["bandpass"], spec,
+            lambda p: p["bandpass"],
+            spec,
             jax.tree.map(eqx.is_inexact_array, surrogate_twin["bandpass"]),
         )
-        forward, params0 = build_forward_fn(
-            surrogate_twin, template_state, filter_spec=spec
-        )
+        forward, params0 = build_forward_fn(surrogate_twin, template_state, filter_spec=spec)
         calibrator = AdamCalibrator(learning_rate=1e-2, n_steps=1500)
         params_fit, losses = calibrator.fit(forward, params0, observed)
 
         assert losses[-1] < losses[0] / 100  # loss drops by > 2 orders
-        fitted = eqx.combine(
-            params_fit, eqx.partition(surrogate_twin, spec)[1]
-        )["bandpass"]
+        fitted = eqx.combine(params_fit, eqx.partition(surrogate_twin, spec)[1])["bandpass"]
         recovered = fitted.response(freq)
         rel_err = jnp.max(jnp.abs(recovered - ripple) / ripple)
         assert rel_err < 0.05  # bandpass recovered to < 5%

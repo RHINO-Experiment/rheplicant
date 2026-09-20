@@ -46,9 +46,7 @@ class TestExtremeEigenvalues:
         # lam_min is a difference of two numbers the size of lam_max, so it is
         # only ever resolved to that scale -- which is precisely why callers
         # floor it with an independent bound rather than trusting it near zero.
-        assert float(smallest) == pytest.approx(
-            float(exact[0]), abs=1e-3 * float(exact[-1])
-        ), label
+        assert float(smallest) == pytest.approx(float(exact[0]), abs=1e-3 * float(exact[-1])), label
 
     def test_the_top_estimate_never_exceeds_the_truth(self):
         """Power iteration approaches lam_max from below.
@@ -69,14 +67,13 @@ class TestExtremeEigenvalues:
         """The default iteration count is a margin, not a requirement."""
         operator, matrix = _operator_with_spectrum([1e-4, 1e-4, 451.0])
         exact = float(jnp.linalg.eigvalsh(matrix)[-1])
-        settled = float(
-            largest_eigenvalue(operator, jnp.zeros(3), jax.random.key(3), 3)
-        )
+        settled = float(largest_eigenvalue(operator, jnp.zeros(3), jax.random.key(3), 3))
         assert settled == pytest.approx(exact, rel=1e-3)
 
     def test_it_works_on_a_pytree_domain(self):
         """A complex latent is carried as a (real, imag) tuple, so the domain
         is a pytree rather than an array."""
+
         def operator(parts):
             return (3.0 * parts[0], 0.5 * parts[1])
 

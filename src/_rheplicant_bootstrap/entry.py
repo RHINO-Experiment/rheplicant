@@ -166,11 +166,7 @@ def _declared_run_names(document: Mapping[str, object]) -> tuple[str, ...]:
 
 
 def _declared_variant_names(prepared: PreparedConfig) -> tuple[str, ...]:
-    return tuple(
-        cast(str, layer.name)
-        for layer in prepared.layers
-        if layer.kind == "variant"
-    )
+    return tuple(cast(str, layer.name) for layer in prepared.layers if layer.kind == "variant")
 
 
 def _metadata(path: str, reason: ArtefactReason) -> ArtefactRecord:
@@ -191,31 +187,19 @@ def _configure_artefacts(
         raise ConfigError("run output request has no target path.")
     trace.configure_artefacts(
         ArtefactTable(
-            marker=_metadata(
-                ".rheplicant-results.json", "boundary_not_reached"
-            ),
-            lock=_metadata(
-                lock_name(request.target_path), "transaction_not_reached"
-            ),
-            journal=_metadata(
-                journal_name(request.target_path), "transaction_not_reached"
-            ),
+            marker=_metadata(".rheplicant-results.json", "boundary_not_reached"),
+            lock=_metadata(lock_name(request.target_path), "transaction_not_reached"),
+            journal=_metadata(journal_name(request.target_path), "transaction_not_reached"),
             input=_content("config.input.yaml", "boundary_not_reached"),
-            resolved_base=_content(
-                "config.resolved.yaml", "layer_not_complete"
-            ),
-            resolved_variants=tuple(
-                _content(path, "layer_not_complete") for path in variant_paths
-            ),
+            resolved_base=_content("config.resolved.yaml", "layer_not_complete"),
+            resolved_variants=tuple(_content(path, "layer_not_complete") for path in variant_paths),
             provenance=_metadata("provenance.json", "boundary_not_reached"),
             diagnostics=_metadata("diagnostics.json", "boundary_not_reached"),
         )
     )
 
 
-def _materialization_is_written(
-    snapshot: AuditSnapshot, row: ArtefactMaterialization
-) -> bool:
+def _materialization_is_written(snapshot: AuditSnapshot, row: ArtefactMaterialization) -> bool:
     table = snapshot.artefacts
     if row.slot == "resolved_variant":
         if row.variant_index is None:
@@ -224,9 +208,7 @@ def _materialization_is_written(
     return cast(ArtefactRecord, getattr(table, row.slot)).written
 
 
-def _record_materializations(
-    trace: AuditTrace, rows: Sequence[ArtefactMaterialization]
-) -> None:
+def _record_materializations(trace: AuditTrace, rows: Sequence[ArtefactMaterialization]) -> None:
     for row in rows:
         if not _materialization_is_written(trace.snapshot(), row):
             trace.record_artefact_materialized(row)
@@ -289,9 +271,7 @@ def _record_variants(
     a `format_version` bump, so the gap is written down here rather than
     papered over by guessing.
     """
-    by_name = {
-        row.layer.name: row for row in resolved if row.layer.kind == "variant"
-    }
+    by_name = {row.layer.name: row for row in resolved if row.layer.kind == "variant"}
     for name in variant_names:
         artefact = by_name.get(name)
         trace.record_variant(
@@ -374,9 +354,7 @@ def _publish_transaction(
             return publish_success(handle, platform)
         return publish_failure(handle, platform)
     except TransactionInterrupted as error:
-        _record_materializations(
-            trace, error.state.unreported_materializations
-        )
+        _record_materializations(trace, error.state.unreported_materializations)
         raise
 
 
@@ -449,15 +427,11 @@ def _publish_failure_once(
         )
     except Exception as transaction_error:
         if isinstance(transaction_error, TransactionInterrupted):
-            _record_materializations(
-                trace, transaction_error.state.unreported_materializations
-            )
+            _record_materializations(trace, transaction_error.state.unreported_materializations)
         _recover_publication(lease, platform, transaction_error)
         if transaction_error is not original:
             try:
-                original.add_note(
-                    f"terminal {status} audit failed: {transaction_error}"
-                )
+                original.add_note(f"terminal {status} audit failed: {transaction_error}")
             except Exception:
                 pass
         raise original from transaction_error
@@ -478,9 +452,7 @@ def _publish_error_after_transaction_failure(
 ) -> None:
     """Recover a failed success transaction, then try one error sibling."""
     if isinstance(original, TransactionInterrupted):
-        _record_materializations(
-            trace, original.state.unreported_materializations
-        )
+        _record_materializations(trace, original.state.unreported_materializations)
     _record_error_once(trace, original)
     publication = _recover_publication(lease, platform, original)
     if publication is None:
@@ -634,9 +606,7 @@ def dispatch_request(
         )
         try:
             if outputs.stdout != "none":
-                stdout.write(
-                    f"configuration valid: base + {len(variant_names)} variants\n"
-                )
+                stdout.write(f"configuration valid: base + {len(variant_names)} variants\n")
                 stdout.flush()
             return 0
         finally:
@@ -768,9 +738,7 @@ def dispatch_request(
                     report=request.report,
                     component_limit=publication.component_limit,
                 )
-                product_files = {
-                    row.relative_path: row.payload for row in scientific.files
-                }
+                product_files = {row.relative_path: row.payload for row in scientific.files}
                 if len(product_files) != len(scientific.files):
                     raise ConfigError("scientific product paths are duplicated.")
                 # Named separately from the duplicate check above, because the
@@ -786,20 +754,16 @@ def dispatch_request(
                         f"{PRESETS_DIRECTORY}/."
                     )
                 reserved = sorted(
-                    set(product_files)
-                    & {*MERGED_METADATA_PATHS, *RESERVED_BUNDLE_PATHS}
+                    set(product_files) & {*MERGED_METADATA_PATHS, *RESERVED_BUNDLE_PATHS}
                 )
                 if reserved:
                     raise ConfigError(
-                        f"scientific product path(s) {reserved} are reserved by "
-                        "the audit tree."
+                        f"scientific product path(s) {reserved} are reserved by the audit tree."
                     )
                 additional_files = {**(additional_files or {}), **product_files}
                 additional_files[PRODUCTS_NAME] = scientific.manifest
             except Exception as original:
-                failure_status = (
-                    "refused" if isinstance(original, REFUSALS) else "error"
-                )
+                failure_status = "refused" if isinstance(original, REFUSALS) else "error"
                 _publish_failure_once(
                     original,
                     status=failure_status,
@@ -879,9 +843,7 @@ def _embedded_presets(rows: Sequence[Mapping[str, object]]) -> dict[str, PresetS
         } <= set(row):
             raise ConfigError(f"embedded preset[{index}] has the wrong fields.")
         if ("input_bytes" in row) == ("input_bytes_b64" in row):
-            raise ConfigError(
-                f"embedded preset[{index}] requires exactly one byte field."
-            )
+            raise ConfigError(f"embedded preset[{index}] requires exactly one byte field.")
         raw = row.get("input_bytes", row.get("input_bytes_b64"))
         payload = _decode_bytes(raw, where=f"embedded preset[{index}] bytes")
         name = row["name"]
@@ -991,9 +953,7 @@ def run_embedded_config(
             try:
                 return snapshots[name]
             except KeyError:
-                raise ConfigError(
-                    f"embedded source does not contain preset {name!r}."
-                ) from None
+                raise ConfigError(f"embedded source does not contain preset {name!r}.") from None
 
         source = SourceInput(
             payload,

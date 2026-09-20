@@ -275,9 +275,7 @@ class TestTheHandBuiltRoute:
     """
 
     def _stages(self):
-        return SrcA(value=jnp.array(1.0)), Tone(level=jnp.array(2.0)), Amp(
-            factor=jnp.array(10.0)
-        )
+        return SrcA(value=jnp.array(1.0)), Tone(level=jnp.array(2.0)), Amp(factor=jnp.array(10.0))
 
     def test_the_correct_order_builds_and_computes(self, state):
         src, tone, amp = self._stages()
@@ -318,9 +316,7 @@ class TestTheHandBuiltRoute:
     def test_replace_stage_re_checks(self, state):
         """The functional-update path rebuilds, so it must refuse the same."""
         src, tone, amp = self._stages()
-        innocent = Pipeline(
-            src, amp, Mul(factor=jnp.array(3.0)), names=("a", "amp", "tone")
-        )
+        innocent = Pipeline(src, amp, Mul(factor=jnp.array(3.0)), names=("a", "amp", "tone"))
         assert jnp.allclose(innocent(state).data, 30.0)  # 1 * 10 * 3
         with pytest.raises(PipelineError, match="\\['amp'\\]"):
             innocent.replace_stage("tone", tone)
@@ -343,7 +339,8 @@ class TestTheHandBuiltRoute:
             must_precede: ClassVar[tuple[str, ...]] = ("tone",)
 
         pipeline = Pipeline(
-            SrcA(value=jnp.array(1.0)), SelfNaming(level=jnp.array(2.0)),
+            SrcA(value=jnp.array(1.0)),
+            SelfNaming(level=jnp.array(2.0)),
             names=("a", "tone"),
         )
         assert jnp.allclose(pipeline(state).data, 3.0)
@@ -397,8 +394,10 @@ class TestWhatTheSequenceCheckCannotSee:
             calls.append(1)
             return real(*args, **kwargs)
 
-        src, tone, amp = SrcA(value=jnp.array(1.0)), Tone(level=jnp.array(2.0)), Amp(
-            factor=jnp.array(10.0)
+        src, tone, amp = (
+            SrcA(value=jnp.array(1.0)),
+            Tone(level=jnp.array(2.0)),
+            Amp(factor=jnp.array(10.0)),
         )
         built = Pipeline(src, tone, amp, names=("a", "tone", "amp"))
         pipeline_module.check_stage_ordering = counting

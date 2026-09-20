@@ -140,8 +140,12 @@ def cst_beam_maps(
     """
     freq_mhz = np.atleast_1d(np.asarray(freq_hz, dtype=float)) / _HZ_PER_MHZ
     return _require_cstbeam().cst_beam_maps(
-        directory, freq_mhz, nside=nside, suffix=suffix,
-        phi0_deg=phi0_deg, phi_sense=phi_sense,
+        directory,
+        freq_mhz,
+        nside=nside,
+        suffix=suffix,
+        phi0_deg=phi0_deg,
+        phi_sense=phi_sense,
     )
 
 
@@ -172,8 +176,7 @@ def horizon_truncated_beam(beam_maps, *, el_deg: float = 90.0, apod_deg: float =
     nside = int(round(math.sqrt(n_pix / 12.0)))
     if 12 * nside**2 != n_pix:
         raise StateValidationError(
-            f"beam_maps has {n_pix} pixels, which is not a valid HEALPix map "
-            "length (12*nside**2)."
+            f"beam_maps has {n_pix} pixels, which is not a valid HEALPix map length (12*nside**2)."
         )
     truncated, fraction = ltj.horizon_truncated_beam(
         maps, nside=nside, el_deg=el_deg, apod_deg=apod_deg

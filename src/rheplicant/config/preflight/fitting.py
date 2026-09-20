@@ -75,9 +75,7 @@ _T7_GRADIENT: str = "gradient"
 #: logs), the test went red on the copy, and the copy was extended here.  The
 #: guard is the reason that was a red test rather than a config layer quietly
 #: refusing a partition ``auto_blocks`` had just produced.
-_ENGINES: frozenset[str] = frozenset(
-    {_T7_CONJUGATE, _T7_LOG_CONJUGATE, _T7_GRADIENT}
-)
+_ENGINES: frozenset[str] = frozenset({_T7_CONJUGATE, _T7_LOG_CONJUGATE, _T7_GRADIENT})
 
 #: The ``log_route_refusal`` reasons (``inference/loglinear.py``) that a
 #: noise's TEXT can decide, spelled as ``LOG_ROUTE_REFUSALS`` spells them.
@@ -94,8 +92,7 @@ _ENGINES: frozenset[str] = frozenset(
 #: That document is still refused, by ``to_log_space`` at P3.
 _T7_NOISE_ADDITIVE: str = "noise_additive"
 _T7_NOISE_NEITHER: str = "noise_neither"
-_LOG_ROUTE_REASONS: frozenset[str] = frozenset(
-    {_T7_NOISE_ADDITIVE, _T7_NOISE_NEITHER})
+_LOG_ROUTE_REASONS: frozenset[str] = frozenset({_T7_NOISE_ADDITIVE, _T7_NOISE_NEITHER})
 
 #: ``inference.noise.kind`` values whose sigma does not scale with the
 #: prediction. ``homoscedastic`` is a ``HomoscedasticNoise``; a
@@ -103,8 +100,7 @@ _LOG_ROUTE_REASONS: frozenset[str] = frozenset(
 #: (``sections/noise.py::freeze_sigma``) and a plan wraps a bare sigma as a
 #: ``HomoscedasticNoise`` -- additive either way, and ``log_route_refusal``
 #: says ``noise_additive`` for both.
-_T7_ADDITIVE_KINDS: frozenset[str] = frozenset({"homoscedastic",
-                                                "radiometer_frozen"})
+_T7_ADDITIVE_KINDS: frozenset[str] = frozenset({"homoscedastic", "radiometer_frozen"})
 
 #: The keys a block entry takes -- ``_BLOCK_KEYS`` (``exits.py::_parse_optimize``), copied
 #: for the same reason :data:`_ENGINES` is: reaching it means importing
@@ -114,8 +110,7 @@ _T7_ADDITIVE_KINDS: frozenset[str] = frozenset({"homoscedastic",
 #: packages_own`` imports ``exits._BLOCK_KEYS`` in the TEST and pins it, so a
 #: fifth block key turns that red rather than leaving this check reading an
 #: entry the grammar rejects.
-_T7_BLOCK_KEYS: frozenset[str] = frozenset({"names", "steps", "engine",
-                                            "learning_rate"})
+_T7_BLOCK_KEYS: frozenset[str] = frozenset({"names", "steps", "engine", "learning_rate"})
 
 #: What an uncovered latent costs, per SITE.  Two sentences rather than one
 #: because the main partition and a ``warm_start``'s are not the same claim:
@@ -125,15 +120,18 @@ _T7_BLOCK_KEYS: frozenset[str] = frozenset({"names", "steps", "engine",
 #: without sharing the reasoning is how a message becomes false on its second
 #: caller, which is the defect class Task 6 shipped eight of.
 _A16_FROZEN: dict[str, str] = {
-    "blocks": ("An omitted latent is silently frozen at its declared init for "
-               "the whole run -- the sweep converges, the joint chi-squared "
-               "settles, and nothing anywhere reports that a parameter you "
-               "declared was never inferred."),
+    "blocks": (
+        "An omitted latent is silently frozen at its declared init for "
+        "the whole run -- the sweep converges, the joint chi-squared "
+        "settles, and nothing anywhere reports that a parameter you "
+        "declared was never inferred."
+    ),
     "warm_start.blocks": (
         "warm_start builds a SamplingPlan of its own over the same space "
         "(exits.py:287), so an omitted latent sits at its declared init "
         "for the whole warm estimate, and warm_start.move: can only carry "
-        "over a value that estimate produced."),
+        "over a value that estimate produced."
+    ),
 }
 
 
@@ -162,8 +160,11 @@ def _latents(document: Mapping[str, Any]) -> dict[str, Any]:
     parameters = inference.get("parameters")
     if not isinstance(parameters, Mapping):
         return {}
-    return {name: (body if isinstance(body, Mapping) else {})
-            for name, body in parameters.items() if isinstance(name, str)}
+    return {
+        name: (body if isinstance(body, Mapping) else {})
+        for name, body in parameters.items()
+        if isinstance(name, str)
+    }
 
 
 def _log_route_refusal_text(noise: Any) -> str | None:
@@ -204,14 +205,18 @@ def _log_route_refusal_text(noise: Any) -> str | None:
     return _T7_NOISE_NEITHER if not floor <= 0.0 else None
 
 
-def _log_route_message(named: str, site: str, position: int,
-                       noise: Mapping[str, Any], reason: str) -> str:
+def _log_route_message(
+    named: str, site: str, position: int, noise: Mapping[str, Any], reason: str
+) -> str:
     """Why this ``engine: log_conjugate`` block has no log route."""
     opening = f"{named}: {site}[{position}] asks for engine: log_conjugate, and "
     if reason == _T7_NOISE_NEITHER:
         floor = noise["floor"]
-        said = (f"{floor.get('value')} {floor.get('unit', '')}".strip()
-                if isinstance(floor, Mapping) else repr(floor))
+        said = (
+            f"{floor.get('value')} {floor.get('unit', '')}".strip()
+            if isinstance(floor, Mapping)
+            else repr(floor)
+        )
         return (
             opening + f"inference.noise.floor declares {said} on kind: "
             "radiometer, so sigma = f * max(|mu|, floor): proportional to the "
@@ -221,7 +226,8 @@ def _log_route_message(named: str, site: str, position: int,
             "closed-form log route (log_route_refusal: noise_neither). Declare "
             "engine: gradient for this block, which evaluates the declared "
             "likelihood, or drop inference.noise.floor if the prediction cannot "
-            "approach zero (check A19).")
+            "approach zero (check A19)."
+        )
     return (
         opening + f"inference.noise is kind: {noise.get('kind')}, whose sigma "
         "does not scale with the prediction. The log route solves against "
@@ -229,7 +235,8 @@ def _log_route_message(named: str, site: str, position: int,
         "noise that is already additive it states a different likelihood from "
         "the one declared (log_route_refusal: noise_additive). Declare another "
         "engine for this block, or inference.noise.kind: radiometer if the "
-        "noise is multiplicative (check A19).")
+        "noise is multiplicative (check A19)."
+    )
 
 
 def _runs(document: Mapping[str, Any]) -> tuple[dict, ...]:
@@ -321,8 +328,7 @@ def _kinds(document: Mapping[str, Any]) -> frozenset[str]:
     enum and with the runs that are not expectations.  A check that needs the
     run's own index, options or ``expect:`` walks :func:`_runs` instead.
     """
-    return frozenset(run["kind"] for run in _runs(document)
-                     if isinstance(run.get("kind"), str))
+    return frozenset(run["kind"] for run in _runs(document) if isinstance(run.get("kind"), str))
 
 
 def _t7_names(entry: Mapping[str, Any]) -> tuple[str, ...] | None:
@@ -487,8 +493,7 @@ def _t7_warm_start(run: Mapping[str, Any]) -> Mapping[str, Any] | None:
     if warm.get("kind") != "plan.estimate":
         return None
     move = warm.get("move")
-    if not isinstance(move, list) or not move or not all(
-            isinstance(name, str) for name in move):
+    if not isinstance(move, list) or not move or not all(isinstance(name, str) for name in move):
         return None
     return warm
 
@@ -533,9 +538,13 @@ def _t7_step_count(steps: Any) -> bool:
     return isinstance(steps, int) and not isinstance(steps, bool) and steps >= 1
 
 
-def _a16_partition(named: str, listed: str, site: str,
-                   entries: tuple[Mapping[str, Any], ...],
-                   latents: Mapping[str, Any]) -> Iterable[Finding]:
+def _a16_partition(
+    named: str,
+    listed: str,
+    site: str,
+    entries: tuple[Mapping[str, Any], ...],
+    latents: Mapping[str, Any],
+) -> Iterable[Finding]:
     """A16: the partition, in the order ``plan.py::_not_converged_message`` settles it.
 
     Three legs, one id.  The schema row (line 1193) describes two of them --
@@ -558,28 +567,33 @@ def _a16_partition(named: str, listed: str, site: str,
         for name in _t7_names(entry) or ():
             if name in seen:
                 yield refuse(
-                    "A16", block_where,
+                    "A16",
+                    block_where,
                     f"{named}: {site}[{position}].names lists {name!r} twice, "
                     "and two copies of one latent in a block are exactly "
                     "degenerate with each other -- the block's normal "
                     "operator is singular in a direction that says nothing "
                     "about the model, and the answer has one entry per name, "
                     "so one copy's result silently overwrites the other's "
-                    "(check A16).")
+                    "(check A16).",
+                )
                 continue
             seen.add(name)
             if name not in latents:
                 yield refuse(
-                    "A16", block_where,
+                    "A16",
+                    block_where,
                     f"{named}: {site}[{position}] names {name!r}, which "
                     "inference.parameters does not declare; it declares "
                     f"{list(latents)}. A block over a name nobody declared "
                     "updates nothing and leaves the latent it was meant to "
-                    "cover sitting at its declared init (check A16).")
+                    "cover sitting at its declared init (check A16).",
+                )
                 continue
             if name in owner:
                 yield refuse(
-                    "A16", block_where,
+                    "A16",
+                    block_where,
                     f"{named}: {name!r} is in {site}[{owner[name]}] and in "
                     f"{site}[{position}]. A Gibbs sweep updates each block "
                     "against the conditional that holds when it runs, so the "
@@ -587,17 +601,20 @@ def _a16_partition(named: str, listed: str, site: str,
                     "invalidated -- and every diagnostic reports the second's "
                     "answer as if the first had never happened. Put each "
                     "latent in exactly one block; to update two together, put "
-                    "them in ONE block (check A16).")
+                    "them in ONE block (check A16).",
+                )
                 continue
             owner[name] = position
     missing = [name for name in latents if name not in owner]
     if missing:
         yield refuse(
-            "A16", listed,
+            "A16",
+            listed,
             f"{named}: {site}: does not cover {missing}; every latent "
             "inference.parameters declares must be in exactly one block. "
             f"{_A16_FROZEN[site]} Add it to a block, or drop it from "
-            "inference.parameters (check A16).")
+            "inference.parameters (check A16).",
+        )
 
 
 def _a17_message(named: str, site: str, position: int, steps: Any) -> str:
@@ -610,26 +627,39 @@ def _a17_message(named: str, site: str, position: int, steps: Any) -> str:
     Measured, ``plan.py``: ``steps=0``, ``steps=True``, ``steps='5'``
     and ``steps=1.5`` are all refused before a plan is settled at all.
     """
-    head = (f"{named}: {site}[{position}] is solved by the conjugate engine, "
-            "which has no inner steps, so steps: ")
-    why = ("A conjugate block's estimate is one Wiener solve and its draw is "
-           "one exact constrained realization -- there is no step count to "
-           "tune, which is the whole advantage. ")
+    head = (
+        f"{named}: {site}[{position}] is solved by the conjugate engine, "
+        "which has no inner steps, so steps: "
+    )
+    why = (
+        "A conjugate block's estimate is one Wiener solve and its draw is "
+        "one exact constrained realization -- there is no step count to "
+        "tune, which is the whole advantage. "
+    )
     if _t7_step_count(steps):
-        return (f"{head}{steps!r} would be silently ignored. {why}Drop "
-                "steps:, or declare engine: gradient if a gradient step was "
-                "what you meant (check A17).")
-    return (f"{head}{steps!r} is not a knob it has. {why}Drop steps:. Moving "
-            f"to engine: gradient would not rescue {steps!r} either -- inner "
-            "steps are a positive int on every engine (plan.py:360), so "
-            "the block would be refused a second time (check A17).")
+        return (
+            f"{head}{steps!r} would be silently ignored. {why}Drop "
+            "steps:, or declare engine: gradient if a gradient step was "
+            "what you meant (check A17)."
+        )
+    return (
+        f"{head}{steps!r} is not a knob it has. {why}Drop steps:. Moving "
+        f"to engine: gradient would not rescue {steps!r} either -- inner "
+        "steps are a positive int on every engine (plan.py:360), so "
+        "the block would be refused a second time (check A17)."
+    )
 
 
-def _t7_engines(named: str, listed: str, site: str,
-                entries: tuple[Mapping[str, Any], ...],
-                latents: Mapping[str, Any], *,
-                derive: bool,
-                noise: Any = None) -> Iterable[Finding]:
+def _t7_engines(
+    named: str,
+    listed: str,
+    site: str,
+    entries: tuple[Mapping[str, Any], ...],
+    latents: Mapping[str, Any],
+    *,
+    derive: bool,
+    noise: Any = None,
+) -> Iterable[Finding]:
     """A17, A18, A19 and the engine enum, in the order ``plan.py`` decides them.
 
     **``derive`` is False when the partition is wrong, and only the ENUM runs
@@ -667,14 +697,15 @@ def _t7_engines(named: str, listed: str, site: str,
         # the pass is "check A16 RAISED" and costs the report every other
         # finding.  `Block._check` refuses a non-string engine by the same
         # clause, measured: "asks for engine=5; the engines are [...]".
-        if declared is not None and not (isinstance(declared, str)
-                                         and declared in _ENGINES):
+        if declared is not None and not (isinstance(declared, str) and declared in _ENGINES):
             yield refuse(
-                "A19", block_where,
+                "A19",
+                block_where,
                 f"{named}: {site}[{position}] asks for engine: {declared!r}; "
                 f"the engines are {sorted(_ENGINES)}. Leave engine: out and "
                 "it is derived from linear: true on each member, which is the "
-                "normal case -- an explicit engine is an override (check A19).")
+                "normal case -- an explicit engine is an override (check A19).",
+            )
             continue
 
         # The log route, which reads the block's declared engine and the
@@ -692,9 +723,9 @@ def _t7_engines(named: str, listed: str, site: str,
         if declared == _T7_LOG_CONJUGATE:
             reason = _log_route_refusal_text(noise)
             if reason is not None:
-                yield refuse("A19", block_where,
-                             _log_route_message(named, site, position,
-                                                noise, reason))
+                yield refuse(
+                    "A19", block_where, _log_route_message(named, site, position, noise, reason)
+                )
                 continue
         if not derive:
             continue
@@ -704,7 +735,8 @@ def _t7_engines(named: str, listed: str, site: str,
             linear = [name for name in names if _a18_linear(latents, name)]
             other = [name for name in names if not _a18_linear(latents, name)]
             yield refuse(
-                "A18", block_where,
+                "A18",
+                block_where,
                 f"{named}: {site}[{position}] mixes declared-linear latents "
                 f"{linear} with non-linear ones {other}, so which engine it "
                 "takes cannot be derived. A conjugate solve needs the whole "
@@ -713,7 +745,8 @@ def _t7_engines(named: str, listed: str, site: str,
                 "linear block is the difference between tractable and "
                 "hopeless. Split them into separate blocks, or declare "
                 "engine: gradient to step the whole block by gradient "
-                "deliberately (check A18).")
+                "deliberately (check A18).",
+            )
             continue
 
         # A19 before A17, because `plan.py` does: `:662-671` is inside the
@@ -725,7 +758,8 @@ def _t7_engines(named: str, listed: str, site: str,
             other = [name for name in names if not _a18_linear(latents, name)]
             if other:
                 yield refuse(
-                    "A19", block_where,
+                    "A19",
+                    block_where,
                     f"{named}: {site}[{position}] asks for engine: conjugate, "
                     f"but {other} do not declare linear: true. The conjugate "
                     "machinery solves (A^T N^-1 A + S^-1)x = b, which is the "
@@ -734,7 +768,8 @@ def _t7_engines(named: str, listed: str, site: str,
                     "declaration, where check_linearity verifies it, not in a "
                     "run that asserts it. Declare linear: true and the claim "
                     "will be checked; leave it out and this block is stepped "
-                    "by gradient (check A19).")
+                    "by gradient (check A19).",
+                )
                 continue
 
         # A17, as §2.6 item 3 decided it: "conjugate-ENGINE block", not the
@@ -743,9 +778,9 @@ def _t7_engines(named: str, listed: str, site: str,
         # package (SamplingPlan(('d','a'):gradient, ('w'):gradient)), and
         # `engine: conjugate` on a partly-linear block trips A19 above.
         if engine == _T7_CONJUGATE and entry.get("steps") is not None:
-            yield refuse("A17", block_where,
-                         _a17_message(named, site, position,
-                                      entry.get("steps")))
+            yield refuse(
+                "A17", block_where, _a17_message(named, site, position, entry.get("steps"))
+            )
 
 
 @register("A16", "A17", "A18", "A19")
@@ -790,11 +825,11 @@ def _blocks(document: Mapping[str, Any]) -> Iterable[Finding]:
             # The partition FIRST, and no engine DERIVED when it is wrong --
             # `_t7_engines`' own docstring says which clause survives that and
             # why the enum is the one that does.
-            partition = list(_a16_partition(named, listed, site, entries,
-                                            latents))
+            partition = list(_a16_partition(named, listed, site, entries, latents))
             yield from partition
-            yield from _t7_engines(named, listed, site, entries, latents,
-                                   derive=not partition, noise=noise)
+            yield from _t7_engines(
+                named, listed, site, entries, latents, derive=not partition, noise=noise
+            )
 
 
 # --- Task 8: the prior gates, and the seed asymmetry ------------------------
@@ -871,8 +906,9 @@ def _a23_latents(document: Mapping[str, Any]) -> dict[str, Any]:
     return {name: body for name, body in _latents(document).items() if body}
 
 
-def _a23_prior_free(latents: Mapping[str, Any], names: Iterable[str],
-                    covered: tuple[str, ...] = ()) -> list[str]:
+def _a23_prior_free(
+    latents: Mapping[str, Any], names: Iterable[str], covered: tuple[str, ...] = ()
+) -> list[str]:
     """The names among ``names`` that declare no prior this route accepts.
 
     ``Latent.prior`` comes from ``spec.get("prior")`` and from nowhere else
@@ -895,9 +931,9 @@ def _a23_prior_free(latents: Mapping[str, Any], names: Iterable[str],
     different fixes.  The caller filters; this function cannot, because on the
     other three routes ``names`` IS the declaration.
     """
-    return [name for name in names
-            if latents.get(name, {}).get("prior") is None
-            and name not in covered]
+    return [
+        name for name in names if latents.get(name, {}).get("prior") is None and name not in covered
+    ]
 
 
 #: What ``kind: optimize`` and ``kind: plan.estimate`` -- the two exits A23's
@@ -935,13 +971,21 @@ def _t8_traded_keys(run: Mapping[str, Any]) -> list[str]:
     # a user's mapping and a call inside it would be one import lookup per
     # key on every A23 refusal.
     calibrator = _t8_calibrator_keys()
-    return sorted(key for key in run
-                  if isinstance(key, str) and key not in _RUN_KEYS
-                  and key not in calibrator)
+    return sorted(
+        key
+        for key in run
+        if isinstance(key, str) and key not in _RUN_KEYS and key not in calibrator
+    )
 
 
-def _a23_message(named: str, kind: str, missing: list[str], because: str,
-                 covered: tuple[str, ...], traded: list[str]) -> str:
+def _a23_message(
+    named: str,
+    kind: str,
+    missing: list[str],
+    because: str,
+    covered: tuple[str, ...],
+    traded: list[str],
+) -> str:
     """A23's refusal: one shape, and three clauses the document decides.
 
     **The verb is per route.**  ``kind: fisher`` with ``space: true`` does not
@@ -968,8 +1012,7 @@ def _a23_message(named: str, kind: str, missing: list[str], because: str,
     stands, because an edit list nobody needs is noise in a refusal that is
     already four clauses long.
     """
-    verb = ("computes a POSTERIOR precision" if kind == "fisher"
-            else "draws a POSTERIOR")
+    verb = "computes a POSTERIOR precision" if kind == "fisher" else "draws a POSTERIOR"
     overlap = [name for name in missing if name in covered]
     if not covered and traded:
         # `seed:` is called out separately because it is the one key whose
@@ -983,34 +1026,44 @@ def _a23_message(named: str, kind: str, missing: list[str], because: str,
             instead = "check A1's, and check A29's on seed:"
         else:
             instead = "check A1's"
-        fix = ("A prior-free latent is a free parameter, which the calibrator "
-               "exits (kind: optimize, kind: plan.estimate) fit and a "
-               "posterior cannot. Give each one a prior:, or run one of those "
-               f"AND drop {traded} with the kind -- neither exit takes "
-               f"{'them' if len(traded) > 1 else 'it'}, so changing kind: "
-               f"alone trades this refusal for {instead}")
+        fix = (
+            "A prior-free latent is a free parameter, which the calibrator "
+            "exits (kind: optimize, kind: plan.estimate) fit and a "
+            "posterior cannot. Give each one a prior:, or run one of those "
+            f"AND drop {traded} with the kind -- neither exit takes "
+            f"{'them' if len(traded) > 1 else 'it'}, so changing kind: "
+            f"alone trades this refusal for {instead}"
+        )
     elif not covered:
-        fix = ("A prior-free latent is a free parameter, which the calibrator "
-               "exits (kind: optimize, kind: plan.estimate) fit and a "
-               "posterior cannot. Give each one a prior:, or run one of those")
+        fix = (
+            "A prior-free latent is a free parameter, which the calibrator "
+            "exits (kind: optimize, kind: plan.estimate) fit and a "
+            "posterior cannot. Give each one a prior:, or run one of those"
+        )
     elif overlap:
-        fix = ("A prior-free latent is a free parameter, which a posterior "
-               f"cannot fit. inference.joint_prior already covers {overlap}, "
-               "and a latent may not be covered AND declare a prior: of its "
-               "own (check A22), so declaring one is not the fix here: run "
-               "kind: nuts, which reads joint-prior coverage as a prior, or "
-               "drop inference.joint_prior and give every latent a prior: of "
-               "its own. Not kind: plan.estimate or kind: plan.sample -- A20 "
-               "refuses both beside a joint prior")
+        fix = (
+            "A prior-free latent is a free parameter, which a posterior "
+            f"cannot fit. inference.joint_prior already covers {overlap}, "
+            "and a latent may not be covered AND declare a prior: of its "
+            "own (check A22), so declaring one is not the fix here: run "
+            "kind: nuts, which reads joint-prior coverage as a prior, or "
+            "drop inference.joint_prior and give every latent a prior: of "
+            "its own. Not kind: plan.estimate or kind: plan.sample -- A20 "
+            "refuses both beside a joint prior"
+        )
     else:
-        fix = ("A prior-free latent is a free parameter, which a posterior "
-               "cannot fit. Give each one a prior:, or add it to "
-               "inference.joint_prior.over, which already covers "
-               f"{list(covered)}. Not kind: plan.estimate or kind: "
-               "plan.sample -- A20 refuses both beside a joint prior, so "
-               "switching would trade this refusal for that one")
-    return (f"{named}: kind: {kind} {verb}, and inference.parameters declares "
-            f"{missing} with no prior: {because}. {fix} (check A23).")
+        fix = (
+            "A prior-free latent is a free parameter, which a posterior "
+            "cannot fit. Give each one a prior:, or add it to "
+            "inference.joint_prior.over, which already covers "
+            f"{list(covered)}. Not kind: plan.estimate or kind: "
+            "plan.sample -- A20 refuses both beside a joint prior, so "
+            "switching would trade this refusal for that one"
+        )
+    return (
+        f"{named}: kind: {kind} {verb}, and inference.parameters declares "
+        f"{missing} with no prior: {because}. {fix} (check A23)."
+    )
 
 
 @register("A20", "A21", "A23")
@@ -1063,8 +1116,7 @@ def _prior_gates(document: Mapping[str, Any]) -> Iterable[Finding]:
     """
     latents = _a23_latents(document)
     covered = _a20_joint_over(document)
-    if not all(name in latents and latents[name].get("prior") is None
-               for name in covered):
+    if not all(name in latents and latents[name].get("prior") is None for name in covered):
         covered = ()
     for index, run in enumerate(_runs(document)):
         kind = run.get("kind")
@@ -1077,7 +1129,8 @@ def _prior_gates(document: Mapping[str, Any]) -> Iterable[Finding]:
 
         if covered and kind.startswith("plan."):
             yield refuse(
-                "A20", where,
+                "A20",
+                where,
                 f"{named}: inference.joint_prior covers {list(covered)}, and "
                 f"kind: {kind} does not evaluate a joint prior -- each block's "
                 "conditional is built from the latent's OWN prior:, and a "
@@ -1085,12 +1138,14 @@ def _prior_gates(document: Mapping[str, Any]) -> Iterable[Finding]:
                 "exactly zero. The sweep would run, settle, and report a "
                 "converged chi-squared computed entirely from blocks that "
                 "never saw the prior. kind: nuts is the exit that evaluates "
-                "it; use that, or drop inference.joint_prior (check A20).")
+                "it; use that, or drop inference.joint_prior (check A20).",
+            )
             continue
 
         if covered and kind == "fisher" and run.get("space") is True:
             yield refuse(
-                "A21", where,
+                "A21",
+                where,
                 f"{named}: inference.joint_prior covers {list(covered)}, and "
                 "space: true means 'add the declared priors' curvature to "
                 "this matrix'. A Jeffreys prior is DEFINED as sqrt(det of "
@@ -1100,7 +1155,8 @@ def _prior_gates(document: Mapping[str, Any]) -> Iterable[Finding]:
                 "positive definite, so nothing downstream would say "
                 "otherwise. Drop space: true -- the likelihood Fisher is what "
                 "the prior is built from -- or read the posterior with "
-                "kind: nuts (check A21).")
+                "kind: nuts (check A21).",
+            )
             continue
 
         if kind == "nuts":
@@ -1110,23 +1166,29 @@ def _prior_gates(document: Mapping[str, Any]) -> Iterable[Finding]:
             # the package would refuse, and a document that declares an
             # `over: [zzz]` does declare one.  The earlier wording was false
             # on exactly that document.
-            because = ("and the inference.joint_prior this document declares "
-                       f"covers {list(covered)} and not them"
-                       if covered else "and no inference.joint_prior covers "
-                                       "them")
+            because = (
+                "and the inference.joint_prior this document declares "
+                f"covers {list(covered)} and not them"
+                if covered
+                else "and no inference.joint_prior covers them"
+            )
         elif kind == "npe":
             missing = _a23_prior_free(latents, latents)
-            because = ("and kind: npe SIMULATES a bank from each latent's OWN "
-                       "prior, consulting inference.joint_prior not at all")
+            because = (
+                "and kind: npe SIMULATES a bank from each latent's OWN "
+                "prior, consulting inference.joint_prior not at all"
+            )
         elif kind == "fisher" and run.get("space") is True:
             missing = _a23_prior_free(latents, latents)
             # The package's own way out, which A23 owes the reader as well as
             # the calibrator exits: `uncertainty.py::_declared_gaussian_priors` says drop `space=`
             # and what comes back is exactly the likelihood matrix.
-            because = ("and space: true asks for a posterior precision, which "
-                       "a prior-free latent has no row of -- drop space: and "
-                       "what comes back is the likelihood Fisher, which is "
-                       "that same matrix without the priors in it")
+            because = (
+                "and space: true asks for a posterior precision, which "
+                "a prior-free latent has no row of -- drop space: and "
+                "what comes back is the likelihood Fisher, which is "
+                "that same matrix without the priors in it"
+            )
         elif kind == "plan.sample":
             # `_t7_entries`, not `run.get("blocks") or ()`: a `blocks: 5`
             # raises on iteration and a `blocks: "nope"` iterates into
@@ -1144,25 +1206,31 @@ def _prior_gates(document: Mapping[str, Any]) -> Iterable[Finding]:
             # one -- putting an A23 refusal beside A18's "mixes
             # declared-linear latents" and beside the enum clause's "asks for
             # engine: 'banana'", about a block whose engine nobody knows.
-            missing = sorted({
-                name
-                for entry in (_t7_entries(run.get("blocks")) or ())
-                if _engine_of(entry, latents) == _T7_GRADIENT
-                for name in _a23_prior_free(
-                    latents,
-                    [one for one in (_t7_names(entry) or ())
-                     if one in latents])})
-            because = ("and a block stepped by the gradient engine needs a "
-                       "prior on every member -- the potential is flat in a "
-                       "prior-free latent and the chain wanders without any "
-                       "diagnostic saying so")
+            missing = sorted(
+                {
+                    name
+                    for entry in (_t7_entries(run.get("blocks")) or ())
+                    if _engine_of(entry, latents) == _T7_GRADIENT
+                    for name in _a23_prior_free(
+                        latents, [one for one in (_t7_names(entry) or ()) if one in latents]
+                    )
+                }
+            )
+            because = (
+                "and a block stepped by the gradient engine needs a "
+                "prior on every member -- the potential is flat in a "
+                "prior-free latent and the chain wanders without any "
+                "diagnostic saying so"
+            )
         else:
             continue
 
         if missing:
-            yield refuse("A23", where,
-                         _a23_message(named, kind, missing, because, covered,
-                                      _t8_traded_keys(run)))
+            yield refuse(
+                "A23",
+                where,
+                _a23_message(named, kind, missing, because, covered, _t8_traded_keys(run)),
+            )
 
 
 #: Which ``runs[].kind`` needs a seed on the RUN.  ``npe`` is absent on
@@ -1175,8 +1243,7 @@ def _prior_gates(document: Mapping[str, Any]) -> Iterable[Finding]:
 # outside A29 --
 #: ``condition_estimate``'s ``key`` defaults internally, which that function's
 #: own docstring argues at ``conjugate.py::_parse_gcr``.
-_A29_SEEDED_KINDS: frozenset[str] = frozenset({"plan.sample", "conjugate.gcr",
-                                               "nuts"})
+_A29_SEEDED_KINDS: frozenset[str] = frozenset({"plan.sample", "conjugate.gcr", "nuts"})
 
 #: The subsections of ``inference.npe:`` that declare a seed, in the order
 #: ``parse_npe`` (``sections/npe.py::_train``) reads them.  ``embed:`` is the one
@@ -1259,8 +1326,7 @@ def _seeds(document: Mapping[str, Any]) -> Iterable[Finding]:
         # {expect, kind, name, on, reuse, variant}, and a sixth key added
         # there would otherwise reach `_seed_name` as an option here while
         # travelling on the spec at P3.
-        options = {key: value for key, value in run.items()
-                   if key not in _RUN_KEYS}
+        options = {key: value for key, value in run.items() if key not in _RUN_KEYS}
         # THE GATE AND `_seed_name` ARE ALTERNATIVES, NOT A PAIR.
         # `conjugate.gcr` is in both `_A29_SEEDED_KINDS` and the gate chain,
         # so a seedless gcr run would be described TWICE -- once by
@@ -1270,10 +1336,15 @@ def _seeds(document: Mapping[str, Any]) -> Iterable[Finding]:
         # FIRED, so a gcr run with a seed of the wrong FORM still reaches
         # `_seed_name`, which is the leg that decides form.
         gated = False
-        gate = (_a29_estimate_takes_no_seed if kind == "plan.estimate"
-                else _a29_gcr_needs_a_seed if kind == "conjugate.gcr"
-                else _a29_npe_takes_no_run_seed if kind == "npe"
-                else None)
+        gate = (
+            _a29_estimate_takes_no_seed
+            if kind == "plan.estimate"
+            else _a29_gcr_needs_a_seed
+            if kind == "conjugate.gcr"
+            else _a29_npe_takes_no_run_seed
+            if kind == "npe"
+            else None
+        )
         if gate is not None:
             try:
                 gate(named, options)
@@ -1385,8 +1456,7 @@ _T9_EARLIEST_CONVERGED_SWEEP: int = 3
 #: A frozenset would therefore accept a document the package refuses AND
 #: crash on another.  :func:`_a25_check_mode` mirrors the package's two-part
 #: test rather than this tuple's membership; the tuple is what the test pins.
-_A25_CHECK_MODES: tuple[Any, ...] = (False, _T9_CHECK_ONCE,
-                                     _T9_CHECK_EACH_SWEEP)
+_A25_CHECK_MODES: tuple[Any, ...] = (False, _T9_CHECK_ONCE, _T9_CHECK_EACH_SWEEP)
 
 #: ``(key, kind, minimum)`` per ``runs[].kind``, for every numeric knob that
 #: reaches the package.  ``sorted(set(_ESTIMATE_PASSTHROUGH) |
@@ -1412,12 +1482,20 @@ _A25_CHECK_MODES: tuple[Any, ...] = (False, _T9_CHECK_ONCE,
 #: ``rhat_max`` carries ``0.0`` and NOT a strictly-positive floor: see
 #: :func:`_counts`' residues.
 _A25_KNOBS: dict[str, tuple[tuple[str, type, float | None], ...]] = {
-    "plan.estimate": (("max_iter", int, 1), ("min_sweeps", int, 1),
-                      ("tol", float, 0.0), ("solve_tol", float, 0.0),
-                      ("solve_guard", float, 0.0)),
-    "plan.sample": (("n_sweeps", int, 1), ("warmup", int, 0),
-                    ("rhat_max", float, 0.0), ("solve_tol", float, 0.0),
-                    ("solve_guard", float, 0.0)),
+    "plan.estimate": (
+        ("max_iter", int, 1),
+        ("min_sweeps", int, 1),
+        ("tol", float, 0.0),
+        ("solve_tol", float, 0.0),
+        ("solve_guard", float, 0.0),
+    ),
+    "plan.sample": (
+        ("n_sweeps", int, 1),
+        ("warmup", int, 0),
+        ("rhat_max", float, 0.0),
+        ("solve_tol", float, 0.0),
+        ("solve_guard", float, 0.0),
+    ),
     "nuts": (("num_samples", int, 1), ("num_warmup", int, 1)),
 }
 
@@ -1461,8 +1539,7 @@ _A25_NULLABLE: frozenset[str] = frozenset({"tol", "solve_guard", "warmup"})
 #: They go through ``transforms._whole`` (``sections/npe.py``), not ``_number``: that is
 #: the binding ``npe._count`` already uses, and a second reading here would be
 #: the ``_number``-vs-``_whole`` divergence the 2C ledger names.
-_A25_NPE_COUNTS: tuple[tuple[str, str], ...] = (("bank", "n_simulations"),
-                                                ("sample", "n_draws"))
+_A25_NPE_COUNTS: tuple[tuple[str, str], ...] = (("bank", "n_simulations"), ("sample", "n_draws"))
 
 
 def _t9_whole_number(value: Any) -> bool:
@@ -1495,8 +1572,9 @@ def _a25_check_mode(mode: Any) -> bool:
     return mode is False or mode in _A25_CHECK_MODES[1:]
 
 
-def _a25_bounded(where: str, name: str, key: str, value: Any, *,
-                 kind: type, minimum: float | None) -> Finding | None:
+def _a25_bounded(
+    where: str, name: str, key: str, value: Any, *, kind: type, minimum: float | None
+) -> Finding | None:
     """``exit_support._number``, with its refusal turned into a Finding.
 
     ``_number`` (``exit_support.py::ParsedOptions``) reads exactly one attribute off
@@ -1541,22 +1619,27 @@ def _a25_bounded(where: str, name: str, key: str, value: Any, *,
     """
     if kind is int and isinstance(value, float) and not math.isfinite(value):
         return refuse(
-            "A25", where,
+            "A25",
+            where,
             f"runs[{name!r}]: {key}: is a whole number; got {value!r}, and "
             f"there is no integer {value!r} rounds to. It reaches this "
             "document from ordinary YAML and JSON -- .inf, -.inf and .nan "
-            "are resolved values and 1e400 parses to infinity (check A25).")
+            "are resolved values and 1e400 parses to infinity (check A25).",
+        )
     try:
-        _number(SimpleNamespace(name=name), key, value, kind=kind,
-                minimum=minimum)
+        _number(SimpleNamespace(name=name), key, value, kind=kind, minimum=minimum)
     except ConfigError as refusal:
         return refuse("A25", where, f"{refusal} (check A25).")
     return None
 
 
-def _a25_bounds(where: str, name: str, prefix: str,
-                rows: tuple[tuple[str, type, float | None], ...],
-                spec: Mapping[str, Any]) -> list[tuple[str, Finding]]:
+def _a25_bounds(
+    where: str,
+    name: str,
+    prefix: str,
+    rows: tuple[tuple[str, type, float | None], ...],
+    spec: Mapping[str, Any],
+) -> list[tuple[str, Finding]]:
     """Every A25 finding ``rows`` earns on ``spec``, with the key that earned
     it -- the caller needs the key, because A24 is computed from two of them.
 
@@ -1585,15 +1668,17 @@ def _a25_bounds(where: str, name: str, prefix: str,
             continue
         if key in _A25_TOL_GATED and not live:
             continue
-        finding = _a25_bounded(where, name, f"{prefix}{key}", spec[key],
-                               kind=kind_of, minimum=minimum)
+        finding = _a25_bounded(
+            where, name, f"{prefix}{key}", spec[key], kind=kind_of, minimum=minimum
+        )
         if finding is not None:
             found.append((key, finding))
     return found
 
 
-def _a25_pair_message(named: str, prefix: str, spec: Mapping[str, Any],
-                      floor: int, cap: int) -> str:
+def _a25_pair_message(
+    named: str, prefix: str, spec: Mapping[str, Any], floor: int, cap: int
+) -> str:
     """A25's sweep-count refusal, naming only what the document actually wrote.
 
     Two clauses, one finding. ``1 <= min_sweeps <= max_iter`` is the package's
@@ -1613,31 +1698,36 @@ def _a25_pair_message(named: str, prefix: str, spec: Mapping[str, Any],
     The cap in the second clause is always written, since the default is
     far above the earliest verdict.
     """
-    floor_said = (f"{prefix}min_sweeps: {floor}" if "min_sweeps" in spec
-                  else f"min_sweeps, which defaults to {floor},")
-    cap_said = (f"{prefix}max_iter: {cap}" if "max_iter" in spec
-                else f"max_iter, which defaults to {cap}")
+    floor_said = (
+        f"{prefix}min_sweeps: {floor}"
+        if "min_sweeps" in spec
+        else f"min_sweeps, which defaults to {floor},"
+    )
+    cap_said = (
+        f"{prefix}max_iter: {cap}" if "max_iter" in spec else f"max_iter, which defaults to {cap}"
+    )
     earliest = _T9_EARLIEST_CONVERGED_SWEEP
     clauses = []
     if floor > cap:
-        clauses.append(f"{floor_said} is above {cap_said}, so the convergence "
-                       "test is never consulted")
+        clauses.append(
+            f"{floor_said} is above {cap_said}, so the convergence test is never consulted"
+        )
     if cap < earliest:
         clauses.append(
             f"{cap_said} is below {earliest}, the earliest sweep at which a "
             "verdict can come: the test needs two consecutive sweep-to-sweep "
-            "changes within tol, and the first is sweep 2 against sweep 1")
+            "changes within tol, and the first is sweep 2 against sweep 1"
+        )
     if cap < earliest:
-        advice = (f"Raise max_iter to at least {max(floor, earliest)}, or "
-                  f"declare {prefix}tol: null")
+        advice = f"Raise max_iter to at least {max(floor, earliest)}, or declare {prefix}tol: null"
     else:
-        advice = ("Declare a lower min_sweeps, raise max_iter, or declare "
-                  f"{prefix}tol: null")
+        advice = f"Declare a lower min_sweeps, raise max_iter, or declare {prefix}tol: null"
     return (
         f"{named}: " + "; and ".join(clauses) + " -- the run always exhausts "
         "max_iter and always refuses, including on a model that had already "
         f"settled. {advice} to run a fixed number of sweeps with no verdict "
-        "(check A25).")
+        "(check A25)."
+    )
 
 
 def _a25_sites(run: Mapping[str, Any]) -> tuple[tuple[str, str, Mapping], ...]:
@@ -1791,8 +1881,7 @@ def _counts(document: Mapping[str, Any]) -> Iterable[Finding]:
         refused_counts = False
         for rows_kind, prefix, spec in sites:
             site = where if not prefix else f"{where}.warm_start"
-            for key, finding in _a25_bounds(site, name, prefix,
-                                            _A25_KNOBS[rows_kind], spec):
+            for key, finding in _a25_bounds(site, name, prefix, _A25_KNOBS[rows_kind], spec):
                 yield finding
                 # A24 is COMPUTED from these two, so a value A25 has just
                 # refused must not be arithmetic for a second finding.  Only
@@ -1804,19 +1893,20 @@ def _counts(document: Mapping[str, Any]) -> Iterable[Finding]:
             # (``nuts.py``) does not carry the key, so Task 3's
             # ``A1.runs`` already refuses it there by name, and a second
             # answer here would be two refusals in two voices for one typo.
-            if (rows_kind.startswith("plan.")
-                    and "check_identifiability" in spec):
+            if rows_kind.startswith("plan.") and "check_identifiability" in spec:
                 mode = spec["check_identifiability"]
                 if not _a25_check_mode(mode):
                     yield refuse(
-                        "A25", site,
+                        "A25",
+                        site,
                         f"{named}: {prefix}check_identifiability: is false, "
                         "'once' (before the first sweep) or 'each_sweep' (at "
                         f"every parameter tuple visited); got {mode!r}. There "
                         "is no size heuristic here on purpose: the cost is a "
                         "dense Jacobian and an SVD, so which of the three a "
                         "run wants is a decision the document makes "
-                        "(check A25).")
+                        "(check A25).",
+                    )
 
             if rows_kind == "plan.estimate":
                 # Gated on ``tol``, and the gate is the package's:
@@ -1847,14 +1937,13 @@ def _counts(document: Mapping[str, Any]) -> Iterable[Finding]:
                 # `min_sweeps` says. Same gate, same site, ONE finding.
                 floor = spec.get("min_sweeps", _T9_MIN_SWEEPS)
                 cap = spec.get("max_iter", _T9_DEFAULT_MAX_ITER)
-                if (spec.get("tol", 1) is not None
-                        and _t9_whole_number(floor)
-                        and _t9_whole_number(cap)
-                        and (floor > cap
-                             or cap < _T9_EARLIEST_CONVERGED_SWEEP)):
-                    yield refuse("A25", site,
-                                 _a25_pair_message(named, prefix, spec,
-                                                   floor, cap))
+                if (
+                    spec.get("tol", 1) is not None
+                    and _t9_whole_number(floor)
+                    and _t9_whole_number(cap)
+                    and (floor > cap or cap < _T9_EARLIEST_CONVERGED_SWEEP)
+                ):
+                    yield refuse("A25", site, _a25_pair_message(named, prefix, spec, floor, cap))
 
         if run["kind"] == "plan.sample" and not refused_counts:
             kept = _a24_kept_draws(run)
@@ -1871,10 +1960,10 @@ def _counts(document: Mapping[str, Any]) -> Iterable[Finding]:
                 # 0.05 s could not hold: 43 modules and 21 ms, on the first
                 # call, for one integer.  The constant carries the numbers.
                 if kept[0] < _T9_MIN_DRAWS:
-                    default = ("" if run.get("warmup") is not None
-                               else ", the default n_sweeps // 2")
+                    default = "" if run.get("warmup") is not None else ", the default n_sweeps // 2"
                     yield refuse(
-                        "A24", where,
+                        "A24",
+                        where,
                         f"{named}: this run would keep {kept[0]} draw(s) "
                         f"({run['n_sweeps']} sweeps minus {kept[1]} warmup"
                         f"{default}), and a split-r_hat needs at least "
@@ -1882,7 +1971,8 @@ def _counts(document: Mapping[str, Any]) -> Iterable[Finding]:
                         "mixing diagnostic is not weak, it is undefined, and "
                         "a run whose only convergence evidence is undefined "
                         "is the silent answer this exit exists to refuse. "
-                        "Raise n_sweeps or lower warmup (check A24).")
+                        "Raise n_sweeps or lower warmup (check A24).",
+                    )
 
     inference = document.get("inference")
     npe = inference.get("npe") if isinstance(inference, Mapping) else None
@@ -1934,7 +2024,8 @@ def _counts(document: Mapping[str, Any]) -> Iterable[Finding]:
 #: ``check_identifiability`` and answered it by making that container a
 #: tuple; §3.1 pins THIS one as a frozenset, so the guard goes on the test.
 _NOISE_KINDS: frozenset[str] = frozenset(
-    {"none", "homoscedastic", "radiometer", "radiometer_frozen"})
+    {"none", "homoscedastic", "radiometer", "radiometer_frozen"}
+)
 
 #: ``inference.noise.kind`` -> what ``decided_noise`` (``sections/noise.py::build_noise``)
 #: hands an exit, decided from the WORD and nothing else.
@@ -1993,8 +2084,7 @@ _T10_NOISE_SHAPE: dict[str, str] = {
 #: only under ``noise_from: declared`` (``conjugate.py::_wiener_plan``, ``conjugate.py::_gcr_plan``,
 #: ``conjugate.py::_gcr_plan``) and has a third way out that costs it nothing, so it is branched
 #: on in the body and hears its own sentence.
-_T10_DECIDES_SIGMA: frozenset[str] = frozenset({"conjugate.wiener",
-                                                "condition"})
+_T10_DECIDES_SIGMA: frozenset[str] = frozenset({"conjugate.wiener", "condition"})
 
 #: The ``runs[].kind``\ s that read ``inference.noise`` as a RULE and
 #: therefore reach ``_decided_model``.  **THREE, not two, and the third was
@@ -2025,8 +2115,7 @@ _T10_DECIDES_SIGMA: frozenset[str] = frozenset({"conjugate.wiener",
 #: ``test_every_exit_that_reads_the_rule_has_a_branch``, which greps this
 #: module's source for one such literal per member.  Two guards, and they
 #: fail in opposite directions on purpose.
-_T10_ITERATES: frozenset[str] = frozenset({"conjugate.gls", "npe",
-                                           "conjugate.gcr"})
+_T10_ITERATES: frozenset[str] = frozenset({"conjugate.gls", "npe", "conjugate.gcr"})
 
 
 @register("A27", "A28")
@@ -2120,25 +2209,42 @@ def _decided(document: Mapping[str, Any]) -> Iterable[Finding]:
         where = f"runs[{index}].kind"
 
         if shape == "iterated" and exit_kind in _T10_DECIDES_SIGMA:
-            findings.append(refuse("A27", where, (
-                f"runs[{name!r}]: kind: {exit_kind} takes a DECIDED sigma "
-                f"array, and inference.noise.kind: {kind} makes sigma a "
-                "function of the prediction -- which a conjugate solve has "
-                "not got, because the prediction is what it solves for "
-                "(linear.py:1031). Two routes run this noise: kind: "
-                "conjugate.gls iterates the covariance it implies, or "
-                "inference.noise.kind: radiometer_frozen decides the sigma "
-                "once and keeps this exit (check A27).")))
-        elif (shape == "iterated" and exit_kind == "conjugate.gcr"
-                and entry.get("noise_from", "declared") != "gls"):
-            findings.append(refuse("A27", where, (
-                f"runs[{name!r}]: inference.noise.kind: {kind} has a sigma "
-                "that depends on the prediction, and a conjugate draw has no "
-                "prediction to evaluate it at -- the prediction is what it "
-                "draws. Declare noise_from: gls, which runs iterative_gls "
-                "first and draws at the covariance it converges to, or "
-                "inference.noise.kind: radiometer_frozen, which decides one "
-                "sigma array up front (check A27).")))
+            findings.append(
+                refuse(
+                    "A27",
+                    where,
+                    (
+                        f"runs[{name!r}]: kind: {exit_kind} takes a DECIDED sigma "
+                        f"array, and inference.noise.kind: {kind} makes sigma a "
+                        "function of the prediction -- which a conjugate solve has "
+                        "not got, because the prediction is what it solves for "
+                        "(linear.py:1031). Two routes run this noise: kind: "
+                        "conjugate.gls iterates the covariance it implies, or "
+                        "inference.noise.kind: radiometer_frozen decides the sigma "
+                        "once and keeps this exit (check A27)."
+                    ),
+                )
+            )
+        elif (
+            shape == "iterated"
+            and exit_kind == "conjugate.gcr"
+            and entry.get("noise_from", "declared") != "gls"
+        ):
+            findings.append(
+                refuse(
+                    "A27",
+                    where,
+                    (
+                        f"runs[{name!r}]: inference.noise.kind: {kind} has a sigma "
+                        "that depends on the prediction, and a conjugate draw has no "
+                        "prediction to evaluate it at -- the prediction is what it "
+                        "draws. Declare noise_from: gls, which runs iterative_gls "
+                        "first and draws at the covariance it converges to, or "
+                        "inference.noise.kind: radiometer_frozen, which decides one "
+                        "sigma array up front (check A27)."
+                    ),
+                )
+            )
         # A28's three legs sit BEHIND `_T10_ITERATES`, so the constant is read
         # by the body rather than only asserted about.  Before this gate
         # existed `grep -rn _T10_ITERATES src/` returned one line -- its own
@@ -2158,46 +2264,66 @@ def _decided(document: Mapping[str, Any]) -> Iterable[Finding]:
                 # messages (A39's) and this is not one of them -- the false
                 # A28 sentence §1 licenses is the `npe` leg below, which is
                 # the only one whose words this task chose.
-                findings.append(refuse("A28", where, (
-                    f"runs[{name!r}]: kind: conjugate.gls solves for the "
-                    "covariance a PREDICTION-DEPENDENT sigma implies, so it "
-                    "reads inference.noise as a model; inference.noise.kind: "
-                    f"{kind} decides its sigma into an array before any run "
-                    "sees it, and a decided array has no fixed point to "
-                    "iterate. Declare "
-                    "inference.noise.kind: radiometer to iterate the rule, or "
-                    "run kind: conjugate.wiener, which is what a decided "
-                    "sigma wants (check A28).")))
+                findings.append(
+                    refuse(
+                        "A28",
+                        where,
+                        (
+                            f"runs[{name!r}]: kind: conjugate.gls solves for the "
+                            "covariance a PREDICTION-DEPENDENT sigma implies, so it "
+                            "reads inference.noise as a model; inference.noise.kind: "
+                            f"{kind} decides its sigma into an array before any run "
+                            "sees it, and a decided array has no fixed point to "
+                            "iterate. Declare "
+                            "inference.noise.kind: radiometer to iterate the rule, or "
+                            "run kind: conjugate.wiener, which is what a decided "
+                            "sigma wants (check A28)."
+                        ),
+                    )
+                )
             elif exit_kind == "npe":
-                findings.append(refuse("A28", where, (
-                    f"runs[{name!r}]: kind: npe SIMULATES a bank of (theta, "
-                    "data) pairs and draws the noise for each one, so it "
-                    "reads inference.noise as a RULE; inference.noise.kind: "
-                    f"{kind} decides its sigma into an array before any run "
-                    "sees it, and a decided array is not a rule. Declare "
-                    "inference.noise.kind: radiometer or homoscedastic -- "
-                    "either is a rule simulate_pairs can draw from. There is "
-                    "no amortized-posterior exit that takes a decided array, "
-                    "so the sigma is what has to change (check A28).")))
-            elif (exit_kind == "conjugate.gcr"
-                    and entry.get("noise_from", "declared") == "gls"):
+                findings.append(
+                    refuse(
+                        "A28",
+                        where,
+                        (
+                            f"runs[{name!r}]: kind: npe SIMULATES a bank of (theta, "
+                            "data) pairs and draws the noise for each one, so it "
+                            "reads inference.noise as a RULE; inference.noise.kind: "
+                            f"{kind} decides its sigma into an array before any run "
+                            "sees it, and a decided array is not a rule. Declare "
+                            "inference.noise.kind: radiometer or homoscedastic -- "
+                            "either is a rule simulate_pairs can draw from. There is "
+                            "no amortized-posterior exit that takes a decided array, "
+                            "so the sigma is what has to change (check A28)."
+                        ),
+                    )
+                )
+            elif exit_kind == "conjugate.gcr" and entry.get("noise_from", "declared") == "gls":
                 # The third caller of `_decided_model`, reached through
                 # `_gls_result` rather than by a call site of its own -- and
                 # the one whose fix is a KEY rather than an exit.  Its
                 # `instead` clause names A27, because A27's gcr sentence
                 # offers `noise_from: gls` and `radiometer_frozen` as
                 # alternatives and a user who takes both arrives exactly here.
-                findings.append(refuse("A28", where, (
-                    f"runs[{name!r}]: kind: conjugate.gcr under noise_from: "
-                    "gls runs iterative_gls first and draws at the covariance "
-                    "it converges to, so it reads inference.noise as a model; "
-                    f"inference.noise.kind: {kind} decides its sigma into an "
-                    "array before any run sees it, and a decided array has no "
-                    "fixed point to iterate. Drop noise_from: gls: the "
-                    "declared route draws "
-                    "at that array directly, which is what a frozen sigma is "
-                    "for -- and noise_from: gls is check A27's answer for "
-                    "inference.noise.kind: radiometer, so declaring both asks "
-                    "a reweighting to find a fixed point in a number that is "
-                    "already fixed (check A28).")))
+                findings.append(
+                    refuse(
+                        "A28",
+                        where,
+                        (
+                            f"runs[{name!r}]: kind: conjugate.gcr under noise_from: "
+                            "gls runs iterative_gls first and draws at the covariance "
+                            "it converges to, so it reads inference.noise as a model; "
+                            f"inference.noise.kind: {kind} decides its sigma into an "
+                            "array before any run sees it, and a decided array has no "
+                            "fixed point to iterate. Drop noise_from: gls: the "
+                            "declared route draws "
+                            "at that array directly, which is what a frozen sigma is "
+                            "for -- and noise_from: gls is check A27's answer for "
+                            "inference.noise.kind: radiometer, so declaring both asks "
+                            "a reweighting to find a fixed point in a number that is "
+                            "already fixed (check A28)."
+                        ),
+                    )
+                )
     return tuple(findings)

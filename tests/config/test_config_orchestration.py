@@ -76,8 +76,7 @@ def _document(**patch):
 def _enumerate(document):
     """The canonical enumeration of a mapping, the mapping API's own route."""
     merged = initial_merge(document, origin=Origin("user"))
-    return enumerate_layers_once(merged.document, merged.origins,
-                                 merged.deletions)
+    return enumerate_layers_once(merged.document, merged.origins, merged.deletions)
 
 
 class _Trace:
@@ -126,8 +125,7 @@ class _Trace:
         return tuple(self.boundaries)
 
     def snapshot(self):
-        return types.SimpleNamespace(
-            completed_boundaries=self.completed_boundaries())
+        return types.SimpleNamespace(completed_boundaries=self.completed_boundaries())
 
 
 @pytest.fixture
@@ -160,6 +158,7 @@ def handler_tables():
 
 def _parse_spy(events, seen, real):
     """Record one ("parse", run-name) event and the configured build seen."""
+
     def spy(options, context):
         events.append(("parse", context.spec.name))
         seen[context.spec.name] = context.configured_run
@@ -169,31 +168,26 @@ def _parse_spy(events, seen, real):
 
 
 def _config_warning_texts(recorded):
-    return [str(one.message) for one in recorded
-            if issubclass(one.category, ConfigWarning)]
+    return [str(one.message) for one in recorded if issubclass(one.category, ConfigWarning)]
 
 
 class TestTheFourBoundariesCarryTheCumulativeReport:
     """Spec §8: each load boundary's ``ConfigError`` carries every completed
     pass's findings; before the first completed pass it carries none."""
 
-    def test_a_structural_error_before_the_first_boundary_carries_no_report(
-            self):
+    def test_a_structural_error_before_the_first_boundary_carries_no_report(self):
         with pytest.raises(ConfigError) as caught:
-            prepare_document({**_document(), "observations": {}},
-                             scope="all_layers")
+            prepare_document({**_document(), "observations": {}}, scope="all_layers")
         assert caught.value.report is None
 
-    def test_a_layering_error_before_the_first_boundary_carries_no_report(
-            self):
+    def test_a_layering_error_before_the_first_boundary_carries_no_report(self):
         document = _document()
         document["variants"] = 0
         with pytest.raises(ConfigError, match="variants") as caught:
             prepare_document(document, scope="all_layers", trace=_Trace())
         assert caught.value.report is None
 
-    def test_a_preflight_refusal_carries_the_preflight_only(
-            self, all_registries):
+    def test_a_preflight_refusal_carries_the_preflight_only(self, all_registries):
         note = warn("C11", "runtime.seed", "text note.")
         refusal = refuse("C12", "model.gain", "text refusal.")
         register_text("C11")(lambda document: (note,))
@@ -209,8 +203,7 @@ class TestTheFourBoundariesCarryTheCumulativeReport:
         assert caught.value.report.findings == (note, refusal)
         # The pass completed, so its boundary and findings ARE appended even
         # though the boundary then refused.
-        assert trace.completed_boundaries() == (
-            CompletedBoundary("preflight", _BASE),)
+        assert trace.completed_boundaries() == (CompletedBoundary("preflight", _BASE),)
         # ...but a refusing boundary emits no warnings.
         assert _config_warning_texts(heard) == []
 
@@ -228,13 +221,16 @@ class TestTheFourBoundariesCarryTheCumulativeReport:
         assert caught.value.report.findings == (note, refusal)
         assert trace.completed_boundaries() == (
             CompletedBoundary("preflight", _BASE),
-            CompletedBoundary("axes", _BASE))
+            CompletedBoundary("axes", _BASE),
+        )
         assert _config_warning_texts(heard) == ["text note."]
 
     def test_a_built_refusal_carries_three_passes(self, all_registries):
-        findings = (warn("C11", "runtime.seed", "text note."),
-                    warn("B3", "observation.time", "axes note."),
-                    refuse("A9", "model.gain", "built refusal."))
+        findings = (
+            warn("C11", "runtime.seed", "text note."),
+            warn("B3", "observation.time", "axes note."),
+            refuse("A9", "model.gain", "built refusal."),
+        )
         register_text("C11")(lambda document: (findings[0],))
         register_axes("B3")(lambda facts: (findings[1],))
         register_built("A9")(lambda run: (findings[2],))
@@ -248,15 +244,17 @@ class TestTheFourBoundariesCarryTheCumulativeReport:
         assert trace.completed_boundaries() == (
             CompletedBoundary("preflight", _BASE),
             CompletedBoundary("axes", _BASE),
-            CompletedBoundary("built", _BASE))
+            CompletedBoundary("built", _BASE),
+        )
         assert _config_warning_texts(heard) == ["text note.", "axes note."]
 
-    def test_a_postflight_refusal_carries_all_four_and_is_itself_recorded(
-            self, all_registries):
-        findings = (warn("C11", "runtime.seed", "text note."),
-                    warn("B3", "observation.time", "axes note."),
-                    warn("A9", "model.gain", "built note."),
-                    refuse("C97", "inference.parameters", "priced refusal."))
+    def test_a_postflight_refusal_carries_all_four_and_is_itself_recorded(self, all_registries):
+        findings = (
+            warn("C11", "runtime.seed", "text note."),
+            warn("B3", "observation.time", "axes note."),
+            warn("A9", "model.gain", "built note."),
+            refuse("C97", "inference.parameters", "priced refusal."),
+        )
         register_text("C11")(lambda document: (findings[0],))
         register_axes("B3")(lambda facts: (findings[1],))
         register_built("A9")(lambda run: (findings[2],))
@@ -276,14 +274,17 @@ class TestTheFourBoundariesCarryTheCumulativeReport:
             CompletedBoundary("axes", _BASE),
             CompletedBoundary("built", _BASE),
             CompletedBoundary("run_parse", _BASE),
-            CompletedBoundary("postflight", _BASE))
-        assert _config_warning_texts(heard) == [
-            "text note.", "axes note.", "built note."]
+            CompletedBoundary("postflight", _BASE),
+        )
+        assert _config_warning_texts(heard) == ["text note.", "axes note.", "built note."]
 
     def test_a_builder_error_after_a_completed_boundary_carries_the_cumulative(
-            self, all_registries, monkeypatch):
-        findings = (warn("C11", "runtime.seed", "text note."),
-                    warn("B3", "observation.time", "axes note."))
+        self, all_registries, monkeypatch
+    ):
+        findings = (
+            warn("C11", "runtime.seed", "text note."),
+            warn("B3", "observation.time", "axes note."),
+        )
         register_text("C11")(lambda document: (findings[0],))
         register_axes("B3")(lambda facts: (findings[1],))
 
@@ -303,13 +304,17 @@ class TestTheFourBoundariesCarryTheCumulativeReport:
         # that returned a refusing Report.
         assert trace.completed_boundaries() == (
             CompletedBoundary("preflight", _BASE),
-            CompletedBoundary("axes", _BASE))
+            CompletedBoundary("axes", _BASE),
+        )
 
     def test_a_parser_error_after_the_built_boundary_carries_three_passes(
-            self, all_registries, handler_tables):
-        findings = (warn("C11", "runtime.seed", "text note."),
-                    warn("B3", "observation.time", "axes note."),
-                    warn("A9", "model.gain", "built note."))
+        self, all_registries, handler_tables
+    ):
+        findings = (
+            warn("C11", "runtime.seed", "text note."),
+            warn("B3", "observation.time", "axes note."),
+            warn("A9", "model.gain", "built note."),
+        )
         register_text("C11")(lambda document: (findings[0],))
         register_axes("B3")(lambda facts: (findings[1],))
         register_built("A9")(lambda run: (findings[2],))
@@ -327,10 +332,10 @@ class TestTheFourBoundariesCarryTheCumulativeReport:
         assert trace.completed_boundaries() == (
             CompletedBoundary("preflight", _BASE),
             CompletedBoundary("axes", _BASE),
-            CompletedBoundary("built", _BASE))
+            CompletedBoundary("built", _BASE),
+        )
 
-    def test_an_already_attached_report_is_never_overwritten(
-            self, all_registries, handler_tables):
+    def test_an_already_attached_report_is_never_overwritten(self, all_registries, handler_tables):
         """The other arm of the attach: a refusal that already carries a
         report keeps it -- the cumulative one is not pasted over it."""
         findings = (warn("C11", "runtime.seed", "text note."),)
@@ -346,7 +351,8 @@ class TestTheFourBoundariesCarryTheCumulativeReport:
         assert caught.value.report is own
 
     def test_a_pass_that_throws_before_returning_completes_no_boundary(
-            self, all_registries, monkeypatch):
+        self, all_registries, monkeypatch
+    ):
         note = warn("C11", "runtime.seed", "text note.")
         register_text("C11")(lambda document: (note,))
 
@@ -360,8 +366,7 @@ class TestTheFourBoundariesCarryTheCumulativeReport:
         assert str(caught.value) == "axes exploded."
         assert caught.value.report is not None
         assert caught.value.report.findings == (note,)
-        assert trace.completed_boundaries() == (
-            CompletedBoundary("preflight", _BASE),)
+        assert trace.completed_boundaries() == (CompletedBoundary("preflight", _BASE),)
 
 
 class TestTheOrchestratedTextPreflightIsThePassItself:
@@ -371,8 +376,9 @@ class TestTheOrchestratedTextPreflightIsThePassItself:
     def _combined(self, document):
         canonical = canonical_layers(document)
         slices = run_text_preflight_all_layers(canonical)
-        return tuple(finding for layer in canonical.layers
-                     for finding in slices[layer.identity].findings)
+        return tuple(
+            finding for layer in canonical.layers for finding in slices[layer.identity].findings
+        )
 
     def test_clean_and_warning_documents_agree(self):
         assert self._combined(_document()) == preflight(_document()).findings
@@ -382,10 +388,14 @@ class TestTheOrchestratedTextPreflightIsThePassItself:
 
     def test_refusing_documents_agree_on_the_attached_report(self):
         documents = [
-            preflight_document(inference={
-                "twin": {"without": ["noise"]},
-                "parameters": {"d": {"init": 0.5, "into": [
-                    "global_signal.depth", "gain.gain"]}}}),
+            preflight_document(
+                inference={
+                    "twin": {"without": ["noise"]},
+                    "parameters": {
+                        "d": {"init": 0.5, "into": ["global_signal.depth", "gain.gain"]}
+                    },
+                }
+            ),
             preflight_document(variants={"bad": {"campaign": {}}}),
         ]
         for document in documents:
@@ -393,47 +403,49 @@ class TestTheOrchestratedTextPreflightIsThePassItself:
                 preflight(document).raise_if_refused()
             with pytest.raises(ConfigError) as via_orchestration:
                 run_text_preflight_all_layers(canonical_layers(document))
-            assert (via_orchestration.value.report.findings
-                    == via_pass.value.report.findings)
+            assert via_orchestration.value.report.findings == via_pass.value.report.findings
 
 
 class TestTheGlobalOrder:
     """Plan Step 2: every build before every parse, every parse before every
     post-flight, and execution strictly after all of it."""
 
-    def test_all_run_parsing_finishes_before_the_first_executor(
-            self, handler_tables):
+    def test_all_run_parsing_finishes_before_the_first_executor(self, handler_tables):
         parse_events = []
         seen = {}
         for kind in list(PARSERS):
             PARSERS[kind] = _parse_spy(parse_events, seen, PARSERS[kind])
         execute_events = []
         for kind in list(EXECUTORS):
+
             def execute_spy(parsed, configured, previous, _events=execute_events):
                 _events.append(("execute", parsed.index))
                 return configured.state
 
             EXECUTORS[kind] = execute_spy
-        document = _document(runs=[
-            {"name": "fwd", "kind": "forward"},
-            {"name": "cov", "kind": "fisher"},
-            {"name": "fit", "kind": "optimize", "optimizer": "gradient",
-             "learning_rate": 0.01, "n_steps": 2},
-            {"name": "est", "kind": "plan.estimate",
-             "blocks": [{"names": ["g"]}]},
-        ])
-        record = execute_prepared(prepare_document(document,
-                                                   scope="all_layers"))
+        document = _document(
+            runs=[
+                {"name": "fwd", "kind": "forward"},
+                {"name": "cov", "kind": "fisher"},
+                {
+                    "name": "fit",
+                    "kind": "optimize",
+                    "optimizer": "gradient",
+                    "learning_rate": 0.01,
+                    "n_steps": 2,
+                },
+                {"name": "est", "kind": "plan.estimate", "blocks": [{"names": ["g"]}]},
+            ]
+        )
+        record = execute_prepared(prepare_document(document, scope="all_layers"))
         # Every parse lands in prepare (before any execute could start);
         # the executes then run in declaration order.
-        assert [name for _, name in parse_events] == [
-            "fwd", "cov", "fit", "est"]
+        assert [name for _, name in parse_events] == ["fwd", "cov", "fit", "est"]
         assert [index for _, index in execute_events] == [0, 1, 2, 3]
         assert record.status == "ok"
         assert set(record.results) == {"fwd", "cov", "fit", "est"}
 
-    def test_an_invalid_later_run_prevents_the_first_executor(
-            self, handler_tables):
+    def test_an_invalid_later_run_prevents_the_first_executor(self, handler_tables):
         """Before this task the later run's refusal arrived only after the
         earlier run had EXECUTED (measured in 3A's survey)."""
         calls = []
@@ -447,14 +459,12 @@ class TestTheGlobalOrder:
         # `fisher` on a document with no inference.parameters is silent at
         # text level (measured) and refuses at handler parse.
         document = synthetic_document()
-        document["runs"] = [{"name": "ok", "kind": "forward"},
-                            {"name": "bad", "kind": "fisher"}]
+        document["runs"] = [{"name": "ok", "kind": "forward"}, {"name": "bad", "kind": "fisher"}]
         with pytest.raises(ConfigError, match="fits latents"):
             run_document(document)
         assert calls == []
 
-    def test_a_postflight_refusal_prevents_any_execution(
-            self, all_registries, handler_tables):
+    def test_a_postflight_refusal_prevents_any_execution(self, all_registries, handler_tables):
         """Every post-flight finishes before execution begins: a priced
         refusal means no executor ever runs."""
         calls = []
@@ -465,51 +475,49 @@ class TestTheGlobalOrder:
             return real(parsed, configured, previous)
 
         EXECUTORS["forward"] = spy
-        register_priced("C97")(lambda payload: (
-            refuse("C97", "inference.parameters", "priced refusal."),))
+        register_priced("C97")(
+            lambda payload: (refuse("C97", "inference.parameters", "priced refusal."),)
+        )
         with pytest.raises(ConfigError, match="priced refusal"):
             run_document(_document())
         assert calls == []
 
-    def test_variant_runs_are_validated_but_never_replace_the_base_schedule(
-            self, handler_tables):
+    def test_variant_runs_are_validated_but_never_replace_the_base_schedule(self, handler_tables):
         parse_events = []
         seen = {}
         for kind in list(PARSERS):
             PARSERS[kind] = _parse_spy(parse_events, seen, PARSERS[kind])
         document = conjugate_document({"name": "fwd", "kind": "forward"})
-        document["variants"] = {"v": {"runs": [{"name": "alt",
-                                                "kind": "fisher"}]}}
+        document["variants"] = {"v": {"runs": [{"name": "alt", "kind": "fisher"}]}}
         prepared = prepare_document(document, scope="all_layers")
-        assert [(parsed.index, parsed.name, parsed.kind, parsed.variant)
-                for parsed in prepared.execution_runs] == [
-            (0, "fwd", "forward", None)]
-        (variant_layer,) = [layer for layer in prepared.layers
-                            if layer.layer.name == "v"]
-        assert [parsed.name for parsed in variant_layer.declared_runs
-                ] == ["alt"]
+        assert [
+            (parsed.index, parsed.name, parsed.kind, parsed.variant)
+            for parsed in prepared.execution_runs
+        ] == [(0, "fwd", "forward", None)]
+        (variant_layer,) = [layer for layer in prepared.layers if layer.layer.name == "v"]
+        assert [parsed.name for parsed in variant_layer.declared_runs] == ["alt"]
         assert ("parse", "alt") in parse_events
         # ...and the variant's schedule is validated against ITS OWN build:
         # the same twin (the parse-time configured is the pre-post-flight
         # object; the layer's is its `_replace`d, report-carrying successor).
         assert seen["alt"].twin is variant_layer.configured.twin
 
-    def test_every_declaration_is_parsed_once_before_any_postflight(
-            self, handler_tables):
+    def test_every_declaration_is_parsed_once_before_any_postflight(self, handler_tables):
         parse_events = []
         seen = {}
         for kind in list(PARSERS):
             PARSERS[kind] = _parse_spy(parse_events, seen, PARSERS[kind])
         trace = _Trace()
         document = conjugate_document(
-            {"name": "b0", "kind": "forward"},
-            {"name": "b1", "kind": "fisher", "variant": "late"})
+            {"name": "b0", "kind": "forward"}, {"name": "b1", "kind": "fisher", "variant": "late"}
+        )
         document["variants"] = {
-            "late": {"model": {"gain": {"gain": {"value": 2.0,
-                                                 "unit": "dimensionless"}}},
-                     "runs": [{"name": "v0", "kind": "forward"}]}}
-        prepared = prepare_document(document, scope="all_layers",
-                                    trace=trace)
+            "late": {
+                "model": {"gain": {"gain": {"value": 2.0, "unit": "dimensionless"}}},
+                "runs": [{"name": "v0", "kind": "forward"}],
+            }
+        }
+        prepared = prepare_document(document, scope="all_layers", trace=trace)
         # The global stage order: all-layer text pre-flight, then each layer
         # through built in canonical order, then every schedule parsed, then
         # each layer's post-flight.
@@ -534,8 +542,8 @@ class TestTheGlobalOrder:
         base = prepared.layers[0]
         assert all(
             executed is declared
-            for executed, declared in zip(prepared.execution_runs,
-                                          base.declared_runs, strict=True))
+            for executed, declared in zip(prepared.execution_runs, base.declared_runs, strict=True)
+        )
         # A base declaration naming a variant parses against THAT build, and
         # `ParsedRun.layer` is the build it parsed against.
         parsed = prepared.execution_runs[1]
@@ -543,8 +551,7 @@ class TestTheGlobalOrder:
         assert parsed.layer.identity == _LATE
         assert seen["b1"].twin is prepared.layers[-1].configured.twin
 
-    def test_a_variant_schedules_entry_naming_another_layer_stands_down(
-            self, handler_tables):
+    def test_a_variant_schedules_entry_naming_another_layer_stands_down(self, handler_tables):
         """The twin route of the variant-schedule rule: an inherited entry
         whose ``variant:`` names a DIFFERENT layer belongs to that layer's
         validation, so the untargeted layer never judges it."""
@@ -553,19 +560,16 @@ class TestTheGlobalOrder:
         for kind in list(PARSERS):
             PARSERS[kind] = _parse_spy(parse_events, seen, PARSERS[kind])
         document = conjugate_document(
-            {"name": "b0", "kind": "forward"},
-            {"name": "b1", "kind": "fisher", "variant": "a"})
-        document["variants"] = {"a": {"runtime": {"seed": 1}},
-                                "b": {"runtime": {"seed": 2}}}
+            {"name": "b0", "kind": "forward"}, {"name": "b1", "kind": "fisher", "variant": "a"}
+        )
+        document["variants"] = {"a": {"runtime": {"seed": 1}}, "b": {"runtime": {"seed": 2}}}
         prepared = prepare_document(document, scope="all_layers")
         # b1 parses exactly twice: in the base schedule (against a's build)
         # and in a's own schedule (same build).  Never against b's.
         assert [name for _, name in parse_events].count("b1") == 2
-        (layer_b,) = [layer for layer in prepared.layers
-                      if layer.layer.name == "b"]
+        (layer_b,) = [layer for layer in prepared.layers if layer.layer.name == "b"]
         # b's declared record of b1 is a stand-down tombstone: empty views.
-        (tombstone,) = [parsed for parsed in layer_b.declared_runs
-                        if parsed.name == "b1"]
+        (tombstone,) = [parsed for parsed in layer_b.declared_runs if parsed.name == "b1"]
         assert dict(tombstone.parsed.execution) == {}
         assert tombstone.parsed.resolved == {}
 
@@ -578,49 +582,57 @@ class TestTheGlobalOrder:
 
         EXECUTORS["forward"] = fail
         with pytest.raises(KeyboardInterrupt):
-            execute_prepared(prepare_document(_document(runs=[
-                {"name": "a", "kind": "forward", "expect": "refuse"}]),
-                scope="all_layers"))
+            execute_prepared(
+                prepare_document(
+                    _document(runs=[{"name": "a", "kind": "forward", "expect": "refuse"}]),
+                    scope="all_layers",
+                )
+            )
 
 
 class TestTheSelectedScope:
     def test_an_unselected_variants_text_fault_still_refuses_and_nothing_is_built(
-            self, monkeypatch):
+        self, monkeypatch
+    ):
         calls = []
         real = document_module.build_resources
         monkeypatch.setattr(
-            document_module, "build_resources",
-            lambda *args, **kwargs: (calls.append(1), real(*args, **kwargs))[1])
+            document_module,
+            "build_resources",
+            lambda *args, **kwargs: (calls.append(1), real(*args, **kwargs))[1],
+        )
         with pytest.raises(ConfigError, match=r"variants\.bad"):
-            prepare_document(_document(variants={"bad": {"campaign": {}}}),
-                             scope="selected", variant=None)
+            prepare_document(
+                _document(variants={"bad": {"campaign": {}}}), scope="selected", variant=None
+            )
         assert calls == []
 
-    def test_only_the_selected_layer_reaches_axes_build_and_postflight(
-            self, monkeypatch):
+    def test_only_the_selected_layer_reaches_axes_build_and_postflight(self, monkeypatch):
         calls = []
         real = document_module.build_resources
         monkeypatch.setattr(
-            document_module, "build_resources",
-            lambda *args, **kwargs: (calls.append(1), real(*args, **kwargs))[1])
+            document_module,
+            "build_resources",
+            lambda *args, **kwargs: (calls.append(1), real(*args, **kwargs))[1],
+        )
         trace = _Trace()
         prepared = prepare_document(
             _document(variants={"idle": {"runtime": {"seed": 3}}}),
-            scope="selected", variant=None, trace=trace)
+            scope="selected",
+            variant=None,
+            trace=trace,
+        )
         assert [layer.layer.identity for layer in prepared.layers] == [_BASE]
         assert prepared.execution_runs == ()
         assert calls == [1]
         stages = trace.completed_boundaries()
-        assert CompletedBoundary(
-            "preflight", LayerIdentity("variant", "idle")) in stages
-        assert CompletedBoundary(
-            "axes", LayerIdentity("variant", "idle")) not in stages
+        assert CompletedBoundary("preflight", LayerIdentity("variant", "idle")) in stages
+        assert CompletedBoundary("axes", LayerIdentity("variant", "idle")) not in stages
 
     def test_the_selected_layer_carries_the_named_variants_build(self):
         """The compatibility order: the variant is merged FIRST, and the
         selected layer is the merged document's own base layer."""
-        prepared = prepare_document(synthetic_document(), scope="selected",
-                                    variant="unity_gain")
+        prepared = prepare_document(synthetic_document(), scope="selected", variant="unity_gain")
         (layer,) = prepared.layers
         assert layer.layer.identity == _BASE
         assert float(layer.configured.twin["gain"].gain) == pytest.approx(1.0)
@@ -631,29 +643,27 @@ class TestTheSelectedScope:
         with pytest.raises(ConfigError) as caught:
             prepare_document(document, scope="selected", variant="nope")
         assert str(caught.value) == (
-            "variant 'nope' was requested but this document declares no "
-            "variants.")
+            "variant 'nope' was requested but this document declares no variants."
+        )
         with pytest.raises(ConfigError) as caught:
-            prepare_document(synthetic_document(), scope="selected",
-                             variant="nope")
+            prepare_document(synthetic_document(), scope="selected", variant="nope")
         assert str(caught.value) == (
-            "variant 'nope' is not declared; this document declares "
-            "['unity_gain'].")
+            "variant 'nope' is not declared; this document declares ['unity_gain']."
+        )
 
-    def test_a_run_naming_an_unbuilt_layer_is_not_parsed_against_the_selected(
-            self):
+    def test_a_run_naming_an_unbuilt_layer_is_not_parsed_against_the_selected(self):
         """The stand-down: selected scope builds ONE layer, so a base run
         targeting another layer cannot be parsed against its build -- and
         parsing it against the WRONG build would refuse valid documents."""
         document = synthetic_document()
-        document["variants"]["with_inf"] = {"inference": {
-            "twin": {"without": ["noise"]},
-            "parameters": {"g": {"init": 1.0, "linear": True,
-                                 "into": "gain.gain"}},
-            "noise": {"kind": "homoscedastic",
-                      "sigma": {"value": 0.05, "unit": "K"}}}}
-        document["runs"] = [{"name": "cov", "kind": "fisher",
-                             "variant": "with_inf"}]
+        document["variants"]["with_inf"] = {
+            "inference": {
+                "twin": {"without": ["noise"]},
+                "parameters": {"g": {"init": 1.0, "linear": True, "into": "gain.gain"}},
+                "noise": {"kind": "homoscedastic", "sigma": {"value": 0.05, "unit": "K"}},
+            }
+        }
+        document["runs"] = [{"name": "cov", "kind": "fisher", "variant": "with_inf"}]
         run = load_document(document)
         assert isinstance(run, ConfiguredRun)
         prepared = prepare_document(document, scope="all_layers")
@@ -675,32 +685,32 @@ class TestTheSelectedScope:
 
 
 class TestTheVariantTargetExecutesAgainstWhatItParsed:
-    def test_a_base_run_naming_an_undeclared_variant_is_refused_before_any_build(
-            self, monkeypatch):
+    def test_a_base_run_naming_an_undeclared_variant_is_refused_before_any_build(self, monkeypatch):
         """Every ``variant:`` reference is checked against the declared set
         BEFORE any build -- today a bad name survives the text pass and is
         refused only when the run's turn comes, after the base was built."""
         calls = []
         real = document_module.build_resources
         monkeypatch.setattr(
-            document_module, "build_resources",
-            lambda *args, **kwargs: (calls.append(1), real(*args, **kwargs))[1])
+            document_module,
+            "build_resources",
+            lambda *args, **kwargs: (calls.append(1), real(*args, **kwargs))[1],
+        )
         document = synthetic_document()
-        document["runs"] = [{"name": "v", "kind": "forward",
-                             "variant": "nope"}]
+        document["runs"] = [{"name": "v", "kind": "forward", "variant": "nope"}]
         with pytest.raises(ConfigError) as caught:
             prepare_document(document, scope="all_layers")
         assert str(caught.value) == (
             "runs['v']: variant: 'nope' names no declared variant; this "
-            "document declares ['unity_gain'].")
+            "document declares ['unity_gain']."
+        )
         assert calls == []
         # ...and through the public route, with the same precedence.
         with pytest.raises(ConfigError, match="names no declared variant"):
             run_document(document)
         assert calls == []
 
-    def test_parse_pre_execute_and_execute_all_see_the_target_build(
-            self, handler_tables):
+    def test_parse_pre_execute_and_execute_all_see_the_target_build(self, handler_tables):
         seen = {"parse": {}, "pre": {}, "exec": {}}
         real_parse = PARSERS["forward"]
 
@@ -742,31 +752,32 @@ class TestTheVariantTargetExecutesAgainstWhatItParsed:
         assert seen["exec"]["v"] is target.configured
         assert record.runs[1].parsed is parsed
         # ...and it is the variant's build, measurably: gain 1.0 vs 1.1.
-        assert not jnp.allclose(record.results["b"].product.data,
-                                record.results["v"].product.data)
+        assert not jnp.allclose(record.results["b"].product.data, record.results["v"].product.data)
 
     def test_the_outcome_row_is_attributed_to_the_target_layer(self):
         trace = _Trace()
         document = synthetic_document()
-        document["runs"] = [{"name": "v", "kind": "forward",
-                             "variant": "unity_gain"}]
-        record = execute_prepared(
-            prepare_document(document, scope="all_layers"), trace=trace)
-        (layer, row), = trace.outcomes
+        document["runs"] = [{"name": "v", "kind": "forward", "variant": "unity_gain"}]
+        record = execute_prepared(prepare_document(document, scope="all_layers"), trace=trace)
+        ((layer, row),) = trace.outcomes
         assert layer == LayerIdentity("variant", "unity_gain")
-        assert row["descriptor"] == {"index": 0, "name": "v", "kind": "forward",
-                                     "variant": "unity_gain"}
+        assert row["descriptor"] == {
+            "index": 0,
+            "name": "v",
+            "kind": "forward",
+            "variant": "unity_gain",
+        }
         assert record.status == "ok"
 
 
 class TestTheExecutionRecord:
     def test_wall_times_are_measured_per_run(self, handler_tables):
         for kind in list(EXECUTORS):
-            EXECUTORS[kind] = (
-                lambda parsed, configured, previous: configured.state)
-        prepared = prepare_document(_document(runs=[
-            {"name": "a", "kind": "forward"},
-            {"name": "b", "kind": "forward"}]), scope="all_layers")
+            EXECUTORS[kind] = lambda parsed, configured, previous: configured.state
+        prepared = prepare_document(
+            _document(runs=[{"name": "a", "kind": "forward"}, {"name": "b", "kind": "forward"}]),
+            scope="all_layers",
+        )
         clock = iter((100, 137, 200, 251))
         record = execute_prepared(prepared, clock_ns=clock.__next__)
         assert [row.wall_time_ns for row in record.runs] == [37, 51]
@@ -774,8 +785,7 @@ class TestTheExecutionRecord:
         assert record.status == "ok"
         assert isinstance(record, ExecutionRecord)
 
-    def test_a_captured_expected_refusal_is_a_successful_run(
-            self, handler_tables):
+    def test_a_captured_expected_refusal_is_a_successful_run(self, handler_tables):
         error = ValueError("boom")
 
         def fail(parsed, configured, previous):
@@ -783,9 +793,10 @@ class TestTheExecutionRecord:
 
         EXECUTORS["forward"] = fail
         trace = _Trace()
-        prepared = prepare_document(_document(runs=[
-            {"name": "a", "kind": "forward", "expect": "refuse"}]),
-            scope="all_layers")
+        prepared = prepare_document(
+            _document(runs=[{"name": "a", "kind": "forward", "expect": "refuse"}]),
+            scope="all_layers",
+        )
         record = execute_prepared(prepared, trace=trace)
         (row,) = record.runs
         assert row.status == "ok"
@@ -796,7 +807,7 @@ class TestTheExecutionRecord:
         assert record.status == "ok"
         assert record.error is None
         assert record.results["a"].error is error
-        (_, outcome), = trace.outcomes
+        ((_, outcome),) = trace.outcomes
         assert outcome["status"] == "expected_refusal"
         assert outcome["capture_scope"] == "arbitrary_exception"
         assert outcome["is_dirt_error"] is False
@@ -811,8 +822,9 @@ class TestTheExecutionRecord:
         the capture.  The tombstone is the parse-time half of that contract.
         """
         document = synthetic_document()
-        document["runs"] = [{"name": "a", "kind": "fisher",
-                             "variant": "unity_gain", "expect": "refuse"}]
+        document["runs"] = [
+            {"name": "a", "kind": "fisher", "variant": "unity_gain", "expect": "refuse"}
+        ]
         results = run_document(document)
         assert results["a"].product is None
         assert isinstance(results["a"].error, ConfigError)
@@ -822,16 +834,14 @@ class TestTheExecutionRecord:
         assert tombstone.parsed.resolved == {}
         assert dict(tombstone.parsed.execution) == {}
         # The declaration is still recorded, on both layers that carry it.
-        assert [parsed.name for parsed in prepared.layers[0].declared_runs
-                ] == ["a"]
+        assert [parsed.name for parsed in prepared.layers[0].declared_runs] == ["a"]
         record = execute_prepared(prepared)
         (row,) = record.runs
         assert row.status == "ok"
         assert row.captured_expected_refusal is True
         assert isinstance(row.result.error, ConfigError)
 
-    def test_an_uncaptured_config_error_refuses_the_run_and_the_document(
-            self, handler_tables):
+    def test_an_uncaptured_config_error_refuses_the_run_and_the_document(self, handler_tables):
         error = ConfigError("the fit blew up.")
 
         def fail(parsed, configured, previous):
@@ -842,12 +852,15 @@ class TestTheExecutionRecord:
         EXECUTORS["forward"] = fail
 
         def document():
-            return _document(runs=[{"name": "good", "kind": "forward"},
-                                   {"name": "bad", "kind": "forward"},
-                                   {"name": "late", "kind": "forward"}])
+            return _document(
+                runs=[
+                    {"name": "good", "kind": "forward"},
+                    {"name": "bad", "kind": "forward"},
+                    {"name": "late", "kind": "forward"},
+                ]
+            )
 
-        record = execute_prepared(prepare_document(document(),
-                                                   scope="all_layers"))
+        record = execute_prepared(prepare_document(document(), scope="all_layers"))
         # Prior successes plus the failing row remain; later rows do not
         # exist, and the failing run has no result entry.
         assert [row.parsed.name for row in record.runs] == ["good", "bad"]
@@ -879,21 +892,19 @@ class TestTheExecutionRecord:
             run_document(_document())
 
     def test_the_succeeded_refusal_message_is_the_legacy_one(self):
-        document = _document(runs=[{"name": "a", "kind": "forward",
-                                    "expect": "refuse"}])
-        record = execute_prepared(prepare_document(document,
-                                                   scope="all_layers"))
+        document = _document(runs=[{"name": "a", "kind": "forward", "expect": "refuse"}])
+        record = execute_prepared(prepare_document(document, scope="all_layers"))
         (row,) = record.runs
         assert row.status == "refused"
         assert str(row.error) == (
             "runs['a']: expect: refuse, and kind: forward SUCCEEDED -- the "
-            "assertion this run makes about the design no longer holds.")
+            "assertion this run makes about the design no longer holds."
+        )
         assert record.status == "refused"
         with pytest.raises(ConfigError, match="SUCCEEDED"):
             run_document(document)
 
-    def test_prior_results_are_read_only_and_a_retained_view_never_grows(
-            self, handler_tables):
+    def test_prior_results_are_read_only_and_a_retained_view_never_grows(self, handler_tables):
         seen = {}
 
         def spy(parsed, configured, previous):
@@ -901,9 +912,14 @@ class TestTheExecutionRecord:
             return configured.state
 
         EXECUTORS["forward"] = spy
-        record = execute_prepared(prepare_document(_document(runs=[
-            {"name": "a", "kind": "forward"},
-            {"name": "b", "kind": "forward"}]), scope="all_layers"))
+        record = execute_prepared(
+            prepare_document(
+                _document(
+                    runs=[{"name": "a", "kind": "forward"}, {"name": "b", "kind": "forward"}]
+                ),
+                scope="all_layers",
+            )
+        )
         assert record.status == "ok"
         assert sorted(seen["a"]) == []
         assert sorted(seen["b"]) == ["a"]
@@ -921,33 +937,38 @@ class TestTheExecutionRecord:
         assert dict(record.results)
 
     def test_completed_boundaries_come_from_the_trace(self, handler_tables):
-        prepared = prepare_document(_document(), scope="all_layers",
-                                    trace=_Trace())
+        prepared = prepare_document(_document(), scope="all_layers", trace=_Trace())
         record = execute_prepared(prepared)
         assert record.completed_boundaries == ()
         trace = _Trace()
-        prepared = prepare_document(_document(), scope="all_layers",
-                                    trace=trace)
+        prepared = prepare_document(_document(), scope="all_layers", trace=trace)
         record = execute_prepared(prepared, trace=trace)
         assert record.completed_boundaries == trace.completed_boundaries()
         assert record.completed_boundaries != ()
 
     def test_outcome_rows_use_the_closed_keys(self, handler_tables):
-        EXECUTORS["forward"] = (
-            lambda parsed, configured, previous: configured.state)
+        EXECUTORS["forward"] = lambda parsed, configured, previous: configured.state
         trace = _Trace()
-        prepared = prepare_document(_document(), scope="all_layers",
-                                    trace=trace)
+        prepared = prepare_document(_document(), scope="all_layers", trace=trace)
         clock = iter((10, 42))
-        record = execute_prepared(prepared, clock_ns=clock.__next__,
-                                  trace=trace)
-        (layer, row), = trace.outcomes
+        record = execute_prepared(prepared, clock_ns=clock.__next__, trace=trace)
+        ((layer, row),) = trace.outcomes
         assert layer == _BASE
-        assert set(row) == {"descriptor", "status", "wall_time_ns",
-                            "exception_type", "exception_message",
-                            "capture_scope", "is_dirt_error"}
-        assert row["descriptor"] == {"index": 0, "name": "forward",
-                                     "kind": "forward", "variant": None}
+        assert set(row) == {
+            "descriptor",
+            "status",
+            "wall_time_ns",
+            "exception_type",
+            "exception_message",
+            "capture_scope",
+            "is_dirt_error",
+        }
+        assert row["descriptor"] == {
+            "index": 0,
+            "name": "forward",
+            "kind": "forward",
+            "variant": None,
+        }
         assert row["status"] == "ok"
         assert row["wall_time_ns"] == 32
         assert row["exception_type"] is None
@@ -965,41 +986,45 @@ class TestTheTargetLookup:
 
     def test_an_absent_target_is_refused(self):
         prepared = self._prepared()
-        orphan = PreparedDocument(layers=(),
-                                  execution_runs=prepared.execution_runs)
+        orphan = PreparedDocument(layers=(), execution_runs=prepared.execution_runs)
         with pytest.raises(ConfigError) as caught:
             execute_prepared(orphan)
         assert str(caught.value) == (
             "runs['forward']: the run was parsed against the base layer, "
             "which is not among this prepared document's layers; the two "
-            "come from different enumerations.")
+            "come from different enumerations."
+        )
 
     def test_a_duplicate_target_is_refused(self):
         prepared = self._prepared()
         layer = prepared.layers[0]
-        doubled = PreparedDocument(layers=(layer, layer),
-                                   execution_runs=prepared.execution_runs)
+        doubled = PreparedDocument(layers=(layer, layer), execution_runs=prepared.execution_runs)
         with pytest.raises(ConfigError) as caught:
             execute_prepared(doubled)
         assert str(caught.value) == (
-            "runs['forward']: the base layer appears twice in this prepared "
-            "document.")
+            "runs['forward']: the base layer appears twice in this prepared document."
+        )
 
     def test_an_inconsistent_target_is_refused(self):
         prepared = self._prepared()
         foreign = _enumerate(_document()).layers[0]
         mismatched = PreparedDocument(
-            layers=(PreparedLayer(layer=foreign,
-                                  configured=prepared.layers[0].configured,
-                                  declared_runs=prepared.layers[0]
-                                  .declared_runs),),
-            execution_runs=prepared.execution_runs)
+            layers=(
+                PreparedLayer(
+                    layer=foreign,
+                    configured=prepared.layers[0].configured,
+                    declared_runs=prepared.layers[0].declared_runs,
+                ),
+            ),
+            execution_runs=prepared.execution_runs,
+        )
         with pytest.raises(ConfigError) as caught:
             execute_prepared(mismatched)
         assert str(caught.value) == (
             "runs['forward']: the prepared base layer is not the one the "
             "run was parsed against; the two come from different "
-            "enumerations.")
+            "enumerations."
+        )
 
 
 class TestLayerFreezing:
@@ -1016,22 +1041,21 @@ class TestLayerFreezing:
         postflight_v = events.index(("boundary", "postflight", variant))
         assert postflight_base < freeze_base < postflight_v
         (base_row,) = [row for layer, row in trace.frozen if layer == _BASE]
-        (variant_row,) = [row for layer, row in trace.frozen
-                          if layer == variant]
-        assert [row["name"] for row in base_row["declared_runs"]] == [
-            "forward"]
-        assert [row["name"] for row in base_row["execution_runs"]] == [
-            "forward"]
+        (variant_row,) = [row for layer, row in trace.frozen if layer == variant]
+        assert [row["name"] for row in base_row["declared_runs"]] == ["forward"]
+        assert [row["name"] for row in base_row["execution_runs"]] == ["forward"]
         # Every completed layer records the same base execution projection.
-        assert [row["name"] for row in variant_row["execution_runs"]] == [
-            "forward"]
+        assert [row["name"] for row in variant_row["execution_runs"]] == ["forward"]
         assert variant_row["declared_runs"] == base_row["declared_runs"]
 
-    def test_a_later_postflight_refusal_leaves_the_failing_layer_unfrozen(
-            self, all_registries):
-        register_priced("C97")(lambda payload: (
-            (refuse("C97", "runtime.seed", "variant fault."),)
-            if payload.run.document["runtime"]["seed"] == 5 else ()))
+    def test_a_later_postflight_refusal_leaves_the_failing_layer_unfrozen(self, all_registries):
+        register_priced("C97")(
+            lambda payload: (
+                (refuse("C97", "runtime.seed", "variant fault."),)
+                if payload.run.document["runtime"]["seed"] == 5
+                else ()
+            )
+        )
         trace = _Trace()
         variant = LayerIdentity("variant", "v")
         document = synthetic_document()
@@ -1052,26 +1076,27 @@ class TestSuppliedLayers:
         with pytest.raises(ConfigError) as caught:
             select_build_layers(canonical, scope="selected", variant="nope")
         assert str(caught.value) == (
-            "variant 'nope' is not declared; this document declares "
-            "['unity_gain'].")
-        (layer,) = select_build_layers(canonical, scope="selected",
-                                       variant="unity_gain")
+            "variant 'nope' is not declared; this document declares ['unity_gain']."
+        )
+        (layer,) = select_build_layers(canonical, scope="selected", variant="unity_gain")
         assert layer.identity == LayerIdentity("variant", "unity_gain")
-        assert select_build_layers(canonical, scope="selected",
-                                   variant=None)[0].identity == _BASE
-        assert len(select_build_layers(canonical, scope="all_layers",
-                                       variant=None)) == 2
+        assert select_build_layers(canonical, scope="selected", variant=None)[0].identity == _BASE
+        assert len(select_build_layers(canonical, scope="all_layers", variant=None)) == 2
 
     def test_supplied_layers_thread_their_own_evidence_maps(self):
         document = _document()
         enumeration = _enumerate(document)
         trace = _Trace()
         prepared = prepare_document(
-            document, scope="all_layers", layers=enumeration.layers,
+            document,
+            scope="all_layers",
+            layers=enumeration.layers,
             layer_origins=enumeration.origins,
-            layer_deletions=enumeration.deletions, trace=trace)
+            layer_deletions=enumeration.deletions,
+            trace=trace,
+        )
         assert [layer.layer.identity for layer in prepared.layers] == [_BASE]
-        (layer, row), = trace.frozen
+        ((layer, row),) = trace.frozen
         assert layer == _BASE
         assert row["origins"] is enumeration.origins[_BASE]
         assert tuple(row["deletions"]) == tuple(enumeration.deletions[_BASE])
@@ -1079,46 +1104,57 @@ class TestSuppliedLayers:
     def test_supplied_layers_require_both_evidence_maps(self):
         enumeration = _enumerate(_document())
         with pytest.raises(ConfigError) as caught:
-            prepare_document(_document(), scope="all_layers",
-                             layers=enumeration.layers)
+            prepare_document(_document(), scope="all_layers", layers=enumeration.layers)
         assert str(caught.value) == (
             "canonical layers supplied by an integration caller require "
-            "their matching layer_origins and layer_deletions maps.")
+            "their matching layer_origins and layer_deletions maps."
+        )
 
     def test_evidence_maps_require_supplied_layers(self):
         enumeration = _enumerate(_document())
         with pytest.raises(ConfigError) as caught:
-            prepare_document(_document(), scope="all_layers",
-                             layer_origins=enumeration.origins,
-                             layer_deletions=enumeration.deletions)
+            prepare_document(
+                _document(),
+                scope="all_layers",
+                layer_origins=enumeration.origins,
+                layer_deletions=enumeration.deletions,
+            )
         assert str(caught.value) == (
-            "layer_origins and layer_deletions accompany supplied canonical "
-            "layers; layers is None.")
+            "layer_origins and layer_deletions accompany supplied canonical layers; layers is None."
+        )
 
     def test_the_maps_must_cover_every_layer(self):
         enumeration = _enumerate(_document())
         with pytest.raises(ConfigError) as caught:
-            prepare_document(_document(), scope="all_layers",
-                             layers=enumeration.layers, layer_origins={},
-                             layer_deletions={})
+            prepare_document(
+                _document(),
+                scope="all_layers",
+                layers=enumeration.layers,
+                layer_origins={},
+                layer_deletions={},
+            )
         assert str(caught.value) == (
             "supplied layer_origins/layer_deletions must cover every "
-            "canonical layer identity exactly once.")
+            "canonical layer identity exactly once."
+        )
 
     def test_an_unknown_scope_is_a_programming_error(self):
         with pytest.raises(ValueError) as caught:
             prepare_document(_document(), scope="everything")
-        assert str(caught.value) == (
-            "scope is 'selected' or 'all_layers'; got 'everything'.")
+        assert str(caught.value) == ("scope is 'selected' or 'all_layers'; got 'everything'.")
 
     def test_supplied_layers_select_a_named_variant(self):
         """The integration route's selection: the name resolves against the
         supplied enumeration (no merge -- supplied layers ARE canonical)."""
         enumeration = _enumerate(synthetic_document())
         prepared = prepare_document(
-            synthetic_document(), scope="selected", variant="unity_gain",
-            layers=enumeration.layers, layer_origins=enumeration.origins,
-            layer_deletions=enumeration.deletions)
+            synthetic_document(),
+            scope="selected",
+            variant="unity_gain",
+            layers=enumeration.layers,
+            layer_origins=enumeration.origins,
+            layer_deletions=enumeration.deletions,
+        )
         (layer,) = prepared.layers
         assert layer.layer.identity == LayerIdentity("variant", "unity_gain")
         assert float(layer.configured.twin["gain"].gain) == pytest.approx(1.0)
@@ -1126,9 +1162,9 @@ class TestSuppliedLayers:
 
 class TestTheParsedViewsAreTheHandlers:
     def test_the_parsed_views_carry_the_handlers_normalization(self):
-        prepared = prepare_document(_document(runs=[{"name": "cov",
-                                                     "kind": "fisher"}]),
-                                    scope="all_layers")
+        prepared = prepare_document(
+            _document(runs=[{"name": "cov", "kind": "fisher"}]), scope="all_layers"
+        )
         (parsed,) = prepared.execution_runs
         # fisher's parser normalizes and injects the measured defaults.
         assert parsed.options == {"space": False, "jitter": 0.0}
@@ -1137,9 +1173,12 @@ class TestTheParsedViewsAreTheHandlers:
     def test_the_trace_records_one_parsed_run_row_per_parse(self):
         trace = _Trace()
         prepare_document(_document(), scope="all_layers", trace=trace)
-        (layer, row), = trace.parsed_runs
+        ((layer, row),) = trace.parsed_runs
         assert layer == _BASE
-        assert set(row) == {"descriptor", "resolved_options",
-                            "deferred_checks"}
-        assert row["descriptor"] == {"index": 0, "name": "forward",
-                                     "kind": "forward", "variant": None}
+        assert set(row) == {"descriptor", "resolved_options", "deferred_checks"}
+        assert row["descriptor"] == {
+            "index": 0,
+            "name": "forward",
+            "kind": "forward",
+            "variant": None,
+        }

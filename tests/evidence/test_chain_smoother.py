@@ -53,17 +53,13 @@ def test_the_smoothed_mean_is_the_oracles_conditional_mean(probe):
     """Measured: 5.2e-14 at worst over the four probes, against a band of 1e-8."""
     mean, _ = _smoothed(probe)
     expected, _ = bank.oracle_zeta_posterior(probe)
-    np.testing.assert_allclose(
-        np.asarray(mean).ravel(), expected, rtol=1e-8, atol=1e-10
-    )
+    np.testing.assert_allclose(np.asarray(mean).ravel(), expected, rtol=1e-8, atol=1e-10)
 
 
 def test_the_smoothed_variance_is_the_oracles_diagonal():
     _, cov = _smoothed(bank.PROBES[1])
     _, expected = bank.oracle_zeta_posterior(bank.PROBES[1])
-    np.testing.assert_allclose(
-        np.asarray(cov).reshape(bank.N_EPOCHS), np.diag(expected), rtol=1e-8
-    )
+    np.testing.assert_allclose(np.asarray(cov).reshape(bank.N_EPOCHS), np.diag(expected), rtol=1e-8)
 
 
 def test_the_whole_covariance_matches_including_the_cross_epoch_blocks():
@@ -133,7 +129,7 @@ def test_a_smoothed_epoch_is_sharper_than_the_same_epoch_filtered():
 
 
 def test_a_late_epochs_data_moves_an_early_epochs_smoothed_mean():
-    """"Neighbouring epochs pull on each other", as a number that cannot be 0.
+    """ "Neighbouring epochs pull on each other", as a number that cannot be 0.
 
     Adding 1.0 to the LAST epoch's target moves every earlier epoch's smoothed
     mean, by -5.41e-3, -1.63e-4, -1.66e-6 and -5.0e-8 going backwards -- the
@@ -155,9 +151,7 @@ def test_a_late_epochs_data_moves_an_early_epochs_smoothed_mean():
         phi=0.0, process_std=bank.PROCESS_STD, initial_std=bank.INITIAL_STD
     )
     base, _ = _smoothed(bank.PROBES[1], transition=loose)
-    moved, _ = _smoothed(
-        bank.PROBES[1], blocks=(factors, bumped, offsets), transition=loose
-    )
+    moved, _ = _smoothed(bank.PROBES[1], blocks=(factors, bumped, offsets), transition=loose)
     unlinked = np.asarray(moved).ravel() - np.asarray(base).ravel()
     assert abs(unlinked[-1]) > 0.1
     np.testing.assert_allclose(unlinked[:-1], 0.0, atol=1e-12)
@@ -266,9 +260,7 @@ def test_the_blocks_must_be_as_wide_as_the_latents_they_claim_to_be_over():
     for the chain's and return a finite, plausible, wrong drift.
     """
     factors, targets, offsets = bank.stacked()
-    with pytest.raises(
-        chain.StateValidationError, match="a different one is not a rename"
-    ):
+    with pytest.raises(chain.StateValidationError, match="a different one is not a rename"):
         smooth(
             (factors[:, :, :2], targets, offsets),
             _transition(),

@@ -19,6 +19,7 @@ def test_public_layering_is_the_bootstrap_implementation():
     assert public.apply_variant is neutral.apply_variant
     assert resources.merge_extends is neutral.merge_extends
 
+
 BASE = {
     "schema_version": 1,
     "observation": {
@@ -46,10 +47,10 @@ class TestRecursiveUpdate:
     def test_mappings_merge_and_lists_replace(self):
         merged = recursive_update(BASE, BASE["variants"]["seven"])
         order = merged["observation"]["switching"]["order"]
-        assert order == ["antenna", "ambient", "hot", "ns"]      # list REPLACED
+        assert order == ["antenna", "ambient", "hot", "ns"]  # list REPLACED
         assert merged["observation"]["switching"]["dwell"] == 1  # sibling SURVIVES
         loads = merged["model"]["cal_loads"]
-        assert set(loads) == {"ambient", "hot", "ns"}            # mapping MERGED
+        assert set(loads) == {"ambient", "hot", "ns"}  # mapping MERGED
 
     def test_tilde_deletes(self):
         merged = recursive_update(BASE, {"model": {"cal_loads": {"~hot": None}}})
@@ -68,6 +69,7 @@ class TestRecursiveUpdate:
 
     def test_frozen_mappings_keep_tuples_and_deepcopy_arbitrary_leaves(self):
         """Catches routing the public compatibility merge through evidence thawing."""
+
         class MutableLeaf:
             def __init__(self, values):
                 self.values = values
@@ -163,11 +165,7 @@ class TestApplyVariant:
             def __iter__(self):
                 if self.role == "variants_iter":
                     raise marker
-                return iter(
-                    ("added",)
-                    if self.role in {"patch", "patch_contains"}
-                    else ("one",)
-                )
+                return iter(("added",) if self.role in {"patch", "patch_contains"} else ("one",))
 
             def items(self):
                 if self.role in {"patch", "patch_contains"}:
@@ -202,11 +200,9 @@ class TestApplyVariant:
 
         document = Document(
             kept=1,
-            variants=CallbackMapping(
-                "variants_patch" if seam == "patch_contains" else seam
-            )
+            variants=CallbackMapping("variants_patch" if seam == "patch_contains" else seam)
             if seam.startswith("variants") or seam == "patch_contains"
-            else {"one": {"added": 2}}
+            else {"one": {"added": 2}},
         )
 
         try:
@@ -218,9 +214,7 @@ class TestApplyVariant:
             assert set(merged) == {"kept", "variants", "added"}
             assert merged["kept"] == 1
             assert merged["added"] == 2
-            assert dict(merged["variants"].items()) == {
-                "one": {"added": 2}
-            }
+            assert dict(merged["variants"].items()) == {"one": {"added": 2}}
 
     def test_variant_name_is_canonicalized_before_mapping_operations(self):
         class HostileName(str):

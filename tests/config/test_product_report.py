@@ -49,9 +49,7 @@ def test_report_json_and_text_share_ordered_statistics_and_relatives():
         "std": {"mapping/n-6761696e": 2.0},
     }
     assert fit["relative"]["width_ratio"] == {"mapping/n-6761696e": 2.0}
-    assert fit["relative"]["mean_sigma"]["mapping/n-6761696e"] == pytest.approx(
-        2.0 / np.sqrt(5.0)
-    )
+    assert fit["relative"]["mean_sigma"]["mapping/n-6761696e"] == pytest.approx(2.0 / np.sqrt(5.0))
     text = files[1].payload.decode()
     assert text.splitlines()[0].startswith("run\tkind\tmean\tstd\tseconds")
     assert text.splitlines()[1].startswith("fit\tplan.sample\t")

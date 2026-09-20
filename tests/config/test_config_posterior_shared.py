@@ -25,8 +25,11 @@ from tests.config.exit_helpers import (
 )
 from tests.config.test_config_document import synthetic_document
 
-JOINT = {**TWO_LATENTS, "parameters": PRIOR_FREE_TWO,
-         "joint_prior": {"jeffreys": {"over": ["d", "a"]}}}
+JOINT = {
+    **TWO_LATENTS,
+    "parameters": PRIOR_FREE_TWO,
+    "joint_prior": {"jeffreys": {"over": ["d", "a"]}},
+}
 
 
 def vector_space():
@@ -40,8 +43,8 @@ def vector_space():
     from rheplicant.inference import Latent, ParameterSpace
 
     return ParameterSpace.raw(
-        [Latent("b", init=jnp.arange(3.0)),
-         Latent("s", init=jnp.asarray(1.0))], bind=lambda p, v: p)
+        [Latent("b", init=jnp.arange(3.0)), Latent("s", init=jnp.asarray(1.0))], bind=lambda p, v: p
+    )
 
 
 class TestTheTwoRoutesDisagreeAboutAPrior:
@@ -56,8 +59,7 @@ class TestTheTwoRoutesDisagreeAboutAPrior:
 
     def test_a_joint_prior_only_space_is_a_space_for_nuts(self):
         built = conjugate_built(inference=JOINT)
-        assert _sampled_space(spec(kind="nuts"), built,
-                              route="nuts") is built.inference.space
+        assert _sampled_space(spec(kind="nuts"), built, route="nuts") is built.inference.space
 
     def test_a_joint_prior_only_space_is_refused_for_npe(self):
         """The refusal, and the SENTENCE that says why the sibling differs.
@@ -106,8 +108,7 @@ class TestTheTwoRoutesDisagreeAboutAPrior:
 
     def test_no_inference_parameters_is_refused_before_the_prior_gate(self):
         built = load_document(synthetic_document())
-        with pytest.raises(ConfigError, match="declares no "
-                           "inference.parameters"):
+        with pytest.raises(ConfigError, match="declares no inference.parameters"):
             _sampled_space(spec(kind="nuts"), built, route="nuts")
 
 
@@ -171,11 +172,10 @@ class TestTheUnravel:
 class TestTheDrawKey:
     def test_the_key_is_the_reported_seed(self):
         built = conjugate_built(seeds={"chain": 3})
-        key = _draw_key(spec(kind="nuts",
-                             seed={"from": "runtime.seeds.chain"}),
-                        "runs['chain']", built)
-        assert bool(jnp.all(jax.random.key_data(key)
-                            == jax.random.key_data(jax.random.key(3))))
+        key = _draw_key(
+            spec(kind="nuts", seed={"from": "runtime.seeds.chain"}), "runs['chain']", built
+        )
+        assert bool(jnp.all(jax.random.key_data(key) == jax.random.key_data(jax.random.key(3))))
 
     def test_a_missing_seed_is_refused_under_the_callers_where(self):
         built = conjugate_built(seeds={"chain": 3})
@@ -198,10 +198,8 @@ class TestTheDrawKey:
         """
         built = conjugate_built(seeds={"chain": 3, "bank": 5})
         run = spec(kind="npe", seed={"from": "runtime.seeds.chain"})
-        key = _draw_key(run, "inference.npe.bank", built,
-                        {"seed": {"from": "runtime.seeds.bank"}})
-        assert bool(jnp.all(jax.random.key_data(key)
-                            == jax.random.key_data(jax.random.key(5))))
+        key = _draw_key(run, "inference.npe.bank", built, {"seed": {"from": "runtime.seeds.bank"}})
+        assert bool(jnp.all(jax.random.key_data(key) == jax.random.key_data(jax.random.key(5))))
 
     def test_an_EMPTY_spec_is_refused_rather_than_falling_back(self):
         """`spec={}` must not quietly borrow the run's own seed.
@@ -236,10 +234,15 @@ class TestTheLazyImportInvariant:
         import sys
 
         out = subprocess.run(
-            [sys.executable, "-c",
-             "import sys; import rheplicant.config; "
-             "print('numpyro' in sys.modules)"],
-            capture_output=True, text=True, check=True)
+            [
+                sys.executable,
+                "-c",
+                "import sys; import rheplicant.config; print('numpyro' in sys.modules)",
+            ],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
         assert out.stdout.strip() == "False", out.stdout
 
     def test_importing_nuts_alone_leaves_numpyro_out(self):
@@ -247,10 +250,16 @@ class TestTheLazyImportInvariant:
         import sys
 
         out = subprocess.run(
-            [sys.executable, "-c",
-             "import sys; import rheplicant.config.sections.nuts; "
-             "print('numpyro' in sys.modules)"],
-            capture_output=True, text=True, check=True)
+            [
+                sys.executable,
+                "-c",
+                "import sys; import rheplicant.config.sections.nuts; "
+                "print('numpyro' in sys.modules)",
+            ],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
         assert out.stdout.strip() == "False", out.stdout
 
 

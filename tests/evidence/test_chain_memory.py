@@ -109,9 +109,7 @@ def test_a_hyper_chain_reads_the_correlation_time_off_the_sampled_value(tau):
     """
     memory = _memory(
         HyperTransition(
-            build=lambda values: ornstein_uhlenbeck(
-                tau=jnp.exp(values["gain_slope"]), sigma=1.0
-            ),
+            build=lambda values: ornstein_uhlenbeck(tau=jnp.exp(values["gain_slope"]), sigma=1.0),
             hyper=("gain_slope",),
             width=1,
         )
@@ -126,9 +124,7 @@ def test_a_hyper_chain_reads_the_correlation_time_off_the_sampled_value(tau):
         process_var=float(transition.process_std[0]) ** 2,
         initial_var=1.0,
     )
-    assert float(memory.log_likelihood(_values(probe))) == pytest.approx(
-        expected, abs=1e-8
-    )
+    assert float(memory.log_likelihood(_values(probe))) == pytest.approx(expected, abs=1e-8)
 
 
 def test_the_posterior_applies_the_prior_exactly_once():
@@ -262,9 +258,7 @@ class TestTheChainChecksEveryDeclaredColumnAndNotJustTheLinkedOne:
         # The bare KeyError named `gain_slope` too, and nothing else. What makes
         # this a message rather than a crash is that it also says what the
         # memory expected and where the missing block has to come from.
-        assert "column_order" in str(caught.value) or "accumulates" in str(
-            caught.value
-        )
+        assert "column_order" in str(caught.value) or "accumulates" in str(caught.value)
 
     def test_a_linked_latent_of_the_wrong_width_is_refused_by_name(self):
         term = self._epoch(
@@ -385,9 +379,7 @@ class TestTheStackAndTheArchiveHaveToDescribeTheSameCampaign:
         memory, terms = self._pair()
         factors, targets, offsets = memory.stacked
         with pytest.raises(StateValidationError, match="shaped"):
-            ChainMemory(
-                memory.factorization, (factors[:, :, :2], targets, offsets), terms
-            )
+            ChainMemory(memory.factorization, (factors[:, :, :2], targets, offsets), terms)
 
     def test_the_pair_remember_builds_is_still_taken(self):
         """Guard the guard, and the tolerance with it.
@@ -522,8 +514,7 @@ def test_a_memory_carrying_two_chains_is_refused():
     factorization = Factorization(
         ParameterSpace(
             latents=space.latents + (second,),
-            bindings=space.bindings
-            + (Bind("gain_drift", into=lambda p: p.gain_drift),),
+            bindings=space.bindings + (Bind("gain_drift", into=lambda p: p.gain_drift),),
         ),
         linked={bank.ZETA_NAME: _transition(), "gain_drift": _transition()},
     )

@@ -164,9 +164,7 @@ def _expanded(value: str, declared: frozenset[str], owner: str | None) -> set[st
         return {
             name
             for name in declared
-            if name.startswith(prefix)
-            and "." not in name[len(prefix) :]
-            and name != owner
+            if name.startswith(prefix) and "." not in name[len(prefix) :] and name != owner
         }
     return set()
 
@@ -413,8 +411,7 @@ def build_resources(section: dict, context: ResolutionContext) -> BuiltResources
     # removed such a filter for once.
     declared = frozenset(specs)
     dependencies = {
-        dotted: _referenced_names(spec, declared, dotted)
-        for dotted, spec in specs.items()
+        dotted: _referenced_names(spec, declared, dotted) for dotted, spec in specs.items()
     }
     for dotted, needs in dependencies.items():
         missing = sorted(needs - set(specs))

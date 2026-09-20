@@ -61,18 +61,23 @@ MINE = frozenset({"A26", "A49"})
 #: A49's required direction.  Built off ``exit_helpers.RADIOMETER`` rather than
 #: written out, so a change to the shared block cannot leave this one behind
 #: carrying a bandwidth nothing else uses.
-RADIOMETER_NO_LOGDET = {"kind": "radiometer",
-                        "channel_width": {"value": 1.0, "unit": "MHz"},
-                        "integration_time": {"value": 2.0, "unit": "s"}}
+RADIOMETER_NO_LOGDET = {
+    "kind": "radiometer",
+    "channel_width": {"value": 1.0, "unit": "MHz"},
+    "integration_time": {"value": 2.0, "unit": "s"},
+}
 
 #: A ``kind: radiometer_frozen`` block, complete -- and then given a key its
 #: own kind does not take.  ``radiometer_frozen`` is S3's first named twin:
 #: its sigma is decided from the DATA and is constant thereafter, so the term
 #: ``include_logdet`` weighs is not prediction-dependent and the key is
 #: refused rather than required.
-FROZEN = {"kind": "radiometer_frozen", "source": "observed",
-          "channel_width": {"value": 16.0, "unit": "Hz"},
-          "integration_time": {"value": 1.0, "unit": "s"}}
+FROZEN = {
+    "kind": "radiometer_frozen",
+    "source": "observed",
+    "channel_width": {"value": 16.0, "unit": "Hz"},
+    "integration_time": {"value": 1.0, "unit": "s"},
+}
 
 #: A one-dimensional sigma, the spelling schema §6 writes.
 ONE_D = {"kind": "homoscedastic", "sigma": {"ones": ["n_freq"], "unit": "K"}}
@@ -123,10 +128,13 @@ def observation(**sections):
     supplies the matching scope.
     """
     section = {
-        "freq": {"grid": {"linspace": {"start": 60.0, "stop": 85.0, "num": 8,
-                                       "endpoint": True}, "unit": "MHz"}},
-        "time": {"grid": {"arange": {"start": 0.0, "step": 2.0, "num": 16},
-                          "unit": "s"}},
+        "freq": {
+            "grid": {
+                "linspace": {"start": 60.0, "stop": 85.0, "num": 8, "endpoint": True},
+                "unit": "MHz",
+            }
+        },
+        "time": {"grid": {"arange": {"start": 0.0, "step": 2.0, "num": 16}, "unit": "s"}},
         **sections,
     }
     build, _ = build_observation(section, runtime=build_runtime({"seed": 1}))
@@ -140,8 +148,9 @@ def built(noise, *, seeds=None, **sections):
     is where each of them lives: a ``{normal:}`` sigma names an entry of
     ``runtime.seeds`` and ``seed_for`` reads it off the context.
     """
-    return build_noise(noise, observation=observation(**sections),
-                       context=context(seeds=dict(seeds or {})))
+    return build_noise(
+        noise, observation=observation(**sections), context=context(seeds=dict(seeds or {}))
+    )
 
 
 def ids_here(document):
@@ -193,15 +202,13 @@ A49_REFUSED_ON_HOMOSCEDASTIC = (
 #: The mirror leg, which is NOT hoisted: it interpolates the RESOLVED extents,
 #: which belong to the axes slot.  Written out here so that
 #: ``test_the_mirror_leg_was_not_hoisted`` can assert where it lives.
-A26_MIRROR = ("inference.noise.axis: says how to read a 1-D sigma; this one "
-              "has shape (16, 8).")
+A26_MIRROR = "inference.noise.axis: says how to read a 1-D sigma; this one has shape (16, 8)."
 
 #: The more specific refusal A26 must not pre-empt.
 AXIS_GRAMMAR = "inference.noise.axis: is none, time or freq; got 'sideways'."
 
 #: The other one: a homoscedastic block with no sigma at all.
-SIGMA_REQUIRED = ("inference.noise: kind: homoscedastic requires sigma: -- a "
-                  "value node.")
+SIGMA_REQUIRED = "inference.noise: kind: homoscedastic requires sigma: -- a value node."
 
 
 class TestTheRowsArriveBeforeTheBeam:
@@ -217,8 +224,7 @@ class TestTheRowsArriveBeforeTheBeam:
     def _refusal(self, noise, *, model=None):
         patch = {} if model is None else {"model": model}
         with pytest.raises(ConfigError) as caught:
-            load_document(with_noise(noise, resources=UNREADABLE_BEAM,
-                                     **patch))
+            load_document(with_noise(noise, resources=UNREADABLE_BEAM, **patch))
         return str(caught.value)
 
     def test_a_one_d_sigma_is_reported_and_not_the_missing_beam(self):
@@ -234,22 +240,21 @@ class TestTheRowsArriveBeforeTheBeam:
         (V-7's rule, applied one module over: the fixture is made to agree,
         the check is not weakened) leaves A49 as the first refusal without
         touching what A49 itself decides."""
-        assert self._refusal(RADIOMETER_NO_LOGDET,
-                             model={"noise": RADIOMETER_DRAWN}) == (
-            A49_REQUIRED)
+        assert self._refusal(RADIOMETER_NO_LOGDET, model={"noise": RADIOMETER_DRAWN}) == (
+            A49_REQUIRED
+        )
 
     def test_a_refused_include_logdet_is_reported_and_not_the_beam(self):
         """See the sibling test above: same reason, same repair."""
-        assert self._refusal({**FROZEN, "include_logdet": True},
-                             model={"noise": RADIOMETER_DRAWN}) == (
-            A49_REFUSED_ON_FROZEN)
+        assert self._refusal(
+            {**FROZEN, "include_logdet": True}, model={"noise": RADIOMETER_DRAWN}
+        ) == (A49_REFUSED_ON_FROZEN)
 
     def test_the_beam_still_wins_when_the_noise_block_is_correct(self):
         """The anti-vacuity partner: without it every assertion above would
         pass against a fixture whose beam had quietly become readable, and
         three tests about PHASE would be testing nothing at all."""
-        assert self._refusal(ONE_D_FIXED).startswith(
-            "No file at 'no_such_beam.npy'.")
+        assert self._refusal(ONE_D_FIXED).startswith("No file at 'no_such_beam.npy'.")
 
 
 class TestA26TheOneDSigma:
@@ -284,14 +289,14 @@ class TestA26TheOneDSigma:
         "full": {"full": {"shape": ["n_freq"], "value": 0.5}, "unit": "K"},
         "list": {"list": [0.1, 0.2, 0.3], "unit": "K"},
         "value_list": {"value": [0.1, 0.2], "unit": "K"},
-        "linspace": {"linspace": {"start": 1.0, "stop": 2.0, "num": "n_freq",
-                                  "endpoint": True}, "unit": "K"},
-        "arange": {"arange": {"start": 1.0, "step": 1.0, "num": "n_freq"},
-                   "unit": "K"},
+        "linspace": {
+            "linspace": {"start": 1.0, "stop": 2.0, "num": "n_freq", "endpoint": True},
+            "unit": "K",
+        },
+        "arange": {"arange": {"start": 1.0, "step": 1.0, "num": "n_freq"}, "unit": "K"},
         "modulo": {"modulo": {"num": "n_freq", "period": 2}, "unit": "K"},
         "from_grid": {"from_grid": "freq"},
-        "normal": {"normal": {"shape": ["n_freq"], "seed": {"from":
-                                                            "runtime.seeds.a"}}},
+        "normal": {"normal": {"shape": ["n_freq"], "seed": {"from": "runtime.seeds.a"}}},
         "stack": {"stack": [{"value": 0.1}, {"value": 0.2}], "unit": "K"},
     }
 
@@ -300,9 +305,10 @@ class TestA26TheOneDSigma:
         """Kills the naive reading -- "only the array constructors carry a
         shape" -- which answers None for six of these eleven and lets each of
         them through to lose to the beam again."""
-        document = with_noise({"kind": "homoscedastic",
-                               "sigma": self.ONE_D_SPELLINGS[spelling]},
-                              runtime={"seed": 7, "seeds": {"a": 3}})
+        document = with_noise(
+            {"kind": "homoscedastic", "sigma": self.ONE_D_SPELLINGS[spelling]},
+            runtime={"seed": 7, "seeds": {"a": 3}},
+        )
         assert only(document, "A26").message == A26_MESSAGE
 
     #: Every spelling that is not 1-D, and three that stop being 1-D.
@@ -319,19 +325,29 @@ class TestA26TheOneDSigma:
         "two_d_ones": {"ones": ["n_time", "n_freq"], "unit": "K"},
         "two_d_list": {"list": [[0.1, 0.2], [0.3, 0.4]], "unit": "K"},
         "column": {"ones": ["n_freq"], "unit": "K", "column": True},
-        "stack_of_rows": {"stack": [{"ones": ["n_freq"]},
-                                    {"ones": ["n_freq"]}], "unit": "K"},
-        "drawn_with_a_2_D_loc": {"normal": {
-            "shape": ["n_freq"], "seed": {"from": "runtime.seeds.a"},
-            "loc": {"ones": ["n_time", "n_freq"]}}},
-        "drawn_with_a_2_D_scale": {"normal": {
-            "shape": ["n_freq"], "seed": {"from": "runtime.seeds.a"},
-            "scale": {"ones": ["n_time", "n_freq"]}}},
-        "drawn_with_a_2_D_low": {"uniform": {
-            "shape": ["n_freq"], "seed": {"from": "runtime.seeds.a"},
-            "low": {"ones": ["n_time", "n_freq"]}}},
-        "filled_with_a_2_D_value": {"full": {"shape": ["n_freq"],
-                                             "value": [[1.0, 2.0]]}},
+        "stack_of_rows": {"stack": [{"ones": ["n_freq"]}, {"ones": ["n_freq"]}], "unit": "K"},
+        "drawn_with_a_2_D_loc": {
+            "normal": {
+                "shape": ["n_freq"],
+                "seed": {"from": "runtime.seeds.a"},
+                "loc": {"ones": ["n_time", "n_freq"]},
+            }
+        },
+        "drawn_with_a_2_D_scale": {
+            "normal": {
+                "shape": ["n_freq"],
+                "seed": {"from": "runtime.seeds.a"},
+                "scale": {"ones": ["n_time", "n_freq"]},
+            }
+        },
+        "drawn_with_a_2_D_low": {
+            "uniform": {
+                "shape": ["n_freq"],
+                "seed": {"from": "runtime.seeds.a"},
+                "low": {"ones": ["n_time", "n_freq"]},
+            }
+        },
+        "filled_with_a_2_D_value": {"full": {"shape": ["n_freq"], "value": [[1.0, 2.0]]}},
     }
 
     @pytest.mark.parametrize("spelling", sorted(NOT_ONE_D))
@@ -339,17 +355,20 @@ class TestA26TheOneDSigma:
         """``column: true`` is the one that is not obvious: it is applied LAST
         by ``modifiers.py`` and forces ``(n,)`` to ``(n, 1)``, so a check that
         read the form key and stopped would refuse a document that builds."""
-        assert silent_here(with_noise(
-            {"kind": "homoscedastic", "sigma": self.NOT_ONE_D[spelling]},
-            runtime={"seed": 7, "seeds": {"a": 3}}))
+        assert silent_here(
+            with_noise(
+                {"kind": "homoscedastic", "sigma": self.NOT_ONE_D[spelling]},
+                runtime={"seed": 7, "seeds": {"a": 3}},
+            )
+        )
 
     def test_a_column_sigma_really_does_build(self):
         """The anti-vacuity partner for the ``column`` row above: standing
         down would be right for the wrong reason if the document were refused
         for something else."""
-        assert built({"kind": "homoscedastic",
-                      "sigma": {"ones": ["n_freq"], "unit": "K",
-                                "column": True}}).model.sigma.shape == (8, 1)
+        assert built(
+            {"kind": "homoscedastic", "sigma": {"ones": ["n_freq"], "unit": "K", "column": True}}
+        ).model.sigma.shape == (8, 1)
 
     def test_a_drawn_sigma_with_a_2_D_loc_really_does_build(self):
         """The anti-vacuity partner for the regression row, and the ONLY test
@@ -366,8 +385,7 @@ class TestA26TheOneDSigma:
         Named for what it asserts rather than for the check, because the check
         must say NOTHING here; the ``(16, 8)`` is the whole evidence.
         """
-        drawn = {"kind": "homoscedastic",
-                 "sigma": self.NOT_ONE_D["drawn_with_a_2_D_loc"]}
+        drawn = {"kind": "homoscedastic", "sigma": self.NOT_ONE_D["drawn_with_a_2_D_loc"]}
         assert built(drawn, seeds={"a": 3}).model.sigma.shape == (16, 8)
 
     def test_a_drawn_sigma_with_a_scalar_loc_is_still_A26s(self):
@@ -381,11 +399,12 @@ class TestA26TheOneDSigma:
         accepts for an operand: a bare number, the shorthand, and a value node.
         """
         for operand in (1.0, "1.0 K", {"value": 1.0}):
-            sigma = {"normal": {"shape": ["n_freq"],
-                                "seed": {"from": "runtime.seeds.a"},
-                                "loc": operand}}
-            document = with_noise({"kind": "homoscedastic", "sigma": sigma},
-                                  runtime={"seed": 7, "seeds": {"a": 3}})
+            sigma = {
+                "normal": {"shape": ["n_freq"], "seed": {"from": "runtime.seeds.a"}, "loc": operand}
+            }
+            document = with_noise(
+                {"kind": "homoscedastic", "sigma": sigma}, runtime={"seed": 7, "seeds": {"a": 3}}
+            )
             assert only(document, "A26").message == A26_MESSAGE, operand
 
 
@@ -406,10 +425,8 @@ class TestA26StandsDownOnWhatTheTextCannotSee:
     }
 
     @pytest.mark.parametrize("spelling", sorted(OPAQUE))
-    def test_a_sigma_whose_shape_the_text_cannot_see_says_nothing(
-            self, spelling):
-        assert silent_here(with_noise({"kind": "homoscedastic",
-                                       "sigma": self.OPAQUE[spelling]}))
+    def test_a_sigma_whose_shape_the_text_cannot_see_says_nothing(self, spelling):
+        assert silent_here(with_noise({"kind": "homoscedastic", "sigma": self.OPAQUE[spelling]}))
 
     def test_the_stand_down_is_capable_of_failing(self):
         """The same document with a spelling that DOES carry a rank fires.
@@ -424,9 +441,9 @@ class TestA26StandsDownOnWhatTheTextCannotSee:
         """What the stand-down COSTS, measured rather than asserted in prose:
         the document is refused, by the same sentence, one phase later."""
         with pytest.raises(ConfigError) as caught:
-            load_document(with_noise(
-                {"kind": "homoscedastic",
-                 "sigma": {"ref": "resources.arrays.flat"}}))
+            load_document(
+                with_noise({"kind": "homoscedastic", "sigma": {"ref": "resources.arrays.flat"}})
+            )
         assert str(caught.value) == A26_MESSAGE
 
 
@@ -461,16 +478,19 @@ class TestA26DoesNotPreEmpt:
         A stand-down with no test is a stand-down one refactor from becoming a
         pre-emption (R4).
         """
-        noise = {"kind": "radiometer",
-                 "sigma": {"ones": ["n_freq"], "unit": "K"},
-                 "channel_width": {"value": 1.0, "unit": "MHz"},
-                 "integration_time": {"value": 2.0, "unit": "s"},
-                 "include_logdet": True}
+        noise = {
+            "kind": "radiometer",
+            "sigma": {"ones": ["n_freq"], "unit": "K"},
+            "channel_width": {"value": 1.0, "unit": "MHz"},
+            "integration_time": {"value": 2.0, "unit": "s"},
+            "include_logdet": True,
+        }
         assert silent_here(with_noise(noise))
         with pytest.raises(ConfigError) as caught:
             built(noise)
         assert str(caught.value).startswith(
-            "inference.noise: kind: radiometer does not take ['sigma']")
+            "inference.noise: kind: radiometer does not take ['sigma']"
+        )
 
     def test_a_homoscedastic_block_with_no_sigma_hears_the_requirement(self):
         document = with_noise({"kind": "homoscedastic"})
@@ -480,8 +500,7 @@ class TestA26DoesNotPreEmpt:
         assert str(caught.value) == SIGMA_REQUIRED
 
     def test_an_empty_list_sigma_is_the_value_grammars_own_refusal(self):
-        assert silent_here(with_noise({"kind": "homoscedastic",
-                                       "sigma": {"list": []}}))
+        assert silent_here(with_noise({"kind": "homoscedastic", "sigma": {"list": []}}))
 
 
 class TestA26sAdviceIsAmbiguous:
@@ -500,15 +519,19 @@ class TestA26sAdviceIsAmbiguous:
     """
 
     def test_the_advice_written_inside_the_sigma_node_re_earns_it(self):
-        inside = {"kind": "homoscedastic",
-                  "sigma": {"ones": ["n_freq"], "unit": "K", "axis": "freq"}}
+        inside = {
+            "kind": "homoscedastic",
+            "sigma": {"ones": ["n_freq"], "unit": "K", "axis": "freq"},
+        }
         assert only(with_noise(inside), "A26").message == A26_MESSAGE
 
     def test_the_build_agrees_that_the_inside_placement_does_not_help(self):
         """The ambiguity is the LAYER's and not this pass's -- which is what
         makes it a finding to record rather than a check to fix."""
-        inside = {"kind": "homoscedastic",
-                  "sigma": {"ones": ["n_freq"], "unit": "K", "axis": "freq"}}
+        inside = {
+            "kind": "homoscedastic",
+            "sigma": {"ones": ["n_freq"], "unit": "K", "axis": "freq"},
+        }
         with pytest.raises(ConfigError) as caught:
             built(inside)
         assert str(caught.value) == A26_MESSAGE
@@ -518,8 +541,11 @@ class TestA26sAdviceIsAmbiguous:
         assert built(ONE_D_FIXED).model.sigma.shape == (1, 8)
 
     def test_axis_time_is_the_other_half_of_the_remedy(self):
-        fixed = {"kind": "homoscedastic",
-                 "sigma": {"ones": ["n_time"], "unit": "K"}, "axis": "time"}
+        fixed = {
+            "kind": "homoscedastic",
+            "sigma": {"ones": ["n_time"], "unit": "K"},
+            "axis": "time",
+        }
         assert silent_here(with_noise(fixed))
         assert built(fixed).model.sigma.shape == (16, 1)
 
@@ -539,9 +565,16 @@ class TestA49BothDirections:
         assert found.message == A49_REFUSED_ON_FROZEN
 
     def test_the_refused_direction_on_a_constant_sigma_whole(self):
-        found = only(with_noise({"kind": "homoscedastic",
-                                 "sigma": {"value": 0.5, "unit": "K"},
-                                 "include_logdet": True}), "A49")
+        found = only(
+            with_noise(
+                {
+                    "kind": "homoscedastic",
+                    "sigma": {"value": 0.5, "unit": "K"},
+                    "include_logdet": True,
+                }
+            ),
+            "A49",
+        )
         assert found.message == A49_REFUSED_ON_HOMOSCEDASTIC
 
     def test_the_build_says_the_same_two_sentences(self):
@@ -564,17 +597,16 @@ class TestA49BothDirections:
         nothing said.  ``test_config_section_noise.py`` pins this at the
         build; this is the same property at P-1.
         """
-        found = only(with_noise({**RADIOMETER_NO_LOGDET,
-                                 "include_logdet": 1}), "A49")
+        found = only(with_noise({**RADIOMETER_NO_LOGDET, "include_logdet": 1}), "A49")
         assert found.message == A49_REQUIRED
 
     @pytest.mark.parametrize("declared", [True, False])
     def test_a_declared_bool_clears_it(self, declared):
-        document = with_noise({**RADIOMETER_NO_LOGDET,
-                               "include_logdet": declared})
+        document = with_noise({**RADIOMETER_NO_LOGDET, "include_logdet": declared})
         assert silent_here(document)
-        assert built({**RADIOMETER_NO_LOGDET,
-                      "include_logdet": declared}).include_logdet is declared
+        assert (
+            built({**RADIOMETER_NO_LOGDET, "include_logdet": declared}).include_logdet is declared
+        )
 
     def test_dropping_the_key_clears_the_refused_direction(self):
         """S4: this check's own advice, applied.  The hint says the key is
@@ -591,8 +623,7 @@ class TestA49DoesNotPreEmpt:
         """``inference.noise.kind: banana`` is ``build_noise``'s vocabulary
         refusal.  A second voice for one typo is worse than a late one, and
         the naive membership test would also raise ``KeyError`` here."""
-        assert silent_here(with_noise({"kind": "banana",
-                                       "include_logdet": True}))
+        assert silent_here(with_noise({"kind": "banana", "include_logdet": True}))
 
     def test_a_stray_key_that_is_not_include_logdet_is_not_A49s(self):
         """Kills the ungated sweep.
@@ -602,9 +633,9 @@ class TestA49DoesNotPreEmpt:
         check's subject wearing this one's id -- and would make A49 fire on
         documents whose ``include_logdet`` is perfectly correct.
         """
-        assert silent_here(with_noise({"kind": "homoscedastic",
-                                       "sigma": {"value": 0.5, "unit": "K"},
-                                       "flors": 1}))
+        assert silent_here(
+            with_noise({"kind": "homoscedastic", "sigma": {"value": 0.5, "unit": "K"}, "flors": 1})
+        )
 
     def test_a_kind_that_is_not_even_a_string_does_not_abort_the_pass(self):
         """§2.3's TRAP, and it is not hypothetical: ``kind: [radiometer]`` is
@@ -627,29 +658,48 @@ class TestA49DoesNotPreEmpt:
 class TestTheTwins:
     """S3.  The three the task body names, plus the two this task found."""
 
-    def test_radiometer_frozen_is_the_kind_that_looks_prediction_dependent(
-            self):
+    def test_radiometer_frozen_is_the_kind_that_looks_prediction_dependent(self):
         """Named twin 1.  Its sigma is decided from the data ONCE and is
         constant thereafter, so ``include_logdet`` is refused on it and not
         required -- the opposite of ``radiometer``, one word away."""
-        assert only(with_noise({**FROZEN, "include_logdet": True}),
-                    "A49").message == A49_REFUSED_ON_FROZEN
+        assert (
+            only(with_noise({**FROZEN, "include_logdet": True}), "A49").message
+            == A49_REFUSED_ON_FROZEN
+        )
         assert silent_here(with_noise(FROZEN))
 
     @pytest.mark.parametrize(
         ("noise", "expected"),
-        [({"kind": "radiometer", "channel_width": {"value": 1.0,
-                                                   "unit": "MHz"},
-           "integration_time": {"value": 2.0, "unit": "s"},
-           "flags": FLAGS}, frozenset({"A49"})),
-         ({"kind": "radiometer", "channel_width": {"value": 1.0,
-                                                   "unit": "MHz"},
-           "integration_time": {"value": 2.0, "unit": "s"},
-           "include_logdet": True, "flags": FLAGS}, frozenset()),
-         ({"kind": "homoscedastic", "sigma": {"ones": ["n_freq"],
-                                              "unit": "K"},
-           "flags": FLAGS}, frozenset({"A26"})),
-         ({**ONE_D_FIXED, "flags": FLAGS}, frozenset())],
+        [
+            (
+                {
+                    "kind": "radiometer",
+                    "channel_width": {"value": 1.0, "unit": "MHz"},
+                    "integration_time": {"value": 2.0, "unit": "s"},
+                    "flags": FLAGS,
+                },
+                frozenset({"A49"}),
+            ),
+            (
+                {
+                    "kind": "radiometer",
+                    "channel_width": {"value": 1.0, "unit": "MHz"},
+                    "integration_time": {"value": 2.0, "unit": "s"},
+                    "include_logdet": True,
+                    "flags": FLAGS,
+                },
+                frozenset(),
+            ),
+            (
+                {
+                    "kind": "homoscedastic",
+                    "sigma": {"ones": ["n_freq"], "unit": "K"},
+                    "flags": FLAGS,
+                },
+                frozenset({"A26"}),
+            ),
+            ({**ONE_D_FIXED, "flags": FLAGS}, frozenset()),
+        ],
     )
     def test_a_flags_entry_never_moves_a_row(self, noise, expected):
         """Named twin 2.  ``FlaggedNoise`` FORWARDS ``depends_on_prediction``
@@ -657,8 +707,7 @@ class TestTheTwins:
         which kinds need ``include_logdet`` nor whether a sigma is 1-D --
         and ``flags`` is a legal key for both kinds, so a check keyed on "the
         block has exactly these keys" would get all four of these wrong."""
-        assert ids_here(with_noise(noise,
-                                   observation=AUX_FLAGS)) == expected
+        assert ids_here(with_noise(noise, observation=AUX_FLAGS)) == expected
 
     def test_the_observed_realise_sigma_is_a_RECORDED_FALSE_NEGATIVE(self):
         """Named twin 3, and the answer is "not guarded", on purpose.
@@ -676,17 +725,24 @@ class TestTheTwins:
         ``axis:`` to that grammar is a section change with its own decision;
         §7 records it by name.
         """
-        square = {"time": {"grid": {"arange": {"start": 0.0, "step": 2.0,
-                                               "num": 8}, "unit": "s"}}}
-        observed = {"from": "simulation", "at": {"g": 1.5}, "twin": "full",
-                    "realise": {"kind": "homoscedastic",
-                                "sigma": {"ones": ["n_freq"], "unit": "K"},
-                                "seed": {"from": "runtime.seeds.a"}}}
+        square = {"time": {"grid": {"arange": {"start": 0.0, "step": 2.0, "num": 8}, "unit": "s"}}}
+        observed = {
+            "from": "simulation",
+            "at": {"g": 1.5},
+            "twin": "full",
+            "realise": {
+                "kind": "homoscedastic",
+                "sigma": {"ones": ["n_freq"], "unit": "K"},
+                "seed": {"from": "runtime.seeds.a"},
+            },
+        }
         document = preflight_document(
-            observation=square, inference={"observed": observed},
-            runtime={"seed": 7, "seeds": {"a": 3}})
+            observation=square,
+            inference={"observed": observed},
+            runtime={"seed": 7, "seeds": {"a": 3}},
+        )
         assert silent_here(document)
-        load_document(document)   # it builds; that IS the false negative
+        load_document(document)  # it builds; that IS the false negative
 
     def test_the_twin_replace_route_carries_no_inference_noise(self):
         """Plan §0.3 E.10, answered: these two checks do NOT walk
@@ -700,16 +756,22 @@ class TestTheTwins:
         ``inference.noise`` said, and both answers are unchanged by the
         replacement.
         """
-        replace = {"replace": {"noise": {"type": "RadiometerNoiseOperator",
-                                         "channel_width": {"value": 1.0,
-                                                           "unit": "MHz"},
-                                         "integration_time": {"value": 2.0,
-                                                              "unit": "s"}}}}
-        assert ids_here(preflight_document(
-            inference={"noise": ONE_D, "twin": replace})) == frozenset({"A26"})
-        assert ids_here(preflight_document(
-            inference={"noise": ONE_D_FIXED,
-                       "twin": replace})) == frozenset()
+        replace = {
+            "replace": {
+                "noise": {
+                    "type": "RadiometerNoiseOperator",
+                    "channel_width": {"value": 1.0, "unit": "MHz"},
+                    "integration_time": {"value": 2.0, "unit": "s"},
+                }
+            }
+        }
+        assert ids_here(
+            preflight_document(inference={"noise": ONE_D, "twin": replace})
+        ) == frozenset({"A26"})
+        assert (
+            ids_here(preflight_document(inference={"noise": ONE_D_FIXED, "twin": replace}))
+            == frozenset()
+        )
 
     def test_a_variant_that_patches_the_noise_block_is_reported(self):
         """The twin this task found: ``variants:``.
@@ -724,28 +786,25 @@ class TestTheTwins:
         place and the variant is as clean as the base.  Measured -- that was
         this test's first draft and it found nothing.
         """
-        document = with_variants(ONE_D_FIXED,
-                                 {"night": {"inference": {"noise": {
-                                     "~axis": None}}}})
+        document = with_variants(ONE_D_FIXED, {"night": {"inference": {"noise": {"~axis": None}}}})
         found = only(document, "A26")
         assert found.message == f"variants.night: {A26_MESSAGE}"
         assert found.where == "variants.night.inference.noise.sigma"
 
     def test_a_variant_that_patches_the_logdet_is_reported_too(self):
-        document = with_variants({**RADIOMETER_NO_LOGDET,
-                                  "include_logdet": True},
-                                 {"gls": {"inference": {"noise": {
-                                     "~include_logdet": None}}}})
-        assert only(document, "A49").message == (
-            f"variants.gls: {A49_REQUIRED}")
+        document = with_variants(
+            {**RADIOMETER_NO_LOGDET, "include_logdet": True},
+            {"gls": {"inference": {"noise": {"~include_logdet": None}}}},
+        )
+        assert only(document, "A49").message == (f"variants.gls: {A49_REQUIRED}")
 
     def test_the_base_documents_own_finding_is_said_once(self):
         """``_task3_over_layers``' de-duplication, on this section: a base
         fault plus four variants would otherwise be five sentences, four of
         them blaming a variant that did not introduce it."""
-        document = with_variants(ONE_D, {
-            f"v{index}": {"inference": {"parameters": {}}}
-            for index in range(4)})
+        document = with_variants(
+            ONE_D, {f"v{index}": {"inference": {"parameters": {}}} for index in range(4)}
+        )
         assert only(document, "A26").message == A26_MESSAGE
 
 
@@ -754,57 +813,62 @@ class TestTheRankReader:
 
     @pytest.mark.parametrize(
         ("node", "rank"),
-        [(0.5, 0), (True, 0), ("0.5 K", 0),
-         ({"value": 0.5}, 0), ({"value": [1.0, 2.0]}, 1),
-         ({"value": [[1.0], [2.0]]}, 2),
-         ({"zeros": []}, 0), ({"ones": ["n_freq"]}, 1),
-         ({"ones": ["n_time", "n_freq"]}, 2),
-         ({"full": {"shape": ["n_freq"], "value": 1.0}}, 1),
-         ({"list": [1.0]}, 1), ({"list": [[1.0, 2.0]]}, 2),
-         ({"linspace": {}}, 1), ({"arange": {}}, 1), ({"modulo": {}}, 1),
-         ({"from_grid": "time"}, 1),
-         ({"normal": {"shape": []}}, 0),
-         ({"uniform": {"shape": ["n_time", "n_freq"]}}, 2),
-         ({"stack": [{"value": 1.0}]}, 1),
-         ({"stack": [{"ones": ["n_freq"]}]}, 2),
-         # `modifiers.py` applies `column:` on truthiness, so `column: false`
-         # leaves the value 1-D and A26 must still fire.  Kills widening
-         # `node.get("column")` to `"column" in node`, which is otherwise
-         # green across the whole of `tests/config`.
-         ({"ones": ["n_freq"], "column": False}, 1),
-         ({"ones": ["n_freq"], "column": 0}, 1),
-         # a draw's operands broadcast, so `shape:` is not the last word
-         ({"normal": {"shape": ["n_freq"], "loc": 1.0}}, 1),
-         ({"normal": {"shape": ["n_freq"], "loc": "1.0 K"}}, 1),
-         ({"normal": {"shape": ["n_freq"], "loc": {"value": 1.0}}}, 1),
-         ({"normal": {"shape": ["n_freq"],
-                      "loc": {"ones": ["n_time", "n_freq"]}}}, None),
-         ({"normal": {"shape": ["n_freq"],
-                      "scale": {"ones": ["n_time", "n_freq"]}}}, None),
-         ({"normal": {"shape": ["n_freq"], "loc": {"ref": "resources.x"}}},
-          None),
-         ({"uniform": {"shape": ["n_freq"], "low": 0.0, "high": 1.0}}, 1),
-         ({"uniform": {"shape": ["n_freq"],
-                       "high": {"ones": ["n_time", "n_freq"]}}}, None),
-         ({"full": {"shape": ["n_freq"], "value": 1.0}}, 1),
-         ({"full": {"shape": ["n_freq"], "value": [[1.0]]}}, None),
-         # every one of these is a stand-down, not a rank
-         ({"ref": "resources.arrays.flat"}, None),
-         ({"file": {"path": "x.npy"}}, None),
-         ({"from": "channel_spacing"}, None),
-         ({"python": "numpy:zeros"}, None),
-         ({"from_switch_order": {"resource": "resources.s_params"}}, None),
-         ({"basis_fit": {}}, None),
-         ({"ones": ["n_freq"], "column": True}, None),
-         ({"ones": ["n_freq"], "list": [1.0]}, None),
-         ({"unit": "K"}, None),
-         ({"ones": "n_freq"}, None),
-         ({"full": ["n_freq"]}, None),
-         ({"list": []}, None),
-         ({"stack": []}, None),
-         ({"value": "not a number"}, None),
-         ([1.0, 2.0], None),
-         (None, None)],
+        [
+            (0.5, 0),
+            (True, 0),
+            ("0.5 K", 0),
+            ({"value": 0.5}, 0),
+            ({"value": [1.0, 2.0]}, 1),
+            ({"value": [[1.0], [2.0]]}, 2),
+            ({"zeros": []}, 0),
+            ({"ones": ["n_freq"]}, 1),
+            ({"ones": ["n_time", "n_freq"]}, 2),
+            ({"full": {"shape": ["n_freq"], "value": 1.0}}, 1),
+            ({"list": [1.0]}, 1),
+            ({"list": [[1.0, 2.0]]}, 2),
+            ({"linspace": {}}, 1),
+            ({"arange": {}}, 1),
+            ({"modulo": {}}, 1),
+            ({"from_grid": "time"}, 1),
+            ({"normal": {"shape": []}}, 0),
+            ({"uniform": {"shape": ["n_time", "n_freq"]}}, 2),
+            ({"stack": [{"value": 1.0}]}, 1),
+            ({"stack": [{"ones": ["n_freq"]}]}, 2),
+            # `modifiers.py` applies `column:` on truthiness, so `column: false`
+            # leaves the value 1-D and A26 must still fire.  Kills widening
+            # `node.get("column")` to `"column" in node`, which is otherwise
+            # green across the whole of `tests/config`.
+            ({"ones": ["n_freq"], "column": False}, 1),
+            ({"ones": ["n_freq"], "column": 0}, 1),
+            # a draw's operands broadcast, so `shape:` is not the last word
+            ({"normal": {"shape": ["n_freq"], "loc": 1.0}}, 1),
+            ({"normal": {"shape": ["n_freq"], "loc": "1.0 K"}}, 1),
+            ({"normal": {"shape": ["n_freq"], "loc": {"value": 1.0}}}, 1),
+            ({"normal": {"shape": ["n_freq"], "loc": {"ones": ["n_time", "n_freq"]}}}, None),
+            ({"normal": {"shape": ["n_freq"], "scale": {"ones": ["n_time", "n_freq"]}}}, None),
+            ({"normal": {"shape": ["n_freq"], "loc": {"ref": "resources.x"}}}, None),
+            ({"uniform": {"shape": ["n_freq"], "low": 0.0, "high": 1.0}}, 1),
+            ({"uniform": {"shape": ["n_freq"], "high": {"ones": ["n_time", "n_freq"]}}}, None),
+            ({"full": {"shape": ["n_freq"], "value": 1.0}}, 1),
+            ({"full": {"shape": ["n_freq"], "value": [[1.0]]}}, None),
+            # every one of these is a stand-down, not a rank
+            ({"ref": "resources.arrays.flat"}, None),
+            ({"file": {"path": "x.npy"}}, None),
+            ({"from": "channel_spacing"}, None),
+            ({"python": "numpy:zeros"}, None),
+            ({"from_switch_order": {"resource": "resources.s_params"}}, None),
+            ({"basis_fit": {}}, None),
+            ({"ones": ["n_freq"], "column": True}, None),
+            ({"ones": ["n_freq"], "list": [1.0]}, None),
+            ({"unit": "K"}, None),
+            ({"ones": "n_freq"}, None),
+            ({"full": ["n_freq"]}, None),
+            ({"list": []}, None),
+            ({"stack": []}, None),
+            ({"value": "not a number"}, None),
+            ([1.0, 2.0], None),
+            (None, None),
+        ],
     )
     def test_the_rank_the_text_declares(self, node, rank):
         assert _a26_rank(node) == rank
@@ -838,16 +902,20 @@ class TestTheRegistryAndTheOrder:
         import sys
 
         done = subprocess.run(
-            [sys.executable, "-c",
-             "from rheplicant.config.preflight import CHECKS\n"
-             "print(sorted(k for k in CHECKS if k in ('A26', 'A49')))\n"
-             "print(CHECKS['A26'].__module__, CHECKS['A49'].__module__)"],
-            capture_output=True, text=True)
+            [
+                sys.executable,
+                "-c",
+                "from rheplicant.config.preflight import CHECKS\n"
+                "print(sorted(k for k in CHECKS if k in ('A26', 'A49')))\n"
+                "print(CHECKS['A26'].__module__, CHECKS['A49'].__module__)",
+            ],
+            capture_output=True,
+            text=True,
+        )
         assert done.returncode == 0, done.stdout + done.stderr
         registered, modules = done.stdout.split("\n")[:2]
         assert registered == "['A26', 'A49']"
-        assert modules == ("rheplicant.config.preflight.noise "
-                           "rheplicant.config.preflight.noise")
+        assert modules == ("rheplicant.config.preflight.noise rheplicant.config.preflight.noise")
 
     def test_both_ids_reach_a_document_through_the_pass(self):
         assert {"A26"} <= ids(with_noise(ONE_D))
@@ -869,10 +937,11 @@ class TestTheRegistryAndTheOrder:
         registration index or a length: five sibling branches are registering
         into the same dict.
         """
-        document = with_noise(RADIOMETER_NO_LOGDET, runs=[
-            {"kind": "conjugate.wiener", "width": "none", "names": ["g"]}])
-        spoken = [one.check for one in findings(document)
-                  if one.check in {"A27", "A49"}]
+        document = with_noise(
+            RADIOMETER_NO_LOGDET,
+            runs=[{"kind": "conjugate.wiener", "width": "none", "names": ["g"]}],
+        )
+        spoken = [one.check for one in findings(document) if one.check in {"A27", "A49"}]
         assert spoken == ["A27", "A49"]
 
 
@@ -887,10 +956,9 @@ class TestTheOneBinding:
     """
 
     @pytest.mark.parametrize(
-        "literal", [A26_MESSAGE, A49_REQUIRED, A49_HINT],
-        ids=["A26", "A49-required", "A49-hint"])
-    def test_each_hoisted_sentence_is_written_in_exactly_one_module(
-            self, literal):
+        "literal", [A26_MESSAGE, A49_REQUIRED, A49_HINT], ids=["A26", "A49-required", "A49-hint"]
+    )
+    def test_each_hoisted_sentence_is_written_in_exactly_one_module(self, literal):
         assert_bound_once(literal)
 
     def test_the_hoisted_sentences_live_in_the_section_that_owns_them(self):
@@ -908,8 +976,7 @@ class TestTheOneBinding:
         slot's inputs.  A P-1 copy of it would have to resolve ``n_time`` and
         ``n_freq``, which is the slot boundary this plan exists to hold.
         """
-        assert modules_carrying("says how to read a 1-D sigma") == (
-            "config/sections/noise.py",)
+        assert modules_carrying("says how to read a 1-D sigma") == ("config/sections/noise.py",)
 
     def test_the_two_refusals_A26_defers_to_stayed_where_they_are(self):
         """The two sentences A26 stands down FOR, checked for the same thing.
@@ -925,8 +992,7 @@ class TestTheOneBinding:
         # interpolates the token the reader wrote, and the walker folds every
         # interpolation to one character -- so the whole text harvests as
         # nothing at all and the assertion would be measuring its own quoting.
-        for literal in ("inference.noise.axis: is none, time or freq; got",
-                        SIGMA_REQUIRED):
+        for literal in ("inference.noise.axis: is none, time or freq; got", SIGMA_REQUIRED):
             assert modules_carrying(literal) == ("config/sections/noise.py",)
 
 

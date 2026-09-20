@@ -233,8 +233,7 @@ _T6_NOISE_NODE = "noise"
 #: mirrors ``preflight/gated.py::_DRAWING_TYPES``'s own row for the same
 #: class, by NAME there (the document's text) and by ``isinstance`` here (the
 #: built operator).
-_T6_RADIOMETER_KINDS: frozenset[str] = frozenset({"radiometer",
-                                                   "radiometer_frozen"})
+_T6_RADIOMETER_KINDS: frozenset[str] = frozenset({"radiometer", "radiometer_frozen"})
 
 #: What ``inference.noise`` says when it says nothing -- ``build_noise``'s own
 #: answer for an absent section and for an explicit ``kind: none`` alike.
@@ -496,8 +495,9 @@ def _t6_agrees(drawn_value: Any, weighed_value: Any) -> bool:
     ``bool(...)`` on the ``allclose`` result is what keeps this a real
     boolean either way.
     """
-    return bool(jnp.allclose(jnp.asarray(drawn_value), jnp.asarray(weighed_value),
-                             rtol=_T6_RTOL, atol=0.0))
+    return bool(
+        jnp.allclose(jnp.asarray(drawn_value), jnp.asarray(weighed_value), rtol=_T6_RTOL, atol=0.0)
+    )
 
 
 def _t6_unwrapped(model: Any) -> Any:
@@ -542,9 +542,11 @@ def _t6_radiometer_fractional(kind: str, weighed: Any) -> float:
     if kind == "radiometer":
         return float(_t6_unwrapped(weighed.model).fractional)
     facts = weighed.frozen or {}
-    return float(RadiometerNoise(
-        channel_width=facts["channel_width_hz"],
-        integration_time=facts["integration_time_s"]).fractional)
+    return float(
+        RadiometerNoise(
+            channel_width=facts["channel_width_hz"], integration_time=facts["integration_time_s"]
+        ).fractional
+    )
 
 
 def _t6_radiometer_floor(kind: str, weighed: Any) -> float:
@@ -601,8 +603,9 @@ def _t6_subject(name: str | None) -> str:
     return f"the data of observed record {name!r}"
 
 
-def _t6_radiometer(kind: str, drawn: Any, weighed: Any,
-                   name: str | None = None) -> Iterable[Finding]:
+def _t6_radiometer(
+    kind: str, drawn: Any, weighed: Any, name: str | None = None
+) -> Iterable[Finding]:
     """The ``RadiometerNoiseOperator`` family: compare the fractional scatter.
 
     Never the two fields -- ``(1 MHz, 2 s)`` on the operator and
@@ -614,22 +617,27 @@ def _t6_radiometer(kind: str, drawn: Any, weighed: Any,
     if _t6_agrees(drawn_f, weighed_f):
         return ()
     floor_clause = _t6_floor_clause(_t6_radiometer_floor(kind, weighed))
-    return (refuse("C18", f"model.{_T6_NOISE_NODE}", (
-        f"model.{_T6_NOISE_NODE} draws {_t6_subject(name)} at a fractional "
-        f"scatter (1 / sqrt(channel_width * integration_time)) of "
-        f"{drawn_f!r}, and inference.noise (kind: {kind}) weighs it at a "
-        f"different fractional scatter of {weighed_f!r}. The fit is weighted "
-        "against a scatter its own data does not have, and it returns a "
-        "finite, correctly-shaped answer whose error bars are wrong by "
-        "whatever the two differ by. Make the two agree -- change "
-        f"model.{_T6_NOISE_NODE}'s channel_width/integration_time, or "
-        "inference.noise's -- so the same physical bandwidth and "
-        f"integration time reach both sides.{floor_clause} (check C18)."
-    )),)
+    return (
+        refuse(
+            "C18",
+            f"model.{_T6_NOISE_NODE}",
+            (
+                f"model.{_T6_NOISE_NODE} draws {_t6_subject(name)} at a fractional "
+                f"scatter (1 / sqrt(channel_width * integration_time)) of "
+                f"{drawn_f!r}, and inference.noise (kind: {kind}) weighs it at a "
+                f"different fractional scatter of {weighed_f!r}. The fit is weighted "
+                "against a scatter its own data does not have, and it returns a "
+                "finite, correctly-shaped answer whose error bars are wrong by "
+                "whatever the two differ by. Make the two agree -- change "
+                f"model.{_T6_NOISE_NODE}'s channel_width/integration_time, or "
+                "inference.noise's -- so the same physical bandwidth and "
+                f"integration time reach both sides.{floor_clause} (check C18)."
+            ),
+        ),
+    )
 
 
-def _t6_homoscedastic(drawn: Any, weighed: Any,
-                      name: str | None = None) -> Iterable[Finding]:
+def _t6_homoscedastic(drawn: Any, weighed: Any, name: str | None = None) -> Iterable[Finding]:
     """The ``NoiseOperator`` family: compare sigma, broadcasting.
 
     ``weighed.model`` is unwrapped by :func:`_t6_unwrapped` first: ``flags:
@@ -642,17 +650,23 @@ def _t6_homoscedastic(drawn: Any, weighed: Any,
     weighed_sigma = _t6_unwrapped(weighed.model).sigma
     if _t6_agrees(drawn_sigma, weighed_sigma):
         return ()
-    return (refuse("C18", f"model.{_T6_NOISE_NODE}", (
-        f"model.{_T6_NOISE_NODE} draws {_t6_subject(name)} with sigma = "
-        f"{jnp.asarray(drawn_sigma)!r}, and inference.noise (kind: "
-        f"homoscedastic) weighs it with a different sigma = "
-        f"{jnp.asarray(weighed_sigma)!r}. The fit is weighted against a "
-        "scatter its own data does not have, and it returns a finite, "
-        "correctly-shaped answer whose error bars are wrong by whatever the "
-        f"two differ by. Make the two agree -- change model.{_T6_NOISE_NODE}"
-        ".sigma, or inference.noise.sigma -- so both sides declare the same "
-        "number (check C18)."
-    )),)
+    return (
+        refuse(
+            "C18",
+            f"model.{_T6_NOISE_NODE}",
+            (
+                f"model.{_T6_NOISE_NODE} draws {_t6_subject(name)} with sigma = "
+                f"{jnp.asarray(drawn_sigma)!r}, and inference.noise (kind: "
+                f"homoscedastic) weighs it with a different sigma = "
+                f"{jnp.asarray(weighed_sigma)!r}. The fit is weighted against a "
+                "scatter its own data does not have, and it returns a finite, "
+                "correctly-shaped answer whose error bars are wrong by whatever the "
+                f"two differ by. Make the two agree -- change model.{_T6_NOISE_NODE}"
+                ".sigma, or inference.noise.sigma -- so both sides declare the same "
+                "number (check C18)."
+            ),
+        ),
+    )
 
 
 @register("C18")
@@ -680,9 +694,11 @@ def _t6_sigma_agreement(payload: Priced) -> Iterable[Finding]:
     """
     from rheplicant.radio import NoiseOperator, RadiometerNoiseOperator
 
-    subjects = [(name, drawn)
-                for name, twin in _t6_generating_records(payload)
-                if (drawn := _t6_drawn_in(twin)) is not None]
+    subjects = [
+        (name, drawn)
+        for name, twin in _t6_generating_records(payload)
+        if (drawn := _t6_drawn_in(twin)) is not None
+    ]
     if not subjects:
         return ()
     weighed = payload.run.inference.noise

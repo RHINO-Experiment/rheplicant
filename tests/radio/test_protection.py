@@ -95,9 +95,7 @@ class TestTheAuxContract:
         flags = jnp.ones((N_TIME, N_FREQ), dtype=bool)
         mask = jnp.zeros((N_TIME, N_FREQ), dtype=bool).at[1:3, TONE_CHANNEL].set(True)
         out = unflag_protected(flags, {PROTECTED_KEY: mask})
-        assert [bool(x) for x in out[:, TONE_CHANNEL]] == [
-            True, False, False, True, True, True
-        ]
+        assert [bool(x) for x in out[:, TONE_CHANNEL]] == [True, False, False, True, True, True]
 
     def test_an_integer_mask_is_read_as_a_mask(self):
         """Nonzero means protected, and the flags stay BOOLEAN.
@@ -119,26 +117,33 @@ class TestTheAuxContract:
 
     def test_a_scalar_mask_is_refused(self):
         with pytest.raises(StateValidationError, match="ndim=0"):
-            unflag_protected(jnp.ones((N_TIME, N_FREQ), dtype=bool),
-                             {PROTECTED_KEY: jnp.array(True)})
+            unflag_protected(
+                jnp.ones((N_TIME, N_FREQ), dtype=bool), {PROTECTED_KEY: jnp.array(True)}
+            )
 
     def test_a_three_dimensional_mask_is_refused(self):
         with pytest.raises(StateValidationError, match="ndim=3"):
-            unflag_protected(jnp.ones((N_TIME, N_FREQ), dtype=bool),
-                             {PROTECTED_KEY: jnp.ones((1, N_TIME, N_FREQ), dtype=bool)})
+            unflag_protected(
+                jnp.ones((N_TIME, N_FREQ), dtype=bool),
+                {PROTECTED_KEY: jnp.ones((1, N_TIME, N_FREQ), dtype=bool)},
+            )
 
     def test_a_mask_from_a_different_band_is_refused(self):
         """It would broadcast only by accident, and protect whichever channels
         happened to line up."""
         with pytest.raises(StateValidationError, match="channels but the"):
-            unflag_protected(jnp.ones((N_TIME, N_FREQ), dtype=bool),
-                             {PROTECTED_KEY: jnp.ones(N_FREQ + 1, dtype=bool)})
+            unflag_protected(
+                jnp.ones((N_TIME, N_FREQ), dtype=bool),
+                {PROTECTED_KEY: jnp.ones(N_FREQ + 1, dtype=bool)},
+            )
 
     def test_a_transposed_waterfall_mask_is_refused(self):
         """The non-square fixture is what makes this catchable at all."""
         with pytest.raises(StateValidationError, match="channels but the"):
-            unflag_protected(jnp.ones((N_TIME, N_FREQ), dtype=bool),
-                             {PROTECTED_KEY: jnp.ones((N_FREQ, N_TIME), dtype=bool)})
+            unflag_protected(
+                jnp.ones((N_TIME, N_FREQ), dtype=bool),
+                {PROTECTED_KEY: jnp.ones((N_FREQ, N_TIME), dtype=bool)},
+            )
 
 
 class TestTheThresholdFlagger:
@@ -152,9 +157,7 @@ class TestTheThresholdFlagger:
         out = Pipeline(_tone(), FlaggingOperator(threshold=100.0))(state)
         flags = out.aux["flags"]
         assert float(flags[:, TONE_CHANNEL].mean()) == 0.0
-        assert [bool(x) for x in flags[:, RFI_CHANNEL]] == [
-            False, True, True, False, False, False
-        ]
+        assert [bool(x) for x in flags[:, RFI_CHANNEL]] == [False, True, True, False, False, False]
 
     def test_the_flagger_is_unchanged_where_nothing_declared_protection(self, state):
         flags = FlaggingOperator(threshold=100.0)(state).aux["flags"]
@@ -172,9 +175,7 @@ MRFI_CHANNEL = float(MRFI_FREQ_AXIS[1] - MRFI_FREQ_AXIS[0])
 def _waterfall() -> jnp.ndarray:
     spectrum = 300.0 * (MRFI_FREQ_AXIS / 70e6) ** -2.5
     drift = 1.0 + 0.02 * jnp.arange(MRFI_TIME, dtype=float)[:, None] / MRFI_TIME
-    noise = 0.01 * jax.random.normal(
-        jax.random.key(11), (MRFI_TIME, MRFI_FREQ)
-    ) * spectrum[None, :]
+    noise = 0.01 * jax.random.normal(jax.random.key(11), (MRFI_TIME, MRFI_FREQ)) * spectrum[None, :]
     return spectrum[None, :] * drift + noise
 
 
@@ -191,9 +192,7 @@ class TestMomentRFI:
     def _state(self):
         return State(
             data=_waterfall(),
-            coords=Coordinates(
-                time=jnp.arange(MRFI_TIME, dtype=float), freq=MRFI_FREQ_AXIS
-            ),
+            coords=Coordinates(time=jnp.arange(MRFI_TIME, dtype=float), freq=MRFI_FREQ_AXIS),
             meta={"telescope": "RHINO", "obs_id": "momentrfi-protect"},
         )
 

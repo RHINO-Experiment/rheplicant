@@ -76,9 +76,7 @@ def test_cli_materializes_before_staging_and_publishes_the_complete_product_tree
     assert stat.S_IMODE((target / "layers/base").stat().st_mode) == 0o700
 
 
-def test_validate_with_product_requests_never_materializes_or_creates_output(
-    tmp_path, monkeypatch
-):
+def test_validate_with_product_requests_never_materializes_or_creates_output(tmp_path, monkeypatch):
     from _rheplicant_bootstrap.cli import main
 
     target = tmp_path / "result"

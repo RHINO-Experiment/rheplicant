@@ -54,9 +54,7 @@ class TestFisher:
     def test_a_noise_model_may_replace_the_bare_sigma(self, linear_problem):
         forward, theta0, A = linear_problem
         bare = fisher_information(forward, theta0, noise_std=0.3)
-        model = fisher_information(
-            forward, theta0, noise_std=HomoscedasticNoise(jnp.asarray(0.3))
-        )
+        model = fisher_information(forward, theta0, noise_std=HomoscedasticNoise(jnp.asarray(0.3)))
         assert jnp.allclose(bare.matrix, model.matrix, rtol=1e-5)
 
     def test_an_array_sigma_is_not_mistaken_for_a_noise_model(self, linear_problem):
@@ -79,6 +77,7 @@ class TestFisher:
         key = jax.random.key(4)
         A = jax.random.normal(key, (N_DATA, N_PAR))
         theta0 = jnp.array([1.0, -2.0, 0.5])
+
         # Offset well clear of zero: sigma is proportional to the prediction,
         # so a prediction near zero is a weight near infinity, not a bug.
         def forward(theta):
@@ -86,9 +85,7 @@ class TestFisher:
 
         noise = RadiometerNoise(50.0, 2.0)  # f = 0.1
         full = fisher_information(forward, theta0, noise_std=noise)
-        naive = fisher_information(
-            forward, theta0, noise_std=noise.std(forward(theta0))
-        )
+        naive = fisher_information(forward, theta0, noise_std=noise.std(forward(theta0)))
         factor = 1.0 + 2.0 * noise.fractional**2
         assert jnp.allclose(full.matrix, factor * naive.matrix, rtol=1e-4)
 
@@ -103,9 +100,7 @@ class TestFisher:
         flags = jnp.zeros(N_DATA, bool).at[:4].set(True)
         noise = RadiometerNoise(50.0, 2.0)
         flagged = fisher_information(forward, theta0, noise_std=noise, flags=flags)
-        kept = fisher_information(
-            lambda t: forward(t)[4:], theta0, noise_std=noise
-        )
+        kept = fisher_information(lambda t: forward(t)[4:], theta0, noise_std=noise)
         assert jnp.allclose(flagged.matrix, kept.matrix, rtol=1e-4)
 
     def test_pytree_params(self):
@@ -161,7 +156,8 @@ class TestCovariancePropagation:
         other_params = {"alpha": jnp.zeros(2), "beta": jnp.zeros(1)}
         F_other = fisher_information(
             lambda p: jnp.concatenate([p["alpha"], p["beta"]]) * jnp.ones(3),
-            other_params, noise_std=1.0,
+            other_params,
+            noise_std=1.0,
         )
         cov_other = parameter_covariance(F_other, jitter=1e-6)
         with pytest.raises(StateValidationError, match="structure"):
@@ -191,9 +187,7 @@ class TestCovariancePropagation:
         ``width: fisher`` run.
         """
         forward, theta0, _ = linear_problem
-        cov = parameter_covariance(
-            fisher_information(forward, theta0, noise_std=0.5)
-        )
+        cov = parameter_covariance(fisher_information(forward, theta0, noise_std=0.5))
         posterior = FlatMatrix(
             matrix=cov.matrix,
             structure=cov.structure,
@@ -250,9 +244,7 @@ class TestTheSynthesisedGraphCannotReachTheAnswer:
         finally:
             bridge.graph_for_information = real
 
-    def test_the_synthetic_sigma_and_data_do_not_move_the_report(
-        self, linear_problem
-    ):
+    def test_the_synthetic_sigma_and_data_do_not_move_the_report(self, linear_problem):
         base = self._report(1.0, 0.0, linear_problem)
         wider = self._report(1e4, 0.0, linear_problem)
         offset = self._report(1.0, 1e3, linear_problem)
@@ -322,8 +314,7 @@ class TestNamedParameters:
         A = jax.random.normal(key, (N_DATA, 3))
 
         def forward(values):
-            return A @ jnp.concatenate([jnp.atleast_1d(values["z_scalar"]),
-                                        values["a_vector"]])
+            return A @ jnp.concatenate([jnp.atleast_1d(values["z_scalar"]), values["a_vector"]])
 
         return forward, {"z_scalar": jnp.array(1.0), "a_vector": jnp.array([2.0, 3.0])}
 
@@ -347,9 +338,7 @@ class TestNamedParameters:
         forward, params = named_problem
         cov = parameter_covariance(fisher_information(forward, params, noise_std=1.0))
         start, stop = cov.span("a_vector")
-        assert jnp.allclose(
-            cov.sigma("a_vector"), jnp.sqrt(jnp.diag(cov.matrix)[start:stop])
-        )
+        assert jnp.allclose(cov.sigma("a_vector"), jnp.sqrt(jnp.diag(cov.matrix)[start:stop]))
 
     def test_block_extracts_a_cross_covariance(self, named_problem):
         forward, params = named_problem
@@ -477,9 +466,7 @@ class TestTheConditionCeiling:
         with jax.enable_x64(True):
             forward, params = self._lopsided()
             params = {k: jnp.asarray(v, jnp.float64) for k, v in params.items()}
-            cov = parameter_covariance(
-                fisher_information(forward, params, noise_std=1.0)
-            )
+            cov = parameter_covariance(fisher_information(forward, params, noise_std=1.0))
             assert cov.matrix.dtype == jnp.float64
             # diag(1, 1e6): the honest inverse of diag(1, 1e-6).
             assert float(cov.matrix[0, 0]) == pytest.approx(1.0, rel=1e-9)
@@ -511,9 +498,7 @@ class TestTheConditionCeiling:
         forward, params = self._lopsided()
         with jax.enable_x64(True):
             params = {k: jnp.asarray(v, jnp.float64) for k, v in params.items()}
-            cov = parameter_covariance(
-                fisher_information(forward, params, noise_std=1.0)
-            )
+            cov = parameter_covariance(fisher_information(forward, params, noise_std=1.0))
             with pytest.raises(StateValidationError, match="covariance"):
                 parameter_covariance(cov)
 
@@ -529,9 +514,7 @@ class TestTheConditionCeiling:
         forward, params = self._lopsided()
         with jax.enable_x64(True):
             params = {k: jnp.asarray(v, jnp.float64) for k, v in params.items()}
-            cov = parameter_covariance(
-                fisher_information(forward, params, noise_std=1.0)
-            )
+            cov = parameter_covariance(fisher_information(forward, params, noise_std=1.0))
             # Rebuilt rather than `tree_at`-ed: `kind` is a static field, so
             # it is part of the treedef and not a leaf to swap.
             posterior = FlatMatrix(
@@ -587,12 +570,11 @@ class TestTheFlatLayoutIsSortedByName:
         for in declaration order would put them the other way round with every
         value still correct.
         """
+
         def forward(p):
             return jnp.stack([p["zulu"] * 0.0 + 1.0, p["alpha"] * 3.0])
 
-        matrix = fisher_information(
-            forward, {"zulu": jnp.array(1.0), "alpha": jnp.array(1.0)}, 1.0
-        )
+        matrix = fisher_information(forward, {"zulu": jnp.array(1.0), "alpha": jnp.array(1.0)}, 1.0)
         assert matrix.names == ("alpha", "zulu")
         values = np.asarray(matrix.matrix)
         assert values[0, 0] == pytest.approx(9.0), "row 0 is not alpha's"

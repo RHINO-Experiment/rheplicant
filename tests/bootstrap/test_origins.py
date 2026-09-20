@@ -44,12 +44,8 @@ def test_append_replace_delete_and_origins_are_distinct():
 
 
 def test_nested_mapping_merge_keeps_container_and_untouched_child_origins():
-    parent = initial_merge(
-        {"section": {"kept": 1}}, origin=Origin("preset", "one")
-    )
-    result = merge_with_origins(
-        parent, {"section": {"added": 2}}, origin=Origin("user")
-    )
+    parent = initial_merge({"section": {"kept": 1}}, origin=Origin("preset", "one"))
+    result = merge_with_origins(parent, {"section": {"added": 2}}, origin=Origin("user"))
     assert origins_at(result.origins, ("section",)) == Origin("preset", "one")
     assert origins_at(result.origins, ("section", "kept")) == Origin("preset", "one")
     assert origins_at(result.origins, ("section", "added")) == Origin("user")
@@ -239,6 +235,7 @@ def test_origin_node_replaces_a_callback_raised_configerror(seam):
                 raise StopIteration
             self.done = True
             if seam == "unpack":
+
                 class BrokenItem:
                     def __iter__(self):
                         raise marker
@@ -305,9 +302,7 @@ def test_origin_record_scalar_canonicalization_uses_only_base_operations():
         None,
         _ItemsMapping([(_HostileStr("value"), sequence)]),
     )
-    deletion = DeletionRecord(
-        [_HostileStr("value"), _HostileInt(0)], origin
-    )
+    deletion = DeletionRecord([_HostileStr("value"), _HostileInt(0)], origin)
     result = MergeResult({"value": [1]}, root, [deletion])
 
     root_key = next(iter(result.origins.children))
@@ -366,9 +361,7 @@ def test_public_origin_node_recursively_detaches_proxy_backing_mappings():
     backing = {"leaf": leaf}
     forged_child = object.__new__(OriginNode)
     object.__setattr__(forged_child, "origin", user)
-    object.__setattr__(
-        forged_child, "children", MappingProxyType(backing)
-    )
+    object.__setattr__(forged_child, "children", MappingProxyType(backing))
 
     root = OriginNode(None, {"branch": forged_child})
     backing["late"] = leaf
@@ -384,9 +377,7 @@ def test_public_merge_result_recursively_detaches_proxy_backing_mappings():
     backing = {"value": leaf}
     forged_root = object.__new__(OriginNode)
     object.__setattr__(forged_root, "origin", None)
-    object.__setattr__(
-        forged_root, "children", MappingProxyType(backing)
-    )
+    object.__setattr__(forged_root, "children", MappingProxyType(backing))
 
     result = MergeResult({"value": 1}, forged_root, ())
     backing["late"] = leaf
@@ -421,9 +412,7 @@ def test_merge_result_compares_origin_segments_by_exact_type_and_value(alias):
     )
     root = object.__new__(OriginNode)
     object.__setattr__(root, "origin", None)
-    object.__setattr__(
-        root, "children", MappingProxyType({"items": forged_sequence})
-    )
+    object.__setattr__(root, "children", MappingProxyType({"items": forged_sequence}))
 
     with pytest.raises(ConfigError, match="origin tree"):
         MergeResult({"items": [1, 2]}, root, ())
@@ -467,12 +456,8 @@ def test_distinct_empty_sequences_remain_distinct_per_edge_after_thaw_and_origin
 def test_origin_alias_memo_is_shared_within_but_not_across_initial_merges():
     shared = {"leaf": 1}
 
-    first = initial_merge(
-        {"left": shared, "right": shared}, origin=Origin("user")
-    )
-    second = initial_merge(
-        {"left": shared, "right": shared}, origin=Origin("user")
-    )
+    first = initial_merge({"left": shared, "right": shared}, origin=Origin("user"))
+    second = initial_merge({"left": shared, "right": shared}, origin=Origin("user"))
 
     assert first.origins.children["left"] is first.origins.children["right"]
     assert second.origins.children["left"] is second.origins.children["right"]
@@ -522,6 +507,7 @@ class _GenerativeOriginMapping(Mapping):
 
 def test_origin_builder_strongly_retains_generative_mapping_identities(monkeypatch):
     real_id = id
+
     def colliding_id(value):
         if isinstance(value, _EphemeralOriginMapping):
             return 17
@@ -532,19 +518,16 @@ def test_origin_builder_strongly_retains_generative_mapping_identities(monkeypat
 
     node = layering_module._origin_node(source, Origin("user"))
 
-    assert tuple(
-        tuple(node.children[f"key_{index}"].children)
-        for index in range(12)
-    ) == tuple((f"leaf_{index}",) for index in range(12))
+    assert tuple(tuple(node.children[f"key_{index}"].children) for index in range(12)) == tuple(
+        (f"leaf_{index}",) for index in range(12)
+    )
     assert len({real_id(value) for value in source.built_sources}) == 12
 
 
 def test_one_branch_merge_splits_that_occurrence_but_keeps_nested_aliases():
     nested = {"value": 1}
     shared = {"nested": nested}
-    parent = initial_merge(
-        {"left": shared, "right": shared}, origin=Origin("user")
-    )
+    parent = initial_merge({"left": shared, "right": shared}, origin=Origin("user"))
 
     result = merge_with_origins(
         parent,
@@ -577,20 +560,13 @@ def test_one_branch_merge_preserves_untouched_parent_branches_by_identity():
     )
 
     assert result.document["untouched"] is parent.document["untouched"]
-    assert (
-        result.origins.children["untouched"]
-        is parent.origins.children["untouched"]
-    )
+    assert result.origins.children["untouched"] is parent.origins.children["untouched"]
 
 
 def test_internal_merge_work_does_not_scale_with_an_untouched_branch():
     def merge_line_events(width):
         parent = initial_merge(
-            {
-                "untouched": {
-                    f"item_{index}": index for index in range(width)
-                }
-            },
+            {"untouched": {f"item_{index}": index for index in range(width)}},
             origin=Origin("user"),
         )
         line_events = 0
@@ -610,16 +586,11 @@ def test_internal_merge_work_does_not_scale_with_an_untouched_branch():
         previous = sys.gettrace()
         sys.settrace(trace)
         try:
-            result = merge_with_origins(
-                parent, {"added": 1}, origin=Origin("preset", "one")
-            )
+            result = merge_with_origins(parent, {"added": 1}, origin=Origin("preset", "one"))
         finally:
             sys.settrace(previous)
         assert result.document["untouched"] is parent.document["untouched"]
-        assert (
-            result.origins.children["untouched"]
-            is parent.origins.children["untouched"]
-        )
+        assert result.origins.children["untouched"] is parent.origins.children["untouched"]
         return line_events
 
     small = merge_line_events(1)
@@ -631,9 +602,7 @@ def test_internal_merge_work_does_not_scale_with_an_untouched_branch():
 def test_identical_recursive_merge_state_reuses_one_result_fragment():
     shared_base = {"kept": {"leaf": 1}}
     shared_patch = {"added": {"leaf": 2}}
-    parent = initial_merge(
-        {"left": shared_base, "right": shared_base}, origin=Origin("user")
-    )
+    parent = initial_merge({"left": shared_base, "right": shared_base}, origin=Origin("user"))
 
     result = merge_with_origins(
         parent,
@@ -651,9 +620,7 @@ def test_append_preserves_inherited_patch_and_operation_alias_topology():
     appended_item = {"new": 2}
     appended = [appended_item, appended_item]
     append_patch = {"append": appended}
-    parent = initial_merge(
-        {"first": inherited, "second": inherited}, origin=Origin("user")
-    )
+    parent = initial_merge({"first": inherited, "second": inherited}, origin=Origin("user"))
 
     result = merge_with_origins(
         parent,
@@ -674,9 +641,7 @@ def test_append_preserves_inherited_patch_and_operation_alias_topology():
 def test_cached_merge_replays_deletion_evidence_for_every_occurrence():
     shared_base = {"gone": 1, "kept": 2}
     shared_patch = {"~gone": None}
-    parent = initial_merge(
-        {"left": shared_base, "right": shared_base}, origin=Origin("user")
-    )
+    parent = initial_merge({"left": shared_base, "right": shared_base}, origin=Origin("user"))
 
     result = merge_with_origins(
         parent,
@@ -759,16 +724,12 @@ def test_shared_binary_dag_remains_linear_through_merge_and_validation(monkeypat
         allocations += 1
         return original_trusted(origin, children)
 
-    monkeypatch.setattr(
-        layering_module, "_trusted_origin_node", counted_trusted
-    )
+    monkeypatch.setattr(layering_module, "_trusted_origin_node", counted_trusted)
 
     result = initial_merge(document, origin=Origin("user"))
     initial_allocations = allocations
     allocations = 0
-    merged = merge_with_origins(
-        result, {"marker": 2}, origin=Origin("preset", "one")
-    )
+    merged = merge_with_origins(result, {"marker": 2}, origin=Origin("preset", "one"))
     merge_allocations = allocations
     unique_origin_nodes = _instrument_origin_children(result.origins)
     _CountingChildren.iterations = 0
@@ -814,12 +775,8 @@ def test_merge_root_preconditions_name_only_the_rejected_type():
     parent = initial_merge({}, origin=Origin("user"))
     calls = (
         lambda hostile: initial_merge(hostile, origin=Origin("user")),
-        lambda hostile: merge_with_origins(
-            hostile, {}, origin=Origin("user")
-        ),
-        lambda hostile: merge_with_origins(
-            parent, hostile, origin=Origin("user")
-        ),
+        lambda hostile: merge_with_origins(hostile, {}, origin=Origin("user")),
+        lambda hostile: merge_with_origins(parent, hostile, origin=Origin("user")),
         lambda hostile: merge_extends(hostile, {}),
         lambda hostile: merge_extends({}, hostile),
     )

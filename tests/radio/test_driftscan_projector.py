@@ -63,8 +63,11 @@ class TestDriftScanProjector:
     def _general_twin(self, proj, **kwargs):
         """GeneralPointingProjector with the same beams (the ground truth here)."""
         return GeneralPointingProjector(
-            beam_alms=proj.beam_alms, lat_deg=self.LAT,
-            lmax=self.LMAX, nside=self.NSIDE, **kwargs,
+            beam_alms=proj.beam_alms,
+            lat_deg=self.LAT,
+            lmax=self.LMAX,
+            nside=self.NSIDE,
+            **kwargs,
         )
 
     def _general_coords(self, drift_coords):
@@ -72,9 +75,7 @@ class TestDriftScanProjector:
         lst = drift_coords.extra["lst_deg"]
         n_t = lst.shape[0]
         return drift_coords.replace(
-            pointing=jnp.stack(
-                [jnp.full(n_t, self.AZ), jnp.full(n_t, self.EL)], axis=-1
-            ),
+            pointing=jnp.stack([jnp.full(n_t, self.AZ), jnp.full(n_t, self.EL)], axis=-1),
             extra={"lst_deg": lst, "selfrot_deg": jnp.full(n_t, self.SELFROT)},
         )
 
@@ -153,9 +154,7 @@ class TestDriftScanProjector:
 
         proj = self._projector(key)
         low = dataclasses.replace(proj, el_deg=10.0)
-        masked = dataclasses.replace(
-            proj, el_deg=10.0, horizon_mask=True, apod_deg=5.0
-        )
+        masked = dataclasses.replace(proj, el_deg=10.0, horizon_mask=True, apod_deg=5.0)
         sky = jax.random.uniform(jax.random.key(7), (N_FREQ, self.N_PIX_HP))
         out_m = masked.forward(sky, drift_coords)
         out_u = low.forward(sky, drift_coords)
@@ -194,8 +193,11 @@ class TestDriftScanProjector:
         with pytest.raises(StateValidationError, match="beam_alms"):
             DriftScanProjector(
                 beam_alms=jnp.zeros((N_FREQ, self.N_ALM + 1), dtype=jnp.complex64),
-                lat_deg=self.LAT, az_deg=self.AZ, el_deg=self.EL,
-                lmax=self.LMAX, nside=self.NSIDE,
+                lat_deg=self.LAT,
+                az_deg=self.AZ,
+                el_deg=self.EL,
+                lmax=self.LMAX,
+                nside=self.NSIDE,
             )
 
     # ------------------------------------------------ ignored-input guard
@@ -214,8 +216,7 @@ class TestDriftScanProjector:
 
     @pytest.mark.parametrize(
         "kind, match",
-        [("scanning_az", "azimuth"), ("wrong_el", "elevation"),
-         ("varying_selfrot", "selfrot")],
+        [("scanning_az", "azimuth"), ("wrong_el", "elevation"), ("varying_selfrot", "selfrot")],
     )
     def test_rejects_disagreeing_pointing(self, key, drift_coords, kind, match):
         """Coords carrying a pointing this projector would DISCARD must fail.
@@ -228,13 +229,11 @@ class TestDriftScanProjector:
         n_t = drift_coords.extra["lst_deg"].shape[0]
         base = self._general_coords(drift_coords)
         if kind == "scanning_az":
-            bad = base.replace(pointing=base.pointing.at[:, 0].set(
-                jnp.linspace(0.0, 90.0, n_t)))
+            bad = base.replace(pointing=base.pointing.at[:, 0].set(jnp.linspace(0.0, 90.0, n_t)))
         elif kind == "wrong_el":
             bad = base.replace(pointing=base.pointing.at[:, 1].set(self.EL + 20.0))
         else:
-            bad = base.replace(extra={**base.extra,
-                                      "selfrot_deg": jnp.linspace(0.0, 30.0, n_t)})
+            bad = base.replace(extra={**base.extra, "selfrot_deg": jnp.linspace(0.0, 30.0, n_t)})
         with pytest.raises(StateValidationError, match=match):
             proj.forward(sky, bad)
         with pytest.raises(StateValidationError, match=match):
@@ -252,9 +251,7 @@ class TestDriftScanProjector:
         def run(pointing):
             return proj.forward(sky, drift_coords.replace(pointing=pointing))
 
-        scanning = jnp.stack(
-            [jnp.linspace(0.0, 90.0, n_t), jnp.full(n_t, self.EL)], axis=-1
-        )
+        scanning = jnp.stack([jnp.linspace(0.0, 90.0, n_t), jnp.full(n_t, self.EL)], axis=-1)
         assert bool(jnp.all(jnp.isfinite(run(scanning))))
 
     # ------------------------------------------------------ friendly builders
@@ -274,8 +271,12 @@ class TestDriftScanProjector:
         sky = jnp.ones((N_FREQ, self.N_PIX_HP))
 
         proj = DriftScanProjector.from_beam_maps(
-            beam_maps, lat_deg=self.LAT, az_deg=self.AZ, el_deg=self.EL,
-            lmax=self.LMAX, selfrot_deg=self.SELFROT,
+            beam_maps,
+            lat_deg=self.LAT,
+            az_deg=self.AZ,
+            el_deg=self.EL,
+            lmax=self.LMAX,
+            selfrot_deg=self.SELFROT,
         )
         assert proj.nside == self.NSIDE  # inferred from the map length
 
@@ -283,23 +284,33 @@ class TestDriftScanProjector:
             [hp.map2alm(b, lmax=self.LMAX, iter=3) for b in np.asarray(beam_maps)]
         )
         reference = DriftScanProjector(
-            beam_alms=healpy_alms, lat_deg=self.LAT, az_deg=self.AZ,
-            el_deg=self.EL, lmax=self.LMAX, nside=self.NSIDE,
+            beam_alms=healpy_alms,
+            lat_deg=self.LAT,
+            az_deg=self.AZ,
+            el_deg=self.EL,
+            lmax=self.LMAX,
+            nside=self.NSIDE,
             selfrot_deg=self.SELFROT,
         )
-        assert jnp.allclose(proj.forward(sky, drift_coords),
-                            reference.forward(sky, drift_coords), rtol=5e-2)
+        assert jnp.allclose(
+            proj.forward(sky, drift_coords), reference.forward(sky, drift_coords), rtol=5e-2
+        )
 
         # ... and the transform the sky uses would NOT have done (npix/4pi).
         quad = DriftScanProjector(
-            beam_alms=jax.vmap(
-                lambda m: ltj.map2alm_quad(m, nside=self.NSIDE, lmax=self.LMAX)
-            )(beam_maps),
-            lat_deg=self.LAT, az_deg=self.AZ, el_deg=self.EL,
-            lmax=self.LMAX, nside=self.NSIDE, selfrot_deg=self.SELFROT,
+            beam_alms=jax.vmap(lambda m: ltj.map2alm_quad(m, nside=self.NSIDE, lmax=self.LMAX))(
+                beam_maps
+            ),
+            lat_deg=self.LAT,
+            az_deg=self.AZ,
+            el_deg=self.EL,
+            lmax=self.LMAX,
+            nside=self.NSIDE,
+            selfrot_deg=self.SELFROT,
         )
-        assert not jnp.allclose(quad.forward(sky, drift_coords),
-                                proj.forward(sky, drift_coords), rtol=0.5)
+        assert not jnp.allclose(
+            quad.forward(sky, drift_coords), proj.forward(sky, drift_coords), rtol=0.5
+        )
 
     def test_from_beam_maps_is_differentiable_in_the_map(self, key, drift_coords):
         """The point of doing the analysis in JAX: gradients reach the beam MAP."""
@@ -309,7 +320,10 @@ class TestDriftScanProjector:
 
         def loss(maps):
             proj = DriftScanProjector.from_beam_maps(
-                maps, lat_deg=self.LAT, az_deg=self.AZ, el_deg=self.EL,
+                maps,
+                lat_deg=self.LAT,
+                az_deg=self.AZ,
+                el_deg=self.EL,
                 lmax=self.LMAX,
             )
             return jnp.sum(proj.forward(sky, drift_coords) ** 2)
@@ -321,13 +335,19 @@ class TestDriftScanProjector:
     def test_from_beam_maps_validation(self):
         with pytest.raises(StateValidationError, match="n_freq, n_pix"):
             DriftScanProjector.from_beam_maps(
-                jnp.ones(self.N_PIX_HP), lat_deg=self.LAT, az_deg=self.AZ,
-                el_deg=self.EL, lmax=self.LMAX,
+                jnp.ones(self.N_PIX_HP),
+                lat_deg=self.LAT,
+                az_deg=self.AZ,
+                el_deg=self.EL,
+                lmax=self.LMAX,
             )
         with pytest.raises(StateValidationError, match="HEALPix"):
             DriftScanProjector.from_beam_maps(
-                jnp.ones((N_FREQ, 100)), lat_deg=self.LAT, az_deg=self.AZ,
-                el_deg=self.EL, lmax=self.LMAX,
+                jnp.ones((N_FREQ, 100)),
+                lat_deg=self.LAT,
+                az_deg=self.AZ,
+                el_deg=self.EL,
+                lmax=self.LMAX,
             )
 
     def test_uniform_lst_grid_satisfies_the_fft_contract(self, key):
@@ -357,9 +377,7 @@ class TestDriftScanProjector:
         n_t = 4 * (self.LMAX + 1)
         return coords.replace(
             freq=coords.freq[:N_FREQ],
-            extra={"lst_deg": jnp.asarray(
-                12.0 + 360.0 * jnp.arange(n_t) / n_t
-            )},
+            extra={"lst_deg": jnp.asarray(12.0 + 360.0 * jnp.arange(n_t) / n_t)},
         )
 
     # A reference LST deliberately UNLIKE lst_deg[0] (= 12.0 in both fixtures):
@@ -405,7 +423,10 @@ class TestDriftScanProjector:
         import dataclasses
 
         masked = dataclasses.replace(
-            self._projector(key), el_deg=10.0, horizon_mask=True, apod_deg=5.0,
+            self._projector(key),
+            el_deg=10.0,
+            horizon_mask=True,
+            apod_deg=5.0,
             lst_ref_deg=12.0,
         )
         cached = masked.to_reference_frame()
@@ -452,8 +473,11 @@ class TestDriftScanProjector:
         # (earlier, more fundamental) anchor invariant does not fire instead
         with pytest.raises(StateValidationError, match="horizon_mask"):
             dataclasses.replace(
-                proj, beam_frame="reference", lst_ref_deg=12.0,
-                beam_ref_lst_deg=12.0, horizon_mask=True,
+                proj,
+                beam_frame="reference",
+                lst_ref_deg=12.0,
+                beam_ref_lst_deg=12.0,
+                horizon_mask=True,
             )
         with pytest.raises(StateValidationError, match="beam_frame"):
             dataclasses.replace(proj, beam_frame="celestial")
@@ -493,9 +517,7 @@ class TestDriftScanProjector:
 
     @pytest.mark.parametrize("lst_ref", [12.0, REF_OFF])
     @pytest.mark.parametrize("normalize", [False, True])
-    def test_uniform_sampling_matches_direct(
-        self, key, uniform_coords, normalize, lst_ref
-    ):
+    def test_uniform_sampling_matches_direct(self, key, uniform_coords, normalize, lst_ref):
         """The FFT route must agree with the direct sum, forward and adjoint.
 
         Also run with a reference LST far from the first sample: shifting the
@@ -518,9 +540,7 @@ class TestDriftScanProjector:
     def test_uniform_sampling_adjoint_dot_identity(self, key, uniform_coords):
         import dataclasses
 
-        fft = dataclasses.replace(
-            self._projector(key, lst_ref_deg=12.0), uniform_sampling=True
-        )
+        fft = dataclasses.replace(self._projector(key, lst_ref_deg=12.0), uniform_sampling=True)
         n_t = uniform_coords.extra["lst_deg"].shape[0]
         sky = jax.random.uniform(jax.random.key(26), (N_FREQ, self.N_PIX_HP))
         tod = jax.random.normal(jax.random.key(27), (n_t, N_FREQ))
@@ -534,9 +554,7 @@ class TestDriftScanProjector:
         what fires — this is the uniformity check itself."""
         import dataclasses
 
-        fft = dataclasses.replace(
-            self._projector(key, lst_ref_deg=12.0), uniform_sampling=True
-        )
+        fft = dataclasses.replace(self._projector(key, lst_ref_deg=12.0), uniform_sampling=True)
         lst = uniform_coords.extra["lst_deg"]
         jittered = uniform_coords.replace(
             extra={"lst_deg": lst.at[len(lst) // 3].add(3.0)}  # one bad sample
@@ -565,9 +583,7 @@ class TestDriftScanProjector:
         proj = self._projector(key, lst_ref_deg=12.0)
         fft = dataclasses.replace(proj, uniform_sampling=True)
         n_t = uniform_coords.extra["lst_deg"].shape[0]
-        half = uniform_coords.replace(
-            extra={"lst_deg": 12.0 + 180.0 * jnp.arange(n_t) / n_t}
-        )
+        half = uniform_coords.replace(extra={"lst_deg": 12.0 + 180.0 * jnp.arange(n_t) / n_t})
         sky = jax.random.uniform(jax.random.key(30), (N_FREQ, self.N_PIX_HP))
 
         # Layer 1 — coords closed over (the normal likelihood pattern): the
@@ -611,9 +627,7 @@ class TestDriftScanProjector:
         import equinox as eqx
 
         plain = self._projector(key, lst_ref_deg=12.0)
-        fast = dataclasses.replace(
-            plain, uniform_sampling=True
-        ).to_reference_frame()
+        fast = dataclasses.replace(plain, uniform_sampling=True).to_reference_frame()
         sky = jax.random.uniform(jax.random.key(28), (N_FREQ, self.N_PIX_HP))
 
         # Max-norm relative comparisons throughout: a TOD crosses zero, and an
@@ -676,9 +690,7 @@ class TestDriftScanProjector:
 
         # and end to end through the projector, where 2*lmax < n_t allows it
         if 2 * self.LMAX < n_t:
-            fft = dataclasses.replace(
-                self._projector(key, lst_ref_deg=lst0), uniform_sampling=True
-            )
+            fft = dataclasses.replace(self._projector(key, lst_ref_deg=lst0), uniform_sampling=True)
             plain = dataclasses.replace(fft, uniform_sampling=False)
             coords = Coordinates(
                 time=jnp.arange(n_t, dtype=float),
@@ -700,9 +712,7 @@ class TestDriftScanProjector:
 
         import limtod_jax
 
-        fft = dataclasses.replace(
-            self._projector(key, lst_ref_deg=12.0), uniform_sampling=True
-        )
+        fft = dataclasses.replace(self._projector(key, lst_ref_deg=12.0), uniform_sampling=True)
         sky = jnp.ones((N_FREQ, self.N_PIX_HP))
         monkeypatch.delattr(limtod_jax, "check_uniform_grid", raising=False)
         with pytest.raises(ImportError, match="limTOD 1.7"):
@@ -818,9 +828,7 @@ print("x64 drift-scan projector: OK")
                 jnp.zeros((N_FREQ, self.N_ALM + 1), dtype=jnp.complex64), drift_coords
             )
         with pytest.raises(StateValidationError, match="sky_alms"):
-            proj.mmodes_alms(
-                jnp.zeros((N_FREQ + 1, self.N_ALM), dtype=jnp.complex64), drift_coords
-            )
+            proj.mmodes_alms(jnp.zeros((N_FREQ + 1, self.N_ALM), dtype=jnp.complex64), drift_coords)
 
     # ------------------------------------------------------ frequency chunking
     @pytest.mark.parametrize("chunk", [1, 2])
@@ -841,11 +849,9 @@ print("x64 drift-scan projector: OK")
         tod = jax.random.normal(jax.random.key(31), (N_TIME, N_FREQ))
         alms = proj.sky_to_alms(sky)
         for a, b in (
-            (chunked.forward_alms(alms, drift_coords),
-             proj.forward_alms(alms, drift_coords)),
+            (chunked.forward_alms(alms, drift_coords), proj.forward_alms(alms, drift_coords)),
             (chunked.adjoint(tod, drift_coords), proj.adjoint(tod, drift_coords)),
-            (chunked.mmodes_alms(alms, drift_coords),
-             proj.mmodes_alms(alms, drift_coords)),
+            (chunked.mmodes_alms(alms, drift_coords), proj.mmodes_alms(alms, drift_coords)),
         ):
             rel = jnp.max(jnp.abs(a - b)) / jnp.max(jnp.abs(b))
             assert rel < 1e-5, f"freq_chunk={chunk} moved values by {rel:.2e}"

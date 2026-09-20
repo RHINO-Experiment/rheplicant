@@ -15,39 +15,53 @@ from tests.config.test_config_document import synthetic_document
 
 def document(run, seeds=None):
     doc = synthetic_document()
-    doc["model"] = {key: value for key, value in doc["model"].items()
-                    if key != "noise"}
+    doc["model"] = {key: value for key, value in doc["model"].items() if key != "noise"}
     doc["runtime"] = {"seed": 20260806, "seeds": seeds or {"sample": 11}}
     doc["inference"] = {
-        "parameters": {"g": {"init": 1.0, "linear": True,
-                             "into": "gain.gain",
-                             "prior": {"normal": {"loc": 1.0,
-                                                  "scale": 10.0}}}},
-        "noise": {"kind": "homoscedastic",
-                  "sigma": {"value": 0.05, "unit": "K"}},
-        "observed": {"from": "simulation", "at": {"g": 1.5},
-                     "realise": {"kind": "homoscedastic",
-                                 "sigma": {"value": 0.05, "unit": "K"},
-                                 "seed": {"from":
-                                          "runtime.seeds.observed_noise"}}},
+        "parameters": {
+            "g": {
+                "init": 1.0,
+                "linear": True,
+                "into": "gain.gain",
+                "prior": {"normal": {"loc": 1.0, "scale": 10.0}},
+            }
+        },
+        "noise": {"kind": "homoscedastic", "sigma": {"value": 0.05, "unit": "K"}},
+        "observed": {
+            "from": "simulation",
+            "at": {"g": 1.5},
+            "realise": {
+                "kind": "homoscedastic",
+                "sigma": {"value": 0.05, "unit": "K"},
+                "seed": {"from": "runtime.seeds.observed_noise"},
+            },
+        },
     }
     doc["runs"] = [run]
     return doc
 
 
-ESTIMATE = {"kind": "plan.estimate", "blocks": [{"names": ["g"]}],
-            "check_identifiability": False}
-SAMPLE = {"kind": "plan.sample", "blocks": [{"names": ["g"]}],
-          "seed": {"from": "runtime.seeds.sample"}, "n_sweeps": 10,
-          "warmup": 4, "check_identifiability": False}
+ESTIMATE = {"kind": "plan.estimate", "blocks": [{"names": ["g"]}], "check_identifiability": False}
+SAMPLE = {
+    "kind": "plan.sample",
+    "blocks": [{"names": ["g"]}],
+    "seed": {"from": "runtime.seeds.sample"},
+    "n_sweeps": 10,
+    "warmup": 4,
+    "check_identifiability": False,
+}
 # A NUTS chain, because an exact conjugate draw forgets the init: only a
 # gradient block can SEE what a warm start moved.
-GRADIENT_SAMPLE = {**SAMPLE, "n_sweeps": 6, "warmup": 2,
-                   "blocks": [{"names": ["g"], "engine": "gradient"}]}
-WARMED = {**GRADIENT_SAMPLE,
-          "warm_start": {"kind": "plan.estimate",
-                         "blocks": [{"names": ["g"]}],
-                         "move": ["g"]}}
+GRADIENT_SAMPLE = {
+    **SAMPLE,
+    "n_sweeps": 6,
+    "warmup": 2,
+    "blocks": [{"names": ["g"], "engine": "gradient"}],
+}
+WARMED = {
+    **GRADIENT_SAMPLE,
+    "warm_start": {"kind": "plan.estimate", "blocks": [{"names": ["g"]}], "move": ["g"]},
+}
 
 
 class TestEstimate:
@@ -63,35 +77,30 @@ class TestEstimate:
         # also refuse a seed, so a looser match could not tell the deliberate
         # explanation (placed BEFORE the sweep) from the fallback.
         with pytest.raises(ConfigError, match="A29"):
-            run_document(document({**ESTIMATE,
-                                   "seed": {"from": "runtime.seeds.sample"}}))
+            run_document(document({**ESTIMATE, "seed": {"from": "runtime.seeds.sample"}}))
 
     def test_estimate_takes_no_sample_only_keys(self):
         with pytest.raises(ConfigError, match="warmup"):
             run_document(document({**ESTIMATE, "warmup": 4}))
 
     def test_blocks_are_required(self):
-        run = {key: value for key, value in ESTIMATE.items()
-               if key != "blocks"}
+        run = {key: value for key, value in ESTIMATE.items() if key != "blocks"}
         with pytest.raises(ConfigError, match="blocks"):
             run_document(document(run))
 
     def test_a_block_entry_sweeps_its_own_keys(self):
         with pytest.raises(ConfigError, match="step"):
-            run_document(document({**ESTIMATE,
-                                   "blocks": [{"names": ["g"], "step": 5}]}))
+            run_document(document({**ESTIMATE, "blocks": [{"names": ["g"], "step": 5}]}))
 
     def test_declared_knobs_reach_the_plan(self):
-        results = run_document(document({**ESTIMATE, "max_iter": 7,
-                                         "tol": None}))
+        results = run_document(document({**ESTIMATE, "max_iter": 7, "tol": None}))
         assert results["plan.estimate"].product.diagnostics.sweeps == 7
 
     def test_the_default_check_identifiability_runs_and_is_recorded(self):
         # The default ("once") RUNS on a float32 twin: identifiability()
         # forces x64 internally and casts the latents, so the promoted
         # Jacobian is float64 and the report lands rather than refusing.
-        run = {key: value for key, value in ESTIMATE.items()
-               if key != "check_identifiability"}
+        run = {key: value for key, value in ESTIMATE.items() if key != "check_identifiability"}
         results = run_document(document(run))
         d = results["plan.estimate"].product.diagnostics
         assert d.identifiability is not None
@@ -99,21 +108,19 @@ class TestEstimate:
 
     def test_check_identifiability_false_stores_no_report(self):
         results = run_document(document(ESTIMATE))
-        assert results["plan.estimate"].product.diagnostics.identifiability \
-            is None
+        assert results["plan.estimate"].product.diagnostics.identifiability is None
 
     def test_noise_kind_none_is_refused(self):
         doc = document(ESTIMATE)
         doc["inference"]["noise"] = {"kind": "none"}
-        doc["inference"]["observed"] = {"from": "simulation",
-                                        "at": {"g": 1.5}}
+        doc["inference"]["observed"] = {"from": "simulation", "at": {"g": 1.5}}
         with pytest.raises(ConfigError, match="none"):
             run_document(doc)
 
     def test_expect_refuse_captures_the_packages_own_refusal(self):
-        results = run_document(document(
-            {**ESTIMATE, "expect": "refuse",
-             "blocks": [{"names": ["g", "ghost"]}]}))
+        results = run_document(
+            document({**ESTIMATE, "expect": "refuse", "blocks": [{"names": ["g", "ghost"]}]})
+        )
         assert results["plan.estimate"].product is None
         assert "ghost" in str(results["plan.estimate"].error)
 
@@ -132,8 +139,7 @@ class TestSample:
             run_document(document(run))
 
     def test_n_sweeps_is_required(self):
-        run = {key: value for key, value in SAMPLE.items()
-               if key != "n_sweeps"}
+        run = {key: value for key, value in SAMPLE.items() if key != "n_sweeps"}
         with pytest.raises(ConfigError, match="n_sweeps"):
             run_document(document(run))
 
@@ -145,22 +151,27 @@ class TestSample:
         run = {**SAMPLE, "n_sweeps": 6, "warmup": 2}
         first = run_document(document(run))["plan.sample"].product
         again = run_document(document(run))["plan.sample"].product
-        moved = run_document(
-            document(run, seeds={"sample": 12}))["plan.sample"].product
+        moved = run_document(document(run, seeds={"sample": 12}))["plan.sample"].product
         assert np.array_equal(first.samples["g"], again.samples["g"])
         assert not np.array_equal(first.samples["g"], moved.samples["g"])
 
     def test_check_identifiability_false_stores_no_report(self):
         results = run_document(document(SAMPLE))
-        assert results["plan.sample"].product.diagnostics.identifiability \
-            is None
+        assert results["plan.sample"].product.diagnostics.identifiability is None
 
     def test_warm_start_moves_only_the_named_inits(self):
-        results = run_document(document(
-            {**SAMPLE,
-             "warm_start": {"kind": "plan.estimate",
-                            "blocks": [{"names": ["g"]}],
-                            "move": ["g"]}}))
+        results = run_document(
+            document(
+                {
+                    **SAMPLE,
+                    "warm_start": {
+                        "kind": "plan.estimate",
+                        "blocks": [{"names": ["g"]}],
+                        "move": ["g"],
+                    },
+                }
+            )
+        )
         draws = results["plan.sample"].product
         assert float(draws.mean["g"]) == pytest.approx(1.5, abs=0.2)
 
@@ -178,31 +189,51 @@ class TestSample:
 
     def test_warm_start_kind_is_plan_estimate_alone(self):
         with pytest.raises(ConfigError, match="plan.estimate"):
-            run_document(document(
-                {**SAMPLE, "warm_start": {"kind": "plan.sample",
-                                          "blocks": [{"names": ["g"]}],
-                                          "move": ["g"]}}))
+            run_document(
+                document(
+                    {
+                        **SAMPLE,
+                        "warm_start": {
+                            "kind": "plan.sample",
+                            "blocks": [{"names": ["g"]}],
+                            "move": ["g"],
+                        },
+                    }
+                )
+            )
 
     def test_warm_start_requires_move(self):
         with pytest.raises(ConfigError, match="move"):
-            run_document(document(
-                {**SAMPLE, "warm_start": {"kind": "plan.estimate",
-                                          "blocks": [{"names": ["g"]}]}}))
+            run_document(
+                document(
+                    {
+                        **SAMPLE,
+                        "warm_start": {"kind": "plan.estimate", "blocks": [{"names": ["g"]}]},
+                    }
+                )
+            )
 
     def test_move_must_name_declared_latents(self):
         with pytest.raises(ConfigError, match="ghost"):
-            run_document(document(
-                {**SAMPLE, "warm_start": {"kind": "plan.estimate",
-                                          "blocks": [{"names": ["g"]}],
-                                          "move": ["ghost"]}}))
+            run_document(
+                document(
+                    {
+                        **SAMPLE,
+                        "warm_start": {
+                            "kind": "plan.estimate",
+                            "blocks": [{"names": ["g"]}],
+                            "move": ["ghost"],
+                        },
+                    }
+                )
+            )
 
 
 class TestTheWarmStartEstimateStaysInExecute:
     """Plan 4A Task 7's carve-out: warm-start NORMALIZATION is parse, but the
     warm-start estimate itself is scientific execution and stays in execute."""
 
-    def test_parse_never_estimates_and_execute_estimates_once(
-            self, monkeypatch):
+    def test_parse_never_estimates_and_execute_estimates_once(self, monkeypatch):
         from rheplicant.config.document import load_document
         from rheplicant.config.sections.exit_support import (
             handler_for,
@@ -222,9 +253,12 @@ class TestTheWarmStartEstimateStaysInExecute:
         doc = document(WARMED)
         built = load_document(doc)
         (spec,) = parse_runs(doc["runs"])
-        parsed = parse_run(spec, built, index=0,
-                           layer=LayerRef(kind="base", name=None, prefix="",
-                                          document={}, declared_runs=None))
+        parsed = parse_run(
+            spec,
+            built,
+            index=0,
+            layer=LayerRef(kind="base", name=None, prefix="", document={}, declared_runs=None),
+        )
         assert calls == []  # parse is normalization, never the estimate
         product = handler_for("plan.sample").execute(parsed, built, {})
         assert calls == [0]  # exactly the warm start's own estimate
@@ -236,15 +270,18 @@ class TestTheWarmStartEstimateStaysInExecute:
 # overriding it.  See sections/exits.py::_a49_is_not_honourable_by_a_plan.
 # --------------------------------------------------------------------------
 
+
 #: 3.5714286 MHz / 2 s are the synthetic document's own grid spacing and sample
 #: step, spelled out because ``{from: observation}`` reads
 #: ``observation.time.channel_width``, which this document does not declare --
 #: the same reason ``exit_helpers.GCR_RADIOMETER`` spells them.
 def _radiometer(include_logdet):
-    return {"kind": "radiometer",
-            "channel_width": {"value": 3.5714286, "unit": "MHz"},
-            "integration_time": {"value": 2.0, "unit": "s"},
-            "include_logdet": include_logdet}
+    return {
+        "kind": "radiometer",
+        "channel_width": {"value": 3.5714286, "unit": "MHz"},
+        "integration_time": {"value": 2.0, "unit": "s"},
+        "include_logdet": include_logdet,
+    }
 
 
 class TestAPlanRefusesTheGLSDeclaration:
@@ -264,8 +301,7 @@ class TestAPlanRefusesTheGLSDeclaration:
         with pytest.raises(ConfigError, match="include_logdet: false is not available"):
             run_document(doc)
 
-    @pytest.mark.parametrize("run", [{**ESTIMATE, "tol": None}, SAMPLE],
-                             ids=["estimate", "sample"])
+    @pytest.mark.parametrize("run", [{**ESTIMATE, "tol": None}, SAMPLE], ids=["estimate", "sample"])
     def test_true_is_not(self, run):
         """The anti-vacuity twin: the same document with ``true`` must run.
 

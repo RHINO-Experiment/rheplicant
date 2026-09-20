@@ -141,9 +141,7 @@ def _routes(document: Mapping[str, Any]) -> list[tuple[str, Mapping[str, Any]]]:
     return routes
 
 
-def _static_number(
-    node: Any, context: Any, destination: DestinationDescriptor
-) -> float | None:
+def _static_number(node: Any, context: Any, destination: DestinationDescriptor) -> float | None:
     """The number a STATIC field's value node carries, or ``None`` to stand down.
 
     **Only the scalar forms are resolved**, and that is a scope decision
@@ -227,10 +225,12 @@ def _nyquist(facts: Axes) -> Iterable[Finding]:
         if 2 * lmax < n_time:
             continue
         yield refuse(
-            "C3", dotted,
+            "C3",
+            dotted,
             f"{dotted}: uniform_sampling: true needs 2*lmax < n_time and this "
             f"run has lmax={lmax} against n_time={n_time} (2*lmax = "
-            f"{2 * lmax}). {_C3_TAIL} (check C3).")
+            f"{2 * lmax}). {_C3_TAIL} (check C3).",
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -274,8 +274,9 @@ def _is_tone(entry: Any) -> bool:
         return _t5_radio_class(entry) is CWCalibrationOperator
     classes = operator_table().get("cw_tone", ())
     if entry.get("type") is not None:
-        return any(cls is CWCalibrationOperator and cls.__name__ == entry["type"]
-                   for cls in classes)
+        return any(
+            cls is CWCalibrationOperator and cls.__name__ == entry["type"] for cls in classes
+        )
     return classes == (CWCalibrationOperator,)
 
 
@@ -345,8 +346,7 @@ def _tone_on_the_grid(facts: Axes) -> Iterable[Finding]:
         return
     freq = facts.context.freq
     try:
-        spacing = float(_median_gap(freq, name="channel_spacing",
-                                    axis_name="frequency"))
+        spacing = float(_median_gap(freq, name="channel_spacing", axis_name="frequency"))
     except ConfigError:
         return  # a single-channel band has no spacing; nothing to measure
     low, high = float(freq.min()), float(freq.max())
@@ -375,25 +375,30 @@ def _tone_on_the_grid(facts: Axes) -> Iterable[Finding]:
         )
         if width is not None and lineshape in MIN_WIDTH_IN_CHANNELS:
             floor = MIN_WIDTH_IN_CHANNELS[lineshape] * spacing
-            ceiling = max(MAX_WIDTH_IN_BAND_FRACTION * (high - low),
-                          MIN_CEILING_IN_CHANNELS * spacing)
+            ceiling = max(
+                MAX_WIDTH_IN_BAND_FRACTION * (high - low), MIN_CEILING_IN_CHANNELS * spacing
+            )
             coarse = width_floor_unresolved(freq, spacing, width, floor)
             if coarse is not None:
-                yield refuse("A13", where, f"{where}.line_width cannot be checked: "
-                             f"{coarse} (check A13).")
+                yield refuse(
+                    "A13", where, f"{where}.line_width cannot be checked: {coarse} (check A13)."
+                )
             elif width < floor * (1.0 - width_floor_rtol(freq, spacing)):
                 yield refuse(
-                    "A13", where,
+                    "A13",
+                    where,
                     f"{where}.line_width: {width:.6g} Hz is narrower than the "
                     f"channel response this {lineshape!r} grid can carry "
                     f"({MIN_WIDTH_IN_CHANNELS[lineshape]:g} x the {spacing:.6g} "
                     f"Hz median channel spacing = {floor:.6g} Hz). The sampled "
                     "channels land on the lineshape's own nulls, or overflow "
                     "its exponent, and the normalisation then divides by float "
-                    f"noise. {_A13_TAIL} (check A13).")
+                    f"noise. {_A13_TAIL} (check A13).",
+                )
             elif width > ceiling:
                 yield refuse(
-                    "A13", where,
+                    "A13",
+                    where,
                     f"{where}.line_width: {width:.6g} Hz is wider than a LINE "
                     f"on this band -- the limit is {ceiling:.6g} Hz, the larger "
                     f"of {MAX_WIDTH_IN_BAND_FRACTION:g} x the {high - low:.6g} "
@@ -405,7 +410,8 @@ def _tone_on_the_grid(facts: Axes) -> Iterable[Finding]:
                     "weights still normalise -- but what they model is a "
                     "PEDESTAL over the whole band, every channel sits above "
                     "protect_floor of the peak, and the RFI flagger is "
-                    f"switched off for the entire run. {_A13_TAIL} (check A13).")
+                    f"switched off for the entire run. {_A13_TAIL} (check A13).",
+                )
         centre = _static_number(
             entry.get("tone_freq"),
             facts.context,
@@ -436,10 +442,13 @@ def _tone_on_the_grid(facts: Axes) -> Iterable[Finding]:
         if low <= min(centres) and max(centres) <= high:
             continue
         moving = (
-            "" if drift == 0.0 else
-            f", drifting at {drift:.6g} Hz/s over the run's {last - first:.6g} s")
+            ""
+            if drift == 0.0
+            else f", drifting at {drift:.6g} Hz/s over the run's {last - first:.6g} s"
+        )
         yield refuse(
-            "A13", where,
+            "A13",
+            where,
             f"{where}.tone_freq: the tone centre spans [{min(centres):.6g}, "
             f"{max(centres):.6g}] Hz{moving}, outside this run's observed band "
             f"[{low:.6g}, {high:.6g}] Hz. A centre that starts in band and "
@@ -447,7 +456,8 @@ def _tone_on_the_grid(facts: Axes) -> Iterable[Finding]:
             "passes, which is why the run's extent is read here rather than "
             "t_0. The lineshape is still evaluated and still normalised, so "
             "the run models a bright feature spread over channels the tone is "
-            f"nowhere near. {_A13_TAIL} (check A13).")
+            f"nowhere near. {_A13_TAIL} (check A13).",
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -526,9 +536,11 @@ def _filters(document: Mapping[str, Any]) -> list[tuple[str, Mapping]]:
         spec = specs.get("filters")
         if spec is None:
             continue
-        found = [(f"{prefix}.{path}", entry)
-                 for path, entry in _t4_entries("filters", spec, many=True)
-                 if isinstance(entry, Mapping)]
+        found = [
+            (f"{prefix}.{path}", entry)
+            for path, entry in _t4_entries("filters", spec, many=True)
+            if isinstance(entry, Mapping)
+        ]
     return found
 
 
@@ -562,12 +574,14 @@ def _divisible(facts: Axes) -> Iterable[Finding]:
         n_chunk, where = chunking
         if n_time % n_chunk:
             yield refuse(
-                "C8", where,
+                "C8",
+                where,
                 f"{where}: n_chunk={n_chunk} does not divide this run's "
                 f"{n_time} time samples ({n_time} % {n_chunk} = "
                 f"{n_time % n_chunk}). BackendOperator reshapes (n_time, ...) "
                 f"into ({n_time} // {n_chunk}, {n_chunk}, ...) and there is no "
-                f"such shape. {_C8_TAIL} (check C8).")
+                f"such shape. {_C8_TAIL} (check C8).",
+            )
             # The filter clause STANDS DOWN: how many samples a filter is
             # handed depends on what this document's n_chunk becomes once it
             # is fixed, and a second sentence computed from a count that is
@@ -578,17 +592,24 @@ def _divisible(facts: Axes) -> Iterable[Finding]:
         n_days = _static_int(entry, "n_days")
         if n_days is None or after % n_days == 0:
             continue
-        averaged = "" if after == n_time else (
-            f"The run declares {n_time} samples, but averaging runs BEFORE "
-            f"filters -- RADIO_GRAPH's processing segment is snapshot, "
-            f"flagging, averaging, apply_cal, filters -- so a chain behind an "
-            f"averaging of n_chunk={n_time // after} is handed {after} of "
-            f"them. Checking n_days against the {n_time} the document declares "
-            f"is the naive reading, and it accepts this document. ")
+        averaged = (
+            ""
+            if after == n_time
+            else (
+                f"The run declares {n_time} samples, but averaging runs BEFORE "
+                f"filters -- RADIO_GRAPH's processing segment is snapshot, "
+                f"flagging, averaging, apply_cal, filters -- so a chain behind an "
+                f"averaging of n_chunk={n_time // after} is handed {after} of "
+                f"them. Checking n_days against the {n_time} the document declares "
+                f"is the naive reading, and it accepts this document. "
+            )
+        )
         yield refuse(
-            "C8", where,
+            "C8",
+            where,
             f"{where}: n_days={n_days} does not divide the {after} time "
             f"sample(s) this filter is handed ({after} % {n_days} = "
             f"{after % n_days}). {averaged}SiderealFilter reshapes the time "
             f"axis into ({n_days}, n_lst, ...) to fold the days together and "
-            f"there is no such shape. {_C8_TAIL} (check C8).")
+            f"there is no such shape. {_C8_TAIL} (check C8).",
+        )

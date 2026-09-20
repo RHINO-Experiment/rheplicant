@@ -32,8 +32,7 @@ _TRUSTED_PROTOCOL_MEMBER_TYPES = (
 _CLASSMETHOD_FUNCTION_DESCRIPTOR = classmethod.__dict__["__func__"]
 _STATICMETHOD_FUNCTION_DESCRIPTOR = staticmethod.__dict__["__func__"]
 _TYPE_TEXT_DESCRIPTORS = {
-    field: type.__dict__[field]
-    for field in ("__name__", "__module__", "__qualname__")
+    field: type.__dict__[field] for field in ("__name__", "__module__", "__qualname__")
 }
 _TYPE_MRO_DESCRIPTOR = type.__dict__["__mro__"]
 _TYPE_NAMESPACE_DESCRIPTOR = type.__dict__["__dict__"]
@@ -67,9 +66,7 @@ def _require_utf8_text(value: str, *, where: str) -> str:
     try:
         str.encode(value, "utf-8", "strict")
     except UnicodeEncodeError:
-        raise ConfigError(
-            f"{where}: evidence text must contain only valid UTF-8."
-        ) from None
+        raise ConfigError(f"{where}: evidence text must contain only valid UTF-8.") from None
     return value
 
 
@@ -80,19 +77,13 @@ def _require_utf8_text_limited(
     byte_limit: int,
 ) -> str:
     if str.__len__(value) > byte_limit:
-        raise ConfigError(
-            f"{where} scalar exceeds the {byte_limit}-byte limit."
-        )
+        raise ConfigError(f"{where} scalar exceeds the {byte_limit}-byte limit.")
     try:
         encoded = str.encode(value, "utf-8", "strict")
     except UnicodeEncodeError:
-        raise ConfigError(
-            f"{where}: evidence text must contain only valid UTF-8."
-        ) from None
+        raise ConfigError(f"{where}: evidence text must contain only valid UTF-8.") from None
     if bytes.__len__(encoded) > byte_limit:
-        raise ConfigError(
-            f"{where} scalar exceeds the {byte_limit}-byte limit."
-        )
+        raise ConfigError(f"{where} scalar exceeds the {byte_limit}-byte limit.")
     return value
 
 
@@ -110,11 +101,7 @@ def static_class_text(
         value = descriptor.__get__(actual_type, type(actual_type))
     except Exception:
         return fallback
-    if (
-        type(value) is not str
-        or not value
-        or str.__len__(value) > _STATIC_CLASS_TEXT_LIMIT
-    ):
+    if type(value) is not str or not value or str.__len__(value) > _STATIC_CLASS_TEXT_LIMIT:
         return fallback
     try:
         str.encode(value, "utf-8", "strict")
@@ -145,10 +132,7 @@ def _static_protocol_member(actual_type: type, name: str) -> bool | None:
     if member is _STATIC_MISSING:
         return None
     member_type = type(member)
-    if any(
-        member_type is trusted_type
-        for trusted_type in _TRUSTED_PROTOCOL_MEMBER_TYPES
-    ):
+    if any(member_type is trusted_type for trusted_type in _TRUSTED_PROTOCOL_MEMBER_TYPES):
         return True
     if member_type is classmethod or member_type is staticmethod:
         descriptor = (
@@ -160,14 +144,8 @@ def _static_protocol_member(actual_type: type, name: str) -> bool | None:
             wrapped = descriptor.__get__(member, member_type)
         except Exception:
             return False
-        return (
-            type(wrapped) is FunctionType
-            or type(wrapped) is BuiltinFunctionType
-        )
-    if (
-        static_class_attribute(member_type, "__get__", _STATIC_MISSING)
-        is not _STATIC_MISSING
-    ):
+        return type(wrapped) is FunctionType or type(wrapped) is BuiltinFunctionType
+    if static_class_attribute(member_type, "__get__", _STATIC_MISSING) is not _STATIC_MISSING:
         return False
     return callable(member)
 
@@ -199,9 +177,7 @@ def static_isinstance(
                 return True
             continue
         if candidate is Sequence:
-            nominal_sequence = any(
-                base is Sequence for base in actual_mro
-            )
+            nominal_sequence = any(base is Sequence for base in actual_mro)
             if nominal_sequence:
                 if _static_sequence_protocol(actual_type):
                     return True
@@ -246,9 +222,7 @@ class _FrozenConcat(Sequence[object]):
         suffix: tuple[object, ...],
     ) -> None:
         if type(parent) is not tuple and type(parent) is not _FrozenConcat:
-            raise ConfigError(
-                "frozen concat parent must be an exact tuple or concat."
-            )
+            raise ConfigError("frozen concat parent must be an exact tuple or concat.")
         if type(suffix) is not tuple:
             raise ConfigError("frozen concat suffix must be an exact tuple.")
         object.__setattr__(self, "_parent", parent)
@@ -279,14 +253,10 @@ class _FrozenConcat(Sequence[object]):
                 bound is not None and type(bound) is not int
                 for bound in (index.start, index.stop, index.step)
             ):
-                raise TypeError(
-                    "frozen concat slice bounds must be exact int or null."
-                )
+                raise TypeError("frozen concat slice bounds must be exact int or null.")
             return tuple(self)[index]
         if type(index) is not int:
-            raise TypeError(
-                "frozen concat indices must be exact int or slice."
-            )
+            raise TypeError("frozen concat indices must be exact int or slice.")
         position = index
         if position < 0:
             position += self._length
@@ -340,10 +310,7 @@ def thaw(value: object) -> object:
                 return cached
             result: dict[object, object] = {}
             remember(item, result)
-            result.update(
-                (thaw_one(key), thaw_one(child))
-                for key, child in item.items()
-            )
+            result.update((thaw_one(key), thaw_one(child)) for key, child in item.items())
             return result
         if type(item) is _FrozenConcat:
             cached = completed_value(item)
@@ -374,9 +341,7 @@ def freeze_evidence(value: object, *, where: str) -> object:
         root_values = object.__getattribute__(value, "values")
         text_limit = object.__getattribute__(value, "text_limit")
         json_only = object.__getattribute__(value, "json_only")
-        integer_bit_limit = object.__getattribute__(
-            value, "integer_bit_limit"
-        )
+        integer_bit_limit = object.__getattribute__(value, "integer_bit_limit")
         shared_consume = object.__getattribute__(value, "consume")
     else:
         root_values = None
@@ -393,9 +358,7 @@ def freeze_evidence(value: object, *, where: str) -> object:
     unsupported = object()
 
     def canonical_scalar(item: object) -> object:
-        if json_only and static_isinstance(
-            item, (bytes, bytearray, memoryview)
-        ):
+        if json_only and static_isinstance(item, (bytes, bytearray, memoryview)):
             raise ConfigError(f"{where} contains a value that is not JSON.")
         if (
             json_only
@@ -404,9 +367,7 @@ def freeze_evidence(value: object, *, where: str) -> object:
             and integer_bit_limit is not None
             and int.bit_length(item) > integer_bit_limit
         ):
-            raise ConfigError(
-                f"{where} integer exceeds the {integer_bit_limit}-bit limit."
-            )
+            raise ConfigError(f"{where} integer exceeds the {integer_bit_limit}-bit limit.")
         item_type = type(item)
         if item_type is str:
             text = cast(str, item)
@@ -420,13 +381,8 @@ def freeze_evidence(value: object, *, where: str) -> object:
         if any(item_type is scalar_type for scalar_type in _SCALAR_TYPES):
             return item
         if static_isinstance(item, str):
-            if (
-                text_limit is not None
-                and str.__len__(item) > text_limit
-            ):
-                raise ConfigError(
-                    f"{where} scalar exceeds the {text_limit}-byte limit."
-                )
+            if text_limit is not None and str.__len__(item) > text_limit:
+                raise ConfigError(f"{where} scalar exceeds the {text_limit}-byte limit.")
             text = str.__str__(item)
             if text_limit is not None:
                 return _require_utf8_text_limited(
@@ -535,11 +491,7 @@ def freeze_evidence(value: object, *, where: str) -> object:
         register(item, depth)
         identity = id(item)
         cached = next(
-            (
-                record
-                for record in completed.get(identity, ())
-                if record[0] is item
-            ),
+            (record for record in completed.get(identity, ()) if record[0] is item),
             None,
         )
         if cached is not None:
@@ -554,9 +506,7 @@ def freeze_evidence(value: object, *, where: str) -> object:
         scalar = canonical_scalar(item)
         if scalar is not unsupported:
             scalar_type = static_type_name(item)
-            completed.setdefault(identity, []).append(
-                (item, scalar, 1, scalar_type)
-            )
+            completed.setdefault(identity, []).append((item, scalar, 1, scalar_type))
             return scalar, 1, scalar_type
         if static_isinstance(item, Mapping):
             active_bucket = active.setdefault(identity, [])
@@ -590,9 +540,7 @@ def freeze_evidence(value: object, *, where: str) -> object:
                             f"{where}: evidence mapping keys collide after freezing "
                             f"type {static_type_name(key)}."
                         )
-                    frozen_child, child_height, child_deepest_type = freeze_one(
-                        child, depth + 1
-                    )
+                    frozen_child, child_height, child_deepest_type = freeze_one(child, depth + 1)
                     frozen_mapping[frozen_key] = frozen_child
                     if child_height > maximum_child_height:
                         maximum_child_height = child_height
@@ -621,9 +569,7 @@ def freeze_evidence(value: object, *, where: str) -> object:
                 deepest_type = static_type_name(item)
                 container_type = static_type_name(item)
                 for child in sequence_items(item, container_type):
-                    frozen_child, child_height, child_deepest_type = freeze_one(
-                        child, depth + 1
-                    )
+                    frozen_child, child_height, child_deepest_type = freeze_one(child, depth + 1)
                     frozen_children.append(frozen_child)
                     if child_height > maximum_child_height:
                         maximum_child_height = child_height
@@ -638,16 +584,13 @@ def freeze_evidence(value: object, *, where: str) -> object:
                 assert removed is item
                 if not active_bucket:
                     del active[identity]
-        raise ConfigError(
-            f"{where}: unsupported evidence leaf type {static_type_name(item)}."
-        )
+        raise ConfigError(f"{where}: unsupported evidence leaf type {static_type_name(item)}.")
 
     try:
         if root_values is not None:
             if list.__len__(root_values) > _EVIDENCE_EDGE_LIMIT:
                 raise ConfigError(
-                    f"{where}: evidence root count exceeds limit "
-                    f"{_EVIDENCE_EDGE_LIMIT}."
+                    f"{where}: evidence root count exceeds limit {_EVIDENCE_EDGE_LIMIT}."
                 )
             frozen_roots: list[object] = []
             for root in list.__iter__(root_values):
@@ -657,13 +600,9 @@ def freeze_evidence(value: object, *, where: str) -> object:
     except ConfigError:
         raise
     except RecursionError:
-        raise ConfigError(
-            f"{where}: evidence recursion exceeded at type {current_type}."
-        ) from None
+        raise ConfigError(f"{where}: evidence recursion exceeded at type {current_type}.") from None
     except Exception:
-        raise ConfigError(
-            f"{where}: evidence protocol failed at type {current_type}."
-        ) from None
+        raise ConfigError(f"{where}: evidence protocol failed at type {current_type}.") from None
 
 
 def _freeze_evidence_roots(
@@ -678,9 +617,7 @@ def _freeze_evidence_roots(
     """Freeze trusted root references with shared identity and no depth wrapper."""
     if type(values) is not list:
         raise ConfigError(f"{where}: evidence roots must be an exact list.")
-    if text_limit is not None and (
-        type(text_limit) is not int or text_limit < 0
-    ):
+    if text_limit is not None and (type(text_limit) is not int or text_limit < 0):
         raise ConfigError(f"{where}: evidence text limit is invalid.")
     if type(json_only) is not bool:
         raise ConfigError(f"{where}: JSON-only evidence policy is invalid.")

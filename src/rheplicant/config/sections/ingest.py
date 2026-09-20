@@ -24,8 +24,15 @@ from rheplicant.config.values import resolve_value
 __all__ = ["freq_unit_problem", "parse_from_file"]
 
 _FROM_FILE_KEYS = frozenset(
-    {"format", "path", "sha256", "freq_unit", "thermistor_columns",
-     "settle_seconds", "thermistor_unit"}
+    {
+        "format",
+        "path",
+        "sha256",
+        "freq_unit",
+        "thermistor_columns",
+        "settle_seconds",
+        "thermistor_unit",
+    }
 )
 
 #: The one ingestion format whose reader demands ``freq_unit:``.  Bound here
@@ -85,16 +92,14 @@ def _seconds(value: Any, key: str) -> float:
         value = value["value"]
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise ConfigError(
-            f"from_file: {key} is a number of seconds; got "
-            f"{type(value).__name__} ({value!r})."
+            f"from_file: {key} is a number of seconds; got {type(value).__name__} ({value!r})."
         )
     return float(value)
 
 
 @register_reader(
     RHINO_FORMAT,
-    frozenset({"freq_unit", "thermistor_columns", "settle_seconds",
-               "thermistor_unit"}),
+    frozenset({"freq_unit", "thermistor_columns", "settle_seconds", "thermistor_unit"}),
     array=False,
 )
 def _read_rhino_hdf5(path, spec: dict):
@@ -115,20 +120,18 @@ def _read_rhino_hdf5(path, spec: dict):
     kwargs: dict[str, Any] = {"freq_unit": str(spec["freq_unit"])}
     if "thermistor_columns" in spec:
         columns = spec["thermistor_columns"]
-        if columns is not None and (not isinstance(columns, Mapping)
-                or not all(isinstance(k, str) for k in columns)
-                or any(isinstance(v, bool) or not isinstance(v, int)
-                       for v in columns.values())):
+        if columns is not None and (
+            not isinstance(columns, Mapping)
+            or not all(isinstance(k, str) for k in columns)
+            or any(isinstance(v, bool) or not isinstance(v, int) for v in columns.values())
+        ):
             raise ConfigError(
                 "from_file: thermistor_columns is a mapping of switch label "
                 f"-> integer column of /temperatures; got {columns!r}."
             )
-        kwargs["thermistor_columns"] = (
-            None if columns is None else dict(columns)
-        )
+        kwargs["thermistor_columns"] = None if columns is None else dict(columns)
     if "settle_seconds" in spec:
-        kwargs["settle_seconds"] = _seconds(spec["settle_seconds"],
-                                            "settle_seconds")
+        kwargs["settle_seconds"] = _seconds(spec["settle_seconds"], "settle_seconds")
     if "thermistor_unit" in spec:
         unit = spec["thermistor_unit"]
         if unit not in ("celsius", "kelvin"):
@@ -143,12 +146,9 @@ def _read_rhino_hdf5(path, spec: dict):
 def parse_from_file(spec: Any, context: ResolutionContext):
     """``(RhinoObservation, provenance_record)`` for an ingested observation."""
     if not isinstance(spec, Mapping):
-        raise ConfigError(
-            f"observation.from_file: is a mapping; got {type(spec).__name__}."
-        )
+        raise ConfigError(f"observation.from_file: is a mapping; got {type(spec).__name__}.")
     declared = dict(spec)
-    check_unknown_keys("observation.from_file", declared, _FROM_FILE_KEYS,
-                       label="from_file:")
+    check_unknown_keys("observation.from_file", declared, _FROM_FILE_KEYS, label="from_file:")
     fmt = declared.get("format")
     if fmt != RHINO_FORMAT:
         raise ConfigError(

@@ -41,19 +41,20 @@ class TestTheTable:
         table = operator_table()
         assert table["gain"] == (GainOperator,)
         assert set(cls.__name__ for cls in table["noise"]) == {
-            "NoiseOperator", "RadiometerNoiseOperator"}
+            "NoiseOperator",
+            "RadiometerNoiseOperator",
+        }
         assert len(table["flagging"]) == 2
         assert len(table["filters"]) == 3
-        assert "astro_sum" not in table          # junctions register nothing
-        assert "beam" not in table               # reserved: no shipped class
+        assert "astro_sum" not in table  # junctions register nothing
+        assert "beam" not in table  # reserved: no shipped class
 
 
 class TestFieldDelivery:
     def test_traced_and_static_fields_arrive_by_kind(self, context):
         op = build_node_operator(
-            "adc",
-            {"scale": {"value": 0.25, "unit": "adc_count/K"}, "n_bits": 12},
-            context)
+            "adc", {"scale": {"value": 0.25, "unit": "adc_count/K"}, "n_bits": 12}, context
+        )
         assert isinstance(op, ADCOperator)
         assert op.n_bits == 12 and isinstance(op.n_bits, int)
         assert op.scale.dtype == jnp.float32
@@ -61,10 +62,13 @@ class TestFieldDelivery:
     def test_units_convert_on_the_way_in(self, context):
         op = build_node_operator(
             "global_signal",
-            {"depth": {"value": 0.5, "unit": "K"},
-             "centre": {"value": 75.0, "unit": "MHz"},
-             "width": {"value": 5.0, "unit": "MHz"}},
-            context)
+            {
+                "depth": {"value": 0.5, "unit": "K"},
+                "centre": {"value": 75.0, "unit": "MHz"},
+                "width": {"value": 5.0, "unit": "MHz"},
+            },
+            context,
+        )
         assert isinstance(op, GlobalSignalOperator)
         assert float(op.centre) == pytest.approx(75e6)
 
@@ -106,9 +110,9 @@ class TestFieldDelivery:
         with pytest.raises(ConfigError, match="width"):
             build_node_operator(
                 "global_signal",
-                {"depth": {"value": 0.5, "unit": "K"},
-                 "centre": {"value": 75.0, "unit": "MHz"}},
-                context)
+                {"depth": {"value": 0.5, "unit": "K"}, "centre": {"value": 75.0, "unit": "MHz"}},
+                context,
+            )
 
     # No wrong-suffix test here: the suffix table (`_NAME_SUFFIX_DIMENSION`,
     # units.py) holds only `_deg`/`_m`, and no shipped operator field ends
@@ -119,19 +123,22 @@ class TestFieldDelivery:
 class TestTypeSelection:
     def test_type_is_required_where_two_classes_register(self, context):
         with pytest.raises(ConfigError, match="type:"):
-            build_node_operator("noise", {"sigma": {"value": 0.5, "unit": "K"}},
-                                context)
+            build_node_operator("noise", {"sigma": {"value": 0.5, "unit": "K"}}, context)
 
     def test_type_picks_the_class(self, context):
         op = build_node_operator(
-            "noise", {"type": "NoiseOperator",
-                      "sigma": {"value": 0.5, "unit": "K"}}, context)
+            "noise", {"type": "NoiseOperator", "sigma": {"value": 0.5, "unit": "K"}}, context
+        )
         assert isinstance(op, NoiseOperator)
         radiometer = build_node_operator(
-            "noise", {"type": "RadiometerNoiseOperator",
-                      "channel_width": {"value": 3.125, "unit": "MHz"},
-                      "integration_time": {"value": 2.0, "unit": "s"}},
-            context)
+            "noise",
+            {
+                "type": "RadiometerNoiseOperator",
+                "channel_width": {"value": 3.125, "unit": "MHz"},
+                "integration_time": {"value": 2.0, "unit": "s"},
+            },
+            context,
+        )
         assert isinstance(radiometer, RadiometerNoiseOperator)
 
     def test_an_unregistered_type_is_refused_listing_the_choices(self, context):
@@ -147,17 +154,20 @@ class TestObjectFields:
     def _context_with_sky(self, context):
         sky = UniformSkyModel(amplitude=jnp.array(10.0), n_pix=12)
         projector = MatrixProjector(matrix=jnp.ones((4, 12)))
-        return (context
-                .with_resource("resources.sky_models.sky", sky)
-                .with_resource("resources.projectors.p", projector))
+        return context.with_resource("resources.sky_models.sky", sky).with_resource(
+            "resources.projectors.p", projector
+        )
 
     def test_object_fields_arrive_by_identity(self, context):
         ctx = self._context_with_sky(context)
         op = build_node_operator(
             "observed_astro_sky",
-            {"sky_model": {"ref": "resources.sky_models.sky"},
-             "projector": {"ref": "resources.projectors.p"}},
-            ctx)
+            {
+                "sky_model": {"ref": "resources.sky_models.sky"},
+                "projector": {"ref": "resources.projectors.p"},
+            },
+            ctx,
+        )
         assert isinstance(op, SkySourceOperator)
         assert op.sky_model is ctx.resources["resources.sky_models.sky"]
 
@@ -166,7 +176,8 @@ class TestObjectFields:
             build_node_operator(
                 "observed_astro_sky",
                 {"sky_model": {"value": 10.0}, "projector": {"value": 1.0}},
-                context)
+                context,
+            )
 
 
 class TestFromRoutes:
@@ -178,9 +189,13 @@ class TestFromRoutes:
         ctx = context.with_resource("resources.projectors.p", WithFraction())
         op = build_node_operator(
             "beam_spill",
-            {"from": "projector", "projector": {"ref": "resources.projectors.p"},
-             "t_ground": {"value": 290.0, "unit": "K"}},
-            ctx)
+            {
+                "from": "projector",
+                "projector": {"ref": "resources.projectors.p"},
+                "t_ground": {"value": 290.0, "unit": "K"},
+            },
+            ctx,
+        )
         assert isinstance(op, BeamSpillOperator)
         assert float(op.sky_fraction) == pytest.approx(0.83)
 
@@ -193,9 +208,9 @@ class TestFromRoutes:
         with pytest.raises(ConfigError, match="t_ground"):
             build_node_operator(
                 "beam_spill",
-                {"from": "projector",
-                 "projector": {"ref": "resources.projectors.p"}},
-                ctx)
+                {"from": "projector", "projector": {"ref": "resources.projectors.p"}},
+                ctx,
+            )
 
     def test_t_sys_extra_from_basis(self, context):
         # BASIS_KINDS (core/basis.py) is ("legendre", "polynomial", "fourier")
@@ -206,15 +221,22 @@ class TestFromRoutes:
 
         basis = build_basis(
             "resources.bases.b",
-            {"time": {"kind": "legendre", "n_basis": 2},
-             "freq": {"kind": "legendre", "n_basis": 3}},
-            context)
+            {
+                "time": {"kind": "legendre", "n_basis": 2},
+                "freq": {"kind": "legendre", "n_basis": 3},
+            },
+            context,
+        )
         ctx = context.with_resource("resources.bases.b", basis)
         op = build_node_operator(
             "t_sys_extra",
-            {"from": "basis", "basis": {"ref": "resources.bases.b"},
-             "coeff": {"zeros": [2, 3], "unit": "K"}},
-            ctx)
+            {
+                "from": "basis",
+                "basis": {"ref": "resources.bases.b"},
+                "coeff": {"zeros": [2, 3], "unit": "K"},
+            },
+            ctx,
+        )
         assert isinstance(op, BasisTemperatureOperator)
         assert op.coeff.shape == (2, 3)
 
@@ -233,13 +255,20 @@ def _twin_with_beam_spill(ctx):
     from rheplicant.config.sections.compose import build_model
 
     return build_model(
-        {"global_signal": {"depth": {"value": 0.5, "unit": "K"},
-                           "centre": {"value": 75.0, "unit": "MHz"},
-                           "width": {"value": 5.0, "unit": "MHz"}},
-         "beam_spill": {"sky_fraction": {"value": 0.9,
-                                         "unit": "dimensionless"},
-                        "t_ground": {"value": 290.0, "unit": "K"}}},
-        ctx, switch_order=())
+        {
+            "global_signal": {
+                "depth": {"value": 0.5, "unit": "K"},
+                "centre": {"value": 75.0, "unit": "MHz"},
+                "width": {"value": 5.0, "unit": "MHz"},
+            },
+            "beam_spill": {
+                "sky_fraction": {"value": 0.9, "unit": "dimensionless"},
+                "t_ground": {"value": 290.0, "unit": "K"},
+            },
+        },
+        ctx,
+        switch_order=(),
+    )
 
 
 class _NoFraction(eqx.Module):
@@ -296,24 +325,24 @@ class TestBeamSpillFromProjectorSpeaksConfig:
     def _build(self, ctx):
         return build_node_operator(
             "beam_spill",
-            {"from": "projector",
-             "projector": {"ref": "resources.projectors.p"},
-             "t_ground": {"value": 290.0, "unit": "K"}},
-            ctx)
+            {
+                "from": "projector",
+                "projector": {"ref": "resources.projectors.p"},
+                "t_ground": {"value": 290.0, "unit": "K"},
+            },
+            ctx,
+        )
 
-    def test_a_cached_rotation_earns_the_value_routes_own_sentence(self,
-                                                                   context):
+    def test_a_cached_rotation_earns_the_value_routes_own_sentence(self, context):
         """The row that had NO config-level guard on this route at all."""
         with pytest.raises(ConfigError) as caught:
             self._build(self._ctx(context, _ReferenceFrame()))
         message = str(caught.value)
-        assert message.startswith("model.beam_spill.projector: "
-                                  "horizon_fraction: ")
+        assert message.startswith("model.beam_spill.projector: horizon_fraction: ")
         assert "optimizations: [cache_beam_rotation]" in message
         assert "{ref: resources.beams.<name>.sky_fraction}" in message
 
-    def test_the_two_routes_say_the_same_thing_about_a_cached_rotation(
-            self, context):
+    def test_the_two_routes_say_the_same_thing_about_a_cached_rotation(self, context):
         """The two guards agree at the boundary, asserted rather than assumed.
 
         This is the property that makes calling the owner better than
@@ -325,14 +354,12 @@ class TestBeamSpillFromProjectorSpeaksConfig:
         with pytest.raises(ConfigError) as by_model:
             self._build(ctx)
         with pytest.raises(ConfigError) as by_value:
-            resolve_value({"from": "horizon_fraction",
-                           "projector": {"ref": "resources.projectors.p"}},
-                          ctx)
-        assert str(by_model.value) == (
-            f"model.beam_spill.projector: {by_value.value}")
+            resolve_value(
+                {"from": "horizon_fraction", "projector": {"ref": "resources.projectors.p"}}, ctx
+            )
+        assert str(by_model.value) == (f"model.beam_spill.projector: {by_value.value}")
 
-    def test_a_projector_without_the_method_is_refused_as_a_ConfigError(
-            self, context):
+    def test_a_projector_without_the_method_is_refused_as_a_ConfigError(self, context):
         """The class-naming sentence, kept -- and now catchable.
 
         The value-node route answers this one with a bare ``AttributeError``
@@ -350,8 +377,7 @@ class TestBeamSpillFromProjectorSpeaksConfig:
             "sky_fraction."
         )
 
-    def test_a_matrix_projector_is_refused_by_name_and_not_by_AttributeError(
-            self, context):
+    def test_a_matrix_projector_is_refused_by_name_and_not_by_AttributeError(self, context):
         """S3's named twin: the value-node route beside the model route.
 
         Measured: the value-node route raises ``'MatrixProjector' object has
@@ -362,16 +388,14 @@ class TestBeamSpillFromProjectorSpeaksConfig:
         outside this task's files.
         """
         ctx = self._ctx(context, MatrixProjector(matrix=jnp.ones((4, 12))))
-        with pytest.raises(ConfigError, match="MatrixProjector does not "
-                                              "expose horizon_fraction"):
+        with pytest.raises(ConfigError, match="MatrixProjector does not expose horizon_fraction"):
             self._build(ctx)
         with pytest.raises(AttributeError):
-            resolve_value({"from": "horizon_fraction",
-                           "projector": {"ref": "resources.projectors.p"}},
-                          ctx)
+            resolve_value(
+                {"from": "horizon_fraction", "projector": {"ref": "resources.projectors.p"}}, ctx
+            )
 
-    def test_the_replace_route_gets_the_same_refusal_as_the_model_route(
-            self, context):
+    def test_the_replace_route_gets_the_same_refusal_as_the_model_route(self, context):
         """0.3 E.10, closed for C7 rather than recorded as a false negative.
 
         ``inference.twin.replace.<node>`` reaches ``build_node_operator``
@@ -385,18 +409,18 @@ class TestBeamSpillFromProjectorSpeaksConfig:
         exactly the claim that stops being true when someone adds a branch.
         """
         ctx = self._ctx(context, _ReferenceFrame())
-        spec = {"from": "projector",
-                "projector": {"ref": "resources.projectors.p"},
-                "t_ground": {"value": 290.0, "unit": "K"}}
+        spec = {
+            "from": "projector",
+            "projector": {"ref": "resources.projectors.p"},
+            "t_ground": {"value": 290.0, "unit": "K"},
+        }
         with pytest.raises(ConfigError) as by_model:
             build_node_operator("beam_spill", spec, ctx)
         with pytest.raises(ConfigError) as by_replace:
-            build_fit_twin({"replace": {"beam_spill": spec}},
-                           _twin_with_beam_spill(ctx), ctx)
+            build_fit_twin({"replace": {"beam_spill": spec}}, _twin_with_beam_spill(ctx), ctx)
         assert str(by_replace.value) == str(by_model.value)
 
-    def test_applying_the_refusals_own_advice_makes_the_document_build(
-            self, context):
+    def test_applying_the_refusals_own_advice_makes_the_document_build(self, context):
         """S4's second half for C7, which was missing.
 
         Both C7 sentences carry advice -- *"Take it from the beam instead,
@@ -407,22 +431,22 @@ class TestBeamSpillFromProjectorSpeaksConfig:
         runs the cached-rotation one: the refused document, then the same
         node written the way the sentence says, which must build.
         """
-        beam = types.SimpleNamespace(maps=jnp.ones((8, 12)),
-                                     sky_fraction=jnp.full((8,), 0.83))
-        ctx = self._ctx(context, _ReferenceFrame()).with_resource(
-            "resources.beams.horn", beam)
+        beam = types.SimpleNamespace(maps=jnp.ones((8, 12)), sky_fraction=jnp.full((8,), 0.83))
+        ctx = self._ctx(context, _ReferenceFrame()).with_resource("resources.beams.horn", beam)
         with pytest.raises(ConfigError, match="sky_fraction"):
             self._build(ctx)
         operator = build_node_operator(
             "beam_spill",
-            {"sky_fraction": {"ref": "resources.beams.horn.sky_fraction"},
-             "t_ground": {"value": 290.0, "unit": "K"}},
-            ctx)
+            {
+                "sky_fraction": {"ref": "resources.beams.horn.sky_fraction"},
+                "t_ground": {"value": 290.0, "unit": "K"},
+            },
+            ctx,
+        )
         assert isinstance(operator, BeamSpillOperator)
         assert operator.sky_fraction.shape == (8,)
 
-    def test_a_failure_that_is_not_the_packages_propagates_as_itself(
-            self, context):
+    def test_a_failure_that_is_not_the_packages_propagates_as_itself(self, context):
         """The handler catches ``StateValidationError`` and nothing wider.
 
         C-12 is the stated reason the handler exists, so the class it names
@@ -432,6 +456,7 @@ class TestBeamSpillFromProjectorSpeaksConfig:
         ``model.beam_spill.projector: ...`` as though the document were at
         fault.
         """
+
         class _Exploding(eqx.Module):
             def horizon_fraction(self):
                 raise RuntimeError("boom")
@@ -447,8 +472,7 @@ class TestBeamSpillFromProjectorSpeaksConfig:
         assert issubclass(StateValidationError, DirtError)
         assert issubclass(ConfigError, DirtError)
 
-    def test_a_working_projector_is_untouched_and_pays_for_no_second_read(
-            self, context):
+    def test_a_working_projector_is_untouched_and_pays_for_no_second_read(self, context):
         """The happy path does not enter the re-voicing branch at all.
 
         ``horizon_fraction()`` is a beam integral on a real projector, so a
@@ -470,8 +494,7 @@ class TestBeamSpillFromProjectorSpeaksConfig:
 
 
 class TestThermistorsRoute:
-    h5py = pytest.importorskip("h5py",
-                               reason="h5py comes with rheplicant[rhino]")
+    h5py = pytest.importorskip("h5py", reason="h5py comes with rheplicant[rhino]")
 
     def _ingested(self, tmp_path, ctx):
         """Widen the module's context FIXTURE VALUE (ctx) with the recording
@@ -482,57 +505,62 @@ class TestThermistorsRoute:
         make_file(tmp_path / "obs.hd5f")
         bootstrap = ResolutionContext(base_dir=str(tmp_path))
         obs, _ = parse_from_file(
-            {"format": "rhino_hdf5", "path": "obs.hd5f", "freq_unit": "MHz",
-             "settle_seconds": 0.0,
-             "thermistor_columns": {"antenna": 0, "internal_load": 0,
-                                    "heated_load": 1}},
-            bootstrap)
+            {
+                "format": "rhino_hdf5",
+                "path": "obs.hd5f",
+                "freq_unit": "MHz",
+                "settle_seconds": 0.0,
+                "thermistor_columns": {"antenna": 0, "internal_load": 0, "heated_load": 1},
+            },
+            bootstrap,
+        )
         return dataclasses.replace(ctx, ingest=obs)
 
     def test_a_thermistor_column_becomes_t_load(self, tmp_path, context):
         operator = build_node_operator(
-            "cal_loads", {"from": "thermistors", "label": "internal_load"},
-            self._ingested(tmp_path, context))
+            "cal_loads",
+            {"from": "thermistors", "label": "internal_load"},
+            self._ingested(tmp_path, context),
+        )
         assert operator.t_load.ndim == 2
         assert operator.t_load.shape[1] == 1
         assert float(operator.t_load[0, 0]) == pytest.approx(293.15)
 
     def test_without_an_ingested_recording_it_is_refused(self, context):
         with pytest.raises(ConfigError, match="from_file"):
-            build_node_operator(
-                "cal_loads", {"from": "thermistors", "label": "ambient"},
-                context)
+            build_node_operator("cal_loads", {"from": "thermistors", "label": "ambient"}, context)
 
     def test_label_is_required(self, tmp_path, context):
         with pytest.raises(ConfigError, match="label"):
-            build_node_operator("cal_loads", {"from": "thermistors"},
-                                self._ingested(tmp_path, context))
+            build_node_operator(
+                "cal_loads", {"from": "thermistors"}, self._ingested(tmp_path, context)
+            )
 
-    def test_a_label_with_no_thermistor_is_the_readers_own_refusal(
-            self, tmp_path, context):
+    def test_a_label_with_no_thermistor_is_the_readers_own_refusal(self, tmp_path, context):
         from rheplicant.core.errors import DataIngestionError
 
         with pytest.raises(DataIngestionError):
             build_node_operator(
-                "cal_loads", {"from": "thermistors", "label": "ghost_load"},
-                self._ingested(tmp_path, context))
+                "cal_loads",
+                {"from": "thermistors", "label": "ghost_load"},
+                self._ingested(tmp_path, context),
+            )
 
-    def test_an_empty_label_is_this_layers_refusal_not_the_readers(
-            self, tmp_path, context):
+    def test_an_empty_label_is_this_layers_refusal_not_the_readers(self, tmp_path, context):
         with pytest.raises(ConfigError, match="label"):
             build_node_operator(
-                "cal_loads", {"from": "thermistors", "label": ""},
-                self._ingested(tmp_path, context))
+                "cal_loads", {"from": "thermistors", "label": ""}, self._ingested(tmp_path, context)
+            )
 
     def test_an_unknown_key_is_swept(self, tmp_path, context):
         with pytest.raises(ConfigError, match="smoothing"):
             build_node_operator(
-                "cal_loads", {"from": "thermistors", "label": "internal_load",
-                              "smoothing": 3},
-                self._ingested(tmp_path, context))
+                "cal_loads",
+                {"from": "thermistors", "label": "internal_load", "smoothing": 3},
+                self._ingested(tmp_path, context),
+            )
 
-    def test_the_document_threads_the_recording_to_the_model_build(
-            self, tmp_path):
+    def test_the_document_threads_the_recording_to_the_model_build(self, tmp_path):
         """load_document -> build_model: the widening in document.py is what
         puts the recording on the context this route reads."""
         from rheplicant.config import load_document
@@ -540,29 +568,31 @@ class TestThermistorsRoute:
         from tests.config.test_config_section_ingest import make_file
 
         make_file(tmp_path / "obs.hd5f")
-        run = load_document({
-            "schema_version": 1,
-            "runtime": {"seed": 1},
-            "observation": {
-                "from_file": {"format": "rhino_hdf5", "path": "obs.hd5f",
-                              "freq_unit": "MHz", "settle_seconds": 0.0,
-                              "thermistor_columns": {"antenna": 0,
-                                                     "internal_load": 0,
-                                                     "heated_load": 1}},
-                "switching": {"order": ["antenna", "internal_load",
-                                        "heated_load"]},
-            },
-            "model": {
-                "gain": {"gain": {"value": 2.0, "unit": "dimensionless"}},
-                "cal_loads": {
-                    "internal_load": {"from": "thermistors",
-                                      "label": "internal_load"},
-                    "heated_load": {"from": "thermistors",
-                                    "label": "heated_load"},
+        run = load_document(
+            {
+                "schema_version": 1,
+                "runtime": {"seed": 1},
+                "observation": {
+                    "from_file": {
+                        "format": "rhino_hdf5",
+                        "path": "obs.hd5f",
+                        "freq_unit": "MHz",
+                        "settle_seconds": 0.0,
+                        "thermistor_columns": {"antenna": 0, "internal_load": 0, "heated_load": 1},
+                    },
+                    "switching": {"order": ["antenna", "internal_load", "heated_load"]},
                 },
+                "model": {
+                    "gain": {"gain": {"value": 2.0, "unit": "dimensionless"}},
+                    "cal_loads": {
+                        "internal_load": {"from": "thermistors", "label": "internal_load"},
+                        "heated_load": {"from": "thermistors", "label": "heated_load"},
+                    },
+                },
+                "runs": [{"kind": "forward"}],
             },
-            "runs": [{"kind": "forward"}],
-        }, base_dir=str(tmp_path))
+            base_dir=str(tmp_path),
+        )
         operator = run.twin["cal_loads_1"]
         assert isinstance(operator, CalLoadOperator)
         assert operator.t_load.shape[1] == 1
@@ -573,9 +603,12 @@ class TestThePythonHatch:
     def test_a_dotted_operator_class_constructs(self, context):
         op = build_node_operator(
             "gain",
-            {"python": "rheplicant.radio:GainOperator",
-             "gain": {"value": 1.1, "unit": "dimensionless"}},
-            context)
+            {
+                "python": "rheplicant.radio:GainOperator",
+                "gain": {"value": 1.1, "unit": "dimensionless"},
+            },
+            context,
+        )
         assert isinstance(op, GainOperator)
 
     def test_a_non_operator_target_is_refused(self, context):
@@ -586,27 +619,32 @@ class TestThePythonHatch:
         with pytest.raises(ConfigError, match="one"):
             build_node_operator(
                 "gain",
-                {"python": "rheplicant.radio:GainOperator",
-                 "type": "GainOperator",
-                 "gain": {"value": 1.0, "unit": "dimensionless"}},
-                context)
+                {
+                    "python": "rheplicant.radio:GainOperator",
+                    "type": "GainOperator",
+                    "gain": {"value": 1.0, "unit": "dimensionless"},
+                },
+                context,
+            )
 
 
 class TestEqxLeaves:
-    def test_arrays_come_from_the_file_and_statics_from_the_document(
-            self, context, tmp_path):
+    def test_arrays_come_from_the_file_and_statics_from_the_document(self, context, tmp_path):
         saved = ADCOperator(scale=jnp.array(0.75), n_bits=14)
         path = tmp_path / "adc.eqx"
         eqx.tree_serialise_leaves(path, saved)
-        ctx = ResolutionContext(freq=FREQ_HZ, time=TIME_S, dtype="float32",
-                                base_dir=str(tmp_path))
+        ctx = ResolutionContext(freq=FREQ_HZ, time=TIME_S, dtype="float32", base_dir=str(tmp_path))
         op = build_node_operator(
             "adc",
-            {"scale": {"value": 0.25, "unit": "adc_count/K"}, "n_bits": 12,
-             "eqx_leaves": {"path": "adc.eqx"}},
-            ctx)
-        assert float(op.scale) == pytest.approx(0.75)   # array: from the FILE
-        assert op.n_bits == 12                          # static: from the DOCUMENT
+            {
+                "scale": {"value": 0.25, "unit": "adc_count/K"},
+                "n_bits": 12,
+                "eqx_leaves": {"path": "adc.eqx"},
+            },
+            ctx,
+        )
+        assert float(op.scale) == pytest.approx(0.75)  # array: from the FILE
+        assert op.n_bits == 12  # static: from the DOCUMENT
 
     def test_a_wrong_sha256_is_refused(self, context, tmp_path):
         # files.py's mismatch refusal reads "{path} hashes to {digest}, and
@@ -619,14 +657,17 @@ class TestEqxLeaves:
         saved = ADCOperator(scale=jnp.array(0.75), n_bits=14)
         path = tmp_path / "adc.eqx"
         eqx.tree_serialise_leaves(path, saved)
-        ctx = ResolutionContext(freq=FREQ_HZ, time=TIME_S, dtype="float32",
-                                base_dir=str(tmp_path))
+        ctx = ResolutionContext(freq=FREQ_HZ, time=TIME_S, dtype="float32", base_dir=str(tmp_path))
         with pytest.raises(ConfigError, match="hashes to"):
             build_node_operator(
                 "adc",
-                {"scale": {"value": 0.25, "unit": "adc_count/K"}, "n_bits": 12,
-                 "eqx_leaves": {"path": "adc.eqx", "sha256": "0" * 64}},
-                ctx)
+                {
+                    "scale": {"value": 0.25, "unit": "adc_count/K"},
+                    "n_bits": 12,
+                    "eqx_leaves": {"path": "adc.eqx", "sha256": "0" * 64},
+                },
+                ctx,
+            )
 
     def test_a_bare_file_node_is_routed_to_the_model_key(self, tmp_path):
         """The file must EXIST: files.py resolves the path and hashes it
@@ -634,18 +675,19 @@ class TestEqxLeaves:
         reachable on a real file."""
         from rheplicant.config import resolve_value
 
-        eqx.tree_serialise_leaves(
-            tmp_path / "x.eqx", ADCOperator(scale=jnp.asarray(0.5), n_bits=8))
-        ctx = ResolutionContext(freq=FREQ_HZ, time=TIME_S, dtype="float32",
-                                base_dir=str(tmp_path))
+        eqx.tree_serialise_leaves(tmp_path / "x.eqx", ADCOperator(scale=jnp.asarray(0.5), n_bits=8))
+        ctx = ResolutionContext(freq=FREQ_HZ, time=TIME_S, dtype="float32", base_dir=str(tmp_path))
         with pytest.raises(ConfigError, match=r"model\.<node>\.eqx_leaves"):
-            resolve_value({"file": {"path": "x.eqx", "format": "eqx_leaves"}},
-                          ctx)
+            resolve_value({"file": {"path": "x.eqx", "format": "eqx_leaves"}}, ctx)
 
     def test_unknown_keys_on_the_leaves_spec_are_refused(self, context):
         with pytest.raises(ConfigError, match=r"\['like'\]"):
             build_node_operator(
                 "adc",
-                {"scale": {"value": 0.25, "unit": "adc_count/K"}, "n_bits": 12,
-                 "eqx_leaves": {"path": "x.eqx", "like": "template"}},
-                context)
+                {
+                    "scale": {"value": 0.25, "unit": "adc_count/K"},
+                    "n_bits": 12,
+                    "eqx_leaves": {"path": "x.eqx", "like": "template"},
+                },
+                context,
+            )

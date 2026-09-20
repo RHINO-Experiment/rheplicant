@@ -49,13 +49,15 @@ from tests.config.preflight_helpers import (
 #: provenance block and nothing else (kinds/projectors.py), which is why every
 #: A52 document here loads in milliseconds.  Measured: a document carrying it
 #: and a projector reference with no pointing returns a ``ConfiguredRun``.
-PROJECTOR = {"engine": "matrix", "matrix": {"zeros": [16, 12]},
-             "provenance": {"built_by": "the test suite", "lat_deg": 0.0}}
+PROJECTOR = {
+    "engine": "matrix",
+    "matrix": {"zeros": [16, 12]},
+    "provenance": {"built_by": "the test suite", "lat_deg": 0.0},
+}
 
 #: A sky model with no file behind it, so the ``observed_astro_sky`` documents
 #: below build rather than dying on an undeclared ``{ref:}``.
-SKY_MODEL = {"kind": "uniform", "amplitude": {"value": 200.0, "unit": "K"},
-             "n_pix": 12}
+SKY_MODEL = {"kind": "uniform", "amplitude": {"value": 200.0, "unit": "K"}, "n_pix": 12}
 
 #: model.noise, lit.  Two classes register at that node and BOTH declare
 #: ``"key"``, which is why a spec with no ``type:`` is still a certain yes.
@@ -65,8 +67,10 @@ NOISE = {"type": "NoiseOperator", "sigma": {"value": 0.5, "unit": "K"}}
 #: hatch and not ``type:``: measured, ``type: GainOperator`` at ``noise`` is
 #: refused ("not registered at this node"), so the hatch is the only spelling
 #: of a non-drawing replacement the package actually builds.
-GAIN_REPLACEMENT = {"python": "rheplicant.radio:GainOperator",
-                    "gain": {"value": 1.0, "unit": "dimensionless"}}
+GAIN_REPLACEMENT = {
+    "python": "rheplicant.radio:GainOperator",
+    "gain": {"value": 1.0, "unit": "dimensionless"},
+}
 
 #: A four-label switch order and the loads it needs.  Written here rather than
 #: imported from ``test_preflight_observing``: that module's ``switching()``
@@ -79,14 +83,12 @@ ORDER = ["antenna", "ambient", "hot", "noise_source"]
 
 def switching(order=ORDER):
     """An ``observation:`` patch that switches through ``order``."""
-    return {**BASE_OBSERVATION,
-            "switching": {"mode": "cycle", "order": list(order), "dwell": 4}}
+    return {**BASE_OBSERVATION, "switching": {"mode": "cycle", "order": list(order), "dwell": 4}}
 
 
 def loads(order=ORDER):
     """``model.cal_loads`` matching ``order[1:]``, which A14 wants present."""
-    return {label: {"t_load": {"value": 300.0, "unit": "K"}}
-            for label in order[1:]}
+    return {label: {"t_load": {"value": 300.0, "unit": "K"}} for label in order[1:]}
 
 
 def simulated(twin="fit", **extra):
@@ -107,8 +109,7 @@ def no_twin_block(**patch):
     it to ``repatch``, which replaces rather than merges.
     """
     document = preflight_document(**patch)
-    inference = {key: value for key, value in document["inference"].items()
-                 if key != "twin"}
+    inference = {key: value for key, value in document["inference"].items() if key != "twin"}
     return repatch(document, inference=inference)
 
 
@@ -123,7 +124,8 @@ class TestA41ALiteralThatShadowsAGridLength:
         doc = preflight_document(resources={"arrays": {"flat": {"ones": [8]}}})
         found = list(_shadowed_literals(doc))
         assert [(f.check, f.severity, f.where) for f in found] == [
-            ("A41", WARN, "resources.arrays.flat")]
+            ("A41", WARN, "resources.arrays.flat")
+        ]
 
     def test_the_whole_message_is_this_and_not_something_like_it(self):
         """Whole-text equality, against a literal rather than against the
@@ -150,29 +152,41 @@ class TestA41ALiteralThatShadowsAGridLength:
         wrong index sends the reader to rename the wrong axis.  An assertion
         that only checked ``"n_freq" in message`` passes with them swapped.
         """
-        doc = preflight_document(
-            model={**BASE_MODEL, "gain": {"gain": {"ones": [16, 8]}}})
+        doc = preflight_document(model={**BASE_MODEL, "gain": {"gain": {"ones": [16, 8]}}})
         found = list(_shadowed_literals(doc))
         assert len(found) == 2
-        assert ("the literal 16 at shape position 0 is this run's n_time, "
-                "which observation.time.grid declares") in found[0].message
-        assert ("the literal 8 at shape position 1 is this run's n_freq, "
-                "which observation.freq.grid declares") in found[1].message
+        assert (
+            "the literal 16 at shape position 0 is this run's n_time, "
+            "which observation.time.grid declares"
+        ) in found[0].message
+        assert (
+            "the literal 8 at shape position 1 is this run's n_freq, "
+            "which observation.freq.grid declares"
+        ) in found[1].message
 
     def test_a_shape_written_in_symbols_says_nothing(self):
         """Kills a check that warns about every shape it finds."""
-        doc = preflight_document(
-            resources={"arrays": {"flat": {"ones": ["n_freq"]}}})
+        doc = preflight_document(resources={"arrays": {"flat": {"ones": ["n_freq"]}}})
         assert list(_shadowed_literals(doc)) == []
 
-    @pytest.mark.parametrize("spec", [
-        {"ones": [8]},
-        {"zeros": [8]},
-        {"full": {"shape": [8], "value": 1.0}},
-        {"normal": {"shape": [8], "seed": {"from": "runtime.seeds.p"}}},
-        {"uniform": {"shape": [8], "low": 0.0, "high": 1.0,
-                     "seed": {"from": "runtime.seeds.p"}}},
-    ], ids=["ones", "zeros", "full", "normal", "uniform"])
+    @pytest.mark.parametrize(
+        "spec",
+        [
+            {"ones": [8]},
+            {"zeros": [8]},
+            {"full": {"shape": [8], "value": 1.0}},
+            {"normal": {"shape": [8], "seed": {"from": "runtime.seeds.p"}}},
+            {
+                "uniform": {
+                    "shape": [8],
+                    "low": 0.0,
+                    "high": 1.0,
+                    "seed": {"from": "runtime.seeds.p"},
+                }
+            },
+        ],
+        ids=["ones", "zeros", "full", "normal", "uniform"],
+    )
     def test_every_form_that_carries_a_shape_is_read(self, spec):
         """All five, and not the two a test happened to ask for.
 
@@ -185,13 +199,16 @@ class TestA41ALiteralThatShadowsAGridLength:
         -- so these need no ``runtime.seeds`` entry.)
         """
         doc = preflight_document(resources={"arrays": {"d": spec}})
-        assert [f.where for f in _shadowed_literals(doc)] == \
-            ["resources.arrays.d"]
+        assert [f.where for f in _shadowed_literals(doc)] == ["resources.arrays.d"]
 
-    @pytest.mark.parametrize("spec", [
-        {"ones": (8,)},
-        {"normal": {"shape": (8,), "seed": {"from": "runtime.seeds.p"}}},
-    ], ids=["a-flat-form", "a-nested-form"])
+    @pytest.mark.parametrize(
+        "spec",
+        [
+            {"ones": (8,)},
+            {"normal": {"shape": (8,), "seed": {"from": "runtime.seeds.p"}}},
+        ],
+        ids=["a-flat-form", "a-nested-form"],
+    )
     def test_a_shape_written_as_a_tuple_is_read_like_a_list(self, spec):
         """``symbols.resolve_shape`` accepts ``(list, tuple)``, so a document
         built in Python rather than read from YAML can hold a tuple shape and
@@ -202,8 +219,7 @@ class TestA41ALiteralThatShadowsAGridLength:
         -- two validators for one property, disagreeing.
         """
         doc = preflight_document(resources={"arrays": {"t": spec}})
-        assert [f.where for f in _shadowed_literals(doc)] == \
-            ["resources.arrays.t"]
+        assert [f.where for f in _shadowed_literals(doc)] == ["resources.arrays.t"]
 
     def test_a_list_grid_written_as_a_tuple_is_still_a_length(self):
         """The same widening one level up, on the SCOPE rather than the shape:
@@ -211,9 +227,11 @@ class TestA41ALiteralThatShadowsAGridLength:
         its list spelling, so declining it would lose the check on a document
         the package builds."""
         doc = preflight_document(
-            observation={**BASE_OBSERVATION,
-                         "freq": {"grid": {"list": (60.0, 70.0, 80.0),
-                                           "unit": "MHz"}}})
+            observation={
+                **BASE_OBSERVATION,
+                "freq": {"grid": {"list": (60.0, 70.0, 80.0), "unit": "MHz"}},
+            }
+        )
         assert _a41_scope(doc).n_freq == 3
 
     def test_a_malformed_linspace_is_not_read_as_a_list(self):
@@ -225,8 +243,8 @@ class TestA41ALiteralThatShadowsAGridLength:
         an axis out of a shape nothing will ever build.
         """
         doc = preflight_document(
-            observation={**BASE_OBSERVATION,
-                         "freq": {"grid": {"linspace": [60.0, 70.0, 80.0]}}})
+            observation={**BASE_OBSERVATION, "freq": {"grid": {"linspace": [60.0, 70.0, 80.0]}}}
+        )
         assert _a41_scope(doc) is None
 
     def test_a_one_is_never_reported(self):
@@ -245,11 +263,13 @@ class TestA41ALiteralThatShadowsAGridLength:
         doc = preflight_document(
             observation=switching(),
             model={**BASE_MODEL, "cal_loads": loads()},
-            resources={"arrays": {"g": {"zeros": [4, "n_freq"]}}})
+            resources={"arrays": {"g": {"zeros": [4, "n_freq"]}}},
+        )
         found = list(_shadowed_literals(doc))
         assert [f.where for f in found] == ["resources.arrays.g"]
-        assert "is this run's n_source, which observation.switching.order " \
-            "declares" in found[0].message
+        assert (
+            "is this run's n_source, which observation.switching.order declares" in found[0].message
+        )
 
     def test_a_switching_block_this_pass_cannot_read_declines_entirely(self):
         """``mode: []`` is unhashable and is nobody's refusal yet (Task 4
@@ -263,19 +283,25 @@ class TestA41ALiteralThatShadowsAGridLength:
         """
         doc = preflight_document(
             observation={**BASE_OBSERVATION, "switching": {"mode": []}},
-            resources={"arrays": {"g": {"zeros": [8]}}})
+            resources={"arrays": {"g": {"zeros": [8]}}},
+        )
         assert _a41_scope(doc) is None
         assert list(_shadowed_literals(doc)) == []
 
-    @pytest.mark.parametrize("grid", [
-        {"file": {"path": "freq.npz", "format": "npz", "key": "f"}},
-        {"ref": "resources.arrays.axis"},
-        {"linspace": {"start": 60.0, "stop": 85.0, "num": "n_time",
-                      "endpoint": True}, "unit": "MHz"},
-        {"zeros": [8], "unit": "MHz"},
-    ], ids=["file", "ref", "symbolic-num", "an-array-form"])
-    def test_a_freq_grid_this_pass_cannot_measure_produces_no_finding(
-            self, grid):
+    @pytest.mark.parametrize(
+        "grid",
+        [
+            {"file": {"path": "freq.npz", "format": "npz", "key": "f"}},
+            {"ref": "resources.arrays.axis"},
+            {
+                "linspace": {"start": 60.0, "stop": 85.0, "num": "n_time", "endpoint": True},
+                "unit": "MHz",
+            },
+            {"zeros": [8], "unit": "MHz"},
+        ],
+        ids=["file", "ref", "symbolic-num", "an-array-form"],
+    )
+    def test_a_freq_grid_this_pass_cannot_measure_produces_no_finding(self, grid):
         """THE BOUNDARY of Plan 3A, as a test rather than a sentence: the
         shape is always text, the SCOPE is not.
 
@@ -287,18 +313,22 @@ class TestA41ALiteralThatShadowsAGridLength:
         """
         doc = preflight_document(
             observation={**BASE_OBSERVATION, "freq": {"grid": grid}},
-            resources={"arrays": {"flat": {"ones": [8]}}})
+            resources={"arrays": {"flat": {"ones": [8]}}},
+        )
         assert _a41_scope(doc) is None
         assert list(_shadowed_literals(doc)) == []
 
-    @pytest.mark.parametrize("grid", [
-        {"file": {"path": "time.npz", "format": "npz", "key": "t"}},
-        {"ref": "resources.arrays.axis"},
-        {"arange": {"start": 0.0, "step": 2.0, "num": "n_freq"}, "unit": "s"},
-        {"zeros": [16], "unit": "s"},
-    ], ids=["file", "ref", "symbolic-num", "an-array-form"])
-    def test_a_time_grid_this_pass_cannot_measure_produces_no_finding(
-            self, grid):
+    @pytest.mark.parametrize(
+        "grid",
+        [
+            {"file": {"path": "time.npz", "format": "npz", "key": "t"}},
+            {"ref": "resources.arrays.axis"},
+            {"arange": {"start": 0.0, "step": 2.0, "num": "n_freq"}, "unit": "s"},
+            {"zeros": [16], "unit": "s"},
+        ],
+        ids=["file", "ref", "symbolic-num", "an-array-form"],
+    )
+    def test_a_time_grid_this_pass_cannot_measure_produces_no_finding(self, grid):
         """The TWIN of the row above, and the reason it is written out.
 
         ``_a41_scope`` needs BOTH lengths or neither: a check that decided
@@ -308,7 +338,8 @@ class TestA41ALiteralThatShadowsAGridLength:
         """
         doc = preflight_document(
             observation={**BASE_OBSERVATION, "time": {"grid": grid}},
-            resources={"arrays": {"flat": {"ones": [8]}}})
+            resources={"arrays": {"flat": {"ones": [8]}}},
+        )
         assert _a41_scope(doc) is None
         assert list(_shadowed_literals(doc)) == []
 
@@ -323,19 +354,27 @@ class TestA41ALiteralThatShadowsAGridLength:
         is the same trap ``literal_shadowing_a_symbol`` keeps its own guard
         for.
         """
-        doc = preflight_document(observation={
-            **BASE_OBSERVATION,
-            "freq": {"grid": {"linspace": {"start": 60.0, "stop": 85.0,
-                                           "num": True, "endpoint": True},
-                              "unit": "MHz"}}})
+        doc = preflight_document(
+            observation={
+                **BASE_OBSERVATION,
+                "freq": {
+                    "grid": {
+                        "linspace": {"start": 60.0, "stop": 85.0, "num": True, "endpoint": True},
+                        "unit": "MHz",
+                    }
+                },
+            }
+        )
         assert _a41_scope(doc) is None
 
     def test_an_ingested_run_reads_its_grids_off_the_recording(self):
         """``observation.from_file`` puts both axes in an HDF5 file.  Kills a
         scope that reads ``observation.freq`` without noticing there is not
         one."""
-        doc = repatch(preflight_document(), observation={
-            "from_file": {"path": "night1.h5", "format": "rhino_hdf5"}})
+        doc = repatch(
+            preflight_document(),
+            observation={"from_file": {"path": "night1.h5", "format": "rhino_hdf5"}},
+        )
         assert _a41_scope(doc) is None
 
     def test_an_unselected_variant_is_not_walked(self):
@@ -343,8 +382,9 @@ class TestA41ALiteralThatShadowsAGridLength:
         and unselected-variant text is Task 3's check.  Kills a walk over
         ``document.items()`` with no exclusion, which would warn twice about
         one document and once about a document nobody asked for."""
-        doc = preflight_document(variants={"hires": {"resources": {"arrays": {
-            "flat": {"ones": [8]}}}}})
+        doc = preflight_document(
+            variants={"hires": {"resources": {"arrays": {"flat": {"ones": [8]}}}}}
+        )
         assert list(_shadowed_literals(doc)) == []
 
     def test_a_name_the_path_grammar_cannot_spell_does_not_kill_the_pass(self):
@@ -359,32 +399,52 @@ class TestA41ALiteralThatShadowsAGridLength:
 
         Kills a check that hands its raw path straight to ``Finding.where``.
         """
-        doc = preflight_document(
-            resources={"arrays": {"flat-8": {"ones": [8]}}})
+        doc = preflight_document(resources={"arrays": {"flat-8": {"ones": [8]}}})
         [found] = list(_shadowed_literals(doc))
         assert found.where == "resources.arrays"
         assert found.message.startswith("resources.arrays.flat-8: ")
         assert {"A41"} <= preflight(doc).checks()
 
-    @pytest.mark.parametrize(("label", "patch"), [
-        ("default", {}),
-        ("a-list-freq-grid", {"observation": {
-            **BASE_OBSERVATION,
-            "freq": {"grid": {"list": [60.0, 70.0, 80.0], "unit": "MHz"}}}}),
-        ("a-square-grid", {"observation": {
-            **BASE_OBSERVATION,
-            "time": {"grid": {"arange": {"start": 0.0, "step": 2.0, "num": 8},
-                              "unit": "s"}}}}),
-        ("a-four-label-cycle", {"observation": switching(),
-                                "model": {**BASE_MODEL,
-                                          "cal_loads": loads()}}),
-        ("a-modulo-freq-grid", {"observation": {
-            **BASE_OBSERVATION,
-            "freq": {"grid": {"modulo": {"num": 6, "period": 3},
-                              "unit": "MHz"}}}}),
-    ])
-    def test_the_text_scope_is_the_scope_the_resolver_builds(self, label,
-                                                             patch):
+    @pytest.mark.parametrize(
+        ("label", "patch"),
+        [
+            ("default", {}),
+            (
+                "a-list-freq-grid",
+                {
+                    "observation": {
+                        **BASE_OBSERVATION,
+                        "freq": {"grid": {"list": [60.0, 70.0, 80.0], "unit": "MHz"}},
+                    }
+                },
+            ),
+            (
+                "a-square-grid",
+                {
+                    "observation": {
+                        **BASE_OBSERVATION,
+                        "time": {
+                            "grid": {"arange": {"start": 0.0, "step": 2.0, "num": 8}, "unit": "s"}
+                        },
+                    }
+                },
+            ),
+            (
+                "a-four-label-cycle",
+                {"observation": switching(), "model": {**BASE_MODEL, "cal_loads": loads()}},
+            ),
+            (
+                "a-modulo-freq-grid",
+                {
+                    "observation": {
+                        **BASE_OBSERVATION,
+                        "freq": {"grid": {"modulo": {"num": 6, "period": 3}, "unit": "MHz"}},
+                    }
+                },
+            ),
+        ],
+    )
+    def test_the_text_scope_is_the_scope_the_resolver_builds(self, label, patch):
         """The only tests here that build a document, and the only ones that
         can say the two agree.  A pass whose ``n_freq`` drifted from
         ``ResolutionContext.shape_scope`` would name the wrong symbol while
@@ -400,10 +460,14 @@ class TestA41ALiteralThatShadowsAGridLength:
         mine = _a41_scope(doc)
         built = run.context.shape_scope
         assert (mine.n_time, mine.n_freq, mine.n_source) == (
-            built.n_time, built.n_freq, built.n_source), label
+            built.n_time,
+            built.n_freq,
+            built.n_source,
+        ), label
         for value in (1, 2, 3, 4, 8, 16):
-            assert literal_shadowing_a_symbol(value, mine) == \
-                literal_shadowing_a_symbol(value, built), value
+            assert literal_shadowing_a_symbol(value, mine) == literal_shadowing_a_symbol(
+                value, built
+            ), value
 
 
 class TestA42DataSimulatedThroughTheTwinTheNoiseLeft:
@@ -413,18 +477,19 @@ class TestA42DataSimulatedThroughTheTwinTheNoiseLeft:
         asked for a sigma.  Kills not shipping the check."""
         doc = preflight_document(
             model={**BASE_MODEL, "noise": NOISE},
-            inference={"twin": {"without": ["noise"]},
-                       "observed": simulated()})
+            inference={"twin": {"without": ["noise"]}, "observed": simulated()},
+        )
         found = list(_simulated_fit_twin(doc))
         assert [(f.check, f.severity, f.where) for f in found] == [
-            ("A42", WARN, "inference.observed.primary")]
+            ("A42", WARN, "inference.observed.primary")
+        ]
 
     def test_the_whole_message_is_this_and_not_something_like_it(self):
         """Whole-text equality, for the reason A41's twin gives."""
         doc = preflight_document(
             model={**BASE_MODEL, "noise": NOISE},
-            inference={"twin": {"without": ["noise"]},
-                       "observed": simulated()})
+            inference={"twin": {"without": ["noise"]}, "observed": simulated()},
+        )
         [found] = list(_simulated_fit_twin(doc))
         assert found.message == (
             "inference.observed.primary: from: simulation with twin: fit "
@@ -444,8 +509,8 @@ class TestA42DataSimulatedThroughTheTwinTheNoiseLeft:
         act on."""
         doc = preflight_document(
             model={**BASE_MODEL, "noise": NOISE},
-            inference={"twin": {"without": ["noise"]},
-                       "observed": simulated()})
+            inference={"twin": {"without": ["noise"]}, "observed": simulated()},
+        )
         [found] = list(_simulated_fit_twin(doc))
         assert "['noise']" in found.message
 
@@ -454,8 +519,8 @@ class TestA42DataSimulatedThroughTheTwinTheNoiseLeft:
         ``twin:``."""
         doc = preflight_document(
             model={**BASE_MODEL, "noise": NOISE},
-            inference={"twin": {"without": ["noise"]},
-                       "observed": simulated(twin="full")})
+            inference={"twin": {"without": ["noise"]}, "observed": simulated(twin="full")},
+        )
         assert list(_simulated_fit_twin(doc)) == []
 
     def test_an_absent_twin_key_is_the_full_default(self):
@@ -469,12 +534,11 @@ class TestA42DataSimulatedThroughTheTwinTheNoiseLeft:
         """
         doc = preflight_document(
             model={**BASE_MODEL, "noise": NOISE},
-            inference={"twin": {"without": ["noise"]},
-                       "observed": {"from": "simulation"}})
+            inference={"twin": {"without": ["noise"]}, "observed": {"from": "simulation"}},
+        )
         assert list(_simulated_fit_twin(doc)) == []
 
-    def test_an_inference_patch_naming_only_observed_keeps_the_bases_repair(
-            self):
+    def test_an_inference_patch_naming_only_observed_keeps_the_bases_repair(self):
         """THE FIXTURE HAZARD, measured and pinned rather than left in a
         comment.
 
@@ -496,9 +560,9 @@ class TestA42DataSimulatedThroughTheTwinTheNoiseLeft:
     def test_a_null_inference_twin_block_is_silent(self):
         """``inference: {twin: null}`` -- the merge's own way of saying the
         key is not wanted.  Kills a reader that calls ``.get`` on it."""
-        doc = preflight_document(model={**BASE_MODEL, "noise": NOISE},
-                                 inference={"twin": None,
-                                            "observed": simulated()})
+        doc = preflight_document(
+            model={**BASE_MODEL, "noise": NOISE}, inference={"twin": None, "observed": simulated()}
+        )
         assert list(_simulated_fit_twin(doc)) == []
 
     def test_twin_fit_with_no_inference_twin_key_at_all_is_silent(self):
@@ -514,17 +578,19 @@ class TestA42DataSimulatedThroughTheTwinTheNoiseLeft:
         The document is built by :func:`no_twin_block` and not by an
         ``inference=`` patch, for the reason the test above measures.
         """
-        doc = no_twin_block(model={**BASE_MODEL, "noise": NOISE},
-                            inference={"observed": simulated()})
+        doc = no_twin_block(
+            model={**BASE_MODEL, "noise": NOISE}, inference={"observed": simulated()}
+        )
         assert "twin" not in doc["inference"]
         assert list(_simulated_fit_twin(doc)) == []
 
     def test_a_non_stochastic_node_in_without_is_silent(self):
         """``without: ["gain"]`` removes nothing that draws.  Kills a check
         that warns on any non-empty ``without:``."""
-        doc = preflight_document(model={**BASE_MODEL, "noise": NOISE},
-                                 inference={"twin": {"without": ["gain"]},
-                                            "observed": simulated()})
+        doc = preflight_document(
+            model={**BASE_MODEL, "noise": NOISE},
+            inference={"twin": {"without": ["gain"]}, "observed": simulated()},
+        )
         assert list(_simulated_fit_twin(doc)) == []
 
     def test_a_stochastic_node_the_model_does_not_light_is_silent(self):
@@ -532,9 +598,14 @@ class TestA42DataSimulatedThroughTheTwinTheNoiseLeft:
         a check that reads ``inference.twin.without`` without asking what
         ``model:`` lights."""
         doc = no_twin_block(model=BASE_MODEL)
-        doc = repatch(doc, inference={**doc["inference"],
-                                      "twin": {"without": ["rfi_field"]},
-                                      "observed": simulated()})
+        doc = repatch(
+            doc,
+            inference={
+                **doc["inference"],
+                "twin": {"without": ["rfi_field"]},
+                "observed": simulated(),
+            },
+        )
         assert list(_simulated_fit_twin(doc)) == []
 
     def test_rfi_field_is_found_by_the_class_it_names(self):
@@ -543,12 +614,16 @@ class TestA42DataSimulatedThroughTheTwinTheNoiseLeft:
         which is what §6's own wording invites and what goes stale on the next
         stochastic operator (§2.5)."""
         doc = preflight_document(
-            model={**BASE_MODEL, "rfi_field": {
-                "type": "RFIOperator",
-                "amplitude": {"value": 5.0, "unit": "K"},
-                "occupancy": 0.1}},
-            inference={"twin": {"without": ["rfi_field"]},
-                       "observed": simulated()})
+            model={
+                **BASE_MODEL,
+                "rfi_field": {
+                    "type": "RFIOperator",
+                    "amplitude": {"value": 5.0, "unit": "K"},
+                    "occupancy": 0.1,
+                },
+            },
+            inference={"twin": {"without": ["rfi_field"]}, "observed": simulated()},
+        )
         [found] = list(_simulated_fit_twin(doc))
         assert "['rfi_field']" in found.message
 
@@ -558,11 +633,19 @@ class TestA42DataSimulatedThroughTheTwinTheNoiseLeft:
         a check that treats every key of ``replace:`` as a removal."""
         doc = preflight_document(
             model={**BASE_MODEL, "noise": NOISE},
-            inference={"twin": {"replace": {"noise": {
-                "type": "RadiometerNoiseOperator",
-                "channel_width": {"value": 1.0, "unit": "MHz"},
-                "integration_time": {"value": 2.0, "unit": "s"}}}},
-                "observed": simulated()})
+            inference={
+                "twin": {
+                    "replace": {
+                        "noise": {
+                            "type": "RadiometerNoiseOperator",
+                            "channel_width": {"value": 1.0, "unit": "MHz"},
+                            "integration_time": {"value": 2.0, "unit": "s"},
+                        }
+                    }
+                },
+                "observed": simulated(),
+            },
+        )
         assert list(_simulated_fit_twin(doc)) == []
 
     def test_a_replacement_that_does_not_draw_is_warned_about(self):
@@ -577,8 +660,8 @@ class TestA42DataSimulatedThroughTheTwinTheNoiseLeft:
         """
         doc = preflight_document(
             model={**BASE_MODEL, "noise": NOISE},
-            inference={"twin": {"replace": {"noise": GAIN_REPLACEMENT}},
-                       "observed": simulated()})
+            inference={"twin": {"replace": {"noise": GAIN_REPLACEMENT}}, "observed": simulated()},
+        )
         found = list(_simulated_fit_twin(doc))
         assert [f.where for f in found] == ["inference.observed.primary"]
         assert "['noise']" in found[0].message
@@ -603,10 +686,18 @@ class TestA42DataSimulatedThroughTheTwinTheNoiseLeft:
         """
         doc = preflight_document(
             model={**BASE_MODEL, "noise": NOISE},
-            inference={"twin": {"replace": {"noise": {
-                "python": "rheplicant.radio.instrument.noise:NoiseOperator",
-                "sigma": {"value": 0.5, "unit": "K"}}}},
-                "observed": simulated()})
+            inference={
+                "twin": {
+                    "replace": {
+                        "noise": {
+                            "python": "rheplicant.radio.instrument.noise:NoiseOperator",
+                            "sigma": {"value": 0.5, "unit": "K"},
+                        }
+                    }
+                },
+                "observed": simulated(),
+            },
+        )
         assert list(_simulated_fit_twin(doc)) == []
 
     def test_a_replacement_this_pass_cannot_name_a_class_for_is_silent(self):
@@ -628,9 +719,13 @@ class TestA42DataSimulatedThroughTheTwinTheNoiseLeft:
         """
         doc = preflight_document(
             model={**BASE_MODEL, "noise": NOISE},
-            inference={"twin": {"replace": {"noise": {
-                "python": "rheplicant.core.operator:SnapshotOperator"}}},
-                "observed": simulated()})
+            inference={
+                "twin": {
+                    "replace": {"noise": {"python": "rheplicant.core.operator:SnapshotOperator"}}
+                },
+                "observed": simulated(),
+            },
+        )
         assert list(_simulated_fit_twin(doc)) == []
 
     def test_a_submodule_spelled_model_node_is_no_longer_a_blind_spot(self):
@@ -651,11 +746,15 @@ class TestA42DataSimulatedThroughTheTwinTheNoiseLeft:
         widening that reached one of them would leave this half silent.
         """
         doc = preflight_document(
-            model={**BASE_MODEL, "noise": {
-                "python": "rheplicant.radio.instrument.noise:NoiseOperator",
-                "sigma": {"value": 0.5, "unit": "K"}}},
-            inference={"twin": {"without": ["noise"]},
-                       "observed": simulated()})
+            model={
+                **BASE_MODEL,
+                "noise": {
+                    "python": "rheplicant.radio.instrument.noise:NoiseOperator",
+                    "sigma": {"value": 0.5, "unit": "K"},
+                },
+            },
+            inference={"twin": {"without": ["noise"]}, "observed": simulated()},
+        )
         found = list(_simulated_fit_twin(doc))
         assert [one.where for one in found] == ["inference.observed.primary"]
         assert "['noise']" in found[0].message
@@ -673,17 +772,20 @@ class TestA42DataSimulatedThroughTheTwinTheNoiseLeft:
         documents differ in nothing else, so the comparison cannot be
         satisfied by a rule about ``rheplicant.radio`` in particular.
         """
+
         def report(target):
             doc = preflight_document(
-                model={**BASE_MODEL, "noise": {
-                    "python": target, "sigma": {"value": 0.5, "unit": "K"}}},
-                inference={"twin": {"without": ["noise"]},
-                           "observed": simulated()})
-            return [(one.check, one.where, one.message)
-                    for one in _simulated_fit_twin(doc)]
+                model={
+                    **BASE_MODEL,
+                    "noise": {"python": target, "sigma": {"value": 0.5, "unit": "K"}},
+                },
+                inference={"twin": {"without": ["noise"]}, "observed": simulated()},
+            )
+            return [(one.check, one.where, one.message) for one in _simulated_fit_twin(doc)]
 
         assert report("rheplicant.radio:NoiseOperator") == report(
-            "rheplicant.radio.instrument.noise:NoiseOperator")
+            "rheplicant.radio.instrument.noise:NoiseOperator"
+        )
         assert report("rheplicant.radio:NoiseOperator") != []
 
     def test_a_replacement_at_a_node_that_never_drew_is_silent(self):
@@ -698,8 +800,8 @@ class TestA42DataSimulatedThroughTheTwinTheNoiseLeft:
         """
         doc = preflight_document(
             model={**BASE_MODEL, "noise": NOISE},
-            inference={"twin": {"replace": {"gain": GAIN_REPLACEMENT}},
-                       "observed": simulated()})
+            inference={"twin": {"replace": {"gain": GAIN_REPLACEMENT}}, "observed": simulated()},
+        )
         assert list(_simulated_fit_twin(doc)) == []
 
     def test_a_without_written_as_a_tuple_is_read_like_a_list(self):
@@ -713,8 +815,8 @@ class TestA42DataSimulatedThroughTheTwinTheNoiseLeft:
         """
         doc = preflight_document(
             model={**BASE_MODEL, "noise": NOISE},
-            inference={"twin": {"without": ("noise",)},
-                       "observed": simulated()})
+            inference={"twin": {"without": ("noise",)}, "observed": simulated()},
+        )
         [found] = list(_simulated_fit_twin(doc))
         assert "['noise']" in found.message
 
@@ -725,12 +827,19 @@ class TestA42DataSimulatedThroughTheTwinTheNoiseLeft:
         count assertion."""
         doc = preflight_document(
             model={**BASE_MODEL, "noise": NOISE},
-            inference={"twin": {"without": ["noise"]},
-                       "observed": {"primary": simulated(),
-                                    "night": simulated(),
-                                    "day": simulated(twin="full")}})
+            inference={
+                "twin": {"without": ["noise"]},
+                "observed": {
+                    "primary": simulated(),
+                    "night": simulated(),
+                    "day": simulated(twin="full"),
+                },
+            },
+        )
         assert [f.where for f in _simulated_fit_twin(doc)] == [
-            "inference.observed.primary", "inference.observed.night"]
+            "inference.observed.primary",
+            "inference.observed.night",
+        ]
 
     def test_a_record_name_the_path_grammar_cannot_spell_is_cut_back(self):
         """Task 3's rule 1 at this module's second call site.  A record named
@@ -738,8 +847,8 @@ class TestA42DataSimulatedThroughTheTwinTheNoiseLeft:
         ``_check_where`` kill the whole pass."""
         doc = preflight_document(
             model={**BASE_MODEL, "noise": NOISE},
-            inference={"twin": {"without": ["noise"]},
-                       "observed": {"night-1": simulated()}})
+            inference={"twin": {"without": ["noise"]}, "observed": {"night-1": simulated()}},
+        )
         [found] = list(_simulated_fit_twin(doc))
         assert found.where == "inference.observed"
         assert found.message.startswith("inference.observed.night-1: ")
@@ -750,17 +859,20 @@ class TestA42DataSimulatedThroughTheTwinTheNoiseLeft:
         decode.  Kills a walk with no de-duplication."""
         doc = preflight_document(
             model={**BASE_MODEL, "noise": NOISE},
-            inference={"twin": {"without": ["noise", "noise"]},
-                       "observed": simulated()})
+            inference={"twin": {"without": ["noise", "noise"]}, "observed": simulated()},
+        )
         [found] = list(_simulated_fit_twin(doc))
         assert "['noise']" in found.message
         assert "'noise', 'noise'" not in found.message
 
-    @pytest.mark.parametrize("record", [
-        {"file": {"path": "night1.npz", "format": "npz", "key": "w"}},
-        {"file": {"path": "night1.npz", "format": "npz", "key": "w"},
-         "twin": "fit"},
-    ], ids=["plain", "carrying-a-twin-key"])
+    @pytest.mark.parametrize(
+        "record",
+        [
+            {"file": {"path": "night1.npz", "format": "npz", "key": "w"}},
+            {"file": {"path": "night1.npz", "format": "npz", "key": "w"}, "twin": "fit"},
+        ],
+        ids=["plain", "carrying-a-twin-key"],
+    )
     def test_the_file_form_is_silent(self, record):
         """Data read off disk was not simulated through anything.  Kills a
         record reader that treats every mapping as a simulation.
@@ -772,8 +884,8 @@ class TestA42DataSimulatedThroughTheTwinTheNoiseLeft:
         """
         doc = preflight_document(
             model={**BASE_MODEL, "noise": NOISE},
-            inference={"twin": {"without": ["noise"]},
-                       "observed": {"night": record}})
+            inference={"twin": {"without": ["noise"]}, "observed": {"night": record}},
+        )
         assert list(_simulated_fit_twin(doc)) == []
 
     def test_a_form_key_is_not_read_as_an_observation_name(self):
@@ -788,8 +900,8 @@ class TestA42DataSimulatedThroughTheTwinTheNoiseLeft:
         """
         doc = preflight_document(
             model={**BASE_MODEL, "noise": NOISE},
-            inference={"twin": {"without": ["noise"]},
-                       "observed": {"at": simulated()}})
+            inference={"twin": {"without": ["noise"]}, "observed": {"at": simulated()}},
+        )
         assert list(_simulated_fit_twin(doc)) == []
 
     def test_a_file_headed_section_is_one_record_not_a_mapping_of_names(self):
@@ -806,10 +918,14 @@ class TestA42DataSimulatedThroughTheTwinTheNoiseLeft:
         """
         doc = preflight_document(
             model={**BASE_MODEL, "noise": NOISE},
-            inference={"twin": {"without": ["noise"]},
-                       "observed": {"file": {"path": "night1.npz",
-                                             "format": "npz", "key": "w"},
-                                    "primary": simulated()}})
+            inference={
+                "twin": {"without": ["noise"]},
+                "observed": {
+                    "file": {"path": "night1.npz", "format": "npz", "key": "w"},
+                    "primary": simulated(),
+                },
+            },
+        )
         assert list(_simulated_fit_twin(doc)) == []
 
     def test_a_new_value_form_makes_someone_look_at_the_a41_walk(self):
@@ -830,8 +946,7 @@ class TestA42DataSimulatedThroughTheTwinTheNoiseLeft:
         """
         from rheplicant.config.values import VALUE_FORMS
 
-        walked = set(_A41_COUNTED_FORMS) | set(_A41_SHAPE_FORMS) | set(
-            _A41_NESTED_SHAPE_FORMS)
+        walked = set(_A41_COUNTED_FORMS) | set(_A41_SHAPE_FORMS) | set(_A41_NESTED_SHAPE_FORMS)
         assert walked <= set(VALUE_FORMS)
         assert set(VALUE_FORMS) - walked == {
             # Nine forms, and none of them states a length or a shape in the
@@ -842,8 +957,15 @@ class TestA42DataSimulatedThroughTheTwinTheNoiseLeft:
             # `jnp.arange(num) % period`, so `num` IS the axis length, and a
             # `{modulo: {num: 6, period: 3}}` freq grid builds `n_freq == 6`),
             # and it is now walked.
-            "basis_fit", "file", "from", "from_grid", "from_switch_order",
-            "python", "ref", "stack", "value",
+            "basis_fit",
+            "file",
+            "from",
+            "from_grid",
+            "from_switch_order",
+            "python",
+            "ref",
+            "stack",
+            "value",
         }
 
     def test_the_record_split_still_mirrors_the_section_that_owns_it(self):
@@ -876,11 +998,13 @@ class TestA42DataSimulatedThroughTheTwinTheNoiseLeft:
         from rheplicant.core.contract import RANDOMNESS
 
         table = operator_table()
-        draws = {node for node, classes in table.items()
-                 if any(RANDOMNESS in cls.requires for cls in classes)}
+        draws = {
+            node
+            for node, classes in table.items()
+            if any(RANDOMNESS in cls.requires for cls in classes)
+        }
         assert draws == {"noise", "rfi_field"}
-        assert all(RANDOMNESS in cls.requires
-                   for node in draws for cls in table[node])
+        assert all(RANDOMNESS in cls.requires for node in draws for cls in table[node])
 
     def test_no_shipped_node_has_classes_that_disagree_about_randomness(self):
         """The fact Task 11's ``all(...)`` rests on, defended rather than
@@ -891,9 +1015,11 @@ class TestA42DataSimulatedThroughTheTwinTheNoiseLeft:
         from rheplicant.config.sections.model import operator_table
         from rheplicant.core.contract import RANDOMNESS
 
-        mixed = {node: [cls.__name__ for cls in classes]
-                 for node, classes in operator_table().items()
-                 if len({RANDOMNESS in cls.requires for cls in classes}) > 1}
+        mixed = {
+            node: [cls.__name__ for cls in classes]
+            for node, classes in operator_table().items()
+            if len({RANDOMNESS in cls.requires for cls in classes}) > 1
+        }
         assert mixed == {}
 
 
@@ -905,24 +1031,37 @@ class TestA52APointingOfNoneAndAProjectorAnyway:
         misses the commonest spelling of the error."""
         doc = preflight_document(
             resources={"projectors": {"p": PROJECTOR}},
-            model={**BASE_MODEL, "filters": [
-                {"type": "SkySpaceFilter",
-                 "projector": {"ref": "resources.projectors.p"},
-                 "regularization": {"value": 1e-3,
-                                     "unit": "dimensionless"}}]})
+            model={
+                **BASE_MODEL,
+                "filters": [
+                    {
+                        "type": "SkySpaceFilter",
+                        "projector": {"ref": "resources.projectors.p"},
+                        "regularization": {"value": 1e-3, "unit": "dimensionless"},
+                    }
+                ],
+            },
+        )
         found = list(_pointing_none(doc))
         assert [(f.check, f.severity, f.where) for f in found] == [
-            ("A52", REFUSE, "model.filters[0].projector")]
+            ("A52", REFUSE, "model.filters[0].projector")
+        ]
 
     def test_the_whole_reference_message_is_this(self):
         """Whole-text equality on the refusal a user actually reads."""
         doc = preflight_document(
             resources={"projectors": {"p": PROJECTOR}},
-            model={**BASE_MODEL, "filters": [
-                {"type": "SkySpaceFilter",
-                 "projector": {"ref": "resources.projectors.p"},
-                 "regularization": {"value": 1e-3,
-                                     "unit": "dimensionless"}}]})
+            model={
+                **BASE_MODEL,
+                "filters": [
+                    {
+                        "type": "SkySpaceFilter",
+                        "projector": {"ref": "resources.projectors.p"},
+                        "regularization": {"value": 1e-3, "unit": "dimensionless"},
+                    }
+                ],
+            },
+        )
         [found] = list(_pointing_none(doc))
         assert found.message == (
             "model.filters[0].projector references a projector while "
@@ -940,12 +1079,16 @@ class TestA52APointingOfNoneAndAProjectorAnyway:
         doc = preflight_document(
             observation={**BASE_OBSERVATION, "pointing": {"mode": "none"}},
             resources={"projectors": {"p": PROJECTOR}},
-            model={**BASE_MODEL, "beam_spill": {
-                "from": "projector",
-                "projector": {"ref": "resources.projectors.p"},
-                "t_ground": {"value": 300.0, "unit": "K"}}})
-        assert [f.where for f in _pointing_none(doc)] == \
-            ["model.beam_spill.projector"]
+            model={
+                **BASE_MODEL,
+                "beam_spill": {
+                    "from": "projector",
+                    "projector": {"ref": "resources.projectors.p"},
+                    "t_ground": {"value": 300.0, "unit": "K"},
+                },
+            },
+        )
+        assert [f.where for f in _pointing_none(doc)] == ["model.beam_spill.projector"]
 
     def test_observed_astro_sky_is_its_own_trigger(self):
         """§6 names the node AND the reference, and they are two conditions.
@@ -958,11 +1101,16 @@ class TestA52APointingOfNoneAndAProjectorAnyway:
         a better sentence already said before the beam and Task 5's
         stand-down rule does not reach it.
         """
-        doc = preflight_document(model={**BASE_MODEL, "observed_astro_sky": {
-            "sky_model": {"ref": "resources.sky_models.s"}}})
+        doc = preflight_document(
+            model={
+                **BASE_MODEL,
+                "observed_astro_sky": {"sky_model": {"ref": "resources.sky_models.s"}},
+            }
+        )
         found = list(_pointing_none(doc))
         assert [(f.check, f.severity, f.where) for f in found] == [
-            ("A52", REFUSE, "observation.pointing")]
+            ("A52", REFUSE, "observation.pointing")
+        ]
 
     def test_the_whole_node_message_is_this(self):
         """Whole-text equality on the OTHER of A52's two messages.
@@ -972,8 +1120,12 @@ class TestA52APointingOfNoneAndAProjectorAnyway:
         a refusal into a sentence a user can ignore, and every ``where``-only
         assertion in this class passes with it.
         """
-        doc = preflight_document(model={**BASE_MODEL, "observed_astro_sky": {
-            "sky_model": {"ref": "resources.sky_models.s"}}})
+        doc = preflight_document(
+            model={
+                **BASE_MODEL,
+                "observed_astro_sky": {"sky_model": {"ref": "resources.sky_models.s"}},
+            }
+        )
         [found] = list(_pointing_none(doc))
         assert found.message == (
             "model lights observed_astro_sky, which sees the sky through a "
@@ -996,14 +1148,19 @@ class TestA52APointingOfNoneAndAProjectorAnyway:
         change.  Measured: this document builds today.
         """
         doc = preflight_document(
-            resources={"projectors": {"p": PROJECTOR},
-                       "sky_models": {"s": SKY_MODEL}},
-            model={**BASE_MODEL, "observed_astro_sky": {
-                "sky_model": {"ref": "resources.sky_models.s"},
-                "projector": {"ref": "resources.projectors.p"}}})
+            resources={"projectors": {"p": PROJECTOR}, "sky_models": {"s": SKY_MODEL}},
+            model={
+                **BASE_MODEL,
+                "observed_astro_sky": {
+                    "sky_model": {"ref": "resources.sky_models.s"},
+                    "projector": {"ref": "resources.projectors.p"},
+                },
+            },
+        )
         assert [(f.severity, f.where) for f in _pointing_none(doc)] == [
             (REFUSE, "observation.pointing"),
-            (REFUSE, "model.observed_astro_sky.projector")]
+            (REFUSE, "model.observed_astro_sky.projector"),
+        ]
 
     def test_every_projector_reference_is_named_not_only_the_first(self):
         """Task 3's rule 3: attribution needs a per-index test on every loop.
@@ -1014,17 +1171,26 @@ class TestA52APointingOfNoneAndAProjectorAnyway:
         """
         doc = preflight_document(
             resources={"projectors": {"p": PROJECTOR, "q": PROJECTOR}},
-            model={**BASE_MODEL, "filters": [
-                {"type": "SkySpaceFilter",
-                 "projector": {"ref": "resources.projectors.p"},
-                 "regularization": {"value": 1e-3,
-                                     "unit": "dimensionless"}},
-                {"type": "SkySpaceFilter",
-                 "projector": {"ref": "resources.projectors.q"},
-                 "regularization": {"value": 1e-3,
-                                     "unit": "dimensionless"}}]})
+            model={
+                **BASE_MODEL,
+                "filters": [
+                    {
+                        "type": "SkySpaceFilter",
+                        "projector": {"ref": "resources.projectors.p"},
+                        "regularization": {"value": 1e-3, "unit": "dimensionless"},
+                    },
+                    {
+                        "type": "SkySpaceFilter",
+                        "projector": {"ref": "resources.projectors.q"},
+                        "regularization": {"value": 1e-3, "unit": "dimensionless"},
+                    },
+                ],
+            },
+        )
         assert [f.where for f in _pointing_none(doc)] == [
-            "model.filters[0].projector", "model.filters[1].projector"]
+            "model.filters[0].projector",
+            "model.filters[1].projector",
+        ]
 
     def test_a_pipeline_model_that_references_a_projector_is_refused_too(self):
         """The measured hole in the task body's own design: ``model_nodes`` is
@@ -1037,15 +1203,22 @@ class TestA52APointingOfNoneAndAProjectorAnyway:
         """
         doc = repatch(
             preflight_document(
-                resources={"projectors": {"p": PROJECTOR},
-                           "sky_models": {"s": SKY_MODEL}},
-                inference=None),
-            model={"kind": "pipeline", "stages": [
-                {"name": "sky", "type": "SkySourceOperator",
-                 "sky_model": {"ref": "resources.sky_models.s"},
-                 "projector": {"ref": "resources.projectors.p"}}]})
-        assert [f.where for f in _pointing_none(doc)] == [
-            "model.stages[0].projector"]
+                resources={"projectors": {"p": PROJECTOR}, "sky_models": {"s": SKY_MODEL}},
+                inference=None,
+            ),
+            model={
+                "kind": "pipeline",
+                "stages": [
+                    {
+                        "name": "sky",
+                        "type": "SkySourceOperator",
+                        "sky_model": {"ref": "resources.sky_models.s"},
+                        "projector": {"ref": "resources.projectors.p"},
+                    }
+                ],
+            },
+        )
+        assert [f.where for f in _pointing_none(doc)] == ["model.stages[0].projector"]
 
     def test_a_fan_label_the_path_grammar_cannot_spell_is_cut_back(self):
         """Task 3's rule 1 at this module's third and last call site.
@@ -1058,15 +1231,20 @@ class TestA52APointingOfNoneAndAProjectorAnyway:
         """
         doc = preflight_document(
             resources={"projectors": {"p": PROJECTOR}},
-            model={**BASE_MODEL, "filters": {"lo-band": {
-                "type": "SkySpaceFilter",
-                "projector": {"ref": "resources.projectors.p"},
-                "regularization": {"value": 1e-3,
-                                    "unit": "dimensionless"}}}})
+            model={
+                **BASE_MODEL,
+                "filters": {
+                    "lo-band": {
+                        "type": "SkySpaceFilter",
+                        "projector": {"ref": "resources.projectors.p"},
+                        "regularization": {"value": 1e-3, "unit": "dimensionless"},
+                    }
+                },
+            },
+        )
         [found] = list(_pointing_none(doc))
         assert found.where == "model.filters"
-        assert found.message.startswith(
-            "model.filters.lo-band.projector references a projector ")
+        assert found.message.startswith("model.filters.lo-band.projector references a projector ")
 
     def test_a_pointing_that_is_not_a_mapping_is_left_to_its_own_refusal(self):
         """``pointing: drift`` (the string, not the block) is a shape
@@ -1080,11 +1258,17 @@ class TestA52APointingOfNoneAndAProjectorAnyway:
         doc = preflight_document(
             observation={**BASE_OBSERVATION, "pointing": "drift"},
             resources={"projectors": {"p": PROJECTOR}},
-            model={**BASE_MODEL, "filters": [
-                {"type": "SkySpaceFilter",
-                 "projector": {"ref": "resources.projectors.p"},
-                 "regularization": {"value": 1e-3,
-                                     "unit": "dimensionless"}}]})
+            model={
+                **BASE_MODEL,
+                "filters": [
+                    {
+                        "type": "SkySpaceFilter",
+                        "projector": {"ref": "resources.projectors.p"},
+                        "regularization": {"value": 1e-3, "unit": "dimensionless"},
+                    }
+                ],
+            },
+        )
         assert list(_pointing_none(doc)) == []
 
     def test_a_drift_pointing_is_not_refused(self):
@@ -1092,17 +1276,28 @@ class TestA52APointingOfNoneAndAProjectorAnyway:
         document in the repository has a pointing; this is the "did not
         overreach" leg."""
         doc = preflight_document(
-            observation={**BASE_OBSERVATION, "pointing": {
-                "mode": "drift", "az_deg": {"value": 0.0, "unit": "deg"},
-                "el_deg": {"value": 90.0, "unit": "deg"},
-                "materialise": ["pointing"],
-                "lst": {"mode": "uniform_turn", "n_time": "n_time"}}},
+            observation={
+                **BASE_OBSERVATION,
+                "pointing": {
+                    "mode": "drift",
+                    "az_deg": {"value": 0.0, "unit": "deg"},
+                    "el_deg": {"value": 90.0, "unit": "deg"},
+                    "materialise": ["pointing"],
+                    "lst": {"mode": "uniform_turn", "n_time": "n_time"},
+                },
+            },
             resources={"projectors": {"p": PROJECTOR}},
-            model={**BASE_MODEL, "filters": [
-                {"type": "SkySpaceFilter",
-                 "projector": {"ref": "resources.projectors.p"},
-                 "regularization": {"value": 1e-3,
-                                     "unit": "dimensionless"}}]})
+            model={
+                **BASE_MODEL,
+                "filters": [
+                    {
+                        "type": "SkySpaceFilter",
+                        "projector": {"ref": "resources.projectors.p"},
+                        "regularization": {"value": 1e-3, "unit": "dimensionless"},
+                    }
+                ],
+            },
+        )
         assert list(_pointing_none(doc)) == []
 
     def test_a_declared_but_unreferenced_projector_is_not_refused(self):
@@ -1130,9 +1325,12 @@ class TestA52APointingOfNoneAndAProjectorAnyway:
 
         Kills a walk over the whole document, and one over ``resources:``.
         """
-        doc = preflight_document(resources={
-            "projectors": {"p": PROJECTOR},
-            "arrays": {"a": {"ref": "resources.projectors.p"}}})
+        doc = preflight_document(
+            resources={
+                "projectors": {"p": PROJECTOR},
+                "arrays": {"a": {"ref": "resources.projectors.p"}},
+            }
+        )
         assert list(_pointing_none(doc)) == []
 
     def test_a_mode_this_layer_does_not_own_is_left_to_its_own_refusal(self):
@@ -1152,11 +1350,17 @@ class TestA52APointingOfNoneAndAProjectorAnyway:
         doc = preflight_document(
             observation={**BASE_OBSERVATION, "pointing": {"mode": None}},
             resources={"projectors": {"p": PROJECTOR}},
-            model={**BASE_MODEL, "filters": [
-                {"type": "SkySpaceFilter",
-                 "projector": {"ref": "resources.projectors.p"},
-                 "regularization": {"value": 1e-3,
-                                     "unit": "dimensionless"}}]})
+            model={
+                **BASE_MODEL,
+                "filters": [
+                    {
+                        "type": "SkySpaceFilter",
+                        "projector": {"ref": "resources.projectors.p"},
+                        "regularization": {"value": 1e-3, "unit": "dimensionless"},
+                    }
+                ],
+            },
+        )
         assert list(_pointing_none(doc)) == []
 
     def test_a_reference_to_something_else_is_not_a_projector(self):
@@ -1164,10 +1368,18 @@ class TestA52APointingOfNoneAndAProjectorAnyway:
         prefix except its trailing dot.  Kills a ``startswith`` written
         without the separator, which would refuse a document naming any
         resource whose kind merely begins with "projectors"."""
-        doc = preflight_document(model={**BASE_MODEL, "t_sys_extra": [
-            {"from": "basis",
-             "basis": {"ref": "resources.projectors_backup.p"},
-             "coeff": {"zeros": ["n_freq"]}}]})
+        doc = preflight_document(
+            model={
+                **BASE_MODEL,
+                "t_sys_extra": [
+                    {
+                        "from": "basis",
+                        "basis": {"ref": "resources.projectors_backup.p"},
+                        "coeff": {"zeros": ["n_freq"]},
+                    }
+                ],
+            }
+        )
         assert list(_pointing_none(doc)) == []
 
     def test_the_site_half_of_a52_is_not_attempted_here(self):
@@ -1184,17 +1396,25 @@ class TestA52APointingOfNoneAndAProjectorAnyway:
         from the schema and require a key nothing in v1 consumes.
         """
         doc = preflight_document(
-            observation={**BASE_OBSERVATION,
-                         "site": {"alt_m": {"value": 100.0, "unit": "m"}},
-                         "pointing": {"mode": "baked",
-                                      "provenance": {"built_by": "a test"}}},
-            resources={"projectors": {"p": {
-                **PROJECTOR, "lat_deg": {"value": 51.0, "unit": "deg"}}}},
-            model={**BASE_MODEL, "filters": [
-                {"type": "SkySpaceFilter",
-                 "projector": {"ref": "resources.projectors.p"},
-                 "regularization": {"value": 1e-3,
-                                     "unit": "dimensionless"}}]})
+            observation={
+                **BASE_OBSERVATION,
+                "site": {"alt_m": {"value": 100.0, "unit": "m"}},
+                "pointing": {"mode": "baked", "provenance": {"built_by": "a test"}},
+            },
+            resources={
+                "projectors": {"p": {**PROJECTOR, "lat_deg": {"value": 51.0, "unit": "deg"}}}
+            },
+            model={
+                **BASE_MODEL,
+                "filters": [
+                    {
+                        "type": "SkySpaceFilter",
+                        "projector": {"ref": "resources.projectors.p"},
+                        "regularization": {"value": 1e-3, "unit": "dimensionless"},
+                    }
+                ],
+            },
+        )
         assert list(_pointing_none(doc)) == []
 
     def test_the_derivation_registry_still_has_no_site_route(self):
@@ -1222,18 +1442,25 @@ class TestAllThreeChecksReachThePass:
         and one that doubled it."""
         doc = preflight_document(
             observation={**BASE_OBSERVATION, "pointing": {"mode": "none"}},
-            resources={"projectors": {"p": PROJECTOR},
-                       "arrays": {"flat": {"ones": [8]}}},
-            model={**BASE_MODEL, "noise": NOISE, "filters": [
-                {"type": "SkySpaceFilter",
-                 "projector": {"ref": "resources.projectors.p"},
-                 "regularization": {"value": 1e-3,
-                                     "unit": "dimensionless"}}]},
-            inference={"twin": {"without": ["noise"]},
-                       "observed": simulated()})
-        found = [f for check in (_shadowed_literals, _simulated_fit_twin,
-                                 _pointing_none)
-                 for f in check(doc)]
+            resources={"projectors": {"p": PROJECTOR}, "arrays": {"flat": {"ones": [8]}}},
+            model={
+                **BASE_MODEL,
+                "noise": NOISE,
+                "filters": [
+                    {
+                        "type": "SkySpaceFilter",
+                        "projector": {"ref": "resources.projectors.p"},
+                        "regularization": {"value": 1e-3, "unit": "dimensionless"},
+                    }
+                ],
+            },
+            inference={"twin": {"without": ["noise"]}, "observed": simulated()},
+        )
+        found = [
+            f
+            for check in (_shadowed_literals, _simulated_fit_twin, _pointing_none)
+            for f in check(doc)
+        ]
         assert {f.check for f in found} == {"A41", "A42", "A52"}
         for finding in found:
             assert finding.message.endswith(f"(check {finding.check}).")
@@ -1245,9 +1472,9 @@ class TestAllThreeChecksReachThePass:
         that raises, and a ``warn()`` call that was written as ``refuse()``."""
         doc = preflight_document(
             model={**BASE_MODEL, "noise": NOISE},
-            inference={"twin": {"without": ["noise"]},
-                       "observed": simulated()},
-            resources={"arrays": {"flat": {"ones": [8]}}})
+            inference={"twin": {"without": ["noise"]}, "observed": simulated()},
+            resources={"arrays": {"flat": {"ones": [8]}}},
+        )
         report = preflight(doc)
         assert {"A41", "A42"} <= report.checks()
         assert {f.check for f in report.warnings()} >= {"A41", "A42"}
@@ -1277,11 +1504,17 @@ class TestAllThreeChecksReachThePass:
         """
         document = preflight_document(
             resources={**UNREADABLE_BEAM, "projectors": {"p": PROJECTOR}},
-            model={**BASE_MODEL, "filters": [
-                {"type": "SkySpaceFilter",
-                 "projector": {"ref": "resources.projectors.p"},
-                 "regularization": {"value": 1e-3,
-                                     "unit": "dimensionless"}}]})
+            model={
+                **BASE_MODEL,
+                "filters": [
+                    {
+                        "type": "SkySpaceFilter",
+                        "projector": {"ref": "resources.projectors.p"},
+                        "regularization": {"value": 1e-3, "unit": "dimensionless"},
+                    }
+                ],
+            },
+        )
         with pytest.raises(ConfigError) as caught:
             load_document(document)
         assert "check A52" in str(caught.value)
@@ -1300,10 +1533,12 @@ class TestAllThreeChecksReachThePass:
         ``pytest.warns`` goes red.
         """
         document = preflight_document(
-            resources={**UNREADABLE_BEAM,
-                       "arrays": {"flat": {"ones": [8]}}})
-        with pytest.warns(ConfigWarning, match=r"check A41"), \
-                pytest.raises(ConfigError, match="no_such_beam"):
+            resources={**UNREADABLE_BEAM, "arrays": {"flat": {"ones": [8]}}}
+        )
+        with (
+            pytest.warns(ConfigWarning, match=r"check A41"),
+            pytest.raises(ConfigError, match="no_such_beam"),
+        ):
             load_document(document)
 
     def test_no_check_here_raises_or_emits_an_unspellable_where(self):
@@ -1332,41 +1567,70 @@ class TestAllThreeChecksReachThePass:
         battery found something; it does not tell you which walk was running.
         """
         hostile = [
-            None, 3, "text", [], {}, [1, 2], {"a": None}, {3: "int-key"},
-            {"ref": 7}, {"ones": 8}, {"ones": [[]]}, {"mode": []},
+            None,
+            3,
+            "text",
+            [],
+            {},
+            [1, 2],
+            {"a": None},
+            {3: "int-key"},
+            {"ref": 7},
+            {"ones": 8},
+            {"ones": [[]]},
+            {"mode": []},
             "pointing-as-a-string",
             # Shapes that get PAST the first guard of each check, so the
             # battery exercises the walks rather than their early returns.
-            {"time": {"grid": {"list": [1, 2, 3]}},
-             "freq": {"grid": {"list": [4, 5, 6]}},
-             "switching": {"mode": "cycle", "order": [3, None]},
-             "pointing": "drift"},
-            {"time": {"grid": {"arange": {"num": 4}}},
-             "freq": {"grid": {"linspace": {"num": 4}}},
-             "pointing": {"mode": None}},
-            {"noise": {"type": []}, "gain": 3, "filters": [{"ref": None}],
-             "sky-1": {"ref": "resources.projectors.p"},
-             "d-1": {"ones": [4, "n_freq"]}, "observed_astro_sky": {},
-             "n": {7: {"ones": [4]}}},
+            {
+                "time": {"grid": {"list": [1, 2, 3]}},
+                "freq": {"grid": {"list": [4, 5, 6]}},
+                "switching": {"mode": "cycle", "order": [3, None]},
+                "pointing": "drift",
+            },
+            {
+                "time": {"grid": {"arange": {"num": 4}}},
+                "freq": {"grid": {"linspace": {"num": 4}}},
+                "pointing": {"mode": None},
+            },
+            {
+                "noise": {"type": []},
+                "gain": 3,
+                "filters": [{"ref": None}],
+                "sky-1": {"ref": "resources.projectors.p"},
+                "d-1": {"ones": [4, "n_freq"]},
+                "observed_astro_sky": {},
+                "n": {7: {"ones": [4]}},
+            },
             # A model whose `noise` really is stochastic, so `stochastic_nodes`
             # is non-empty and A42's `_a42_records` walk RUNS.
-            {"noise": NOISE, "rfi_field": {"type": "RFIOperator"},
-             "p": {"ref": "resources.projectors.p"}},
-            {"twin": {"without": [["noise"], "noise", 3],
-                      "replace": {"noise": [], 3: {}, "rfi_field": {"type": 7}}},
-             "observed": {"night-1": {"from": "simulation", "twin": "fit"},
-                          "bad": 3, 7: {}}},
+            {
+                "noise": NOISE,
+                "rfi_field": {"type": "RFIOperator"},
+                "p": {"ref": "resources.projectors.p"},
+            },
+            {
+                "twin": {
+                    "without": [["noise"], "noise", 3],
+                    "replace": {"noise": [], 3: {}, "rfi_field": {"type": 7}},
+                },
+                "observed": {"night-1": {"from": "simulation", "twin": "fit"}, "bad": 3, 7: {}},
+            },
         ]
-        checks = {"A41": _shadowed_literals, "A42": _simulated_fit_twin,
-                  "A52": _pointing_none}
+        checks = {"A41": _shadowed_literals, "A42": _simulated_fit_twin, "A52": _pointing_none}
         calls = 0
         emitted = dict.fromkeys(checks, 0)
-        for observation, model, inference in itertools.product(hostile,
-                                                               repeat=3):
-            document = {"schema_version": 1, "runtime": {"seed": 1},
-                        "observation": observation, "model": model,
-                        "inference": inference, "runs": [{"kind": "forward"}],
-                        "resources": model, 7: model}
+        for observation, model, inference in itertools.product(hostile, repeat=3):
+            document = {
+                "schema_version": 1,
+                "runtime": {"seed": 1},
+                "observation": observation,
+                "model": model,
+                "inference": inference,
+                "runs": [{"kind": "forward"}],
+                "resources": model,
+                7: model,
+            }
             for check_id, check in checks.items():
                 for finding in check(document):
                     _check_where(check_id, finding)

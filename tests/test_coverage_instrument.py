@@ -78,7 +78,8 @@ def test_no_test_hands_the_tracer_back_as_none():
     ]
     assert offenders == [], (
         "these lines uninstall coverage's tracer for the rest of the session "
-        "rather than restoring what was there:\n  " + "\n  ".join(offenders)
+        "rather than restoring what was there:\n  "
+        + "\n  ".join(offenders)
         + "\nCapture `previous = sys.gettrace()` before installing your own "
         "and restore THAT. See this module's docstring for what it cost."
     )

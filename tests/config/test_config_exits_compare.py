@@ -182,8 +182,7 @@ def test_compare_refuses_structure_shape_and_dtype_class_mismatch(left, right, w
 
 def test_compare_is_present_in_all_four_live_registries():
     assert all(
-        "compare" in registry
-        for registry in (PARSERS, PRE_EXECUTORS, EXECUTORS, DEFERRED_CHECKS)
+        "compare" in registry for registry in (PARSERS, PRE_EXECUTORS, EXECUTORS, DEFERRED_CHECKS)
     )
     assert DEFERRED_CHECKS["compare"] == (
         "compare.left_available",

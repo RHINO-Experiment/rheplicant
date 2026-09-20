@@ -13,33 +13,51 @@ from tests.config.test_config_document import synthetic_document
 
 FORWARD = {"name": "fwd", "kind": "forward"}
 FISHER = {"name": "cov", "kind": "fisher"}
-SAMPLE = {"name": "chain", "kind": "plan.sample", "blocks": [{"names": ["g"]}],
-          "seed": {"from": "runtime.seeds.sample"}, "n_sweeps": 10,
-          "warmup": 4, "check_identifiability": False}
-ESTIMATE = {"name": "point", "kind": "plan.estimate",
-            "blocks": [{"names": ["g"]}], "check_identifiability": False}
-OPTIMIZE = {"name": "fit", "kind": "optimize", "optimizer": "gradient",
-            "learning_rate": 0.1, "n_steps": 3}
+SAMPLE = {
+    "name": "chain",
+    "kind": "plan.sample",
+    "blocks": [{"names": ["g"]}],
+    "seed": {"from": "runtime.seeds.sample"},
+    "n_sweeps": 10,
+    "warmup": 4,
+    "check_identifiability": False,
+}
+ESTIMATE = {
+    "name": "point",
+    "kind": "plan.estimate",
+    "blocks": [{"names": ["g"]}],
+    "check_identifiability": False,
+}
+OPTIMIZE = {
+    "name": "fit",
+    "kind": "optimize",
+    "optimizer": "gradient",
+    "learning_rate": 0.1,
+    "n_steps": 3,
+}
 #: The near miss that COLLIDES.  `_gaussian_width` (conjugate.py::_gaussian_width) returns
 #: {"fisher": ..., "covariance": ...} and `width: fisher` merges it into the
 #: wiener product (:392), so this run's product carries a "covariance" key
 #: that is NOT a kind: fisher product -- its covariance is over the CONJUGATE
 #: BLOCK's latents.  It is the leg that makes the kind dispatch load-bearing.
-WIENER_FISHER = {"name": "w", "kind": "conjugate.wiener", "names": ["g"],
-                 "width": "fisher"}
+WIENER_FISHER = {"name": "w", "kind": "conjugate.wiener", "names": ["g"], "width": "fisher"}
 FROM_COV = {"name": "p", "kind": "predict", "reuse": "cov"}
 FROM_CHAIN = {"name": "p", "kind": "predict", "reuse": "chain"}
 
 #: The compatibility base layer the parse seam is driven against directly.
-_BASE_LAYER = LayerRef(kind="base", name=None, prefix="", document={},
-                       declared_runs=None)
+_BASE_LAYER = LayerRef(kind="base", name=None, prefix="", document={}, declared_runs=None)
 
 # The repair moves the absorption centre from 75 MHz to 65 MHz, which moves
 # the widest prediction across the frequency grid (60..85 MHz, 8 points).
-TWIN_AT_65 = {"replace": {"global_signal": {
-    "depth": {"value": 0.5, "unit": "K"},
-    "centre": {"value": 65.0, "unit": "MHz"},
-    "width": {"value": 5.0, "unit": "MHz"}}}}
+TWIN_AT_65 = {
+    "replace": {
+        "global_signal": {
+            "depth": {"value": 0.5, "unit": "K"},
+            "centre": {"value": 65.0, "unit": "MHz"},
+            "width": {"value": 5.0, "unit": "MHz"},
+        }
+    }
+}
 
 
 def document(*runs, twin=None, sigma_k=0.05):
@@ -59,16 +77,19 @@ def document(*runs, twin=None, sigma_k=0.05):
     respond to the covariance it was handed.
     """
     doc = synthetic_document()
-    doc["model"] = {key: value for key, value in doc["model"].items()
-                    if key != "noise"}
+    doc["model"] = {key: value for key, value in doc["model"].items() if key != "noise"}
     doc["model"]["gain"] = {"gain": {"value": 1.0, "unit": "dimensionless"}}
     doc["runtime"] = {"seed": 20260806, "seeds": {"sample": 11}}
     inference = {
-        "parameters": {"g": {"init": 1.0, "linear": True, "into": "gain.gain",
-                             "prior": {"normal": {"loc": 1.0,
-                                                  "scale": 0.05}}}},
-        "noise": {"kind": "homoscedastic",
-                  "sigma": {"value": sigma_k, "unit": "K"}},
+        "parameters": {
+            "g": {
+                "init": 1.0,
+                "linear": True,
+                "into": "gain.gain",
+                "prior": {"normal": {"loc": 1.0, "scale": 0.05}},
+            }
+        },
+        "noise": {"kind": "homoscedastic", "sigma": {"value": sigma_k, "unit": "K"}},
         "observed": {"from": "simulation", "at": {"g": 1.5}},
     }
     if twin is not None:
@@ -163,8 +184,7 @@ class TestTheCovarianceRoute:
         while the repaired twin peaks at index 1 (63.57 MHz, nearest 65).
         Measured both ways.
         """
-        results = run_document(document(FORWARD, FISHER, FROM_COV,
-                                        twin=TWIN_AT_65))
+        results = run_document(document(FORWARD, FISHER, FROM_COV, twin=TWIN_AT_65))
         unrepaired = np.asarray(results["fwd"].product.data)
         width = np.asarray(results["p"].product)
         assert int(jnp.argmax(jnp.abs(unrepaired[0]))) == 4
@@ -221,11 +241,10 @@ class TestTheSamplesRoute:
         signal = np.asarray(results["fwd"].product.data)
         draws = np.asarray(results["chain"].product.samples["g"])
         predictive = np.asarray(results["p"].product)
-        assert draws.shape == (6,)          # 10 sweeps, 4 discarded as warmup
+        assert draws.shape == (6,)  # 10 sweeps, 4 discarded as warmup
         assert predictive.shape == (6, 16, 8)
         assert not np.allclose(predictive, predictive[0], rtol=1e-6)
-        assert np.allclose(predictive, draws[:, None, None] * signal,
-                           rtol=1e-5)
+        assert np.allclose(predictive, draws[:, None, None] * signal, rtol=1e-5)
 
     def test_the_samples_route_calls_predict_from_samples(self, monkeypatch):
         """The draws reach predict_from_samples, not propagate_covariance.
@@ -265,8 +284,7 @@ class TestTheSamplesRoute:
         index 4 (74.29 MHz, nearest the declared 75) while the repaired twin
         peaks at index 1 (63.57 MHz, nearest 65).
         """
-        results = run_document(document(FORWARD, SAMPLE, FROM_CHAIN,
-                                        twin=TWIN_AT_65))
+        results = run_document(document(FORWARD, SAMPLE, FROM_CHAIN, twin=TWIN_AT_65))
         unrepaired = np.asarray(results["fwd"].product.data)
         predictive = np.asarray(results["p"].product)
         assert predictive.shape == (6, 16, 8)
@@ -282,14 +300,12 @@ class TestTheSamplesRoute:
         honest if the chain ever mixes so well that its two ends stop being
         distinguishable.
         """
-        results = run_document(document(FORWARD, SAMPLE,
-                                        {**FROM_CHAIN, "n_draw": 2}))
+        results = run_document(document(FORWARD, SAMPLE, {**FROM_CHAIN, "n_draw": 2}))
         signal = float(np.asarray(results["fwd"].product.data)[0, 4])
         draws = np.asarray(results["chain"].product.samples["g"])
         predictive = np.asarray(results["p"].product)
         assert predictive.shape == (2, 16, 8)
-        assert predictive[:, 0, 4] / signal == pytest.approx(draws[-2:],
-                                                             rel=1e-4)
+        assert predictive[:, 0, 4] / signal == pytest.approx(draws[-2:], rel=1e-4)
         assert not np.allclose(draws[-2:], draws[:2], rtol=1e-3)
 
     def test_n_draw_equal_to_the_chain_is_the_boundary_that_RUNS(self):
@@ -376,12 +392,13 @@ class TestTheNutsRoute:
     @pytest.fixture(scope="class")
     @classmethod
     def chain(cls):
-        return run_document(conjugate_document(
-            NUTS, {"name": "p", "kind": "predict", "reuse": "chain"},
-            seeds={"chain": 3}))
+        return run_document(
+            conjugate_document(
+                NUTS, {"name": "p", "kind": "predict", "reuse": "chain"}, seeds={"chain": 3}
+            )
+        )
 
-    def test_every_draw_reaches_the_prediction_and_none_of_it_is_noisy(
-            self, chain):
+    def test_every_draw_reaches_the_prediction_and_none_of_it_is_noisy(self, chain):
         """The pushed predictions differ from each other EXACTLY as the draws
         do.
 
@@ -405,11 +422,9 @@ class TestTheNutsRoute:
         assert draws.shape == (200,)
         assert predictive.shape == (200, 16, 8)
         assert not np.allclose(predictive, predictive[0], rtol=1e-6)
-        assert np.allclose(predictive / predictive[0],
-                           (draws / draws[0])[:, None, None], rtol=1e-4)
+        assert np.allclose(predictive / predictive[0], (draws / draws[0])[:, None, None], rtol=1e-4)
 
-    def test_the_prediction_site_never_reaches_predict_from_samples(
-            self, monkeypatch):
+    def test_the_prediction_site_never_reaches_predict_from_samples(self, monkeypatch):
         """``samples`` carries the latents and NOT the whole TOD.
 
         ``mcmc.get_samples()`` returns the deterministic ``"prediction"`` site
@@ -432,9 +447,11 @@ class TestTheNutsRoute:
 
         monkeypatch.setattr(inference, "predict_from_samples", spy)
         monkeypatch.setattr(inference, "propagate_covariance", _never)
-        run_document(conjugate_document(
-            NUTS, {"name": "p", "kind": "predict", "reuse": "chain"},
-            seeds={"chain": 3}))
+        run_document(
+            conjugate_document(
+                NUTS, {"name": "p", "kind": "predict", "reuse": "chain"}, seeds={"chain": 3}
+            )
+        )
         assert sorted(seen["samples"]) == ["g"]
         assert "prediction" not in seen["samples"]
 
@@ -447,15 +464,19 @@ class TestTheNutsRoute:
         fails here.  A separate ``run_document`` because the class fixture's
         predict declares no ``n_draw:``.
         """
-        results = run_document(conjugate_document(
-            NUTS, {"name": "p", "kind": "predict", "reuse": "chain",
-                   "n_draw": 5},
-            seeds={"chain": 3}))
+        results = run_document(
+            conjugate_document(
+                NUTS,
+                {"name": "p", "kind": "predict", "reuse": "chain", "n_draw": 5},
+                seeds={"chain": 3},
+            )
+        )
         draws = np.asarray(results["chain"].product.samples["g"])
         predictive = np.asarray(results["p"].product)
         assert predictive.shape == (5, 16, 8)
-        assert np.allclose(predictive / predictive[0],
-                           (draws[-5:] / draws[-5])[:, None, None], rtol=1e-4)
+        assert np.allclose(
+            predictive / predictive[0], (draws[-5:] / draws[-5])[:, None, None], rtol=1e-4
+        )
         assert not np.allclose(draws[-5:], draws[:5], rtol=1e-9)
 
     def test_n_draw_beyond_the_chain_names_NUTS_OWN_reason(self):
@@ -469,10 +490,13 @@ class TestTheNutsRoute:
         to kill, because that sentence is FALSE for npe.
         """
         with pytest.raises(ConfigError) as caught:
-            run_document(conjugate_document(
-                NUTS, {"name": "p", "kind": "predict", "reuse": "chain",
-                       "n_draw": 201},
-                seeds={"chain": 3}))
+            run_document(
+                conjugate_document(
+                    NUTS,
+                    {"name": "p", "kind": "predict", "reuse": "chain", "n_draw": 201},
+                    seeds={"chain": 3},
+                )
+            )
         message = str(caught.value)
         assert message.startswith("runs['p']:")
         assert "exceeds the 200 draws" in message
@@ -513,21 +537,29 @@ class TestTheNutsRoute:
         this test is about the LAYOUT of the flat stack, and the layout does
         not get truer with a longer chain.  Measured at ~0.8 s.
         """
-        run = {**NUTS, "num_warmup": 50, "num_samples": 20, "num_chains": 2,
-               "chain_method": "sequential"}
-        results = run_document(conjugate_document(
-            run, {"name": "p", "kind": "predict", "reuse": "chain",
-                  "n_draw": 20},
-            seeds={"chain": 3}))
+        run = {
+            **NUTS,
+            "num_warmup": 50,
+            "num_samples": 20,
+            "num_chains": 2,
+            "chain_method": "sequential",
+        }
+        results = run_document(
+            conjugate_document(
+                run,
+                {"name": "p", "kind": "predict", "reuse": "chain", "n_draw": 20},
+                seeds={"chain": 3},
+            )
+        )
         product = results["chain"].product
         draws = np.asarray(product.samples["g"])
         predictive = np.asarray(results["p"].product)
         assert product.n_draw == 40 and product.n_chain == 2
         assert draws.shape == (40,)
         assert predictive.shape == (20, 16, 8)
-        assert np.allclose(predictive / predictive[0],
-                           (draws[-20:] / draws[-20])[:, None, None],
-                           rtol=1e-4)
+        assert np.allclose(
+            predictive / predictive[0], (draws[-20:] / draws[-20])[:, None, None], rtol=1e-4
+        )
         # Not a claim about predict: `draws` is the PRODUCT's stack.  This is
         # what keeps the ratio assertion above able to see a front slice --
         # with the halves coincident both slice directions predict the same
@@ -571,9 +603,9 @@ class TestTheNpeRoute:
     @pytest.fixture(scope="class")
     @classmethod
     def amortized(cls):
-        return run_document(npe_document(
-            {}, {"name": "p", "kind": "predict", "reuse": "amortized"},
-            npe=cls.TWELVE))
+        return run_document(
+            npe_document({}, {"name": "p", "kind": "predict", "reuse": "amortized"}, npe=cls.TWELVE)
+        )
 
     def test_the_unravelled_draws_reach_the_prediction(self, amortized):
         """The npe product's ``samples`` is a MAPPING, and predict reads it.
@@ -606,8 +638,7 @@ class TestTheNpeRoute:
         assert predictive.shape == (12, 16, 8)
         assert np.all(np.isfinite(predictive))
         assert not np.allclose(predictive, predictive[0], rtol=1e-6)
-        assert np.allclose(predictive / predictive[0],
-                           (draws / draws[0])[:, None, None], rtol=1e-4)
+        assert np.allclose(predictive / predictive[0], (draws / draws[0])[:, None, None], rtol=1e-4)
 
     def test_the_npe_leg_calls_predict_from_samples(self, monkeypatch):
         """The mirror of the covariance route's binding test, on the fourth
@@ -630,9 +661,11 @@ class TestTheNpeRoute:
 
         monkeypatch.setattr(inference, "predict_from_samples", spy)
         monkeypatch.setattr(inference, "propagate_covariance", _never)
-        run_document(npe_document(
-            {}, {"name": "p", "kind": "predict", "reuse": "amortized"},
-            npe=self.TWELVE))
+        run_document(
+            npe_document(
+                {}, {"name": "p", "kind": "predict", "reuse": "amortized"}, npe=self.TWELVE
+            )
+        )
         assert sorted(seen["samples"]) == ["g"]
         assert np.asarray(seen["samples"]["g"]).shape == (12,)
 
@@ -652,16 +685,20 @@ class TestTheNpeRoute:
         assertion is what keeps that distinction visible: twelve independent
         posterior draws do not repeat.
         """
-        results = run_document(npe_document(
-            {}, {"name": "p", "kind": "predict", "reuse": "amortized",
-                 "n_draw": 5},
-            npe=self.TWELVE))
+        results = run_document(
+            npe_document(
+                {},
+                {"name": "p", "kind": "predict", "reuse": "amortized", "n_draw": 5},
+                npe=self.TWELVE,
+            )
+        )
         draws = np.asarray(results["amortized"].product.samples["g"])
         predictive = np.asarray(results["p"].product)
         assert draws.shape == (12,)
         assert predictive.shape == (5, 16, 8)
-        assert np.allclose(predictive / predictive[0],
-                           (draws[-5:] / draws[-5])[:, None, None], rtol=1e-4)
+        assert np.allclose(
+            predictive / predictive[0], (draws[-5:] / draws[-5])[:, None, None], rtol=1e-4
+        )
         assert not np.allclose(draws[-5:], draws[:5], rtol=1e-9)
 
     def test_n_draw_beyond_the_draws_names_NPES_OWN_reason(self):
@@ -674,10 +711,13 @@ class TestTheNpeRoute:
         does not exist.
         """
         with pytest.raises(ConfigError) as caught:
-            run_document(npe_document(
-                {}, {"name": "p", "kind": "predict", "reuse": "amortized",
-                     "n_draw": 13},
-                npe=self.TWELVE))
+            run_document(
+                npe_document(
+                    {},
+                    {"name": "p", "kind": "predict", "reuse": "amortized", "n_draw": 13},
+                    npe=self.TWELVE,
+                )
+            )
         message = str(caught.value)
         assert message.startswith("runs['p']:")
         assert "exceeds the 12 draws" in message
@@ -691,8 +731,7 @@ class TestTheReuseGrammar:
         """The bare `is required` would also fit the missing-name refusal
         below, so the phrase matched is the whole clause -- the one that tells
         the user WHICH key to write."""
-        with pytest.raises(ConfigError,
-                           match=r"reuse: <run name> is required"):
+        with pytest.raises(ConfigError, match=r"reuse: <run name> is required"):
             run_document(document({"kind": "predict"}))
 
     def test_a_forward_reference_reads_as_a_missing_run(self):
@@ -744,16 +783,13 @@ class TestTheReuseGrammar:
         first -- measured here rather than assumed from the source order.
         """
         with pytest.raises(ConfigError, match="second spelling"):
-            run_document(document(FISHER, {"name": "p", "kind": "predict",
-                                           "from": "cov"}))
+            run_document(document(FISHER, {"name": "p", "kind": "predict", "from": "cov"}))
 
     @pytest.mark.parametrize(
         ("earlier", "reuse"),
-        [(ESTIMATE, "point"), (FORWARD, "fwd"), (OPTIMIZE, "fit"),
-         (WIENER_FISHER, "w")],
+        [(ESTIMATE, "point"), (FORWARD, "fwd"), (OPTIMIZE, "fit"), (WIENER_FISHER, "w")],
     )
-    def test_reusing_another_kind_names_the_four_that_work(self, earlier,
-                                                           reuse):
+    def test_reusing_another_kind_names_the_four_that_work(self, earlier, reuse):
         """The dispatch is on the run's KIND, never on its product's shape.
 
         plan.estimate is the near miss of family -- same estimators, no
@@ -808,8 +844,7 @@ class TestTheReuseGrammar:
         for source in ("fisher", "plan.sample", "nuts", "npe"):
             assert source in message, source
         assert "draws of a plan.sample / nuts / npe run" in message
-        assert "Those are the 4 products this exit knows how to " \
-               "propagate." in message
+        assert "Those are the 4 products this exit knows how to propagate." in message
         assert message.startswith("runs['p']:")
 
     @pytest.mark.parametrize("kind", ["condition", "conjugate.gcr"])
@@ -850,10 +885,16 @@ class TestTheReuseGrammar:
             n_draw = 3
             samples = {"g": jnp.ones((3,))}
 
-        spec = RunSpec(name="p", kind="predict", variant=None, on="primary",
-                       expect="ok", options={}, reuse="other")
-        results = {"other": RunResult(name="other", kind=kind,
-                                      product=Chainlike(), error=None)}
+        spec = RunSpec(
+            name="p",
+            kind="predict",
+            variant=None,
+            on="primary",
+            expect="ok",
+            options={},
+            reuse="other",
+        )
+        results = {"other": RunResult(name="other", kind=kind, product=Chainlike(), error=None)}
         parsed = parse_run(spec, built, index=1, layer=_BASE_LAYER)
         with pytest.raises(ConfigError) as caught:
             handler_for("predict").pre_execute(parsed, built, results)
@@ -897,17 +938,39 @@ class TestAVariantMismatchIsRefused:
     it instead of recording it.
     """
 
-    AT_65 = {"at_65": {"model": {"global_signal": {
-        "depth": {"value": 0.5, "unit": "K"},
-        "centre": {"value": 65.0, "unit": "MHz"},
-        "width": {"value": 5.0, "unit": "MHz"}}}}}
+    AT_65 = {
+        "at_65": {
+            "model": {
+                "global_signal": {
+                    "depth": {"value": 0.5, "unit": "K"},
+                    "centre": {"value": 65.0, "unit": "MHz"},
+                    "width": {"value": 5.0, "unit": "MHz"},
+                }
+            }
+        }
+    }
     #: A variant that moves the parameter LAYOUT -- the half the package
     #: catches on its own, and the companion measurement at the foot.
-    TWO = {"two": {"inference": {"parameters": {
-        "g": {"init": 1.0, "linear": True, "into": "gain.gain",
-              "prior": {"normal": {"loc": 1.0, "scale": 0.05}}},
-        "d": {"init": 0.5, "linear": True, "into": "global_signal.depth",
-              "prior": {"normal": {"loc": 0.5, "scale": 0.5}}}}}}}
+    TWO = {
+        "two": {
+            "inference": {
+                "parameters": {
+                    "g": {
+                        "init": 1.0,
+                        "linear": True,
+                        "into": "gain.gain",
+                        "prior": {"normal": {"loc": 1.0, "scale": 0.05}},
+                    },
+                    "d": {
+                        "init": 0.5,
+                        "linear": True,
+                        "into": "global_signal.depth",
+                        "prior": {"normal": {"loc": 0.5, "scale": 0.5}},
+                    },
+                }
+            }
+        }
+    }
 
     @staticmethod
     def _bypass(variants, name):
@@ -932,11 +995,19 @@ class TestAVariantMismatchIsRefused:
 
         doc = document(FISHER)
         doc["variants"] = variants
-        cov = execute_run(RunSpec(name="cov", kind="fisher", variant=None,
-                                  on="primary", expect="ok", options={}),
-                          load_document(doc, variant=None))
-        spec = RunSpec(name="p", kind="predict", variant=name, on="primary",
-                       expect="ok", options={}, reuse="cov")
+        cov = execute_run(
+            RunSpec(name="cov", kind="fisher", variant=None, on="primary", expect="ok", options={}),
+            load_document(doc, variant=None),
+        )
+        spec = RunSpec(
+            name="p",
+            kind="predict",
+            variant=name,
+            on="primary",
+            expect="ok",
+            options={},
+            reuse="cov",
+        )
         built = load_document(doc, variant=name)
         parsed = parse_run(spec, built, index=1, layer=_BASE_LAYER)
         handler = handler_for("predict")
@@ -967,8 +1038,7 @@ class TestAVariantMismatchIsRefused:
             run_document(doc)
         message = str(caught.value)
         assert "MIXES TWO BUILDS" in message
-        assert "variant: 'at_65', and reuse: 'cov' ran on variant: None" in \
-            message
+        assert "variant: 'at_65', and reuse: 'cov' ran on variant: None" in message
         assert message.startswith("runs['p']:")
 
     def test_the_samples_route_refuses_the_same_mismatch(self):
@@ -1007,10 +1077,9 @@ class TestAVariantMismatchIsRefused:
         join below, `is not` FAILS here and `!=` passes, which is what makes
         this test the thing that says `!=` rather than `is not`.
         """
-        same = "".join(["unity_", "gain"])   # equal, NOT the same object
+        same = "".join(["unity_", "gain"])  # equal, NOT the same object
         assert same == "unity_gain" and same is not "unity_gain"  # noqa: F632
-        both = document({**FISHER, "variant": "unity_gain"},
-                        {**FROM_COV, "variant": same})
+        both = document({**FISHER, "variant": "unity_gain"}, {**FROM_COV, "variant": same})
         neither = document(FISHER, FROM_COV)
         on_variant = np.asarray(run_document(both)["p"].product)
         on_base = np.asarray(run_document(neither)["p"].product)
@@ -1027,8 +1096,7 @@ class TestAVariantMismatchIsRefused:
         document's own 0.0078557 is a DIFFERENT model and 5.5x away; it is
         not the baseline for a mixing error and was mistaken for one once.
         """
-        doc = document({**FISHER, "variant": "at_65"},
-                       {**FROM_COV, "variant": "at_65"})
+        doc = document({**FISHER, "variant": "at_65"}, {**FROM_COV, "variant": "at_65"})
         doc["variants"] = self.AT_65
         unmixed = np.asarray(run_document(doc)["p"].product)
         mixed = np.asarray(self._bypass(self.AT_65, "at_65"))
@@ -1037,8 +1105,7 @@ class TestAVariantMismatchIsRefused:
         assert float(mixed[0, 4]) == pytest.approx(0.0014147, rel=1e-4)
         ratio = mixed / unmixed
         assert float(np.max(ratio)) == pytest.approx(0.98883, rel=1e-4)
-        assert float(np.max(np.abs(1.0 - ratio))) == pytest.approx(0.01117,
-                                                                   rel=1e-3)
+        assert float(np.max(np.abs(1.0 - ratio))) == pytest.approx(0.01117, rel=1e-3)
 
     def test_a_variant_that_moves_the_layout_is_the_packages_refusal(self):
         """Underneath the config guard, the package still speaks first.
@@ -1085,7 +1152,7 @@ class TestTheOptionalDependencyStaysOptional:
         base = {"PATH": "/usr/bin:/bin"}
         if os.environ.get("PYTHONPATH"):
             base["PYTHONPATH"] = os.environ["PYTHONPATH"]
-        proc = subprocess.run([sys.executable, "-c", script],
-                              capture_output=True, text=True, check=True,
-                              env=base)
+        proc = subprocess.run(
+            [sys.executable, "-c", script], capture_output=True, text=True, check=True, env=base
+        )
         assert proc.stdout.strip() == "[]", proc.stdout

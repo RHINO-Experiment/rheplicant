@@ -197,7 +197,9 @@ def _refuse_a_time_axis_the_stored_dtype_cannot_carry(times: jax.Array) -> None:
         if values.size == 1 or resolution <= FINEST_CADENCE_S:
             return
         raise _cannot_carry(
-            values.dtype, peak, resolution,
+            values.dtype,
+            peak,
+            resolution,
             f"all {values.size} samples on this axis hold that one value. An axis "
             "of identical samples is accepted only where that spacing is at most "
             f"{FINEST_CADENCE_S:g} s (values read as seconds, the unit "
@@ -210,16 +212,16 @@ def _refuse_a_time_axis_the_stored_dtype_cannot_carry(times: jax.Array) -> None:
     if resolution <= MAX_TIME_RESOLUTION_IN_SAMPLES * cadence:
         return
     raise _cannot_carry(
-        values.dtype, peak, resolution,
+        values.dtype,
+        peak,
+        resolution,
         f"the closest two distinct samples on this axis are {cadence:.6g} apart, "
         f"and coords.time must resolve its own sampling to at most "
         f"{MAX_TIME_RESOLUTION_IN_SAMPLES:g} of that.",
     )
 
 
-def _cannot_carry(
-    dtype: Any, peak: Any, resolution: float, finding: str
-) -> StateValidationError:
+def _cannot_carry(dtype: Any, peak: Any, resolution: float, finding: str) -> StateValidationError:
     """The refusal both branches above raise, with the finding in the middle."""
     return StateValidationError(
         f"coords.time is stored as {dtype} and reaches {float(peak):.9g}, "

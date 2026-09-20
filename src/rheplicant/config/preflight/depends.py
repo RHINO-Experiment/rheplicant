@@ -137,8 +137,7 @@ Requirement = tuple[str, str, str | None]
 _FEATURES: dict[tuple[str, str], tuple[Requirement, ...]] = {
     # resources.beams.<name>.format -- BEAM_FORMATS, all eight
     ("format", "cst"): (("limTOD", "limTOD", None),),
-    ("format", "uvbeam"): (("pyuvdata", "pyuvdata", None),
-                           ("limTOD", "limTOD", None)),
+    ("format", "uvbeam"): (("pyuvdata", "pyuvdata", None), ("limTOD", "limTOD", None)),
     ("format", "healpix"): (("healpy", "healpy", None),),
     ("format", "gaussian"): (("healpy", "healpy", None),),
     ("format", "npy"): (),
@@ -171,8 +170,7 @@ _FEATURES: dict[tuple[str, str], tuple[Requirement, ...]] = {
     ("sky_model", "uniform"): (),
     ("sky_model", "power_law"): (),
     ("sky_model", "maps"): (),
-    ("sky_model", "gdsm"): (("pygdsm", "pygdsm", None),
-                            ("limTOD", "limTOD", None)),
+    ("sky_model", "gdsm"): (("pygdsm", "pygdsm", None), ("limTOD", "limTOD", None)),
     ("sky_model", "python"): (),
     # observation.from_file, and every {file: {format: ...}} value node
     ("file", "rhino_hdf5"): (("h5py", "h5py", None),),
@@ -197,8 +195,7 @@ _FEATURES: dict[tuple[str, str], tuple[Requirement, ...]] = {
 #: A document without ``uniform_sampling:`` never reaches it, so folding this
 #: into :data:`_FEATURES` would refuse installs that run the document fine.
 _CONDITIONAL: dict[tuple[str, str], tuple[str, Requirement]] = {
-    ("engine", "driftscan"): ("uniform_sampling",
-                              ("limTOD", "limtod_jax", "check_uniform_grid")),
+    ("engine", "driftscan"): ("uniform_sampling", ("limTOD", "limtod_jax", "check_uniform_grid")),
 }
 
 #: The section-token -> the phrase that names the route in the user's own
@@ -230,26 +227,40 @@ _TRIGGER: dict[str, str] = {
 #: particular there is **no ``rheplicant[gdsm]``** -- the shipped gate advises
 #: ``limTOD[gdsm]`` and so does this one.
 _INSTALL: dict[str, str] = {
-    "limTOD": ('limTOD is a hard dependency of this package rather than an extra, so a '
-               'missing one means the install is broken or limTOD was removed: pip '
-               'install "limTOD[jax]>=1.10".'),
-    "healpy": ("healpy arrives with limTOD's own dependencies, so a missing one means "
-               'the install is incomplete: pip install "limTOD[jax]>=1.10".'),
-    "pygdsm": ("pygdsm is optional and arrives through limTOD's extra rather than "
-               'through this package\'s: pip install "limTOD[gdsm]". There is no '
-               "rheplicant[gdsm]."),
-    "pyuvdata": ("pyuvdata is the 'uvbeam' extra; the limTOD bridge itself ships with "
-                 'limTOD, so only the file reader is missing: uv pip install -e ".[uvbeam]".'),
-    "h5py": ("h5py is the 'rhino' extra and it does resolve from an index: uv pip "
-             'install -e ".[rhino]".'),
+    "limTOD": (
+        "limTOD is a hard dependency of this package rather than an extra, so a "
+        "missing one means the install is broken or limTOD was removed: pip "
+        'install "limTOD[jax]>=1.10".'
+    ),
+    "healpy": (
+        "healpy arrives with limTOD's own dependencies, so a missing one means "
+        'the install is incomplete: pip install "limTOD[jax]>=1.10".'
+    ),
+    "pygdsm": (
+        "pygdsm is optional and arrives through limTOD's extra rather than "
+        'through this package\'s: pip install "limTOD[gdsm]". There is no '
+        "rheplicant[gdsm]."
+    ),
+    "pyuvdata": (
+        "pyuvdata is the 'uvbeam' extra; the limTOD bridge itself ships with "
+        'limTOD, so only the file reader is missing: uv pip install -e ".[uvbeam]".'
+    ),
+    "h5py": (
+        "h5py is the 'rhino' extra and it does resolve from an index: uv pip "
+        'install -e ".[rhino]".'
+    ),
     "numpyro": ("numpyro is the 'numpyro' extra: pip install 'rheplicant[numpyro]'."),
-    "rhino-cal-jax": ("rhino-cal-jax is the 'cal' extra and is not on PyPI, so the extra "
-                      "names the requirement rather than resolving it, and the branch "
-                      'matters: uv pip install "rhino-cal-jax @ '
-                      'git+https://github.com/RHINO-Experiment/rhino-cal@feat/rhino-cal-jax".'),
-    "MomentRFI": ("MomentRFI is the 'rfi' extra and is not on PyPI, so the extra names "
-                  'the requirement rather than resolving it: uv pip install "MomentRFI @ '
-                  'git+https://github.com/zzhang0123/MomentRFI".'),
+    "rhino-cal-jax": (
+        "rhino-cal-jax is the 'cal' extra and is not on PyPI, so the extra "
+        "names the requirement rather than resolving it, and the branch "
+        'matters: uv pip install "rhino-cal-jax @ '
+        'git+https://github.com/RHINO-Experiment/rhino-cal@feat/rhino-cal-jax".'
+    ),
+    "MomentRFI": (
+        "MomentRFI is the 'rfi' extra and is not on PyPI, so the extra names "
+        'the requirement rather than resolving it: uv pip install "MomentRFI @ '
+        'git+https://github.com/zzhang0123/MomentRFI".'
+    ),
 }
 
 #: A requirement -> the sentence that says what this check did NOT probe.
@@ -262,7 +273,8 @@ _PROBE_NOTE: dict[Requirement, str] = {
         "Only the top-level limTOD is probed here: the submodules this layer reaches "
         "(limTOD.cstbeam, limTOD.uvbeam, limTOD.sky_model) are settled by their own "
         "gates when the resource is built, because probing one at this phase would "
-        "import limTOD -- measured at 1180.8 ms against this pass's 50 ms budget."),
+        "import limTOD -- measured at 1180.8 ms against this pass's 50 ms budget."
+    ),
 }
 
 #: ``(section-token, value)`` -> the route that needs nothing optional, where
@@ -271,23 +283,27 @@ _PROBE_NOTE: dict[Requirement, str] = {
 #: with no honest alternative gets no sentence, which is the other half of the
 #: same rule.
 _ALTERNATIVE: dict[tuple[str, str], str] = {
-    ("node", "MomentRFIFlaggingOperator"):
-        "The threshold-based FlaggingOperator needs none of it.",
-    ("engine", "driftscan"):
-        "engine: matrix takes a precomputed sky->TOD matrix and needs no optional "
-        "dependency (fixed pointing and beam only).",
-    ("engine", "general_pointing"):
-        "engine: matrix takes a precomputed sky->TOD matrix and needs no optional "
-        "dependency (fixed pointing and beam only).",
+    ("node", "MomentRFIFlaggingOperator"): "The threshold-based FlaggingOperator needs none of it.",
+    (
+        "engine",
+        "driftscan",
+    ): "engine: matrix takes a precomputed sky->TOD matrix and needs no optional "
+    "dependency (fixed pointing and beam only).",
+    (
+        "engine",
+        "general_pointing",
+    ): "engine: matrix takes a precomputed sky->TOD matrix and needs no optional "
+    "dependency (fixed pointing and beam only).",
 }
 
 #: The tail every A35 finding carries: why the sentence is said HERE.
-_TAIL = ("Said from the document's text, so that a missing dependency arrives before the "
-         "run rather than as an ImportError in the middle of one (check A35).")
+_TAIL = (
+    "Said from the document's text, so that a missing dependency arrives before the "
+    "run rather than as an ImportError in the middle of one (check A35)."
+)
 
 
-def _requirements(token: str, value: str,
-                  siblings: Any) -> tuple[Requirement, ...]:
+def _requirements(token: str, value: str, siblings: Any) -> tuple[Requirement, ...]:
     """Everything ``(token, value)`` needs, the sibling-conditional one included."""
     required = _FEATURES.get((token, value))
     if required is None:
@@ -341,18 +357,21 @@ def _verdict(requirement: Requirement) -> str | None:
     return None if found is not None else "absent"
 
 
-def _message(where: str, token: str, value: str, requirement: Requirement,
-             verdict: str) -> str:
+def _message(where: str, token: str, value: str, requirement: Requirement, verdict: str) -> str:
     """The whole sentence, built from the token rather than hoisted."""
     distribution, module, attribute = requirement
     trigger = _TRIGGER[token].format(value=value)
     if verdict == "absent":
-        head = (f"{where}: {trigger} needs the {distribution} distribution, and {module} "
-                f"is not importable in this environment.")
+        head = (
+            f"{where}: {trigger} needs the {distribution} distribution, and {module} "
+            f"is not importable in this environment."
+        )
     else:
-        head = (f"{where}: {trigger} needs {module}.{attribute}, and the {module} this "
-                f"process holds does not carry it -- the module imports and the symbol is "
-                f"missing, which is what a {distribution} older than this route looks like.")
+        head = (
+            f"{where}: {trigger} needs {module}.{attribute}, and the {module} this "
+            f"process holds does not carry it -- the module imports and the symbol is "
+            f"missing, which is what a {distribution} older than this route looks like."
+        )
     clauses = [head, _INSTALL[distribution]]
     note = _PROBE_NOTE.get(requirement)
     if note is not None:
@@ -538,8 +557,7 @@ def _transforms(where: str, spec: Mapping) -> Iterable[tuple[str, str, Any, Any]
             yield (where, "transform", word, block)
 
 
-def _in_layer(layer: Mapping[str, Any],
-              seen: dict[Requirement, str | None]) -> Iterable[Finding]:
+def _in_layer(layer: Mapping[str, Any], seen: dict[Requirement, str | None]) -> Iterable[Finding]:
     """A35 over one layer of the document.
 
     ``seen`` is one pass's answers, and it is a correctness-preserving cache

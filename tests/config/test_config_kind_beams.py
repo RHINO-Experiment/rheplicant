@@ -17,14 +17,21 @@ from rheplicant.config.resources import build_resources
 def context(tmp_path):
     np.save(tmp_path / "beam.npy", np.ones((4, 192)))
     return ResolutionContext(
-        freq=jnp.linspace(60e6, 85e6, 4), time=jnp.arange(8.0), dtype="float32",
+        freq=jnp.linspace(60e6, 85e6, 4),
+        time=jnp.arange(8.0),
+        dtype="float32",
         base_dir=str(tmp_path),
     )
 
 
 def _beam(**overrides):
-    spec = {"format": "npy", "path": "beam.npy", "nside": 4, "normalize": "pixel_sum",
-            "frame": "beam_local"}
+    spec = {
+        "format": "npy",
+        "path": "beam.npy",
+        "nside": 4,
+        "normalize": "pixel_sum",
+        "frame": "beam_local",
+    }
     spec.update(overrides)
     # None strips a key entirely rather than leaving it in the spec with a
     # None value: format: gaussian/inline/python callers override path=None
@@ -44,9 +51,15 @@ def _uvbeam(path, **overrides):
 
 
 def _healpix(path, freq=None, **overrides):
-    spec = {"format": "healpix", "path": path, "nside": 4, "normalize": "none",
-            "frame": "beam_local", "order": "ring",
-            "freq": freq if freq is not None else {"from_grid": "freq"}}
+    spec = {
+        "format": "healpix",
+        "path": path,
+        "nside": 4,
+        "normalize": "none",
+        "frame": "beam_local",
+        "order": "ring",
+        "freq": freq if freq is not None else {"from_grid": "freq"},
+    }
     spec.update(overrides)
     return {"beams": {"horn": spec}}
 
@@ -63,9 +76,11 @@ class TestTheFormats:
         died before step 1 -- the first thing a new user does is run a shipped
         example on a machine with no beam files."""
         built = build_resources(
-            _beam(format="inline", path=None,
-                  maps={"full": {"shape": ["n_freq", 192], "value": 1.0},
-                        "unit": "dimensionless"}),
+            _beam(
+                format="inline",
+                path=None,
+                maps={"full": {"shape": ["n_freq", 192], "value": 1.0}, "unit": "dimensionless"},
+            ),
             context,
         )
         assert built.resources["resources.beams.horn"].maps.shape == (4, 192)
@@ -86,8 +101,11 @@ class TestTheFormats:
             _beam(format="gaussian", path=None, fwhm_deg={"value": 30.0, "unit": "deg"}), context
         )
         via_sigma = build_resources(
-            _beam(format="gaussian", path=None,
-                  sigma_deg={"value": 30.0 / 2.3548200450309493, "unit": "deg"}),
+            _beam(
+                format="gaussian",
+                path=None,
+                sigma_deg={"value": 30.0 / 2.3548200450309493, "unit": "deg"},
+            ),
             context,
         )
         assert np.allclose(
@@ -101,8 +119,9 @@ class TestTheFormats:
         shape error, which names neither the key nor the run."""
         with pytest.raises(ConfigError) as excinfo:
             build_resources(
-                _beam(format="gaussian", path=None,
-                      sigma_deg={"list": [10.0, 20.0], "unit": "deg"}),
+                _beam(
+                    format="gaussian", path=None, sigma_deg={"list": [10.0, 20.0], "unit": "deg"}
+                ),
                 context,
             )
         message = str(excinfo.value)
@@ -111,8 +130,7 @@ class TestTheFormats:
 
     def test_python(self, context):
         built = build_resources(
-            _beam(format="python", path=None, python="jax.numpy:ones",
-                  literal={"shape": [4, 192]}),
+            _beam(format="python", path=None, python="jax.numpy:ones", literal={"shape": [4, 192]}),
             context,
         )
         assert built.resources["resources.beams.horn"].maps.shape == (4, 192)
@@ -124,15 +142,18 @@ class TestTheFormats:
         choice by writing the same key twice."""
         with pytest.raises(ConfigError) as excinfo:
             build_resources(
-                _beam(format="python", path=None, python="jax.numpy:ones",
-                      args={"shape": {"list": [4, 192]}}, literal={"shape": [4, 192]}),
+                _beam(
+                    format="python",
+                    path=None,
+                    python="jax.numpy:ones",
+                    args={"shape": {"list": [4, 192]}},
+                    literal={"shape": [4, 192]},
+                ),
                 context,
             )
         assert "shape" in str(excinfo.value)
 
-    def test_python_argument_targets_are_validated_before_import(
-        self, context, monkeypatch
-    ):
+    def test_python_argument_targets_are_validated_before_import(self, context, monkeypatch):
         imported = []
         monkeypatch.setattr(
             beams_module,
@@ -266,8 +287,7 @@ class TestHorizonTruncation:
         assert "80" in message
         assert "90" in message
 
-    def test_the_el_deg_refusal_names_both_settings_a_projector_mask_needs(
-            self, context):
+    def test_the_el_deg_refusal_names_both_settings_a_projector_mask_needs(self, context):
         """The remedy used to name ``horizon.mode: projector_mask`` alone,
         which masks nothing: the cut happens only on a driftscan projector
         that also sets ``horizon_mask: true``."""
@@ -283,41 +303,50 @@ class TestHorizonTruncation:
             "el_deg. The mode alone masks nothing."
         )
 
-    @pytest.mark.parametrize(("written", "expected"), [
-        ({"el_deg": 90.0},
-         "resources.beams.horn: horizon.el_deg is read only by horizon.mode: "
-         "truncate_map, which cuts the beam map itself. Under projector_mask "
-         "the cut is the projector's: its horizon_mask: true applies it at the "
-         "projector's own el_deg and apodises it by the projector's own "
-         "apod_deg. Delete it from this entry, or, if it is inherited through "
-         "extends:, write ~el_deg: null under this entry's horizon: to drop "
-         "it here. For a taper, set apod_deg on the projector."),
-        ({"el_deg": 90.0, "apod_deg": 5.0},
-         "resources.beams.horn: horizon.el_deg and horizon.apod_deg are read "
-         "only by horizon.mode: truncate_map, which cuts the beam map itself. "
-         "Under projector_mask the cut is the projector's: its horizon_mask: "
-         "true applies it at the projector's own el_deg and apodises it by "
-         "the projector's own apod_deg. Delete them from this entry, or, if "
-         "they are inherited through extends:, write ~el_deg: null and "
-         "~apod_deg: null under this entry's horizon: to drop them here. For "
-         "a taper, set apod_deg on the projector."),
-    ], ids=["el_deg", "both"])
-    def test_projector_mask_refuses_the_two_angles_it_never_reads(
-            self, context, written, expected):
+    @pytest.mark.parametrize(
+        ("written", "expected"),
+        [
+            (
+                {"el_deg": 90.0},
+                "resources.beams.horn: horizon.el_deg is read only by horizon.mode: "
+                "truncate_map, which cuts the beam map itself. Under projector_mask "
+                "the cut is the projector's: its horizon_mask: true applies it at the "
+                "projector's own el_deg and apodises it by the projector's own "
+                "apod_deg. Delete it from this entry, or, if it is inherited through "
+                "extends:, write ~el_deg: null under this entry's horizon: to drop "
+                "it here. For a taper, set apod_deg on the projector.",
+            ),
+            (
+                {"el_deg": 90.0, "apod_deg": 5.0},
+                "resources.beams.horn: horizon.el_deg and horizon.apod_deg are read "
+                "only by horizon.mode: truncate_map, which cuts the beam map itself. "
+                "Under projector_mask the cut is the projector's: its horizon_mask: "
+                "true applies it at the projector's own el_deg and apodises it by "
+                "the projector's own apod_deg. Delete them from this entry, or, if "
+                "they are inherited through extends:, write ~el_deg: null and "
+                "~apod_deg: null under this entry's horizon: to drop them here. For "
+                "a taper, set apod_deg on the projector.",
+            ),
+        ],
+        ids=["el_deg", "both"],
+    )
+    def test_projector_mask_refuses_the_two_angles_it_never_reads(self, context, written, expected):
         """Refused rather than dropped: ``_truncate`` is the only reader of
         either angle, and a taper written here under ``projector_mask`` would
         vanish without a word."""
         with pytest.raises(ConfigError) as excinfo:
-            build_resources(_beam(horizon={"mode": "projector_mask", **written}),
-                            context)
+            build_resources(_beam(horizon={"mode": "projector_mask", **written}), context)
         assert str(excinfo.value) == expected
 
-    @pytest.mark.parametrize("horizon", [
-        {"mode": "none", "apod_deg": 5.0},
-        {"apod_deg": 5.0},
-    ], ids=["mode-none", "mode-defaulted"])
-    def test_mode_none_refuses_the_two_angles_it_never_reads(
-            self, context, horizon):
+    @pytest.mark.parametrize(
+        "horizon",
+        [
+            {"mode": "none", "apod_deg": 5.0},
+            {"apod_deg": 5.0},
+        ],
+        ids=["mode-none", "mode-defaulted"],
+    )
+    def test_mode_none_refuses_the_two_angles_it_never_reads(self, context, horizon):
         """``none`` is also the default, so an angle written with no mode at
         all is the same unread key."""
         with pytest.raises(ConfigError) as excinfo:
@@ -332,8 +361,7 @@ class TestHorizonTruncation:
             "horizon.mode: truncate_map."
         )
 
-    def test_an_inherited_angle_is_refused_and_the_tilde_remedy_builds(
-            self, context):
+    def test_an_inherited_angle_is_refused_and_the_tilde_remedy_builds(self, context):
         """``extends:`` merges the parent's ``horizon`` into the child's, so a
         ``projector_mask`` child of a ``truncate_map`` parent carries the
         parent's ``el_deg``.  ``build_beam`` sees only the merged spec and
@@ -346,13 +374,12 @@ class TestHorizonTruncation:
         with pytest.raises(ConfigError) as excinfo:
             build_resources({"beams": {"horn": spec, "child": child}}, context)
         assert str(excinfo.value).startswith(
-            "resources.beams.child: horizon.el_deg is read only by")
+            "resources.beams.child: horizon.el_deg is read only by"
+        )
         assert "if it is inherited through extends:" in str(excinfo.value)
-        fixed = {"extends": "horn",
-                 "horizon": {"mode": "projector_mask", "~el_deg": None}}
+        fixed = {"extends": "horn", "horizon": {"mode": "projector_mask", "~el_deg": None}}
         pytest.importorskip("limtod_jax")
-        built = build_resources({"beams": {"horn": spec, "child": fixed}},
-                                context)
+        built = build_resources({"beams": {"horn": spec, "child": fixed}}, context)
         assert "resources.beams.child" in built.resources
 
     def test_projector_mask_without_the_angles_builds(self, context):
@@ -385,7 +412,9 @@ class TestUvbeam:
         az = np.linspace(0.0, 2 * np.pi, 73)[:-1]
         za = np.linspace(0.0, np.deg2rad(90.0), 41)
         uvb = GaussianBeam(sigma=np.deg2rad(20.0)).to_uvbeam(
-            freq_array=np.array([55e6, 90e6]), axis1_array=az, axis2_array=za,
+            freq_array=np.array([55e6, 90e6]),
+            axis1_array=az,
+            axis2_array=za,
             beam_type="efield",
         )
         uvb.write_beamfits(str(tmp_path / "horn.beamfits"))
@@ -399,9 +428,7 @@ class TestUvbeam:
         built = build_resources(_uvbeam(beamfits), context)
         assert built.resources["resources.beams.horn"].maps.shape == (4, 192)
 
-    def test_the_peak_is_at_the_pole_and_below_horizon_is_exactly_zero(
-        self, context, beamfits
-    ):
+    def test_the_peak_is_at_the_pole_and_below_horizon_is_exactly_zero(self, context, beamfits):
         """RING pixel 0 sits at the pole the beam points at, and the za grid
         stops at 90 deg, so the bridge's fill_value=0.0 makes every strictly-
         south pixel (indices 104: at nside 4) exactly zero. A wrong azimuth or
@@ -412,11 +439,14 @@ class TestUvbeam:
         assert int(jnp.argmax(maps[0])) == 0
         assert float(jnp.abs(maps[:, 104:]).max()) == 0.0
 
-    @pytest.mark.parametrize("key,value", [
-        ("frame", "beam_local"),
-        ("phi0_deg", {"value": 0.0, "unit": "deg"}),
-        ("phi_sense", "ccw"),
-    ])
+    @pytest.mark.parametrize(
+        "key,value",
+        [
+            ("frame", "beam_local"),
+            ("phi0_deg", {"value": 0.0, "unit": "deg"}),
+            ("phi_sense", "ccw"),
+        ],
+    )
     def test_the_chart_keys_are_refused(self, key, value, context, beamfits):
         """The bridge carries the azimuth convention itself; a declared chart
         is either redundant or a contradiction the maps cannot settle."""
@@ -525,7 +555,9 @@ class TestHealpixFormat:
         single = np.arange(192.0) + 500.0
         hp.write_map(str(tmp_path / "single.fits"), single)
         one_channel = ResolutionContext(
-            freq=jnp.asarray([70e6]), time=jnp.arange(8.0), dtype="float32",
+            freq=jnp.asarray([70e6]),
+            time=jnp.arange(8.0),
+            dtype="float32",
             base_dir=str(tmp_path),
         )
         built = build_resources(_healpix("single.fits"), one_channel)
@@ -555,8 +587,7 @@ class TestHealpixFormat:
         names, on the beam side."""
         other = [float(v) for v in np.linspace(100e6, 125e6, 4)]
         with pytest.raises(ConfigError) as excinfo:
-            build_resources(_healpix(ring_file, freq={"list": other, "unit": "Hz"}),
-                            context)
+            build_resources(_healpix(ring_file, freq={"list": other, "unit": "Hz"}), context)
         assert "different channels" in str(excinfo.value)
 
 
@@ -579,8 +610,14 @@ class TestUnknownKeysAreRefused:
         """sufix: -- not suffix: -- is silently unread by spec.get('suffix',
         '.txt') today: the typo's value is discarded and the default '.txt'
         is used instead, with no error anywhere."""
-        spec = _beam(format="cst", path=None, frame=None, directory="cst/",
-                      phi0_deg={"value": 0.0, "unit": "deg"}, phi_sense="ccw")
+        spec = _beam(
+            format="cst",
+            path=None,
+            frame=None,
+            directory="cst/",
+            phi0_deg={"value": 0.0, "unit": "deg"},
+            phi_sense="ccw",
+        )
         spec["beams"]["horn"]["sufix"] = ".txt"
         with pytest.raises(ConfigError, match="sufix"):
             build_resources(spec, context)
@@ -618,9 +655,7 @@ class TestTheHorizonInnerKeys:
                 f"defaulted path unexpectedly looked up: {path}"
             ),
         )
-        assert _horizon_angle(
-            "resources.beams.horn", {}, "el_deg", 90.0, configured
-        ) == 90.0
+        assert _horizon_angle("resources.beams.horn", {}, "el_deg", 90.0, configured) == 90.0
         _, destination, facts = trace.deliveries[0]
         assert destination.document_path == "resources.beams.horn.horizon.el_deg"
         assert facts["origin"].kind == "rheplicant-default"
@@ -641,6 +676,5 @@ class TestPresenceRefusals:
     def test_a_list_args_is_refused_as_not_a_mapping(self, context):
         with pytest.raises(ConfigError, match="mapping of argument name"):
             build_resources(
-                _beam(format="python", path=None, python="numpy:ones",
-                      args=[12]),
-                context)
+                _beam(format="python", path=None, python="numpy:ones", args=[12]), context
+            )

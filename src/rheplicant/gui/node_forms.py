@@ -75,9 +75,7 @@ _RESOURCE_KINDS: dict[str, str] = {
 
 _SHAPE_REASON = "Node settings are not a mapping; edit them as YAML."
 
-Control = Literal[
-    "quantity", "integer", "text", "select", "toggle", "opaque", "resource"
-]
+Control = Literal["quantity", "integer", "text", "select", "toggle", "opaque", "resource"]
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -334,8 +332,8 @@ def _field_widgets(node_id: str, catalog: FormCatalog) -> tuple[WidgetMetadata, 
         widget
         for widget in catalog.widgets
         if widget.path.startswith(prefix)
-        and "." not in widget.path[len(prefix):]
-        and widget.path[len(prefix):] not in (_TYPE_KEY, "eqx_leaves")
+        and "." not in widget.path[len(prefix) :]
+        and widget.path[len(prefix) :] not in (_TYPE_KEY, "eqx_leaves")
     )
 
 
@@ -491,8 +489,7 @@ def from_route_fields(
     if keys is None:
         return ()
     declared = {
-        widget.path.rsplit(".", 1)[-1]: widget
-        for widget in _field_widgets(node_id, catalog)
+        widget.path.rsplit(".", 1)[-1]: widget for widget in _field_widgets(node_id, catalog)
     }
     return tuple(
         _project_field(declared[key], settings, None, resources)
@@ -636,10 +633,7 @@ def _operator_settings(
     owned = frozenset(field.name for field in fields)
     named = owned | {_TYPE_KEY}
     by_class = {
-        cls.__name__: frozenset(
-            _class_fields(node_id, cls.__name__, catalog)
-        )
-        for cls in classes
+        cls.__name__: frozenset(_class_fields(node_id, cls.__name__, catalog)) for cls in classes
     }
     return NodeFieldSet(
         node_id=node_id,

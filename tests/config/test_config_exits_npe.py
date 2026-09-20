@@ -109,8 +109,7 @@ class TestTheBank:
         # because the columns of thetas are laid out in ITS names order and
         # Task 8 unravels the draws through the same object.
         built = npe_built()
-        space, thetas, data = _simulate_bank(npe_spec(), built,
-                                             built.inference.npe)
+        space, thetas, data = _simulate_bank(npe_spec(), built, built.inference.npe)
         assert thetas.shape == (64, 1)
         assert data.shape == (64, 16, 8)
         assert thetas.dtype == jnp.float32 and data.dtype == jnp.float32
@@ -122,15 +121,12 @@ class TestTheBank:
         # executes.  Two DIFFERENT declared sizes are what it cannot survive.
         eight = npe_built(npe={"bank": {"n_simulations": 8}})
         sixteen = npe_built(npe={"bank": {"n_simulations": 16}})
-        _, thetas8, data8 = _simulate_bank(npe_spec(), eight,
-                                           eight.inference.npe)
-        _, thetas16, _ = _simulate_bank(npe_spec(), sixteen,
-                                        sixteen.inference.npe)
+        _, thetas8, data8 = _simulate_bank(npe_spec(), eight, eight.inference.npe)
+        _, thetas16, _ = _simulate_bank(npe_spec(), sixteen, sixteen.inference.npe)
         assert thetas8.shape[0] == 8 and data8.shape[0] == 8
         assert thetas16.shape[0] == 16
 
-    def test_the_bank_key_is_runtime_seeds_bank_and_not_another_subsection(
-            self):
+    def test_the_bank_key_is_runtime_seeds_bank_and_not_another_subsection(self):
         # The four seeds are the one place a copy-paste is invisible: wiring
         # spec.create's seed into the bank leaves every shape, dtype and
         # finiteness assertion above green.  These three numbers are the first
@@ -140,12 +136,9 @@ class TestTheBank:
         built = npe_built(npe={"bank": {"n_simulations": 8}})
         assert seed_for("bank", built.context) == 11
         _, thetas, _ = _simulate_bank(npe_spec(), built, built.inference.npe)
-        assert float(thetas[0, 0]) == pytest.approx(0.8553414344787598,
-                                                    rel=1e-6)
-        assert float(thetas[1, 0]) == pytest.approx(0.3442210555076599,
-                                                    rel=1e-6)
-        assert float(thetas[2, 0]) == pytest.approx(1.096588134765625,
-                                                    rel=1e-6)
+        assert float(thetas[0, 0]) == pytest.approx(0.8553414344787598, rel=1e-6)
+        assert float(thetas[1, 0]) == pytest.approx(0.3442210555076599, rel=1e-6)
+        assert float(thetas[2, 0]) == pytest.approx(1.096588134765625, rel=1e-6)
 
     def test_the_bank_key_comes_from_the_document_and_is_not_a_constant(self):
         # The test above pins three floats from key(11) and so discriminates
@@ -161,8 +154,7 @@ class TestTheBank:
         # its twin.  Two documents differing ONLY in runtime.seeds.bank must
         # bank different thetas.
         built = npe_built(npe={"bank": {"n_simulations": 8}})
-        other = npe_built(npe={"bank": {"n_simulations": 8}},
-                          seeds={**NPE_SEEDS, "bank": 88})
+        other = npe_built(npe={"bank": {"n_simulations": 8}}, seeds={**NPE_SEEDS, "bank": 88})
         assert seed_for("bank", other.context) == 88
         _, thetas, _ = _simulate_bank(npe_spec(), built, built.inference.npe)
         _, others, _ = _simulate_bank(npe_spec(), other, other.inference.npe)
@@ -220,9 +212,10 @@ class TestTheBank:
         # `_prior_gates` stands down on it for that reason).  The subject of
         # this test is unchanged: `_simulate_bank`'s route to
         # `_sampled_space`, driven directly.
-        built = npe_built({"expect": "refuse"},
-                          parameters={"g": {"init": 1.0, "linear": True,
-                                            "into": "gain.gain"}})
+        built = npe_built(
+            {"expect": "refuse"},
+            parameters={"g": {"init": 1.0, "linear": True, "into": "gain.gain"}},
+        )
         with pytest.raises(ConfigError, match="SIMULATES a bank") as caught:
             _simulate_bank(npe_spec(), built, built.inference.npe)
         message = str(caught.value)
@@ -253,8 +246,7 @@ class TestTheEstimator:
         # not 128, which is what a create called (data, thetas) would report.
         built = npe_built(npe={"bank": {"n_simulations": 8}})
         _, thetas, data = self._pairs(built)
-        estimator = _estimator(npe_spec(), built, built.inference.npe,
-                               thetas, data)
+        estimator = _estimator(npe_spec(), built, built.inference.npe, thetas, data)
         assert estimator.n_components == 1
         assert estimator.net.width_size == 16
         assert estimator.net.depth == 2
@@ -270,17 +262,14 @@ class TestTheEstimator:
         # 2C's carry-forward note says the opposite and is wrong about the
         # caller.  9 and not 16: the value has to differ from NPE_SECTION's
         # own so that a passthrough reading the wrong subsection is visible.
-        built = npe_built(npe={"bank": {"n_simulations": 8},
-                               "create": {"width": 9}})
+        built = npe_built(npe={"bank": {"n_simulations": 8}, "create": {"width": 9}})
         _, thetas, data = self._pairs(built)
-        assert _estimator(npe_spec(), built, built.inference.npe,
-                          thetas, data).net.width_size == 9
+        assert _estimator(npe_spec(), built, built.inference.npe, thetas, data).net.width_size == 9
 
     def test_an_undeclared_knob_is_materialized_as_the_package_default(self):
         built = npe_built(npe={"bank": {"n_simulations": 8}})
         _, thetas, data = self._pairs(built)
-        estimator = _estimator(npe_spec(), built, built.inference.npe,
-                               thetas, data)
+        estimator = _estimator(npe_spec(), built, built.inference.npe, thetas, data)
         assert estimator.min_scale == MIN_SCALE
         assert built.inference.npe.create["min_scale"] == MIN_SCALE
 
@@ -294,11 +283,9 @@ class TestTheEstimator:
         # package's default arrives, and this one proves the document's does.
         # 0.5 rather than a near-MIN_SCALE value so the two cannot be
         # confused by a comparison at any tolerance.
-        built = npe_built(npe={"bank": {"n_simulations": 8},
-                               "create": {"min_scale": 0.5}})
+        built = npe_built(npe={"bank": {"n_simulations": 8}, "create": {"min_scale": 0.5}})
         _, thetas, data = self._pairs(built)
-        estimator = _estimator(npe_spec(), built, built.inference.npe,
-                               thetas, data)
+        estimator = _estimator(npe_spec(), built, built.inference.npe, thetas, data)
         assert estimator.min_scale == 0.5
 
     def test_the_embed_reaches_create_and_resizes_the_input_layer(self):
@@ -311,15 +298,16 @@ class TestTheEstimator:
         # An executor that dropped embed= entirely still gets 128, which is
         # why the assertion that matters is on the NON-default -- and the
         # second half pins the default so the two cannot be confused.
-        embedded = npe_built(npe={"bank": {"n_simulations": 8},
-                                  "embed": {"python": "jax.numpy:diagonal"}})
+        embedded = npe_built(
+            npe={"bank": {"n_simulations": 8}, "embed": {"python": "jax.numpy:diagonal"}}
+        )
         _, thetas, data = self._pairs(embedded)
-        assert _estimator(npe_spec(), embedded, embedded.inference.npe,
-                          thetas, data).net.in_size == 8
+        assert (
+            _estimator(npe_spec(), embedded, embedded.inference.npe, thetas, data).net.in_size == 8
+        )
         plain = npe_built(npe={"bank": {"n_simulations": 8}})
         _, pt, pd = self._pairs(plain)
-        assert _estimator(npe_spec(), plain, plain.inference.npe,
-                          pt, pd).net.in_size == 128
+        assert _estimator(npe_spec(), plain, plain.inference.npe, pt, pd).net.in_size == 128
 
     def test_the_create_key_is_runtime_seeds_create(self):
         # Two documents differing ONLY in runtime.seeds.create must give
@@ -330,16 +318,12 @@ class TestTheEstimator:
         # SAME pairs go into both calls, so the only difference between the
         # two estimators is the key create was handed.
         built = npe_built(npe={"bank": {"n_simulations": 8}})
-        other = npe_built(npe={"bank": {"n_simulations": 8}},
-                          seeds={**NPE_SEEDS, "create": 88})
+        other = npe_built(npe={"bank": {"n_simulations": 8}}, seeds={**NPE_SEEDS, "create": 88})
         assert seed_for("create", other.context) == 88
         _, thetas, data = self._pairs(built)
-        first = _estimator(npe_spec(), built, built.inference.npe,
-                           thetas, data)
-        second = _estimator(npe_spec(), other, other.inference.npe,
-                            thetas, data)
-        assert not jnp.array_equal(first.net.layers[0].weight,
-                                   second.net.layers[0].weight)
+        first = _estimator(npe_spec(), built, built.inference.npe, thetas, data)
+        second = _estimator(npe_spec(), other, other.inference.npe, thetas, data)
+        assert not jnp.array_equal(first.net.layers[0].weight, second.net.layers[0].weight)
 
 
 class TestTheSectionIsRequired:
@@ -368,12 +352,10 @@ class TestTheSectionIsRequired:
         del doc["inference"]["npe"]
         built = built_run(doc)
         assert built.inference.npe is None
-        with pytest.raises(ConfigError,
-                           match="declares no inference.npe:") as caught:
+        with pytest.raises(ConfigError, match="declares no inference.npe:") as caught:
             _npe_spec(npe_spec(), built)
         assert str(caught.value).startswith("runs['amortized']: ")
-        with pytest.raises(ConfigError,
-                           match="declares no inference.npe:") as caught:
+        with pytest.raises(ConfigError, match="declares no inference.npe:") as caught:
             load_document(doc)
         assert str(caught.value).startswith("runs['amortized']: ")
 
@@ -392,8 +374,7 @@ class TestTheSectionIsRequired:
 
 
 class TestTheDocumentBuilder:
-    def test_extra_runs_ride_beside_the_npe_run_and_are_not_merged_over_it(
-            self):
+    def test_extra_runs_ride_beside_the_npe_run_and_are_not_merged_over_it(self):
         # ``npe_document`` takes ``*extra_runs`` for Task 9, whose predict
         # reuses this run -- and a parameter no test exercises is a parameter
         # a later edit can drop while every test stays green.  Both halves
@@ -464,8 +445,7 @@ class TestTheTrainedPosterior:
         product = npe_product()
         built = npe_built()
         assert seed_for("sample", built.context) == 14
-        redrawn = product.posterior.sample(
-            _observed(npe_spec(), built), jax.random.key(14), 100)
+        redrawn = product.posterior.sample(_observed(npe_spec(), built), jax.random.key(14), 100)
         assert redrawn.shape == (100, 1)
         assert jnp.array_equal(redrawn.reshape(100), product.samples["g"])
 
@@ -480,10 +460,8 @@ class TestTheTrainedPosterior:
         # both orders bind, and only one runs.
         at_truth = npe_product()
         at_one = npe_product(at={"g": 1.0})
-        assert float(jnp.mean(at_truth.samples["g"])) == pytest.approx(
-            1.5614667, rel=1e-4)
-        assert float(jnp.mean(at_one.samples["g"])) == pytest.approx(
-            1.0128615, rel=1e-4)
+        assert float(jnp.mean(at_truth.samples["g"])) == pytest.approx(1.5614667, rel=1e-4)
+        assert float(jnp.mean(at_one.samples["g"])) == pytest.approx(1.0128615, rel=1e-4)
         # and the honest band, which survives a jax or hardware change the two
         # pins above would not: the draws sit on the data, and the two answers
         # are half a unit apart against a draw sd of 0.22.
@@ -567,8 +545,7 @@ class TestTheTrainedPosterior:
         base = npe_product()
         for name, value in (("bank", 77), ("create", 88), ("sample", 99)):
             moved = npe_product(seeds={**NPE_SEEDS, name: value})
-            assert not jnp.array_equal(moved.samples["g"],
-                                       base.samples["g"]), name
+            assert not jnp.array_equal(moved.samples["g"], base.samples["g"]), name
         # the train seed shuffles minibatches, so it moves the LOSS CURVE
         # rather than moving the draws by a margin worth a tolerance.
         shuffled = npe_product(seeds={**NPE_SEEDS, "train": 99})
@@ -623,8 +600,7 @@ class TestTheUnravel:
         # "the draws are 18 wide and inference.parameters accounts for 3");
         # one that permuted the WIDTHS lands here instead.
         product = trio_product()
-        consumed = sum(math.prod(stack.shape[1:])
-                       for stack in product.samples.values())
+        consumed = sum(math.prod(stack.shape[1:]) for stack in product.samples.values())
         assert consumed == product.posterior.n_params == 18
 
     def test_the_unravel_is_told_which_run_it_is_serving(self, monkeypatch):
@@ -708,10 +684,8 @@ class TestThePriorGate:
         # it sent a reader the wrong way once.
         assert "prediction" not in chain.product.samples
         assert chain.product.n_draw == 200
-        assert float(jnp.mean(chain.product.samples["d"])) == pytest.approx(
-            1.2, abs=0.01)
-        assert float(jnp.mean(chain.product.samples["a"])) == pytest.approx(
-            12.0, abs=0.05)
+        assert float(jnp.mean(chain.product.samples["d"])) == pytest.approx(1.2, abs=0.01)
+        assert float(jnp.mean(chain.product.samples["a"])) == pytest.approx(12.0, abs=0.05)
 
     def test_the_refusal_is_not_the_missing_section_one(self):
         # joint_prior_document writes inference.npe: onto the document on
@@ -755,9 +729,11 @@ class TestThePriorGate:
         # one test, so a clause appended to the covered branch as well is
         # still the mutation only this test catches.
         joint = str(joint_results()["amortized"].error)
-        bare = str(run_document(npe_document({"expect": "refuse"},
-                                             parameters=PRIOR_FREE))
-                   ["amortized"].error)
+        bare = str(
+            run_document(npe_document({"expect": "refuse"}, parameters=PRIOR_FREE))[
+                "amortized"
+            ].error
+        )
         assert "SIMULATES a bank" in bare
         assert "which is why kind: nuts accepts this space" in joint
         assert "or run kind: nuts" in joint
@@ -803,8 +779,7 @@ class TestTheRunLevelParse:
     """Plan 4A Task 9: npe's parse is the empty sweep plus the section's
     presence -- no simulation, no training, no draw."""
 
-    def test_parse_touches_no_science_and_projects_empty_views(
-            self, monkeypatch):
+    def test_parse_touches_no_science_and_projects_empty_views(self, monkeypatch):
         import rheplicant.inference as inference
         from _rheplicant_bootstrap.variants import LayerRef
         from rheplicant.config.sections.exit_support import parse_run
@@ -815,8 +790,11 @@ class TestTheRunLevelParse:
         monkeypatch.setattr(inference, "simulate_pairs", explode)
         monkeypatch.setattr(inference, "NeuralPosterior", explode)
         monkeypatch.setattr(inference, "train_posterior", explode)
-        parsed = parse_run(npe_spec(), npe_built(), index=0,
-                           layer=LayerRef(kind="base", name=None, prefix="",
-                                          document={}, declared_runs=None))
+        parsed = parse_run(
+            npe_spec(),
+            npe_built(),
+            index=0,
+            layer=LayerRef(kind="base", name=None, prefix="", document={}, declared_runs=None),
+        )
         assert dict(parsed.parsed.execution) == {}
         assert dict(parsed.parsed.resolved) == {}

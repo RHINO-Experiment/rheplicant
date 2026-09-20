@@ -27,7 +27,11 @@ def test_the_top_level_keys_are_exactly_the_six_the_rpc_promises():
     as a KeyError, not as a diff -- so this is asserted as a set, not as a
     handful of membership checks that would miss an extra key."""
     assert set(json_schema()) == {
-        "schemaVersion", "sections", "exits", "operators", "transforms",
+        "schemaVersion",
+        "sections",
+        "exits",
+        "operators",
+        "transforms",
         "catalogs",
     }
 
@@ -80,8 +84,7 @@ class TestSections:
         assert required == {"runtime", "observation", "model", "runs"}
 
     def test_campaign_is_present_and_not_required(self):
-        sections = {entry["name"]: entry["required"]
-                    for entry in json_schema()["sections"]}
+        sections = {entry["name"]: entry["required"] for entry in json_schema()["sections"]}
         assert "campaign" in sections
         assert sections["campaign"] is False
 
@@ -91,9 +94,7 @@ class TestSections:
         section list (this schema's) has not drifted from the first."""
         sections = json_schema()["sections"]
         assert [entry["name"] for entry in sections] == list(_SECTIONS)
-        assert {entry["name"] for entry in sections if entry["required"]} == (
-            set(_REQUIRED)
-        )
+        assert {entry["name"] for entry in sections if entry["required"]} == (set(_REQUIRED))
 
     def test_every_status_is_one_of_the_three_known_values(self):
         """`status` is a closed vocabulary -- "accepted", "deferred" or
@@ -109,8 +110,7 @@ class TestSections:
         than merely not-yet-implemented. All four must read as something
         other than "accepted", or a form/UI rendered from this schema
         offers a section that can only ever produce an error."""
-        statuses = {entry["name"]: entry["status"]
-                    for entry in json_schema()["sections"]}
+        statuses = {entry["name"]: entry["status"] for entry in json_schema()["sections"]}
         for name in ("defaults", "plugins", "outputs"):
             assert statuses[name] == "deferred", (name, statuses[name])
         assert statuses["campaign"] == "reserved"
@@ -128,14 +128,11 @@ class TestSections:
         this test alone would stay green even if `_structural`'s logic were
         rewired to ignore both tables while `schema.py` kept importing them."""
         sections = json_schema()["sections"]
-        non_accepted = {entry["name"] for entry in sections
-                         if entry["status"] != "accepted"}
+        non_accepted = {entry["name"] for entry in sections if entry["status"] != "accepted"}
         assert non_accepted == set(_NOT_YET) | set(_RESERVED)
-        deferred = {entry["name"] for entry in sections
-                    if entry["status"] == "deferred"}
+        deferred = {entry["name"] for entry in sections if entry["status"] == "deferred"}
         assert deferred == set(_NOT_YET)
-        reserved = {entry["name"] for entry in sections
-                    if entry["status"] == "reserved"}
+        reserved = {entry["name"] for entry in sections if entry["status"] == "reserved"}
         assert reserved == set(_RESERVED)
 
 
@@ -168,8 +165,7 @@ class TestStatusAgreesWithTheLoader:
 
     def test_the_accepted_sections_are_exactly_what_the_base_document_carries(self):
         assert set(preflight_document()) == {
-            entry["name"] for entry in json_schema()["sections"]
-            if entry["status"] == "accepted"
+            entry["name"] for entry in json_schema()["sections"] if entry["status"] == "accepted"
         }
 
     def test_the_unpatched_document_is_accepted_by_the_real_loader(self):
@@ -190,8 +186,7 @@ class TestStatusAgreesWithTheLoader:
         otherwise-clean base document is what reaches `_structural`'s
         refusal -- the same function, the same call, that `json_schema()`
         never touches."""
-        statuses = {entry["name"]: entry["status"]
-                    for entry in json_schema()["sections"]}
+        statuses = {entry["name"]: entry["status"] for entry in json_schema()["sections"]}
         assert statuses[name] != "accepted"
         document = preflight_document(**{name: {}})
         with pytest.raises(ConfigError) as caught:
@@ -203,7 +198,6 @@ class TestStatusAgreesWithTheLoader:
         else:
             assert statuses[name] == "deferred"
             assert "is not read by this layer" in message
-
 
 
 class TestReasonTravelsWithTheStatus:
@@ -259,9 +253,7 @@ class TestReasonTravelsWithTheStatus:
         is a paraphrase shipped to a UI that renders it with no gloss.
         """
         reason = next(
-            entry["reason"]
-            for entry in json_schema()["sections"]
-            if entry["name"] == name
+            entry["reason"] for entry in json_schema()["sections"] if entry["name"] == name
         )
         with pytest.raises(ConfigError) as caught:
             preflight(preflight_document(**{name: {}}))
@@ -276,9 +268,7 @@ class TestReasonTravelsWithTheStatus:
         reads ``_NOT_YET``'s value directly and demands it be present.
         """
         reason = next(
-            entry["reason"]
-            for entry in json_schema()["sections"]
-            if entry["name"] == name
+            entry["reason"] for entry in json_schema()["sections"] if entry["name"] == name
         )
         assert _NOT_YET[name] in reason, (reason, _NOT_YET[name])
 
@@ -296,9 +286,7 @@ class TestReasonTravelsWithTheStatus:
         from rheplicant.config.preflight.document import _CAPABILITY_KEYS
 
         reason = next(
-            entry["reason"]
-            for entry in json_schema()["sections"]
-            if entry["name"] == "campaign"
+            entry["reason"] for entry in json_schema()["sections"] if entry["name"] == "campaign"
         )
         capability, schema_section = _CAPABILITY_KEYS["campaign"]
         # "capability 4 (streaming evidence)" -> both halves, however the
@@ -306,6 +294,7 @@ class TestReasonTravelsWithTheStatus:
         assert capability.rstrip(")").split(" (")[0] in reason, reason
         assert capability.rstrip(")").split(" (")[1] in reason, reason
         assert schema_section in reason, reason
+
 
 class TestExits:
     def test_exits_has_exactly_eighteen_entries(self):
@@ -337,12 +326,17 @@ class TestExits:
         assert exits
         assert set(exits) == set(EXECUTORS)
 
-    @pytest.mark.parametrize("module, table", [
-        ("rheplicant.config.sections.runs", "_KINDS"),
-        ("rheplicant.config.dimensions", "_FORMULA_REGISTRY"),
-    ], ids=["exits", "transforms"])
+    @pytest.mark.parametrize(
+        "module, table",
+        [
+            ("rheplicant.config.sections.runs", "_KINDS"),
+            ("rheplicant.config.dimensions", "_FORMULA_REGISTRY"),
+        ],
+        ids=["exits", "transforms"],
+    )
     def test_a_table_that_cannot_be_read_raises_instead_of_publishing_empty(
-            self, monkeypatch, module, table):
+        self, monkeypatch, module, table
+    ):
         """No empty list shipped in silence.
 
         ``json_schema()`` is served verbatim to rheplicant-agent, and an
@@ -372,9 +366,7 @@ class TestVocabularies:
         the value-form, value-modifier and derivation vocabularies, so this
         pins that union rather than a restated literal list that would go
         stale the moment any one registry gains an entry."""
-        expected = sorted(
-            set(VALUE_FORMS) | set(VALUE_MODIFIERS) | set(DERIVATIONS)
-        )
+        expected = sorted(set(VALUE_FORMS) | set(VALUE_MODIFIERS) | set(DERIVATIONS))
         assert json_schema()["operators"] == expected
 
     def test_transforms_is_the_sorted_formula_registry(self):
@@ -384,15 +376,21 @@ class TestVocabularies:
 class TestCatalogs:
     def test_catalogs_has_exactly_the_four_keys(self):
         assert set(json_schema()["catalogs"]) == {
-            "acceptedUnits", "resourceKinds", "fileFormats", "shapeSymbols",
+            "acceptedUnits",
+            "resourceKinds",
+            "fileFormats",
+            "shapeSymbols",
         }
 
-    @pytest.mark.parametrize(("key", "source"), [
-        ("acceptedUnits", ACCEPTED_UNITS),
-        ("resourceKinds", RESOURCE_KINDS),
-        ("fileFormats", FILE_FORMATS),
-        ("shapeSymbols", SHAPE_SYMBOLS),
-    ])
+    @pytest.mark.parametrize(
+        ("key", "source"),
+        [
+            ("acceptedUnits", ACCEPTED_UNITS),
+            ("resourceKinds", RESOURCE_KINDS),
+            ("fileFormats", FILE_FORMATS),
+            ("shapeSymbols", SHAPE_SYMBOLS),
+        ],
+    )
     def test_each_catalog_is_its_own_registry_as_a_list(self, key, source):
         """Derive, do not re-spell, and order-sensitive: these catalogs are
         not sorted (shapeSymbols in particular is grouped by meaning, not by

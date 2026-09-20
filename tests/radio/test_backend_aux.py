@@ -139,9 +139,9 @@ class TestFlagsReachTheChunkAxis:
         """The downstream that used to refuse: 'flags shape (6, 4) does not
         match the prediction shape (2, 4)'."""
         out = BackendOperator(n_chunk=N_CHUNK)(state.replace(aux={FLAGS_KEY: one_flag()}))
-        sigma = FlaggedNoise(
-            HomoscedasticNoise(sigma=jnp.array(1.0)), out.aux[FLAGS_KEY]
-        ).std(out.data)
+        sigma = FlaggedNoise(HomoscedasticNoise(sigma=jnp.array(1.0)), out.aux[FLAGS_KEY]).std(
+            out.data
+        )
         assert sigma.shape == (N_OUT, N_FREQ)
         assert bool(jnp.isinf(sigma[1, FLAGGED_FREQ]))
         assert int(jnp.isinf(sigma).sum()) == 1
@@ -154,9 +154,7 @@ class TestFlagsReachTheChunkAxis:
         out = averaged({FLAGS_KEY: bad})
         assert out.aux[FLAGS_KEY].shape == (N_FREQ, N_TIME)
         with pytest.raises(StateValidationError, match="does not match the prediction"):
-            FlaggedNoise(HomoscedasticNoise(sigma=jnp.array(1.0)), out.aux[FLAGS_KEY]).std(
-                out.data
-            )
+            FlaggedNoise(HomoscedasticNoise(sigma=jnp.array(1.0)), out.aux[FLAGS_KEY]).std(out.data)
 
 
 class TestProtectionReachesTheChunkAxis:
@@ -179,9 +177,9 @@ class TestProtectionReachesTheChunkAxis:
         """Before: 'aux['protected'] is a waterfall mask over 6 time samples but
         the flags cover 2 ... has left this one stale'."""
         mask = jnp.zeros((N_TIME, N_FREQ), dtype=bool).at[:, FLAGGED_FREQ].set(True)
-        out = Pipeline(
-            BackendOperator(n_chunk=N_CHUNK), FlaggingOperator(threshold=-1.0)
-        )(state.replace(aux={PROTECTED_KEY: mask}))
+        out = Pipeline(BackendOperator(n_chunk=N_CHUNK), FlaggingOperator(threshold=-1.0))(
+            state.replace(aux={PROTECTED_KEY: mask})
+        )
         flags = np.asarray(out.aux[FLAGS_KEY])
         assert flags.shape == (N_OUT, N_FREQ)
         assert not flags[:, FLAGGED_FREQ].any()  # protected, all chunks
@@ -402,9 +400,9 @@ class TestBothMasksThroughOnePipeline:
 
     def test_a_protected_channel_survives_the_average_and_the_flagger(self, state):
         protected = jnp.zeros((N_TIME, N_FREQ), dtype=bool).at[:, FLAGGED_FREQ].set(True)
-        out = Pipeline(
-            BackendOperator(n_chunk=N_CHUNK), FlaggingOperator(threshold=10.0)
-        )(state.replace(aux={PROTECTED_KEY: protected, FLAGS_KEY: one_flag()}))
+        out = Pipeline(BackendOperator(n_chunk=N_CHUNK), FlaggingOperator(threshold=10.0))(
+            state.replace(aux={PROTECTED_KEY: protected, FLAGS_KEY: one_flag()})
+        )
         assert out.aux[PROTECTED_KEY].shape == (N_OUT, N_FREQ)
         assert out.aux[FLAGS_KEY].shape == (N_OUT, N_FREQ)
         assert not np.asarray(out.aux[FLAGS_KEY])[:, FLAGGED_FREQ].any()

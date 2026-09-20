@@ -89,9 +89,7 @@ def _forward_arrays(product: object, configured: object, _options: Mapping[str, 
     observed = configured.inference.observed
     if observed is not None:
         for name, value in sorted(observed.entries.items()):
-            arrays[f"observed/{encode_name(name)}"] = _array(
-                value, where=f"observed {name!r}"
-            )
+            arrays[f"observed/{encode_name(name)}"] = _array(value, where=f"observed {name!r}")
     return ExtractedProduct("npz", arrays)
 
 
@@ -149,19 +147,13 @@ def _fisher_arrays(product: object, _configured: object, _options: Mapping[str, 
     return _npz(
         {
             **_flat_matrix_arrays(_field(product, "fisher", "fisher"), name="fisher"),
-            **_flat_matrix_arrays(
-                _field(product, "covariance", "fisher"), name="covariance"
-            ),
+            **_flat_matrix_arrays(_field(product, "covariance", "fisher"), name="covariance"),
         }
     )
 
 
 def _fisher_covariance(product: object, _configured: object, _options: Mapping[str, object]):
-    return _npz(
-        _flat_matrix_arrays(
-            _field(product, "covariance", "fisher"), name="covariance"
-        )
-    )
+    return _npz(_flat_matrix_arrays(_field(product, "covariance", "fisher"), name="covariance"))
 
 
 def _mapping_field(kind: str, field: str) -> Callable:
@@ -179,8 +171,10 @@ def _attribute_field(field: str) -> Callable:
 
 
 def _posterior_parameters(product: object, _configured: object, _options: Mapping[str, object]):
-    means = {name: np.mean(_array(stack, where=f"samples[{name!r}]"), axis=0)
-             for name, stack in product.samples.items()}
+    means = {
+        name: np.mean(_array(stack, where=f"samples[{name!r}]"), axis=0)
+        for name, stack in product.samples.items()
+    }
     return _npz(means)
 
 
@@ -335,9 +329,20 @@ def _condition_diagnostics(product: object, _configured: object, _options: Mappi
 
 def _identifiability(product: object, _configured: object, _options: Mapping[str, object]):
     fields = (
-        "names", "shapes", "spans", "n_par", "n_data", "rank", "nullity",
-        "singular_values", "null_space", "jacobian", "column_norms", "rtol",
-        "threshold", "weakest_identified",
+        "names",
+        "shapes",
+        "spans",
+        "n_par",
+        "n_data",
+        "rank",
+        "nullity",
+        "singular_values",
+        "null_space",
+        "jacobian",
+        "column_norms",
+        "rtol",
+        "threshold",
+        "weakest_identified",
     )
     return ExtractedProduct(
         "json", {field: _json_value(getattr(product, field)) for field in fields}
@@ -405,9 +410,7 @@ def _prediction_bands(product: object, _configured: object, _options: Mapping[st
 
 def _wiener_covariance(product: object, _configured: object, _options: Mapping[str, object]):
     return _npz(
-        _flat_matrix_arrays(
-            _field(product, "covariance", "conjugate.wiener"), name="covariance"
-        )
+        _flat_matrix_arrays(_field(product, "covariance", "conjugate.wiener"), name="covariance")
     )
 
 
@@ -481,7 +484,12 @@ RUN_KIND_SELECTORS = {
     "plan.estimate": ("arrays", "estimates", "parameters", "recovery", "run_diagnostics"),
     "plan.sample": ("arrays", "draws", "parameters", "chains", "recovery", "run_diagnostics"),
     "conjugate.wiener": (
-        "arrays", "estimates", "parameters", "covariance", "recovery", "run_diagnostics",
+        "arrays",
+        "estimates",
+        "parameters",
+        "covariance",
+        "recovery",
+        "run_diagnostics",
     ),
     "conjugate.gcr": ("arrays", "draws", "chains", "run_diagnostics"),
     "conjugate.gls": ("arrays", "estimates", "parameters", "recovery", "run_diagnostics"),
@@ -493,7 +501,12 @@ RUN_KIND_SELECTORS = {
     "predict": ("arrays", "prediction_bands", "posterior_predictives"),
     "nuts": ("arrays", "draws", "parameters", "chains", "recovery", "run_diagnostics"),
     "npe": (
-        "arrays", "draws", "parameters", "chains", "training_history", "recovery",
+        "arrays",
+        "draws",
+        "parameters",
+        "chains",
+        "training_history",
+        "recovery",
         "run_diagnostics",
     ),
     "compare": ("compare",),
@@ -576,8 +589,8 @@ def _recovery(product: object, configured: object, kind: str) -> ExtractedProduc
 
 
 for _kind in ("plan.estimate", "plan.sample", "conjugate.wiener", "conjugate.gls", "nuts", "npe"):
-    EXTRACTOR_REGISTRY[(_kind, "recovery")] = (
-        lambda product, configured, _options, kind=_kind: _recovery(product, configured, kind)
+    EXTRACTOR_REGISTRY[(_kind, "recovery")] = lambda product, configured, _options, kind=_kind: (
+        _recovery(product, configured, kind)
     )
 
 

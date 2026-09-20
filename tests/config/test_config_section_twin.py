@@ -16,8 +16,7 @@ class TestWithout:
         assert replaced == ()
 
     def test_without_drops_the_noise_node(self):
-        repaired, _ = build_fit_twin({"without": ["noise"]},
-                                     twin(NOISY_MODEL), context())
+        repaired, _ = build_fit_twin({"without": ["noise"]}, twin(NOISY_MODEL), context())
         assert "noise" not in repaired.lit
         assert "gain" in repaired.lit
 
@@ -36,16 +35,15 @@ class TestWithout:
 
 class TestReplace:
     def test_replace_swaps_the_gain_operator(self):
-        section = {"replace": {"gain": {"gain": {"value": 1.0,
-                                                 "unit": "dimensionless"}}}}
+        section = {"replace": {"gain": {"gain": {"value": 1.0, "unit": "dimensionless"}}}}
         repaired, replaced = build_fit_twin(section, twin(), context())
         assert float(repaired["gain"].gain) == pytest.approx(1.0)
         assert replaced == ("gain",)
 
     def test_replace_spec_goes_through_the_model_sections_builder(self):
-        section = {"replace": {"gain": {"gain": {"value": 1.0,
-                                                 "unit": "dimensionless"},
-                                        "typo": 1}}}
+        section = {
+            "replace": {"gain": {"gain": {"value": 1.0, "unit": "dimensionless"}, "typo": 1}}
+        }
         with pytest.raises(ConfigError):
             build_fit_twin(section, twin(), context())
 
@@ -54,9 +52,10 @@ class TestReplace:
             build_fit_twin({"replace": ["gain"]}, twin(), context())
 
     def test_without_applies_before_replace(self):
-        section = {"without": ["noise"],
-                   "replace": {"gain": {"gain": {"value": 2.0,
-                                                 "unit": "dimensionless"}}}}
+        section = {
+            "without": ["noise"],
+            "replace": {"gain": {"gain": {"value": 2.0, "unit": "dimensionless"}}},
+        }
         repaired, _ = build_fit_twin(section, twin(NOISY_MODEL), context())
         assert "noise" not in repaired.lit
         assert float(repaired["gain"].gain) == pytest.approx(2.0)
@@ -65,18 +64,17 @@ class TestReplace:
         # Pins the order: without runs first, so the replace lands on an
         # assembly that no longer has the node. Replace-first would let
         # this contradictory document pass silently.
-        section = {"without": ["noise"],
-                   "replace": {"noise": {"type": "NoiseOperator",
-                                         "sigma": {"value": 0.1,
-                                                   "unit": "K"}}}}
+        section = {
+            "without": ["noise"],
+            "replace": {"noise": {"type": "NoiseOperator", "sigma": {"value": 0.1, "unit": "K"}}},
+        }
         with pytest.raises(KeyError, match="No node named"):
             build_fit_twin(section, twin(NOISY_MODEL), context())
 
     def test_an_empty_replace_key_means_no_replacements(self):
         # YAML ``replace:`` with nothing under it parses to None.
         model = twin()
-        repaired, replaced = build_fit_twin({"replace": None}, model,
-                                            context())
+        repaired, replaced = build_fit_twin({"replace": None}, model, context())
         assert repaired is model
         assert replaced == ()
 
@@ -91,9 +89,17 @@ class TestGrammar:
             build_fit_twin(["noise"], twin(), context())
 
     def test_a_pipeline_twin_is_refused_by_name(self):
-        pipeline = twin({"kind": "pipeline",
-                         "stages": [{"name": "gain", "type": "GainOperator",
-                                     "gain": {"value": 1.1,
-                                              "unit": "dimensionless"}}]})
+        pipeline = twin(
+            {
+                "kind": "pipeline",
+                "stages": [
+                    {
+                        "name": "gain",
+                        "type": "GainOperator",
+                        "gain": {"value": 1.1, "unit": "dimensionless"},
+                    }
+                ],
+            }
+        )
         with pytest.raises(ConfigError, match="pipeline"):
             build_fit_twin({"without": ["gain"]}, pipeline, context())

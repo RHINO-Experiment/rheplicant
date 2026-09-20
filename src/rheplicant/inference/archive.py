@@ -79,9 +79,9 @@ def _describe(term: QuadraticLikelihood) -> dict[str, Any]:
         "epoch_id": term.epoch_id,
         "n_observed": term.n_observed,
         "exact": term.exact,
-        "support": None if term.support is None else {
-            name: list(bounds) for name, bounds in term.support.items()
-        },
+        "support": None
+        if term.support is None
+        else {name: list(bounds) for name, bounds in term.support.items()},
         "include_logdet": term.include_logdet,
         "noise_frozen_at": term.noise_frozen_at,
         "prior_share": list(term.prior_share),
@@ -157,8 +157,7 @@ def _reject_bad_archive(terms: list[dict[str, Any]], represents: Any) -> None:
         seen.add(epoch_id)
 
     estimators = {
-        ("full" if entry["include_logdet"] else "gls", entry["noise_frozen_at"])
-        for entry in terms
+        ("full" if entry["include_logdet"] else "gls", entry["noise_frozen_at"]) for entry in terms
     }
     if len(estimators) > 1:
         raise StateValidationError(
@@ -168,9 +167,7 @@ def _reject_bad_archive(terms: list[dict[str, Any]], represents: Any) -> None:
             "first one it finds."
         )
 
-    tempered = [
-        entry["epoch_id"] for entry in terms if tuple(entry["prior_share"])[0] != 0
-    ]
+    tempered = [entry["epoch_id"] for entry in terms if tuple(entry["prior_share"])[0] != 0]
     if tempered:
         raise StateValidationError(
             f"Term(s) {tempered} carry a nonzero prior_share, but a streaming memory "
@@ -267,9 +264,7 @@ def save_memory(memory, path: str | Path) -> None:
         )
     path = Path(path)
     foreign = [
-        term.epoch_id
-        for term in memory.archive
-        if not isinstance(term, QuadraticLikelihood)
+        term.epoch_id for term in memory.archive if not isinstance(term, QuadraticLikelihood)
     ]
     if foreign:
         raise StateValidationError(
@@ -405,9 +400,9 @@ def load_memory(path: str | Path, factorization: Factorization):
                 epoch_id=entry["epoch_id"],
                 n_observed=entry["n_observed"],
                 exact=entry["exact"],
-                support=None if entry["support"] is None else {
-                    name: tuple(bounds) for name, bounds in entry["support"].items()
-                },
+                support=None
+                if entry["support"] is None
+                else {name: tuple(bounds) for name, bounds in entry["support"].items()},
                 include_logdet=entry["include_logdet"],
                 noise_frozen_at=entry["noise_frozen_at"],
                 prior_share=tuple(entry["prior_share"]),
@@ -428,9 +423,7 @@ def load_memory(path: str | Path, factorization: Factorization):
         ),
     )
     with path.open("rb") as handle:
-        restored, terms = eqx.tree_deserialise_leaves(
-            handle, (template, tuple(template.archive))
-        )
+        restored, terms = eqx.tree_deserialise_leaves(handle, (template, tuple(template.archive)))
         consumed = handle.tell()
     remaining = path.stat().st_size - consumed
     if remaining:

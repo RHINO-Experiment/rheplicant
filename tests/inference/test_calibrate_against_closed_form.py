@@ -127,9 +127,9 @@ class TestEveryKnobReachesTheFarSideExactlyAsWritten:
 
     def test_the_adam_calibrator_passes_its_six(self, monkeypatch):
         seen = self._spy(monkeypatch)
-        AdamCalibrator(
-            learning_rate=0.041, n_steps=13, beta1=0.11, beta2=0.22, eps=3e-7
-        ).fit(FORWARD, START, OBSERVED, loss_fn=mean_squared_error)
+        AdamCalibrator(learning_rate=0.041, n_steps=13, beta1=0.11, beta2=0.22, eps=3e-7).fit(
+            FORWARD, START, OBSERVED, loss_fn=mean_squared_error
+        )
         assert seen == {
             "method": "adam",
             "steps": 13,

@@ -261,9 +261,7 @@ def _constant_sigma(noise_std: Any) -> Any | None:
     return noise_std
 
 
-def check_noise_std_axis(
-    noise_std: Any, prediction_shape: Any, caller: str
-) -> None:
+def check_noise_std_axis(noise_std: Any, prediction_shape: Any, caller: str) -> None:
     """Refuse a 1-D ``noise_std`` whose axis the prediction cannot settle.
 
     "Scalar or broadcastable to the data" is not a contract. Against a square

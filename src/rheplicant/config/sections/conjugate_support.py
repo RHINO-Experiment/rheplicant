@@ -66,9 +66,11 @@ _PRIOR_KEYS = frozenset({"prior_std", "prior_mean"})
 #: either would fire A27 on exactly the document that exit exists to serve.
 _DECIDES_SIGMA_HERE = frozenset({"conjugate.wiener", "condition"})
 #: key, coercion, floor, and whether the package spells "off" as None.
-_SOLVER_KNOBS = (("tol", float, 0.0, False),
-                 ("maxiter", int, 1, True),
-                 ("require_convergence", float, 0.0, True))
+_SOLVER_KNOBS = (
+    ("tol", float, 0.0, False),
+    ("maxiter", int, 1, True),
+    ("require_convergence", float, 0.0, True),
+)
 _KNOB_DEFAULTS = {
     "tol": 1e-6,
     "maxiter": None,
@@ -108,8 +110,7 @@ def _selected(run: Any, where: str) -> tuple[str, ...]:
         return (names,)
     # A tuple is the frozen view's spelling of the list the document wrote --
     # the parse/execute split re-reads this through ``ParsedRun.options``.
-    if (isinstance(names, (list, tuple)) and names
-            and all(isinstance(one, str) for one in names)):
+    if isinstance(names, (list, tuple)) and names and all(isinstance(one, str) for one in names):
         return tuple(names)
     raise ConfigError(
         f"{where}: names: is required -- one latent name, or a list of "
@@ -120,8 +121,9 @@ def _selected(run: Any, where: str) -> tuple[str, ...]:
     )
 
 
-def _conjugate_block(run: Any, built: Any, where: str, *,
-                     needs_observed: bool = True) -> tuple[Any, Any, Any]:
+def _conjugate_block(
+    run: Any, built: Any, where: str, *, needs_observed: bool = True
+) -> tuple[Any, Any, Any]:
     """``(block, sigma, observed)`` -- everything a conjugate solve opens with.
 
     Three things come back together because no executor may hold one without
@@ -147,21 +149,22 @@ def _conjugate_block(run: Any, built: Any, where: str, *,
 
     space = _space(run, built)
     observed = _observed(run, built) if needs_observed else None
-    sigma = (_decided_sigma(run, built)
-             if run.kind in _DECIDES_SIGMA_HERE else None)
+    sigma = _decided_sigma(run, built) if run.kind in _DECIDES_SIGMA_HERE else None
     knobs: dict[str, Any] = {}
     if "check" in run.options:
         check = run.options["check"]
         if not isinstance(check, bool):
             raise ConfigError(f"{where}: check: is a bool; got {check!r}.")
         knobs["check"] = check
-    block = linear_operator(space, built.inference.fit_twin, built.state,
-                            names=_selected(run, where), **knobs)
+    block = linear_operator(
+        space, built.inference.fit_twin, built.state, names=_selected(run, where), **knobs
+    )
     return block, sigma, observed
 
 
-def _one_prior(run: Any, where: str, key: str, value: Any, names: tuple,
-               space: Any) -> dict[str, Any]:
+def _one_prior(
+    run: Any, where: str, key: str, value: Any, names: tuple, space: Any
+) -> dict[str, Any]:
     """One of ``prior_std``/``prior_mean`` -> the per-member mapping.
 
     ``names`` is the block's member tuple -- at parse time it is
@@ -171,8 +174,7 @@ def _one_prior(run: Any, where: str, key: str, value: Any, names: tuple,
     minimum = 0.0 if key == "prior_std" else None
     if isinstance(value, Mapping):
         if set(value) != set(names):
-            declared = [name for name in names
-                        if space.latent(name).prior is not None]
+            declared = [name for name in names if space.latent(name).prior is not None]
             raise ConfigError(
                 f"{where}: {key}: names {sorted(value)}, and this block "
                 f"groups {list(names)}; S is block-diagonal, so a "
@@ -180,9 +182,10 @@ def _one_prior(run: Any, where: str, key: str, value: Any, names: tuple,
                 f"member, or drop {key}: and let each latent's own prior: "
                 f"drive the solve ({declared} declare one)."
             )
-        return {name: _number(run, f"{key}.{name}", value[name], kind=float,
-                              minimum=minimum)
-                for name in names}
+        return {
+            name: _number(run, f"{key}.{name}", value[name], kind=float, minimum=minimum)
+            for name in names
+        }
     number = _number(run, key, value, kind=float, minimum=minimum)
     if len(names) == 1:
         return {names[0]: number}
@@ -198,8 +201,7 @@ def _one_prior(run: Any, where: str, key: str, value: Any, names: tuple,
     )
 
 
-def _prior_kwargs(run: Any, built: Any, block: Any,
-                  where: str) -> dict[str, Any]:
+def _prior_kwargs(run: Any, built: Any, block: Any, where: str) -> dict[str, Any]:
     """The ``prior_std=``/``prior_mean=`` keywords the solve should take.
 
     Absent keys are absent from the result: the package then reads each
@@ -212,9 +214,11 @@ def _prior_kwargs(run: Any, built: Any, block: Any,
     ``space.latent(name).prior`` (plan section 3.1).
     """
     space = _space(run, built)
-    return {key: _one_prior(run, where, key, run.options[key], block.names,
-                            space)
-            for key in ("prior_std", "prior_mean") if key in run.options}
+    return {
+        key: _one_prior(run, where, key, run.options[key], block.names, space)
+        for key in ("prior_std", "prior_mean")
+        if key in run.options
+    }
 
 
 def _knobs(
@@ -252,8 +256,8 @@ def _knobs(
         else:
             continue
         if value is None and nullable:
-            resolved[key] = None      # "no cap" / "no guard", as the package
-            continue                  # spells them
+            resolved[key] = None  # "no cap" / "no guard", as the package
+            continue  # spells them
         resolved[key] = _number(run, key, value, kind=cast, minimum=floor)
     return resolved
 
@@ -268,9 +272,14 @@ def _knobs(
 # ``linear_operator`` or evaluate the twin.
 
 
-def _parsed_opening(spec: Any, options: Mapping, context: Any, *,
-                    needs_observed: bool = True,
-                    decides_sigma: bool = False) -> tuple[dict, Any]:
+def _parsed_opening(
+    spec: Any,
+    options: Mapping,
+    context: Any,
+    *,
+    needs_observed: bool = True,
+    decides_sigma: bool = False,
+) -> tuple[dict, Any]:
     """The parse-time half of the shared opening -> (normalized, space).
 
     Validates the space/observed/sigma statics, the ``check:`` boolean and
@@ -303,14 +312,22 @@ def _parsed_opening(spec: Any, options: Mapping, context: Any, *,
     return normalized, space
 
 
-def _parsed_priors(spec: Any, options: Mapping, space: Any, names: tuple,
-                   where: str,
-                   keys: tuple = ("prior_std", "prior_mean")) -> dict:
+def _parsed_priors(
+    spec: Any,
+    options: Mapping,
+    space: Any,
+    names: tuple,
+    where: str,
+    keys: tuple = ("prior_std", "prior_mean"),
+) -> dict:
     """The declared ``prior_`` mappings, shape-checked and coerced at parse.
 
     The per-member mapping a parser stores is what :func:`_prior_kwargs`
     re-derives from the built block at execute -- one grammar, two phases,
     and the mapping branch is idempotent under it.
     """
-    return {key: _one_prior(spec, where, key, options[key], names, space)
-            for key in keys if key in options}
+    return {
+        key: _one_prior(spec, where, key, options[key], names, space)
+        for key in keys
+        if key in options
+    }

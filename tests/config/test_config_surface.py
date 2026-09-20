@@ -65,11 +65,26 @@ def _block(text: str, heading: str) -> str:
 #: resized past what these guards know. Module-level since Batch 5: the run
 #: kinds, the value forms and the tutorial's own claims are counted by three
 #: different classes, and a second copy is the copy that goes stale.
-_NUMBER_WORDS = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
-                 "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10,
-                 "eleven": 11, "twelve": 12, "thirteen": 13,
-                 "fourteen": 14, "fifteen": 15, "sixteen": 16,
-                 "seventeen": 17, "eighteen": 18}
+_NUMBER_WORDS = {
+    "one": 1,
+    "two": 2,
+    "three": 3,
+    "four": 4,
+    "five": 5,
+    "six": 6,
+    "seven": 7,
+    "eight": 8,
+    "nine": 9,
+    "ten": 10,
+    "eleven": 11,
+    "twelve": 12,
+    "thirteen": 13,
+    "fourteen": 14,
+    "fifteen": 15,
+    "sixteen": 16,
+    "seventeen": 17,
+    "eighteen": 18,
+}
 
 
 def _rows(body: str) -> list[list[str]]:
@@ -95,7 +110,7 @@ def _rows(body: str) -> list[list[str]]:
             continue
         cells = [cell.strip() for cell in line.strip("|").split("|")]
         if all(set(cell) <= set("-: ") for cell in cells):
-            continue          # the |---|---| rule
+            continue  # the |---|---| rule
         found.append(cells)
     return found[1:] if found else []
 
@@ -157,8 +172,7 @@ class TestTheSurface:
             with pytest.raises(config.ConfigWarning):
                 warnings.warn("x", config.ConfigWarning, stacklevel=2)
 
-    def test_exporting_preflight_shadows_the_subpackage_and_that_is_pinned(
-            self):
+    def test_exporting_preflight_shadows_the_subpackage_and_that_is_pinned(self):
         """THE side effect of binding the function in ``config/__init__.py``.
 
         Measured: after this task both ``from rheplicant.config import
@@ -219,10 +233,7 @@ class TestTheLayerBoundaryIsMechanical:
         }
         for allowed in sorted(allowed_clients):
             text = (src / allowed).read_text()
-            assert (
-                "from rheplicant.config" in text
-                or "import rheplicant.config" in text
-            ), (
+            assert "from rheplicant.config" in text or "import rheplicant.config" in text, (
                 f"{allowed} is allowed to import config and does not. Remove "
                 "it from the allowlist -- an unused exemption is a hole "
                 "nothing is watching."
@@ -274,8 +285,13 @@ class TestThePlan2ASurface:
     def test_the_document_layer_is_exported(self):
         import rheplicant.config as config
 
-        for name in ("ConfiguredRun", "apply_variant", "load_document",
-                     "recursive_update", "run_forward"):
+        for name in (
+            "ConfiguredRun",
+            "apply_variant",
+            "load_document",
+            "recursive_update",
+            "run_forward",
+        ):
             assert name in config.__all__
             assert getattr(config, name) is not None
 
@@ -324,14 +340,38 @@ class TestThePlan2CSurface:
     #: therefore at the end of Plan 2C. Sorted here for reading; compared
     #: sorted, because ``__all__`` groups constants before classes.
     SURFACE = (
-        "ACCEPTED_UNITS", "BuiltResources", "ConfigError", "ConfiguredRun",
-        "DERIVATIONS", "FILE_FORMATS", "FieldSpec", "InferenceBuild",
-        "RESOURCE_KINDS", "ResolutionContext", "ResolvedPath",
-        "ResolvedValue", "RunResult", "SHAPE_SYMBOLS", "ShapeScope", "Unit",
-        "VALUE_FORMS", "VALUE_MODIFIERS", "apply_variant", "build_resources",
-        "canonical_unit", "compile_path", "convert_to_canonical", "deliver",
-        "field_specs", "load_document", "parse_path", "recursive_update",
-        "resolve_extent", "resolve_path_on", "resolve_value", "run_document",
+        "ACCEPTED_UNITS",
+        "BuiltResources",
+        "ConfigError",
+        "ConfiguredRun",
+        "DERIVATIONS",
+        "FILE_FORMATS",
+        "FieldSpec",
+        "InferenceBuild",
+        "RESOURCE_KINDS",
+        "ResolutionContext",
+        "ResolvedPath",
+        "ResolvedValue",
+        "RunResult",
+        "SHAPE_SYMBOLS",
+        "ShapeScope",
+        "Unit",
+        "VALUE_FORMS",
+        "VALUE_MODIFIERS",
+        "apply_variant",
+        "build_resources",
+        "canonical_unit",
+        "compile_path",
+        "convert_to_canonical",
+        "deliver",
+        "field_specs",
+        "load_document",
+        "parse_path",
+        "recursive_update",
+        "resolve_extent",
+        "resolve_path_on",
+        "resolve_value",
+        "run_document",
         "run_forward",
     )
 
@@ -361,15 +401,12 @@ class TestThePlan2CSurface:
 
     SURFACE_4A = ("register_dimension", "register_dimension_formula")
 
-    def test_the_surface_is_2b_s_list_plus_the_names_each_later_plan_added(
-            self):
+    def test_the_surface_is_2b_s_list_plus_the_names_each_later_plan_added(self):
         import rheplicant.config as config
 
-        assert sorted(config.__all__) == sorted(self.SURFACE
-                                                + self.SURFACE_3A
-                                                + self.SURFACE_3B
-                                                + self.SURFACE_3C
-                                                + self.SURFACE_4A), (
+        assert sorted(config.__all__) == sorted(
+            self.SURFACE + self.SURFACE_3A + self.SURFACE_3B + self.SURFACE_3C + self.SURFACE_4A
+        ), (
             "rheplicant.config.__all__ changed. Plan 2C's decision was that "
             "nine new run kinds are document vocabulary rather than public "
             "API, and 2D's that a product received through run_document is "
@@ -382,11 +419,23 @@ class TestThePlan2CSurface:
         """The dispatch table is not something a caller may hold."""
         import rheplicant.config as config
 
-        for name in ("EXECUTORS", "PARSERS", "PRE_EXECUTORS",
-                     "DEFERRED_CHECKS", "register", "handler_for",
-                     "parse_run", "parsed_options", "ParsedOptions",
-                     "ParsedRun", "RunParseContext", "ExitHandler",
-                     "reuse_of", "RunSpec", "execute_run"):
+        for name in (
+            "EXECUTORS",
+            "PARSERS",
+            "PRE_EXECUTORS",
+            "DEFERRED_CHECKS",
+            "register",
+            "handler_for",
+            "parse_run",
+            "parsed_options",
+            "ParsedOptions",
+            "ParsedRun",
+            "RunParseContext",
+            "ExitHandler",
+            "reuse_of",
+            "RunSpec",
+            "execute_run",
+        ):
             assert name not in config.__all__, name
 
     def test_every_declared_kind_is_reachable_from_a_document(self):
@@ -489,8 +538,11 @@ class TestThePagesSayWhatTheLayerDoes:
 
     def _rows(self):
         table = _section(_page("config-inference.md"), "## Transforms")
-        return [line for line in table.splitlines()
-                if line.startswith("|") and not set(line) <= set("|- ")]
+        return [
+            line
+            for line in table.splitlines()
+            if line.startswith("|") and not set(line) <= set("|- ")
+        ]
 
     def test_the_transform_table_lists_every_registered_transform(self):
         """Both directions, because each has its own way of going stale.
@@ -545,8 +597,7 @@ class TestThePagesSayWhatTheLayerDoes:
             names = re.findall(r"`([^`]+)`", cells[1])
             if not names or names[0].rstrip(":") == "Subsection":
                 continue
-            keys = {token.rstrip(":")
-                    for token in re.findall(r"`([^`]+)`", cells[3])}
+            keys = {token.rstrip(":") for token in re.findall(r"`([^`]+)`", cells[3])}
             rows[names[0].rstrip(":")] = keys
         assert len(rows) > 3, f"the npe table stopped parsing: {rows}"
         return rows
@@ -596,8 +647,7 @@ class TestThePagesSayWhatTheLayerDoes:
     #: which is derived from the root seed rather than refused.
     _UNDER_NONE = {
         "forward": ({}, True),
-        "optimize": ({"optimizer": "gradient", "learning_rate": 1e-3,
-                      "n_steps": 2}, True),
+        "optimize": ({"optimizer": "gradient", "learning_rate": 1e-3, "n_steps": 2}, True),
         "identifiability": ({"names": ["g"]}, True),
         "score_directions": ({"names": ["g"]}, True),
         "fisher": ({}, False),
@@ -609,22 +659,36 @@ class TestThePagesSayWhatTheLayerDoes:
         # (`plan.py::SamplingPlan._partition`), just three phases later.  Four kept draws is
         # `MIN_DRAWS` exactly, so the document gets past P-1 and the row
         # measures the sentence it was written to measure.
-        "plan.sample": ({"blocks": [{"names": ["g"]}], "n_sweeps": 8,
-                         "warmup": 4, "check_identifiability": False,
-                         "seed": {"from": "runtime.seeds.probe"}}, False),
-        "conjugate.wiener": ({"names": ["g"], "prior_std": {"g": 10.0},
-                              "width": "none"}, False),
-        "conjugate.gcr": ({"names": ["g"], "prior_std": {"g": 10.0},
-                           "n_draws": 2,
-                           "seed": {"from": "runtime.seeds.probe"}}, False),
+        "plan.sample": (
+            {
+                "blocks": [{"names": ["g"]}],
+                "n_sweeps": 8,
+                "warmup": 4,
+                "check_identifiability": False,
+                "seed": {"from": "runtime.seeds.probe"},
+            },
+            False,
+        ),
+        "conjugate.wiener": ({"names": ["g"], "prior_std": {"g": 10.0}, "width": "none"}, False),
+        "conjugate.gcr": (
+            {
+                "names": ["g"],
+                "prior_std": {"g": 10.0},
+                "n_draws": 2,
+                "seed": {"from": "runtime.seeds.probe"},
+            },
+            False,
+        ),
         "conjugate.gls": ({"names": ["g"], "prior_std": {"g": 10.0}}, False),
         "condition": ({"names": ["g"], "prior_std": {"g": 10.0}}, False),
         # num_warmup/num_samples/seed are required and the sweep refuses a run
         # without them, so they are written here to get PAST the grammar and
         # as far as the noise check -- 2 and 2 because this row is about which
         # refusal fires, not about a posterior.
-        "nuts": ({"num_warmup": 2, "num_samples": 2,
-                  "seed": {"from": "runtime.seeds.probe"}}, False),
+        "nuts": (
+            {"num_warmup": 2, "num_samples": 2, "seed": {"from": "runtime.seeds.probe"}},
+            False,
+        ),
         "npe": ({}, False),
     }
 
@@ -674,8 +738,7 @@ class TestThePagesSayWhatTheLayerDoes:
 
         document = _page_document(TestTheWorkedDocumentOnThePage.HEADING)
         runs_side, refused_side = self._kind_none_sides()
-        posterior_page = _page_document(
-            TestThePosteriorDocumentOnThePage.HEADING)["inference"]
+        posterior_page = _page_document(TestThePosteriorDocumentOnThePage.HEADING)["inference"]
 
         for kind, (options, should_run) in self._UNDER_NONE.items():
             block = {**document["inference"], "noise": {"kind": "none"}}
@@ -689,15 +752,12 @@ class TestThePagesSayWhatTheLayerDoes:
             }
             side = runs_side if should_run else refused_side
             assert f"`{kind}`" in side, (
-                f"the kind: none bullet puts {kind!r} on the wrong side, or "
-                "does not name it at all"
+                f"the kind: none bullet puts {kind!r} on the wrong side, or does not name it at all"
             )
             if should_run:
                 assert run_document(noiseless)["probe"].product is not None
             else:
-                with pytest.raises(
-                    ConfigError, match="weighs residuals with inference.noise"
-                ):
+                with pytest.raises(ConfigError, match="weighs residuals with inference.noise"):
                     run_document(noiseless)
 
     #: A kind's own bullet under a ``### `` subsection: ``- `forward` — ``.
@@ -719,8 +779,8 @@ class TestThePagesSayWhatTheLayerDoes:
     #: The same bullets with their BODIES, ``{kind: text}``. Terminated by the
     #: next bullet, the next ``### `` heading, or the end of ``## Runs``.
     _KIND_BULLET_BODY = re.compile(
-        r"^- `([a-z][a-z._]*)` — (.*?)(?=^- `|^### |\Z)",
-        re.MULTILINE | re.DOTALL)
+        r"^- `([a-z][a-z._]*)` — (.*?)(?=^- `|^### |\Z)", re.MULTILINE | re.DOTALL
+    )
 
     def _runs_subsections(self):
         """``[(heading, [kinds bulleted])]`` for ``## Runs``."""
@@ -748,16 +808,14 @@ class TestThePagesSayWhatTheLayerDoes:
             "split or the bullet pattern has stopped matching."
         )
         bulleted = [kind for _, kinds in sections for kind in kinds]
-        assert len(bulleted) == len(set(bulleted)), (
-            f"a kind is bulleted twice: {sorted(bulleted)}"
-        )
+        assert len(bulleted) == len(set(bulleted)), f"a kind is bulleted twice: {sorted(bulleted)}"
         assert set(bulleted) == set(_KINDS), (
             f"bulleted but not declared: {sorted(set(bulleted) - set(_KINDS))}; "
             f"declared but not bulleted: {sorted(set(_KINDS) - set(bulleted))}"
         )
 
     def test_every_subsection_heading_that_counts_counts_right(self):
-        """"The five that fit" is a claim, and nothing was checking it.
+        """ "The five that fit" is a claim, and nothing was checking it.
 
         Not every heading carries a number -- "The conjugate family" does not,
         and is covered by the partition above -- so the scan is over the ones
@@ -766,15 +824,15 @@ class TestThePagesSayWhatTheLayerDoes:
         """
         counted = 0
         for heading, kinds in self._runs_subsections():
-            words = [word for word in _NUMBER_WORDS
-                     if re.search(rf"\b{word}\b", heading, re.IGNORECASE)]
+            words = [
+                word for word in _NUMBER_WORDS if re.search(rf"\b{word}\b", heading, re.IGNORECASE)
+            ]
             if not words:
                 continue
             counted += 1
             assert len(words) == 1, f"{heading!r} carries {words}"
             assert _NUMBER_WORDS[words[0]] == len(kinds), (
-                f"{heading!r} says {words[0]} and bullets {len(kinds)}: "
-                f"{kinds}"
+                f"{heading!r} says {words[0]} and bullets {len(kinds)}: {kinds}"
             )
         assert counted >= 3, (
             f"only {counted} '### ' headings under ## Runs carry a number "
@@ -790,8 +848,7 @@ class TestThePagesSayWhatTheLayerDoes:
         """
         from rheplicant.config.sections.runs import _KINDS
 
-        stated = re.search(r"\[the (\w+) kinds it runs\]",
-                           _page("config-anatomy.md"))
+        stated = re.search(r"\[the (\w+) kinds it runs\]", _page("config-anatomy.md"))
         assert stated, (
             "config-anatomy.md no longer states how many kinds `runs:` holds "
             "in the '[the N kinds it runs](...)' form this guard reads."
@@ -799,8 +856,7 @@ class TestThePagesSayWhatTheLayerDoes:
         word = stated.group(1).lower()
         assert word in _NUMBER_WORDS, f"unknown number word {word!r}"
         assert _NUMBER_WORDS[word] == len(_KINDS), (
-            f"config-anatomy.md says {word} kinds; runs.py declares "
-            f"{len(_KINDS)}."
+            f"config-anatomy.md says {word} kinds; runs.py declares {len(_KINDS)}."
         )
 
     def _kind_bullets(self) -> dict:
@@ -827,8 +883,7 @@ class TestThePagesSayWhatTheLayerDoes:
         from rheplicant.config.preflight.fitting import _T10_ITERATES
 
         bullets = self._kind_bullets()
-        missing = sorted(kind for kind in _T10_ITERATES
-                         if "A28" not in bullets.get(kind, ""))
+        missing = sorted(kind for kind in _T10_ITERATES if "A28" not in bullets.get(kind, ""))
         assert not missing, (
             f"these kinds read inference.noise as a rule and their bullets on "
             f"config-inference.md do not mention check A28: {missing}"
@@ -932,9 +987,7 @@ class TestThePagesSayWhatTheLayerDoes:
         """
         listed: set[str] = set()
         for path in sorted(_DOCS.glob("*.md")):
-            for body in re.findall(
-                r"^```\{toctree\}\n(.*?)^```", path.read_text(), re.M | re.S
-            ):
+            for body in re.findall(r"^```\{toctree\}\n(.*?)^```", path.read_text(), re.M | re.S):
                 listed |= {
                     line.strip()
                     for line in body.splitlines()
@@ -962,15 +1015,18 @@ class TestThePagesSayWhatTheLayerDoes:
         body = _section(_page("config-validation.md"), "## What a Report carries")
         listed = set(re.findall(r"\| `report\.(\w+)\([^)]*\)` \|", body))
         assert listed, "the Report method table stopped parsing"
-        public = {name for name in vars(Report)
-                  if not name.startswith("_") and callable(getattr(Report, name))}
+        public = {
+            name
+            for name in vars(Report)
+            if not name.startswith("_") and callable(getattr(Report, name))
+        }
         assert listed == public, (
             f"on the page and not on Report: {sorted(listed - public)}; on "
             f"Report and not on the page: {sorted(public - listed)}"
         )
 
     def test_the_validation_page_counts_a_findings_fields(self):
-        """"A ``Finding`` is four fields" -- and it names all four.
+        """ "A ``Finding`` is four fields" -- and it names all four.
 
         The count and the names together, because either alone drifts: a
         fifth field added to ``findings.py`` leaves the word "four" false, and
@@ -981,8 +1037,7 @@ class TestThePagesSayWhatTheLayerDoes:
         from rheplicant.config import Finding
 
         body = _section(_page("config-validation.md"), "## What a Report carries")
-        opens = re.search(r"A `Finding` is (\w+) fields: (.*?)\n\n", body,
-                          re.DOTALL)
+        opens = re.search(r"A `Finding` is (\w+) fields: (.*?)\n\n", body, re.DOTALL)
         assert opens, "config-validation.md no longer counts a Finding's fields"
         word = opens.group(1).lower()
         assert word in _NUMBER_WORDS, f"unknown number word {word!r}"
@@ -997,7 +1052,7 @@ class TestThePagesSayWhatTheLayerDoes:
         )
 
     def test_the_validation_page_counts_the_sources_it_lists(self):
-        """"reads three things and no fourth" and "Three sources", once each.
+        """ "reads three things and no fourth" and "Three sources", once each.
 
         Self-consistency rather than a check against the package: the three
         sources are §2.4's scope boundary, which no shipped constant holds.
@@ -1020,9 +1075,7 @@ class TestThePagesSayWhatTheLayerDoes:
         page = _page("config-validation.md")
         body = _section(page, "## What it decides, and from what")
         bullets = re.findall(r"^- \*\*", body, re.MULTILINE)
-        assert len(bullets) >= 2, (
-            f"the source bullets stopped parsing: {len(bullets)} found"
-        )
+        assert len(bullets) >= 2, f"the source bullets stopped parsing: {len(bullets)} found"
         claims = [
             (r"reads (\w+) things and no fourth", "the pass's own sentence"),
             (r"^(\w+) sources, and the third", "the list's lead-in"),
@@ -1063,9 +1116,8 @@ class TestThePagesSayWhatTheLayerDoes:
             "config-validation.md no longer explains the structural exception "
             "in the sentence this guard reads."
         )
-        tail = body[opens.end():]
-        named = {token.rstrip(":")
-                 for token in re.findall(r"`([a-z_]+):`", tail)}
+        tail = body[opens.end() :]
+        named = {token.rstrip(":") for token in re.findall(r"`([a-z_]+):`", tail)}
         assert named == set(_NOT_YET) | {"campaign"}, (
             f"the page names {sorted(named)} as refused before any check "
             f"runs; _structural refuses {sorted(set(_NOT_YET) | {'campaign'})}."
@@ -1074,8 +1126,7 @@ class TestThePagesSayWhatTheLayerDoes:
         # And the sentence COUNTS them in words, which the set comparison
         # above cannot see: a section added to either table would be added to
         # the list and leave "four" behind.
-        counted = re.search(r"(\w+) whole sections this layer does not read",
-                            tail)
+        counted = re.search(r"(\w+) whole sections this layer does not read", tail)
         assert counted, (
             "the page no longer counts the sections it names in the "
             "'N whole sections this layer does not read' form."
@@ -1083,8 +1134,7 @@ class TestThePagesSayWhatTheLayerDoes:
         word = counted.group(1).lower()
         assert word in _NUMBER_WORDS, f"unknown number word {word!r}"
         assert _NUMBER_WORDS[word] == len(named), (
-            f"config-validation.md says {word} sections and names "
-            f"{len(named)}: {sorted(named)}."
+            f"config-validation.md says {word} sections and names {len(named)}: {sorted(named)}."
         )
 
 
@@ -1107,11 +1157,41 @@ class TestTheCountsProseStatesAboutThisLayer:
     #: so an equality against the registry would go red on work that is not
     #: wrong. What IS asserted against the registry is that every one of them
     #: is still there.
-    PLAN_3A = frozenset({
-        "A1", "A2", "A3", "A4", "A5", "A6", "A7", "A8", "A14", "A15", "A16",
-        "A17", "A18", "A19", "A20", "A21", "A23", "A24", "A25", "A27", "A28",
-        "A29", "A30", "A31", "A32", "A33", "A38", "A39", "A41", "A42", "A52",
-    })
+    PLAN_3A = frozenset(
+        {
+            "A1",
+            "A2",
+            "A3",
+            "A4",
+            "A5",
+            "A6",
+            "A7",
+            "A8",
+            "A14",
+            "A15",
+            "A16",
+            "A17",
+            "A18",
+            "A19",
+            "A20",
+            "A21",
+            "A23",
+            "A24",
+            "A25",
+            "A27",
+            "A28",
+            "A29",
+            "A30",
+            "A31",
+            "A32",
+            "A33",
+            "A38",
+            "A39",
+            "A41",
+            "A42",
+            "A52",
+        }
+    )
 
     def test_every_check_plan_3a_claims_is_registered(self):
         """The direction that goes silently wrong: a check quietly dropped.
@@ -1165,11 +1245,32 @@ class TestTheCountsProseStatesAboutThisLayer:
     #: register no slot at all. A set built from "what this plan worked on"
     #: rather than "what this plan registered" would be a set no registry can
     #: check.
-    PLAN_3B = frozenset({
-        "A10", "A11", "A12", "A13", "A26", "A35", "A40", "A43", "A44", "A45",
-        "A46", "A47", "A48", "A49", "A50", "B5", "B9", "C1", "C2", "C3", "C8",
-        "C9",
-    })
+    PLAN_3B = frozenset(
+        {
+            "A10",
+            "A11",
+            "A12",
+            "A13",
+            "A26",
+            "A35",
+            "A40",
+            "A43",
+            "A44",
+            "A45",
+            "A46",
+            "A47",
+            "A48",
+            "A49",
+            "A50",
+            "B5",
+            "B9",
+            "C1",
+            "C2",
+            "C3",
+            "C8",
+            "C9",
+        }
+    )
 
     def test_every_check_plan_3b_claims_is_registered(self):
         """The same direction as 3A's, over the three registries 3B ships.
@@ -1183,9 +1284,11 @@ class TestTheCountsProseStatesAboutThisLayer:
         from rheplicant.config.inflight import AXIS_CHECKS, BUILT_CHECKS
         from rheplicant.config.preflight import CHECKS
 
-        bare = {slot.split(".")[0]
-                for registry in (CHECKS, AXIS_CHECKS, BUILT_CHECKS)
-                for slot in registry}
+        bare = {
+            slot.split(".")[0]
+            for registry in (CHECKS, AXIS_CHECKS, BUILT_CHECKS)
+            for slot in registry
+        }
         assert self.PLAN_3B <= bare, (
             f"these schema ids are in Plan 3B's scope and no function "
             f"registers them in any of the three passes: "
@@ -1231,9 +1334,11 @@ class TestTheCountsProseStatesAboutThisLayer:
         from rheplicant.config.postflight import CHECKS as PRICED
         from rheplicant.config.preflight import CHECKS
 
-        bare = {slot.split(".")[0]
-                for registry in (CHECKS, AXIS_CHECKS, BUILT_CHECKS, PRICED)
-                for slot in registry}
+        bare = {
+            slot.split(".")[0]
+            for registry in (CHECKS, AXIS_CHECKS, BUILT_CHECKS, PRICED)
+            for slot in registry
+        }
         assert self.PLAN_3C <= bare, (
             f"these schema ids are in Plan 3C's scope and no function "
             f"registers them in any of the four passes: "
@@ -1251,8 +1356,7 @@ class TestTheCountsProseStatesAboutThisLayer:
         moment any one pair is disjoint, so a row shared by exactly two plans
         -- which is the mistake a reader actually makes -- would pass it.
         """
-        for left, right in (("PLAN_3A", "PLAN_3B"), ("PLAN_3A", "PLAN_3C"),
-                            ("PLAN_3B", "PLAN_3C")):
+        for left, right in (("PLAN_3A", "PLAN_3B"), ("PLAN_3A", "PLAN_3C"), ("PLAN_3B", "PLAN_3C")):
             shared = getattr(self, left) & getattr(self, right)
             assert shared == frozenset(), (
                 f"{left} and {right} both claim {sorted(shared)}. A schema "
@@ -1264,9 +1368,14 @@ class TestTheCountsProseStatesAboutThisLayer:
     #: changelog's own number sits in. Extended rather than replaced: a
     #: reworded "thirty-two" must fail as a WRONG COUNT (32 != 31), where an
     #: unknown word would fail as a broken scan and read as this guard's bug.
-    _WORDS = {**_NUMBER_WORDS,
-              "twenty-nine": 29, "thirty": 30, "thirty-one": 31,
-              "thirty-two": 32, "thirty-three": 33}
+    _WORDS = {
+        **_NUMBER_WORDS,
+        "twenty-nine": 29,
+        "thirty": 30,
+        "thirty-one": 31,
+        "thirty-two": 32,
+        "thirty-three": 33,
+    }
 
     #: Each plan's changelog entry, by its own ``### `` heading, and the
     #: sentence that entry states its count in.
@@ -1280,16 +1389,19 @@ class TestTheCountsProseStatesAboutThisLayer:
     #: different."* placed above these two leaves the whole module at exit 0
     #: while Plan 3A's guard reads **that entry's** number.
     _ENTRIES = {
-        "3A": ("### Everything a document can be refused for before it costs "
-               "anything",
-               r"([A-Za-z-]+)\s+schema §6 checks now decide"),
-        "3B": ("### The rest of what text decides, and two slots for what it "
-               "cannot",
-               r"registers\s+(\d+)\s+schema §6 ids\s+across\s+the\s+three"
-               r"\s+passes"),
-        "3C": ("### The checks that cost something, and the gate that decides "
-               "whether to pay",
-               r"puts a price on\s+(\d+)\s+schema §6 rows"),
+        "3A": (
+            "### Everything a document can be refused for before it costs anything",
+            r"([A-Za-z-]+)\s+schema §6 checks now decide",
+        ),
+        "3B": (
+            "### The rest of what text decides, and two slots for what it cannot",
+            r"registers\s+(\d+)\s+schema §6 ids\s+across\s+the\s+three"
+            r"\s+passes",
+        ),
+        "3C": (
+            "### The checks that cost something, and the gate that decides whether to pay",
+            r"puts a price on\s+(\d+)\s+schema §6 rows",
+        ),
     }
 
     def _entry(self, plan: str) -> tuple[str, str]:
@@ -1330,7 +1442,7 @@ class TestTheCountsProseStatesAboutThisLayer:
         return entry, changelog
 
     def test_the_changelog_counts_the_checks_plan_3a_decided(self):
-        """"Thirty-one schema §6 checks" was prose with no reader.
+        """ "Thirty-one schema §6 checks" was prose with no reader.
 
         Neither registry number is it: 34 SLOTS is high by the three dotted
         ``A1.*`` keys and by ``A14.cal_loads``. The number is the count of
@@ -1354,8 +1466,7 @@ class TestTheCountsProseStatesAboutThisLayer:
         word = stated.group(1).lower()
         assert word in self._WORDS, f"unknown number word {word!r}"
         assert self._WORDS[word] == len(self.PLAN_3A), (
-            f"CHANGELOG.md says {word} checks; Plan 3A's scope table has "
-            f"{len(self.PLAN_3A)}."
+            f"CHANGELOG.md says {word} checks; Plan 3A's scope table has {len(self.PLAN_3A)}."
         )
 
     def test_the_changelog_counts_the_rows_plan_3b_registered(self):
@@ -1435,8 +1546,7 @@ class TestTheCountsProseStatesAboutThisLayer:
         """
         heading, pattern = self._ENTRIES[plan]
         entry, changelog = self._entry(plan)
-        everywhere = [match.start() for match in re.finditer(pattern,
-                                                             changelog)]
+        everywhere = [match.start() for match in re.finditer(pattern, changelog)]
         assert len(everywhere) == 1, (
             f"Plan {plan}'s count sentence appears {len(everywhere)} times in "
             f"CHANGELOG.md. It is how that plan's guard finds its own number, "
@@ -1488,8 +1598,7 @@ class TestPlan3BsWiringAndItsSurface:
                 "keeping axes() off the surface no longer holds; re-decide it "
                 "rather than letting this comment rot."
             )
-        for name in ("axes", "built", "AXIS_CHECKS", "BUILT_CHECKS", "Axes",
-                     "Built"):
+        for name in ("axes", "built", "AXIS_CHECKS", "BUILT_CHECKS", "Axes", "Built"):
             assert name not in config.__all__, name
 
     def test_the_three_prior_gates_are_one_function_in_the_order_written(self):
@@ -1531,8 +1640,7 @@ class TestPlan3BsWiringAndItsSurface:
         order = list(CHECKS)
         assert order.index("A20") < order.index("A21") < order.index("A23")
 
-    def test_the_one_binding_walker_is_called_from_the_modules_that_hoist(
-            self):
+    def test_the_one_binding_walker_is_called_from_the_modules_that_hoist(self):
         """A FLOOR on ``assert_bound_once`` call sites, found by a glob.
 
         §3.2(h)'s shared table was replaced by "each hoisting task
@@ -1567,8 +1675,7 @@ class TestPlan3BsWiringAndItsSurface:
             for node in ast.walk(ast.parse(source)):
                 if not isinstance(node, ast.Call):
                     continue
-                name = getattr(node.func, "id", None) or getattr(
-                    node.func, "attr", None)
+                name = getattr(node.func, "id", None) or getattr(node.func, "attr", None)
                 found += name == "assert_bound_once"
             return found
 
@@ -1582,8 +1689,7 @@ class TestPlan3BsWiringAndItsSurface:
             "the glob found no message_binding.py, so it is not looking "
             "where it thinks it is and every count below is zero"
         )
-        sites = {path.name: _calls(path.read_text())
-                 for path in modules if path.name != helper}
+        sites = {path.name: _calls(path.read_text()) for path in modules if path.name != helper}
         carrying = {name: n for name, n in sites.items() if n}
         assert sum(carrying.values()) >= 11, (
             f"only {sum(carrying.values())} assert_bound_once call sites: "
@@ -1625,8 +1731,7 @@ class TestPlan3CsSurfaceAndItsPage:
     #: :data:`TestTheCountsProseStatesAboutThisLayer._WORDS` gives: a reworded
     #: count must fail as a WRONG COUNT, where an unknown word fails as a
     #: broken scan and reads as this guard's own bug.
-    _WORDS = {**_NUMBER_WORDS,
-              "nineteen": 19, "twenty": 20}
+    _WORDS = {**_NUMBER_WORDS, "nineteen": 19, "twenty": 20}
 
     #: How the page's ``report:`` column expands into the cells it stands for.
     #: THREE of the five spellings expand, and each for its own reason:
@@ -1634,9 +1739,13 @@ class TestPlan3CsSurfaceAndItsPage:
     #: the column is meaningless for a gate that never ran, and ``ignored``
     #: says :func:`~rheplicant.config.gating.verdict` reads past it. The two
     #: literal spellings pin one value each.
-    _REPORT_CELL = {"either": (True, False), "true": (True,),
-                    "false": (False,), "ignored": (True, False),
-                    "—": (True, False)}
+    _REPORT_CELL = {
+        "either": (True, False),
+        "true": (True,),
+        "false": (False,),
+        "ignored": (True, False),
+        "—": (True, False),
+    }
 
     #: And how the ``it failed`` column does NOT expand. ``—`` is one cell and
     #: not two: a gate that never ran has no failure to have had, so pairing
@@ -1671,8 +1780,7 @@ class TestPlan3CsSurfaceAndItsPage:
             assert hasattr(config, name), name
         resolved = config.gates({"linearity": {"mode": "warn"}})
         assert set(resolved) == set(config.gates(None))
-        assert all(isinstance(gate, config.Gate)
-                   for gate in resolved.values())
+        assert all(isinstance(gate, config.Gate) for gate in resolved.values())
 
     def test_the_priced_pass_stays_wiring_rather_than_surface(self):
         """``priced`` is NOT exported, and the reason is Plan 3B's.
@@ -1690,10 +1798,22 @@ class TestPlan3CsSurfaceAndItsPage:
         """
         import rheplicant.config as config
 
-        for name in ("priced", "Priced", "PostCheck", "verdict",
-                     "check_gates", "auto_skipped", "MODES", "STATES",
-                     "DEFAULT_MODE", "CHECK_ID", "CHECK_NAMES", "AUTO_SKIP",
-                     "AUTO_SKIP_ID", "OFF"):
+        for name in (
+            "priced",
+            "Priced",
+            "PostCheck",
+            "verdict",
+            "check_gates",
+            "auto_skipped",
+            "MODES",
+            "STATES",
+            "DEFAULT_MODE",
+            "CHECK_ID",
+            "CHECK_NAMES",
+            "AUTO_SKIP",
+            "AUTO_SKIP_ID",
+            "OFF",
+        ):
             assert name not in config.__all__, name
             assert not hasattr(config, name), name
 
@@ -1735,8 +1855,13 @@ class TestPlan3CsSurfaceAndItsPage:
         from rheplicant.config import Gate
         from rheplicant.config.gating import STATES
 
-        unknown = Gate(name="linearity", state="a_state_no_plan_has_added",
-                       record=False, reason=None, rtol=None)
+        unknown = Gate(
+            name="linearity",
+            state="a_state_no_plan_has_added",
+            record=False,
+            reason=None,
+            rtol=None,
+        )
         assert unknown.state not in STATES
         assert unknown.runs() is False, (
             "an unrecognised state RUNS. gating.py's docstring: a state added "
@@ -1768,25 +1893,27 @@ class TestPlan3CsSurfaceAndItsPage:
             "order is the page's own claim -- the four writable ones, then "
             "the two that are not."
         )
-        writable = {row[0].strip("`") for row in rows
-                    if "mode:" in row[1]}
+        writable = {row[0].strip("`") for row in rows if "mode:" in row[1]}
         assert writable == set(MODES), (
             f"the page shows {sorted(writable)} as writable as a mode:; "
             f"gating.MODES is {sorted(MODES)}."
         )
-        for word, what in ((r"(\w+) effective states", "the heading's count"),
-                           (r"states, (\w+) of them writable",
-                            "the heading's writable count")):
+        for word, what in (
+            (r"(\w+) effective states", "the heading's count"),
+            (r"states, (\w+) of them writable", "the heading's writable count"),
+        ):
             found = re.search(word, self.STATES_TABLE, re.IGNORECASE)
             assert found, f"{what} is no longer in {self.STATES_TABLE!r}"
             said = found.group(1).lower()
             assert said in self._WORDS, f"{what}: unknown word {said!r}"
-        assert self._WORDS[re.search(r"(\w+) effective states",
-                                     self.STATES_TABLE,
-                                     re.IGNORECASE).group(1).lower()] == len(STATES)
-        assert self._WORDS[re.search(r"states, (\w+) of them writable",
-                                     self.STATES_TABLE,
-                                     re.IGNORECASE).group(1).lower()] == len(MODES)
+        assert self._WORDS[
+            re.search(r"(\w+) effective states", self.STATES_TABLE, re.IGNORECASE).group(1).lower()
+        ] == len(STATES)
+        assert self._WORDS[
+            re.search(r"states, (\w+) of them writable", self.STATES_TABLE, re.IGNORECASE)
+            .group(1)
+            .lower()
+        ] == len(MODES)
 
     def test_the_pages_cross_product_table_is_EXECUTED(self):
         """Every cell of the page's table is driven through ``verdict``.
@@ -1817,8 +1944,13 @@ class TestPlan3CsSurfaceAndItsPage:
             # own because it is what makes the ``—`` cells legible: a row that
             # says "no" is exactly a row whose failed and report: columns
             # stand for nothing.
-            probe = Gate(name="linearity", state=state, record=False,
-                         reason="the document said so", rtol=None)
+            probe = Gate(
+                name="linearity",
+                state=state,
+                record=False,
+                reason="the document said so",
+                rtol=None,
+            )
             assert probe.runs() == (ran == "yes"), (
                 f"the page says the {state!r} row {'runs' if ran == 'yes' else 'does not run'}; "
                 f"Gate.runs() says {probe.runs()}."
@@ -1839,14 +1971,19 @@ class TestPlan3CsSurfaceAndItsPage:
                 f"{promised!r}, which is neither a **SEVERITY** nor *none*."
             )
             for keeps in self._REPORT_CELL[record]:
-                gate = Gate(name="linearity", state=state, record=keeps,
-                            reason=("the document said so"
-                                    if state in ("skip", "auto_skip")
-                                    else None),
-                            rtol=None)
-                got = verdict(gate, failed=self._FAILED_CELL[failed],
-                              where="inference.parameters.g",
-                              message="the numbers")
+                gate = Gate(
+                    name="linearity",
+                    state=state,
+                    record=keeps,
+                    reason=("the document said so" if state in ("skip", "auto_skip") else None),
+                    rtol=None,
+                )
+                got = verdict(
+                    gate,
+                    failed=self._FAILED_CELL[failed],
+                    where="inference.parameters.g",
+                    message="the numbers",
+                )
                 driven += 1
                 if named is None:
                     assert got is None, (
@@ -1878,7 +2015,7 @@ class TestPlan3CsSurfaceAndItsPage:
         )
 
     def test_the_page_counts_the_cells_its_table_stands_for(self):
-        """"eighteen cells, not twelve rows", against the table itself.
+        """ "eighteen cells, not twelve rows", against the table itself.
 
         The sentence is the whole reason the table is legible: a reader who
         counts rows concludes ``{mode: skip, report: true}`` has a cell, and
@@ -1889,8 +2026,7 @@ class TestPlan3CsSurfaceAndItsPage:
         """
         body = _block(_page(self.PAGE), self.CROSS)
         rows = self._cross_product_rows()
-        stated = re.search(r"(\w+) cells, not (\w+) rows", body,
-                           re.IGNORECASE)
+        stated = re.search(r"(\w+) cells, not (\w+) rows", body, re.IGNORECASE)
         assert stated, (
             f"{self.PAGE} no longer counts its cross-product in the "
             "'N cells, not M rows' form this guard reads. Reword the pattern "
@@ -1930,7 +2066,7 @@ class TestPlan3CsSurfaceAndItsPage:
         )
 
     def test_the_page_counts_a_gates_fields_and_names_them(self):
-        """"A `Gate` is five fields" -- and it names all five.
+        """ "A `Gate` is five fields" -- and it names all five.
 
         The count and the names together, for the reason the ``Finding``
         sibling above gives: a sixth field leaves the word "five" false, and a
@@ -1939,8 +2075,7 @@ class TestPlan3CsSurfaceAndItsPage:
         from rheplicant.config import Gate
 
         body = _block(_page(self.PAGE), self.IN_CODE)
-        opens = re.search(r"A `Gate` is (\w+) fields: (.*?)\n\n", body,
-                          re.DOTALL)
+        opens = re.search(r"A `Gate` is (\w+) fields: (.*?)\n\n", body, re.DOTALL)
         assert opens, f"{self.PAGE} no longer counts a Gate's fields"
         word = opens.group(1).lower()
         assert word in self._WORDS, f"unknown number word {word!r}"
@@ -1949,8 +2084,7 @@ class TestPlan3CsSurfaceAndItsPage:
         )
         named = set(re.findall(r"`(\w+)`", opens.group(2)))
         assert set(Gate._fields) <= named, (
-            f"the page counts {word} fields and does not name "
-            f"{sorted(set(Gate._fields) - named)}."
+            f"the page counts {word} fields and does not name {sorted(set(Gate._fields) - named)}."
         )
 
     def test_the_precondition_gates_advertises_holds_as_written(self):
@@ -1972,16 +2106,14 @@ class TestPlan3CsSurfaceAndItsPage:
         with pytest.raises(ValueError):
             config.gates({"identifiability": {"rtol": "1e-8x"}})
 
-        typo = config.gates(
-            {"linearity": {"mode": "a_typo_no_plan_has_added"}})["linearity"]
+        typo = config.gates({"linearity": {"mode": "a_typo_no_plan_has_added"}})["linearity"]
         assert typo.state not in STATES
         assert typo.runs() is False
 
         needle = "already passed the pre-flight grammar"
         body = _block(_page(self.PAGE), self.IN_CODE)
         assert needle in body, (
-            f"{self.PAGE} no longer states gates()'s precondition under "
-            f"{self.IN_CODE!r}."
+            f"{self.PAGE} no longer states gates()'s precondition under {self.IN_CODE!r}."
         )
         assert needle in (config.__doc__ or ""), (
             "rheplicant.config's own module docstring no longer states "
@@ -2006,8 +2138,11 @@ class TestPlan3CsSurfaceAndItsPage:
         way) if only one of the two assertions below exists.
         """
         body = _block(_page(self.PAGE), self.SPELLINGS)
-        stated = re.search(r"\*\*(\w+) unrelated things in this layer are "
-                           r'spelled "report"', body)
+        stated = re.search(
+            r"\*\*(\w+) unrelated things in this layer are "
+            r'spelled "report"',
+            body,
+        )
         assert stated, f"{self.PAGE} no longer counts the report spellings"
         word = stated.group(1).lower()
         assert word in self._WORDS, f"unknown number word {word!r}"
@@ -2021,7 +2156,9 @@ class TestPlan3CsSurfaceAndItsPage:
 
         module_stated = re.search(
             r"\*\*(\w+) unrelated things in this layer are "
-            r'spelled "report"', gating.__doc__ or "")
+            r'spelled "report"',
+            gating.__doc__ or "",
+        )
         assert module_stated, (
             "gating.py's own module docstring no longer counts the report "
             "spellings in the same words the page does."
@@ -2045,17 +2182,14 @@ class TestPlan3CsSurfaceAndItsPage:
 
         rows = _rows(_block(_page(self.PAGE), self.COSTS))
         assert rows, f"{self.PAGE}'s post-flight cost table stopped parsing"
-        table = {row[0].strip("`"): (row[2].strip("`"), row[3].strip("`"))
-                 for row in rows}
+        table = {row[0].strip("`"): (row[2].strip("`"), row[3].strip("`")) for row in rows}
         applied = gates(None)
         assert set(table) == set(CHECK_ID), (
-            f"the page tabulates {sorted(table)}; gating.CHECK_ID knows "
-            f"{sorted(CHECK_ID)}."
+            f"the page tabulates {sorted(table)}; gating.CHECK_ID knows {sorted(CHECK_ID)}."
         )
         for name, (check, default) in table.items():
             assert check == CHECK_ID[name], (
-                f"the page gives {name} the id {check!r}; CHECK_ID says "
-                f"{CHECK_ID[name]!r}."
+                f"the page gives {name} the id {check!r}; CHECK_ID says {CHECK_ID[name]!r}."
             )
             assert default == applied[name].state, (
                 f"the page says {name} defaults to {default!r}; gates(None) "
@@ -2082,8 +2216,7 @@ class TestPlan3CsSurfaceAndItsPage:
 
         body = _block(_page(self.PAGE), self.COSTS)
         assert "(1e-3, 1, 1e3)" in body, (
-            f"{self.PAGE} no longer names the probe scales beside the "
-            "linearity row."
+            f"{self.PAGE} no longer names the probe scales beside the linearity row."
         )
         assert "mode: skip" in body and "reason:" in body, (
             f"{self.PAGE} no longer names linearity's own escape beside the "
@@ -2118,8 +2251,7 @@ class TestPlan3CsSurfaceAndItsPage:
             "saturates') is stale."
         )
         assert "2.16e+00" in checks["C12"].message, (
-            "C12's own message no longer carries the departure the page "
-            "quotes."
+            "C12's own message no longer carries the departure the page quotes."
         )
 
     def test_the_slots_section_counts_the_passes_that_actually_exist(self):
@@ -2150,8 +2282,7 @@ class TestPlan3CsSurfaceAndItsPage:
         )
         rows = _rows(body)
         assert len(rows) == len(passes) - 1, (
-            f"the slots table has {len(rows)} rows for {len(passes) - 1} "
-            "later passes."
+            f"the slots table has {len(rows)} rows for {len(passes) - 1} later passes."
         )
         ordering = re.findall(r"^- (\w[\w -]*?) pass —", body, re.MULTILINE)
         assert len(ordering) == len(passes), (
@@ -2185,15 +2316,13 @@ class TestPlan3CsSurfaceAndItsPage:
         modes = re.search(r"`mode: ([^`]+)`", body)
         assert modes, "the Checks section no longer spells the mode words"
         assert [word.strip() for word in modes.group(1).split("|")] == list(MODES), (
-            f"the page spells the modes {modes.group(1)!r}; gating.MODES is "
-            f"{list(MODES)}."
+            f"the page spells the modes {modes.group(1)!r}; gating.MODES is {list(MODES)}."
         )
         rows = _rows(body)
         assert rows, "config-inference.md's Checks table stopped parsing"
         table = {row[0].strip("`"): row[-1].strip("`") for row in rows}
         assert set(table) == set(CHECK_NAMES), (
-            f"the page tabulates {sorted(table)}; gating.CHECK_NAMES is "
-            f"{sorted(CHECK_NAMES)}."
+            f"the page tabulates {sorted(table)}; gating.CHECK_NAMES is {sorted(CHECK_NAMES)}."
         )
         applied = gates(None)
         for name, default in table.items():
@@ -2224,27 +2353,49 @@ _PAGE_FIXES = {
         # `width:` goes with it: measured, changing the kind alone swaps A27
         # for A1 -- `width` is not a `conjugate.gls` option and Task 3's run
         # sweep says so. The page names that, so the patch does it.
-        (("kind: conjugate.gls", "drop `width:`"),
-         lambda doc: {**doc, "runs": [{k: v for k, v in doc["runs"][0].items()
-                                       if k != "width"}
-                                      | {"kind": "conjugate.gls"}]}),
+        (
+            ("kind: conjugate.gls", "drop `width:`"),
+            lambda doc: {
+                **doc,
+                "runs": [
+                    {k: v for k, v in doc["runs"][0].items() if k != "width"}
+                    | {"kind": "conjugate.gls"}
+                ],
+            },
+        ),
         # THREE edits, and the page says so since Plan 3B. Writing only the
         # kind leaves `include_logdet:` on a kind whose key set does not carry
         # it (A49, and `build_noise` before A49 was hoisted), and leaves
         # `source:` unwritten, which `radiometer_frozen` has no default for.
-        (("inference.noise.kind: radiometer_frozen", "keeps this exit",
-          "drop it (check A49)", "source: observed"),
-         lambda doc: {**doc, "inference": {
-             **doc["inference"],
-             "noise": {**{k: v for k, v in doc["inference"]["noise"].items()
-                          if k != "include_logdet"},
-                       "kind": "radiometer_frozen",
-                       "source": "observed"}}}),
+        (
+            (
+                "inference.noise.kind: radiometer_frozen",
+                "keeps this exit",
+                "drop it (check A49)",
+                "source: observed",
+            ),
+            lambda doc: {
+                **doc,
+                "inference": {
+                    **doc["inference"],
+                    "noise": {
+                        **{
+                            k: v
+                            for k, v in doc["inference"]["noise"].items()
+                            if k != "include_logdet"
+                        },
+                        "kind": "radiometer_frozen",
+                        "source": "observed",
+                    },
+                },
+            },
+        ),
     ],
     "A30": [
-        (("inference.twin: {without: [noise]}",),
-         lambda doc: {**doc, "inference": {**doc["inference"],
-                                           "twin": {"without": ["noise"]}}}),
+        (
+            ("inference.twin: {without: [noise]}",),
+            lambda doc: {**doc, "inference": {**doc["inference"], "twin": {"without": ["noise"]}}},
+        ),
     ],
     "A33": [
         # `init:` goes with the transform, and that is the half the page left
@@ -2253,27 +2404,43 @@ _PAGE_FIXES = {
         # produces a nine-channel bandpass for eight channels of data. The
         # pre-flight pass cannot see it -- it is a shape -- so only
         # `test_the_three_fixes_together_leave_a_document_that_LOADS` does.
-        (("transform: unit_mean_bandpass", "`b`, whose free vector",
-          "{ones: [7]}"),
-         lambda doc: {**doc, "inference": {
-             **doc["inference"],
-             "parameters": {
-                 **doc["inference"]["parameters"],
-                 "b": {**doc["inference"]["parameters"]["b"],
-                       "init": {"ones": [7]},
-                       "transform": "unit_mean_bandpass"}}}}),
+        (
+            ("transform: unit_mean_bandpass", "`b`, whose free vector", "{ones: [7]}"),
+            lambda doc: {
+                **doc,
+                "inference": {
+                    **doc["inference"],
+                    "parameters": {
+                        **doc["inference"]["parameters"],
+                        "b": {
+                            **doc["inference"]["parameters"]["b"],
+                            "init": {"ones": [7]},
+                            "transform": "unit_mean_bandpass",
+                        },
+                    },
+                },
+            },
+        ),
     ],
     "C18": [
         # Only the `model.noise.type:` escape: the page's OTHER escape
         # (`inference.noise.kind: homoscedastic`) also clears A27, which
         # would fail the "and only it" assertion below -- measured, it
         # leaves ['A30', 'A33', 'A49'], not ['A27', 'A30', 'A33'].
-        (("model.noise.type: RadiometerNoiseOperator",),
-         lambda doc: {**doc, "model": {
-             **doc["model"],
-             "noise": {"type": "RadiometerNoiseOperator",
-                       "channel_width": {"value": 1.0, "unit": "MHz"},
-                       "integration_time": {"value": 2.0, "unit": "s"}}}}),
+        (
+            ("model.noise.type: RadiometerNoiseOperator",),
+            lambda doc: {
+                **doc,
+                "model": {
+                    **doc["model"],
+                    "noise": {
+                        "type": "RadiometerNoiseOperator",
+                        "channel_width": {"value": 1.0, "unit": "MHz"},
+                        "integration_time": {"value": 2.0, "unit": "s"},
+                    },
+                },
+            },
+        ),
     ],
 }
 
@@ -2339,8 +2506,7 @@ class TestTheValidationPageDocument:
     #: document is wrong in a way it is not.
     _COUNT_CLAIMS = (
         (r"wrong (\w+) ways", "the heading", "verdicts"),
-        (r"and all (\w+) come back from one call", "the opening sentence",
-         "findings"),
+        (r"and all (\w+) come back from one call", "the opening sentence", "findings"),
         (r"^(\w+) findings,", "the bullet list's lead-in", "findings"),
     )
 
@@ -2406,9 +2572,7 @@ class TestTheValidationPageDocument:
             )
             word = found.group(1).lower()
             assert word in words, f"{what}: unknown number word {word!r}"
-            counted = (
-                report.findings if quantity == "findings" else report.verdicts()
-            )
+            counted = report.findings if quantity == "findings" else report.verdicts()
             assert words[word] == len(counted), (
                 f"{what} says {word} and the document earns "
                 f"{len(report.findings)} findings "
@@ -2416,7 +2580,7 @@ class TestTheValidationPageDocument:
             )
 
     def test_the_kinds_a30_lets_keep_the_node_are_the_packages_own(self):
-        """"`kind: forward` keeps the node" was true and INCOMPLETE.
+        """ "`kind: forward` keeps the node" was true and INCOMPLETE.
 
         ``mmodes`` keeps it too -- §3.2 (e) 2 expressed A30's fitting
         condition as the complement ``{"forward", "mmodes"}`` precisely so
@@ -2430,8 +2594,9 @@ class TestTheValidationPageDocument:
         """
         from rheplicant.config.preflight.model import _A30_NOT_FITTING
 
-        [bullet] = re.findall(r"^- \*\*A30\*\*.*?(?=^- \*\*|\Z)", self._body(),
-                              re.MULTILINE | re.DOTALL)
+        [bullet] = re.findall(
+            r"^- \*\*A30\*\*.*?(?=^- \*\*|\Z)", self._body(), re.MULTILINE | re.DOTALL
+        )
         named = set(re.findall(r"`kind: ([a-z][a-z._]*)`", bullet))
         assert named == set(_A30_NOT_FITTING), (
             f"the A30 bullet says {sorted(named)} keep the node; the package "
@@ -2500,8 +2665,13 @@ class TestTheValidationPageDocument:
 
         for finding in preflight(self._document()).findings:
             assert finding.where.split(".")[0].split("[")[0] in {
-                "runtime", "observation", "resources", "model", "inference",
-                "runs", "variants",
+                "runtime",
+                "observation",
+                "resources",
+                "model",
+                "inference",
+                "runs",
+                "variants",
             }, finding.where
 
     @pytest.mark.parametrize("check", sorted(_PAGE_FIXES))
@@ -2514,23 +2684,23 @@ class TestTheValidationPageDocument:
         audience. This kills a bullet reworded to advise something else while
         the test below goes on applying the advice that used to be there.
         """
-        bullet = re.search(rf"^- \*\*{check}\*\*.*?(?=^- \*\*|\Z)",
-                           self._body(), re.MULTILINE | re.DOTALL)
+        bullet = re.search(
+            rf"^- \*\*{check}\*\*.*?(?=^- \*\*|\Z)", self._body(), re.MULTILINE | re.DOTALL
+        )
         assert bullet, f"the page no longer carries a bullet for {check}"
         for phrases, _ in _PAGE_FIXES[check]:
             for phrase in phrases:
-                assert phrase in bullet.group(0), (
-                    f"{check}'s bullet no longer offers {phrase!r}"
-                )
+                assert phrase in bullet.group(0), f"{check}'s bullet no longer offers {phrase!r}"
 
     @pytest.mark.parametrize(
         ("check", "index"),
-        [(check, index)
-         for check in sorted(_PAGE_FIXES)
-         for index in range(len(_PAGE_FIXES[check]))],
+        [
+            (check, index)
+            for check in sorted(_PAGE_FIXES)
+            for index in range(len(_PAGE_FIXES[check]))
+        ],
     )
-    def test_the_fix_the_page_names_clears_the_finding_and_only_it(self, check,
-                                                                   index):
+    def test_the_fix_the_page_names_clears_the_finding_and_only_it(self, check, index):
         """The other half: advice that does not work is worse than none.
 
         Each patch applies exactly what the bullet tells the reader to write,
@@ -2632,9 +2802,7 @@ class TestTheValidationPageDocument:
         # every fix on the page and stops being said when the physics
         # arrives, not when a document changes.
         remaining = [f.check for f in preflight(document).verdicts()]
-        assert remaining == [], (
-            f"the four remedies together still leave {remaining}"
-        )
+        assert remaining == [], f"the four remedies together still leave {remaining}"
         load_document(document)
 
     def test_the_pass_on_the_pages_document_is_free(self):
@@ -2781,8 +2949,7 @@ class TestTheWorkedDocumentOnThePage:
         document = self._document()
         runs = list(document["runs"])
         names = [run["name"] for run in runs]
-        forward = {**document,
-                   "runs": [*runs[:2], runs[3], runs[2]]}
+        forward = {**document, "runs": [*runs[:2], runs[3], runs[2]]}
 
         assert names == ["identifiable", "mean", "at_init", "spread"], names
         with pytest.raises(ConfigError, match="names no earlier run"):
@@ -2827,8 +2994,7 @@ class TestThePosteriorDocumentOnThePage:
 
         return run_document(_page_document(cls.HEADING))
 
-    def test_the_pages_chain_agrees_with_the_pages_conjugate_mean(self,
-                                                                  results):
+    def test_the_pages_chain_agrees_with_the_pages_conjugate_mean(self, results):
         """Two exits, one document, one answer.
 
         The conjugate page recovers ``g = 1.5224889516830444`` by an exact
@@ -2862,8 +3028,7 @@ class TestThePosteriorDocumentOnThePage:
         assert sorted(chain.samples) == ["g"]
         assert "prediction" not in chain.samples
         assert chain.n_draw == 200 and chain.n_chain == 1
-        assert float(np.mean(np.asarray(chain.samples["g"]))) == \
-            pytest.approx(1.52, abs=0.05)
+        assert float(np.mean(np.asarray(chain.samples["g"]))) == pytest.approx(1.52, abs=0.05)
 
     def test_the_page_s_npe_run_returns_the_shape_it_promises(self, results):
         """Shapes, keys and the estimator -- not a posterior.
@@ -2909,8 +3074,7 @@ class TestThePosteriorDocumentOnThePage:
         Both predicts look backwards, so the page's list is not decoration:
         moving either above the run it names is refused.
         """
-        assert list(results) == ["chain", "chain_spread", "amortized",
-                                 "npe_spread"]
+        assert list(results) == ["chain", "chain_spread", "amortized", "npe_spread"]
 
 
 class TestTheTutorialsTwoDocumentsRun:
@@ -2988,13 +3152,10 @@ class TestTheTutorialsTwoDocumentsRun:
 
         results = run_document(document)
 
-        assert list(results) == ["simulate", "fit"], (
-            "runs must come back in declaration order"
-        )
+        assert list(results) == ["simulate", "fit"], "runs must come back in declaration order"
         fitted = float(results["fit"].product["params"]["g"])
         assert fitted == pytest.approx(self.RECOVERED, abs=5e-4), (
-            f"the page says the fit lands on {self.RECOVERED}; it landed on "
-            f"{fitted}."
+            f"the page says the fit lands on {self.RECOVERED}; it landed on {fitted}."
         )
         assert f"**{self.RECOVERED}**" in _page("config-tutorial.md")
 
@@ -3021,12 +3182,12 @@ class TestTheTutorialsTwoDocumentsRun:
                 f"false. Got: {caught.value}"
             )
 
-        stated = re.search(r"lists the\s+(\w+) keys the kind does take",
-                           _page("config-tutorial.md"))
+        stated = re.search(
+            r"lists the\s+(\w+) keys the kind does take", _page("config-tutorial.md")
+        )
         assert stated, "the tutorial no longer counts the optimize vocabulary"
         assert _NUMBER_WORDS[stated.group(1).lower()] == len(_OPTIMIZE_KEYS), (
-            f"the tutorial says {stated.group(1)} keys; exits.py declares "
-            f"{len(_OPTIMIZE_KEYS)}."
+            f"the tutorial says {stated.group(1)} keys; exits.py declares {len(_OPTIMIZE_KEYS)}."
         )
 
     def test_the_page_counts_the_run_kinds_the_same_way_every_page_does(self):
@@ -3060,8 +3221,7 @@ class TestEveryPageThatCountsTheValueFormsCountsThemRight:
         claims = []
         for path in sorted(_DOCS.glob("*.md")):
             text = path.read_text()
-            for pattern in (r"the\s+(\w+)\s+form keys",
-                            r"(\w+)\s+form keys\s+in\s+\w+\s+families"):
+            for pattern in (r"the\s+(\w+)\s+form keys", r"(\w+)\s+form keys\s+in\s+\w+\s+families"):
                 for word in re.findall(pattern, text):
                     claims.append((path.name, word.lower()))
         assert len(claims) >= 3, (
@@ -3073,8 +3233,7 @@ class TestEveryPageThatCountsTheValueFormsCountsThemRight:
         for page, word in claims:
             assert word in _NUMBER_WORDS, f"{page} counts form keys in {word!r}"
             assert _NUMBER_WORDS[word] == len(VALUE_FORMS), (
-                f"{page} says {word} form keys; values.py declares "
-                f"{len(VALUE_FORMS)}."
+                f"{page} says {word} form keys; values.py declares {len(VALUE_FORMS)}."
             )
 
     def test_no_page_miscounts_the_families_the_forms_come_in(self):
@@ -3088,12 +3247,12 @@ class TestEveryPageThatCountsTheValueFormsCountsThemRight:
         families = len(re.findall(r"^### \d+\. ", values_page, re.MULTILINE))
         assert families > 1, "config-values.md's numbered subsections stopped parsing"
 
-        claims = [("config-values.md", word)
-                  for word in re.findall(r"^## The (\w+) forms", values_page,
-                                         re.MULTILINE)]
+        claims = [
+            ("config-values.md", word)
+            for word in re.findall(r"^## The (\w+) forms", values_page, re.MULTILINE)
+        ]
         for path in sorted(_DOCS.glob("*.md")):
-            for word in re.findall(r"form keys\s+in\s+(\w+)\s+families",
-                                   path.read_text()):
+            for word in re.findall(r"form keys\s+in\s+(\w+)\s+families", path.read_text()):
                 claims.append((path.name, word))
         assert len(claims) >= 2, (
             f"the family count scan found only {claims}; both the heading on "

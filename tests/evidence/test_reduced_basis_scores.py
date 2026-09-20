@@ -24,9 +24,7 @@ STEP = 1e-4
 
 
 def _scores(**kwargs):
-    return score_directions(
-        rhino_bank.space(), rhino_bank.pipeline(), rhino_bank.state(), **kwargs
-    )
+    return score_directions(rhino_bank.space(), rhino_bank.pipeline(), rhino_bank.state(), **kwargs)
 
 
 def test_score_directions_match_a_central_difference():
@@ -74,9 +72,7 @@ def test_at_moves_the_point_and_a_nonlinear_score_moves_with_it():
     np.testing.assert_allclose(
         np.asarray(here["amplitude"]), np.asarray(there["amplitude"]), rtol=1e-12
     )
-    assert not np.allclose(
-        np.asarray(here["index"]), np.asarray(there["index"]), rtol=1e-3
-    )
+    assert not np.allclose(np.asarray(here["index"]), np.asarray(there["index"]), rtol=1e-3)
 
 
 def test_an_unknown_name_is_refused():

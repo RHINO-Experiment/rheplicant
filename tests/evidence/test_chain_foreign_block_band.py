@@ -45,8 +45,11 @@ SHAPES = tuple(() for _ in ORDER)
 #: One RHINO night's time-bandwidth product, the offset scalar the evidence
 #: layer carries under RadiometerNoise.
 RHINO_OFFSET = 7.2e11
-SHIFTS = [pytest.param(0.0, id="offset+0"), pytest.param(1e6, id="offset+1e6"),
-          pytest.param(RHINO_OFFSET, id="offset+7.2e11")]
+SHIFTS = [
+    pytest.param(0.0, id="offset+0"),
+    pytest.param(1e6, id="offset+1e6"),
+    pytest.param(RHINO_OFFSET, id="offset+7.2e11"),
+]
 
 
 def _memory():
@@ -71,12 +74,18 @@ def _night(seed, shift):
 
 def _term(factor, target, offset, epoch_id="e"):
     info = SqrtInfo(
-        factor=jnp.asarray(factor), target=jnp.asarray(target),
-        offset=jnp.asarray(float(offset)), names=ORDER, shapes=SHAPES,
+        factor=jnp.asarray(factor),
+        target=jnp.asarray(target),
+        offset=jnp.asarray(float(offset)),
+        names=ORDER,
+        shapes=SHAPES,
     )
     return QuadraticLikelihood(
-        info=info, epoch_id=epoch_id, n_observed=bank.N_SAMPLES,
-        residual_chi2=jnp.asarray(0.0), residual_dof=0,
+        info=info,
+        epoch_id=epoch_id,
+        n_observed=bank.N_SAMPLES,
+        residual_chi2=jnp.asarray(0.0),
+        residual_dof=0,
     )
 
 

@@ -209,7 +209,9 @@ def build_inference(
     twin_section = (
         section["twin"]
         if "twin" in section
-        else None if context is None else context.use_default("inference.twin", None)
+        else None
+        if context is None
+        else context.use_default("inference.twin", None)
     )
     fit_twin, replaced = build_fit_twin(twin_section, twin, context)
     parsed = parse_latents(section["parameters"], context) if "parameters" in section else None

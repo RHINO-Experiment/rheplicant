@@ -40,16 +40,12 @@ dist = pytest.importorskip("numpyro.distributions", reason="numpyro not installe
 @pytest.fixture(scope="module")
 def block():
     state = State(
-        coords=Coordinates(
-            time=jnp.arange(16.0), freq=jnp.linspace(60e6, 85e6, 8)
-        ),
+        coords=Coordinates(time=jnp.arange(16.0), freq=jnp.linspace(60e6, 85e6, 8)),
         key=jax.random.key(0),
         meta={"telescope": "magnitude"},
     )
     twin = assemble(
-        ForegroundOperator(
-            amplitude=jnp.array(1e3), spectral_index=jnp.array(2.5), ref_freq=70e6
-        ),
+        ForegroundOperator(amplitude=jnp.array(1e3), spectral_index=jnp.array(2.5), ref_freq=70e6),
         GainOperator(gain=jnp.array(1.1)),
         NoiseOperator(sigma=jnp.array(0.5)),
     )
@@ -73,9 +69,7 @@ def block():
 
 def test_magnitude_returns_a_python_float_inside_a_trace() -> None:
     """The narrow claim, isolated from everything that calls it."""
-    latent = Latent(
-        "x", init=jnp.array([2.5, -4.0]), prior=dist.Normal(jnp.zeros(2), jnp.ones(2))
-    )
+    latent = Latent("x", init=jnp.array([2.5, -4.0]), prior=dist.Normal(jnp.zeros(2), jnp.ones(2)))
     seen = {}
 
     @eqx.filter_jit
@@ -115,9 +109,7 @@ def test_the_all_zero_fallback_survives(block) -> None:
     value is a real float; on a tracer it would raise, so this asserts the
     branch is still reachable rather than merely present in the source.
     """
-    zero = Latent(
-        "z", init=jnp.zeros(3), prior=dist.Normal(jnp.zeros(3), jnp.ones(3))
-    )
+    zero = Latent("z", init=jnp.zeros(3), prior=dist.Normal(jnp.zeros(3), jnp.ones(3)))
     seen = {}
 
     @eqx.filter_jit

@@ -423,8 +423,14 @@ class _Attempt:
     certified: bool
 
 
-def _certify(programs: dict[Any, Any], cond: Any, values: dict[str, jax.Array],
-             gap_tol: float, sweep: int, floor: float | None = None) -> _Attempt:
+def _certify(
+    programs: dict[Any, Any],
+    cond: Any,
+    values: dict[str, jax.Array],
+    gap_tol: float,
+    sweep: int,
+    floor: float | None = None,
+) -> _Attempt:
     """The Newton decrement at ``values``, and whether it certifies ``gap_tol``.
 
     The objective is :meth:`Conditioning.neg_log_posterior` over every
@@ -483,11 +489,21 @@ def _at_this_size(measured: Any) -> str:
 
 
 def _not_converged_message(
-    *, max_iter: int, tol: float, gap_tol: float, effective: float,
-    changed: bool, objective: list[float], chi2: list[float],
-    contraction: float | None, gap: float | None,
-    rise: tuple[int, float] | None, attempt: _Attempt | None, solve_tol: float,
-    dtype: Any, hidden: str,
+    *,
+    max_iter: int,
+    tol: float,
+    gap_tol: float,
+    effective: float,
+    changed: bool,
+    objective: list[float],
+    chi2: list[float],
+    contraction: float | None,
+    gap: float | None,
+    rise: tuple[int, float] | None,
+    attempt: _Attempt | None,
+    solve_tol: float,
+    dtype: Any,
+    hidden: str,
 ) -> str:
     """:meth:`SamplingPlan.estimate`'s refusal at ``max_iter``.
 
@@ -510,8 +526,7 @@ def _not_converged_message(
     limit = math.sqrt(2.0 * gap_tol)
     unsure = attempt is not None and not attempt.measured.proven
     headline = (
-        "SamplingPlan.estimate cannot certify this estimate at this size and "
-        "precision"
+        "SamplingPlan.estimate cannot certify this estimate at this size and precision"
         if unsure
         else "SamplingPlan.estimate did not converge"
     )
@@ -547,7 +562,8 @@ def _not_converged_message(
             f"blocks ended at solve_tol = {solve_tol:g}), when sigma depends on the "
             "prediction and a conjugate block freezes it, when a block is solved in "
             f"log space, or in {np.dtype(dtype).name} when the objective's gradient "
-            "is below its rounding. " + _at_this_size(measured)
+            "is below its rounding. "
+            + _at_this_size(measured)
             + "Run in float64 (JAX_ENABLE_X64=1), group the "
             "correlated latents into ONE Block, raise max_iter, or pass tol=None to "
             "accept an unconverged answer."
@@ -574,7 +590,9 @@ def _not_converged_message(
         "run in float64 (JAX_ENABLE_X64=1). "
     )
     return opening + (
-        f"The decrease contracts by {said_rho} per sweep{left}. " + hidden + rounding
+        f"The decrease contracts by {said_rho} per sweep{left}. "
+        + hidden
+        + rounding
         + "Slow convergence here means the blocks are correlated — group the "
         "correlated latents into ONE Block, which resolves them in a single "
         "solve, or raise max_iter. identifiability(space, pipeline, state, "
@@ -1025,10 +1043,7 @@ class SamplingPlan:
         """
         declared = set(self.space.names)
         unknown = [
-            (block, name)
-            for block in self.blocks
-            for name in block.names
-            if name not in declared
+            (block, name) for block in self.blocks for name in block.names if name not in declared
         ]
         if unknown:
             listed = ", ".join(f"{name!r} in Block{b.names}" for b, name in unknown)
@@ -1100,9 +1115,7 @@ class SamplingPlan:
         joint = self.space.joint_prior
         if joint is None:
             return
-        placed = ", ".join(
-            f"{name!r} in Block{owner[name].names}" for name in joint.over
-        )
+        placed = ", ".join(f"{name!r} in Block{owner[name].names}" for name in joint.over)
         split = len({owner[name].names for name in joint.over}) > 1
         why = (
             "and this partition splits it across blocks, so neither block would "
@@ -1183,9 +1196,7 @@ class SamplingPlan:
         return engine
 
     def __repr__(self) -> str:
-        listed = ", ".join(
-            f"{block.label}:{engine}" for block, engine in self._assign
-        )
+        listed = ", ".join(f"{block.label}:{engine}" for block, engine in self._assign)
         return f"SamplingPlan({listed})"
 
     # -------------------------------------------------------------- running --
@@ -1251,7 +1262,9 @@ class SamplingPlan:
         """
         try:
             check_linearity(
-                self.space, cond.pipeline, cond.state_template,
+                self.space,
+                cond.pipeline,
+                cond.state_template,
                 names=self.space.names,
             )
         except LinearityRefused:
@@ -1307,9 +1320,7 @@ class SamplingPlan:
         )
         for block, engine in self._assign:
             if engine == CONJUGATE:
-                check_linearity(
-                    self.space, pipeline, state_template, names=block.names, at=values0
-                )
+                check_linearity(self.space, pipeline, state_template, names=block.names, at=values0)
             elif engine == LOG_CONJUGATE:
                 check_log_linearity(
                     self.space, pipeline, state_template, names=block.names, at=values0
@@ -1327,9 +1338,7 @@ class SamplingPlan:
         reports and the whole reason it reports by name: "you have 8 blind
         directions" tells a user they have a problem and nothing about which.
         """
-        report = identifiability(
-            self.space, cond.pipeline, cond.state_template, at=values
-        )
+        report = identifiability(self.space, cond.pipeline, cond.state_template, at=values)
         if report.nullity == 0:
             return report
 
@@ -1398,17 +1407,27 @@ class SamplingPlan:
                     run = log_conjugate_estimate if log else conjugate_estimate
                 extra = {"key": block_key} if draw else {}
                 values, recorded = run(
-                    cond, block.names, values,
-                    tol=solve_tol, maxiter=None, require_convergence=solve_guard,
-                    programs=programs, **extra,
+                    cond,
+                    block.names,
+                    values,
+                    tol=solve_tol,
+                    maxiter=None,
+                    require_convergence=solve_guard,
+                    programs=programs,
+                    **extra,
                 )
                 residuals[block.names] = float(recorded)
             else:
                 steps = DEFAULT_GRADIENT_STEPS if block.steps is None else block.steps
                 if draw:
                     values, tuning[block.names] = gradient_draw(
-                        cond, block.names, values, key=block_key, steps=steps,
-                        tuning=tuning.get(block.names), adapt=adapt,
+                        cond,
+                        block.names,
+                        values,
+                        key=block_key,
+                        steps=steps,
+                        tuning=tuning.get(block.names),
+                        adapt=adapt,
                         programs=programs,
                     )
                     potential = conditional_potential(cond, block.names, values)
@@ -1417,9 +1436,16 @@ class SamplingPlan:
                     )
                 else:
                     values, potential = gradient_estimate(
-                        cond, block.names, values, steps=steps, programs=programs,
-                        **({} if block.learning_rate is None
-                           else {"learning_rate": block.learning_rate}),
+                        cond,
+                        block.names,
+                        values,
+                        steps=steps,
+                        programs=programs,
+                        **(
+                            {}
+                            if block.learning_rate is None
+                            else {"learning_rate": block.learning_rate}
+                        ),
                     )
                     residuals[block.names] = float(potential)
         return values
@@ -1561,9 +1587,7 @@ class SamplingPlan:
         # Gated on `tol`, because with no convergence test there is no floor for
         # `min_sweeps` to raise and a run of two sweeps asking for no verdict is
         # a perfectly ordinary thing to want.
-        if tol is not None and (
-            not isinstance(min_sweeps, int) or not 1 <= min_sweeps <= max_iter
-        ):
+        if tol is not None and (not isinstance(min_sweeps, int) or not 1 <= min_sweeps <= max_iter):
             raise ParameterSpaceError(
                 f"estimate() needs 1 <= min_sweeps <= max_iter, got {min_sweeps!r} and "
                 f"{max_iter!r}. A min_sweeps above the cap means the test is never "
@@ -1571,7 +1595,11 @@ class SamplingPlan:
                 "including on a model that had already settled."
             )
         cond, values = self._prepare(
-            pipeline, state_template, observed, noise, check_identifiability,
+            pipeline,
+            state_template,
+            observed,
+            noise,
+            check_identifiability,
             "SamplingPlan.estimate",
         )
         report = None
@@ -1596,14 +1624,13 @@ class SamplingPlan:
         # curvature itself and proving a floor would cost a linearity check
         # this run has no use for.
         curvature = (
-            self._curvature_floor(cond)
-            if certify.real_size(values) > certify.DENSE_MAX
-            else None
+            self._curvature_floor(cond) if certify.real_size(values) > certify.DENSE_MAX else None
         )
         converged = None if tol is None else False
         # "once" is "due now, and never again"; "each_sweep" is "due every time".
-        due, repeat = check_identifiability is not False, (
-            check_identifiability == CHECK_EACH_SWEEP
+        due, repeat = (
+            check_identifiability is not False,
+            (check_identifiability == CHECK_EACH_SWEEP),
         )
 
         for sweep in range(1, max_iter + 1):
@@ -1611,9 +1638,16 @@ class SamplingPlan:
                 report = self._identifiable(cond, values, "SamplingPlan.estimate")
                 due = repeat
             values = self._update(
-                cond, values, draw=False, key=None, adapt=False,
-                solve_tol=tightened, solve_guard=solve_guard,
-                tuning={}, residuals=residuals, programs=programs,
+                cond,
+                values,
+                draw=False,
+                key=None,
+                adapt=False,
+                solve_tol=tightened,
+                solve_guard=solve_guard,
+                tuning={},
+                residuals=residuals,
+                programs=programs,
             )
             chi2_now, objective_now, following, following_scales = measure(values)
             decrease, resolution = change(terms, scales, following, following_scales)
@@ -1621,9 +1655,7 @@ class SamplingPlan:
             decrease, resolution = float(decrease), float(resolution)
             chi2.append(float(chi2_now))
             objective.append(float(objective_now))
-            gap_state, screened, gap, rho = _gap_step(
-                gap_state, decrease, resolution, gap_tol
-            )
+            gap_state, screened, gap, rho = _gap_step(gap_state, decrease, resolution, gap_tol)
             if gap_state.contraction is not None:
                 measured = gap_state.contraction
             floor = _solve_tol_floor(objective_now)
@@ -1664,8 +1696,7 @@ class SamplingPlan:
 
         if converged is False:
             worst = max(
-                (residuals[block.names] for block, engine in self._assign
-                 if engine == CONJUGATE),
+                (residuals[block.names] for block, engine in self._assign if engine == CONJUGATE),
                 default=None,
             )
             hidden = (
@@ -1678,11 +1709,20 @@ class SamplingPlan:
             )
             raise ParameterSpaceError(
                 _not_converged_message(
-                    max_iter=max_iter, tol=tol, gap_tol=gap_tol,
-                    effective=effective, changed=changed, objective=objective,
-                    chi2=chi2, contraction=measured, gap=gap,
-                    rise=last_rise, attempt=attempt, solve_tol=tightened,
-                    dtype=jnp.result_type(objective_now), hidden=hidden,
+                    max_iter=max_iter,
+                    tol=tol,
+                    gap_tol=gap_tol,
+                    effective=effective,
+                    changed=changed,
+                    objective=objective,
+                    chi2=chi2,
+                    contraction=measured,
+                    gap=gap,
+                    rise=last_rise,
+                    attempt=attempt,
+                    solve_tol=tightened,
+                    dtype=jnp.result_type(objective_now),
+                    hidden=hidden,
                 )
             )
 
@@ -1700,9 +1740,7 @@ class SamplingPlan:
                 effective_tol=effective,
                 contraction=rho,
                 distance_bound=None if attempt is None else attempt.measured.distance,
-                certificate_iterations=(
-                    None if attempt is None else attempt.measured.products
-                ),
+                certificate_iterations=(None if attempt is None else attempt.measured.products),
                 certificate_attempts=attempts,
                 solve_tol=tightened,
                 floor_source=None if attempt is None else attempt.measured.floor_source,
@@ -1764,9 +1802,7 @@ class SamplingPlan:
                 a gradient block has a member with no declared prior.
         """
         if not isinstance(n_sweeps, int) or n_sweeps < 1:
-            raise ParameterSpaceError(
-                f"sample() needs n_sweeps >= 1, got {n_sweeps!r}."
-            )
+            raise ParameterSpaceError(f"sample() needs n_sweeps >= 1, got {n_sweeps!r}.")
         warmup = n_sweeps // 2 if warmup is None else warmup
         if not isinstance(warmup, int) or warmup < 0:
             raise ParameterSpaceError(
@@ -1789,7 +1825,11 @@ class SamplingPlan:
                 require_priors(self.space, block.names, block.label)
 
         cond, values = self._prepare(
-            pipeline, state_template, observed, noise, check_identifiability,
+            pipeline,
+            state_template,
+            observed,
+            noise,
+            check_identifiability,
             "SamplingPlan.sample",
         )
         report = None
@@ -1798,8 +1838,9 @@ class SamplingPlan:
         programs: dict[Any, Any] = {}
         chi2: list[float] = []
         kept: dict[str, list[jax.Array]] = {name: [] for name in self.space.names}
-        due, repeat = check_identifiability is not False, (
-            check_identifiability == CHECK_EACH_SWEEP
+        due, repeat = (
+            check_identifiability is not False,
+            (check_identifiability == CHECK_EACH_SWEEP),
         )
 
         for sweep in range(n_sweeps):
@@ -1807,9 +1848,16 @@ class SamplingPlan:
                 report = self._identifiable(cond, values, "SamplingPlan.sample")
                 due = repeat
             values = self._update(
-                cond, values, draw=True, key=jax.random.fold_in(key, sweep),
-                adapt=sweep < warmup, solve_tol=solve_tol, solve_guard=solve_guard,
-                tuning=tuning, residuals=residuals, programs=programs,
+                cond,
+                values,
+                draw=True,
+                key=jax.random.fold_in(key, sweep),
+                adapt=sweep < warmup,
+                solve_tol=solve_tol,
+                solve_guard=solve_guard,
+                tuning=tuning,
+                residuals=residuals,
+                programs=programs,
             )
             chi2.append(float(cond.chi2(values)))
             if sweep >= warmup:

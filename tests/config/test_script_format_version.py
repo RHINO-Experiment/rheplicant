@@ -52,8 +52,12 @@ def test_a_script_without_a_version_is_refused_and_told_what_to_do():
     """
     with pytest.raises(ConfigError) as raised:
         run_embedded_config(
-            source_path="doc.yaml", source_realpath=None, source_name="doc.yaml",
-            base_dir=".", presets=(), input_bytes=b"schema_version: 1\n",
+            source_path="doc.yaml",
+            source_realpath=None,
+            source_name="doc.yaml",
+            base_dir=".",
+            presets=(),
+            input_bytes=b"schema_version: 1\n",
         )
     message = str(raised.value)
     assert "predates" in message, message
@@ -82,8 +86,12 @@ def test_a_version_that_is_not_the_current_integer_is_refused(version):
     with pytest.raises(ConfigError) as raised:
         run_embedded_config(
             format_version=version,
-            source_path="doc.yaml", source_realpath=None, source_name="doc.yaml",
-            base_dir=".", presets=(), input_bytes=b"schema_version: 1\n",
+            source_path="doc.yaml",
+            source_realpath=None,
+            source_name="doc.yaml",
+            base_dir=".",
+            presets=(),
+            input_bytes=b"schema_version: 1\n",
         )
     assert "script format" in str(raised.value), raised.value
 
@@ -102,8 +110,12 @@ def test_the_current_version_is_not_refused_for_its_version():
     stderr = io.StringIO()
     code = run_embedded_config(
         format_version=SCRIPT_FORMAT_VERSION,
-        source_path="doc.yaml", source_realpath=None, source_name="doc.yaml",
-        base_dir=".", presets=(), input_bytes=b"schema_version: 1\n",
+        source_path="doc.yaml",
+        source_realpath=None,
+        source_name="doc.yaml",
+        base_dir=".",
+        presets=(),
+        input_bytes=b"schema_version: 1\n",
         stderr=stderr,
     )
     assert code != 0, "the fixture document should not run cleanly"

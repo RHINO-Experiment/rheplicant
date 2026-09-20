@@ -98,9 +98,7 @@ class TestAJointPriorNeedsFloat64:
         self, twin, observed, template_state
     ):
         with pytest.raises(StateValidationError) as caught:
-            to_numpyro_model(
-                twin, template_state, self._covered_space(), SIGMA
-            )
+            to_numpyro_model(twin, template_state, self._covered_space(), SIGMA)
         message = str(caught.value)
         # What was declared, and where the number goes wrong -- a refusal that
         # only says "float32" leaves the reader to guess whether it matters.
@@ -111,9 +109,7 @@ class TestAJointPriorNeedsFloat64:
         assert "jax_enable_x64" in message
         assert "inference.joint_prior" in message
 
-    def test_the_same_space_is_accepted_in_a_float64_session(
-        self, twin, observed, template_state
-    ):
+    def test_the_same_space_is_accepted_in_a_float64_session(self, twin, observed, template_state):
         """The sibling: the refusal is about the precision, not the prior.
 
         Without this, a guard that refused every declared ``joint_prior``
@@ -124,17 +120,13 @@ class TestAJointPriorNeedsFloat64:
         was = jax.config.read("jax_enable_x64")
         jax.config.update("jax_enable_x64", True)
         try:
-            model = to_numpyro_model(
-                twin, template_state, self._covered_space(), SIGMA
-            )
+            model = to_numpyro_model(twin, template_state, self._covered_space(), SIGMA)
             # `substitute`, not `seed` alone: the covered latent's site is an
             # ImproperUniform and an improper density cannot be sampled from --
             # which is the point of it, and is why a real run passes
             # `init_to_declared`. The value is supplied here for the same
             # reason.
-            conditioned = substitute(
-                seed(model, rng_seed=0), data={"gain": jnp.array(1.0)}
-            )
+            conditioned = substitute(seed(model, rng_seed=0), data={"gain": jnp.array(1.0)})
             sites = trace(conditioned).get_trace(observed)
         finally:
             jax.config.update("jax_enable_x64", was)
@@ -151,7 +143,9 @@ class TestModelConstruction:
 
     def test_the_space_is_validated_against_the_pipeline(self, twin, template_state):
         space = ParameterSpace.direct(
-            "gain", init=jnp.zeros(3), into=lambda p: p["gain"].gain,
+            "gain",
+            init=jnp.zeros(3),
+            into=lambda p: p["gain"].gain,
             prior=dist.Normal(jnp.zeros(3), 1.0),
         )
         with pytest.raises(ParameterSpaceError, match="shape"):
@@ -166,13 +160,14 @@ class TestModel:
         assert tr["prediction"]["value"].shape == (8, 4)
         assert tr["obs"]["value"].shape == (8, 4)
 
-    def test_a_reparameterized_site_is_named_for_what_is_sampled(
-        self, twin, template_state
-    ):
+    def test_a_reparameterized_site_is_named_for_what_is_sampled(self, twin, template_state):
         """The site is `log_gain` — the coordinate NUTS explores — even though
         the value lands in a leaf called `gain`."""
         space = ParameterSpace.direct(
-            "log_gain", init=0.0, into=lambda p: p["gain"].gain, fn=jnp.exp,
+            "log_gain",
+            init=0.0,
+            into=lambda p: p["gain"].gain,
+            fn=jnp.exp,
             prior=dist.Normal(0.0, 0.3),
         )
         model = to_numpyro_model(twin, template_state, space, noise_std=SIGMA)
@@ -181,9 +176,7 @@ class TestModel:
         assert "gain" not in tr
 
     def test_sampled_noise_std(self, twin, space, template_state):
-        model = to_numpyro_model(
-            twin, template_state, space, noise_std=dist.HalfNormal(1.0)
-        )
+        model = to_numpyro_model(twin, template_state, space, noise_std=dist.HalfNormal(1.0))
         tr = trace(seed(model, jax.random.key(0))).get_trace()
         assert "noise_std" in tr
 
@@ -192,9 +185,7 @@ class TestModel:
         from numpyro.infer.util import log_density
 
         flags = jnp.zeros(observed.shape, bool).at[0, 0].set(True)
-        masked = to_numpyro_model(
-            twin, template_state, space, noise_std=SIGMA, flags=flags
-        )
+        masked = to_numpyro_model(twin, template_state, space, noise_std=SIGMA, flags=flags)
         unmasked = to_numpyro_model(twin, template_state, space, noise_std=SIGMA)
         corrupted = observed.at[0, 0].set(1e6)
         params = {"gain": jnp.array(TRUE_GAIN)}
@@ -210,7 +201,9 @@ class TestMCMCRecovery:
     def test_nuts_recovers_gain(self, twin, space, template_state, observed):
         model = to_numpyro_model(twin, template_state, space, noise_std=SIGMA)
         mcmc = numpyro.infer.MCMC(
-            numpyro.infer.NUTS(model), num_warmup=200, num_samples=200,
+            numpyro.infer.NUTS(model),
+            num_warmup=200,
+            num_samples=200,
             progress_bar=False,
         )
         mcmc.run(jax.random.key(0), observed=observed)
@@ -242,6 +235,7 @@ class TestMCMCRecovery:
         two have different causes and different fixes, and a bare recovery
         assertion cannot tell them apart.
         """
+
         def two_stage(gain):
             return Pipeline(
                 SkyOperator(amplitude=jnp.array(SKY)),
@@ -254,22 +248,22 @@ class TestMCMCRecovery:
             jax.random.key(4), (8, 4)
         )
         space = ParameterSpace.direct(
-            "log_gain", init=0.0,
+            "log_gain",
+            init=0.0,
             into=(lambda p: p["gain_a"].gain, lambda p: p["gain_b"].gain),
-            fn=jnp.exp, prior=dist.Normal(0.0, 0.5),
+            fn=jnp.exp,
+            prior=dist.Normal(0.0, 0.5),
         )
         model = to_numpyro_model(two_stage(1.0), template_state, space, noise_std=SIGMA)
         mcmc = numpyro.infer.MCMC(
-            numpyro.infer.NUTS(model), num_warmup=1000, num_samples=1000,
+            numpyro.infer.NUTS(model),
+            num_warmup=1000,
+            num_samples=1000,
             progress_bar=False,
         )
         mcmc.run(jax.random.key(0), observed=data)
         draws = mcmc.get_samples()["log_gain"]
-        ess = float(
-            numpyro.diagnostics.effective_sample_size(
-                np.asarray(draws).reshape(1, -1)
-            )
-        )
+        ess = float(numpyro.diagnostics.effective_sample_size(np.asarray(draws).reshape(1, -1)))
         assert ess > 150, f"the chain barely mixed (ESS {ess:.0f}); see the docstring"
         recovered = float(jnp.exp(draws).mean())
         assert abs(recovered - TRUE_GAIN) < 0.01
@@ -277,7 +271,9 @@ class TestMCMCRecovery:
     def test_posterior_predictive(self, twin, space, template_state, observed):
         model = to_numpyro_model(twin, template_state, space, noise_std=SIGMA)
         mcmc = numpyro.infer.MCMC(
-            numpyro.infer.NUTS(model), num_warmup=100, num_samples=50,
+            numpyro.infer.NUTS(model),
+            num_warmup=100,
+            num_samples=50,
             progress_bar=False,
         )
         mcmc.run(jax.random.key(1), observed=observed)
@@ -323,12 +319,15 @@ class TestMCMCRecovery:
             GainOperator(gain=jnp.ones(n_time)),
         )
         space = ParameterSpace.direct(
-            "gains", init=jnp.ones(n_time), into=lambda p: p["gain"].gain,
+            "gains",
+            init=jnp.ones(n_time),
+            into=lambda p: p["gain"].gain,
             prior=dist.Normal(jnp.ones(n_time), 0.1),
         )
         with pytest.raises(StateValidationError, match="per-sample shape"):
-            predict_from_samples(twin, template_state, space,
-                                 {"gains": jnp.ones((5,))})    # scalar per draw
+            predict_from_samples(
+                twin, template_state, space, {"gains": jnp.ones((5,))}
+            )  # scalar per draw
 
     def test_predict_mismatched_draw_counts_rejected(self, template_state):
         twin = assemble(
@@ -336,14 +335,14 @@ class TestMCMCRecovery:
             GainOperator(gain=jnp.array(1.0)),
         )
         space = ParameterSpace(
-            latents=[Latent("a", init=1.0, prior=dist.Normal(1.0, 0.1)),
-                     Latent("b", init=1.0, prior=dist.Normal(1.0, 0.1))],
-            bindings=[Bind(("a", "b"), into=lambda p: p["gain"].gain,
-                           fn=lambda a, b: a * b)],
+            latents=[
+                Latent("a", init=1.0, prior=dist.Normal(1.0, 0.1)),
+                Latent("b", init=1.0, prior=dist.Normal(1.0, 0.1)),
+            ],
+            bindings=[Bind(("a", "b"), into=lambda p: p["gain"].gain, fn=lambda a, b: a * b)],
         )
         with pytest.raises(StateValidationError, match="differing numbers of draws"):
-            predict_from_samples(twin, template_state, space,
-                                 {"a": jnp.ones(5), "b": jnp.ones(7)})
+            predict_from_samples(twin, template_state, space, {"a": jnp.ones(5), "b": jnp.ones(7)})
 
     def test_predict_missing_site_rejected(self, twin, space, template_state):
         with pytest.raises(StateValidationError, match="missing site"):
@@ -368,9 +367,7 @@ class TestObservedNoneIsThePriorPredictive:
     nothing else looks at it.
     """
 
-    def test_no_argument_leaves_the_observation_unconditioned(
-        self, twin, space, template_state
-    ):
+    def test_no_argument_leaves_the_observation_unconditioned(self, twin, space, template_state):
         model = to_numpyro_model(twin, template_state, space, noise_std=SIGMA)
         tr = trace(seed(model, jax.random.key(0))).get_trace()
         site = tr["obs"]
@@ -413,11 +410,7 @@ class TestASampledSigmaCollidingWithALatent:
     @staticmethod
     def _colliding_space():
         return ParameterSpace(
-            latents=(
-                Latent(
-                    name="noise_std", init=jnp.array(1.0), prior=dist.Normal(1.0, 0.3)
-                ),
-            ),
+            latents=(Latent(name="noise_std", init=jnp.array(1.0), prior=dist.Normal(1.0, 0.3)),),
             bindings=(Bind("noise_std", into=lambda p: p["gain"].gain),),
         )
 
@@ -429,7 +422,9 @@ class TestASampledSigmaCollidingWithALatent:
         # is invisible to both.
         with pytest.raises(ParameterSpaceError, match="noise_std") as caught:
             to_numpyro_model(
-                twin, template_state, self._colliding_space(),
+                twin,
+                template_state,
+                self._colliding_space(),
                 noise_std=dist.HalfNormal(1.0),
             )
         message = str(caught.value)
@@ -439,17 +434,13 @@ class TestASampledSigmaCollidingWithALatent:
         assert "rename the latent" in message
         assert "fixed noise_std" in message
 
-    def test_a_fixed_sigma_beside_that_latent_is_left_alone(
-        self, twin, template_state, observed
-    ):
+    def test_a_fixed_sigma_beside_that_latent_is_left_alone(self, twin, template_state, observed):
         """The sibling: nothing collides when the sigma is not sampled.
 
         Without it a refusal that fired on the NAME alone would satisfy the
         test above and delete an ordinary, if unfortunately named, latent.
         """
-        model = to_numpyro_model(
-            twin, template_state, self._colliding_space(), noise_std=SIGMA
-        )
+        model = to_numpyro_model(twin, template_state, self._colliding_space(), noise_std=SIGMA)
         tr = trace(seed(model, jax.random.key(0))).get_trace()
         assert "noise_std" in tr
         assert isinstance(tr["noise_std"]["fn"], dist.Normal)

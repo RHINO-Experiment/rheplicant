@@ -78,9 +78,9 @@ def test_validate_worker_establishes_runtime_before_plugins_in_order(tmp_path):
     # -- `test_preflight_capability.py` is where the wording is pinned.
     assert frame["status"] == "ok"
     assert frame["result"]["layers"] == 2
-    assert [
-        (one["check"], one["severity"]) for one in frame["result"]["findings"]
-    ] == [("A53", "report")]
+    assert [(one["check"], one["severity"]) for one in frame["result"]["findings"]] == [
+        ("A53", "report")
+    ]
     assert trace.read_text(encoding="utf-8").splitlines() == [
         "a:x64=True",
         "b:x64=True",
@@ -106,9 +106,7 @@ def test_validate_worker_warns_once_for_a_python_target():
         "gain": {"value": 1.1, "unit": "dimensionless"},
     }
 
-    completed, frame = _invoke_worker(
-        "validate", yaml.safe_dump(document, sort_keys=False)
-    )
+    completed, frame = _invoke_worker("validate", yaml.safe_dump(document, sort_keys=False))
 
     assert frame["status"] == "ok"
     assert completed.stderr.decode().count("trusted plugin/python code") == 1
@@ -121,9 +119,7 @@ def test_validation_worker_closes_environment_after_success(monkeypatch):
                 layers=(
                     SimpleNamespace(
                         layer=SimpleNamespace(prefix=""),
-                        configured=SimpleNamespace(
-                            report=SimpleNamespace(findings=())
-                        ),
+                        configured=SimpleNamespace(report=SimpleNamespace(findings=())),
                     ),
                 )
             )
@@ -194,18 +190,14 @@ def test_parent_worker_adapter_preserves_exact_job_bytes(monkeypatch):
             exact_yaml.encode("utf-8", "strict"),
         ),
     ]
-    assert yaml.safe_load(preview)["runs"] == [
-        {"name": "preview-forward", "kind": "forward"}
-    ]
+    assert yaml.safe_load(preview)["runs"] == [{"name": "preview-forward", "kind": "forward"}]
 
 
 @pytest.mark.parametrize(
     "failure",
     [ConfigError("refused"), RuntimeError("boom")],
 )
-def test_priced_job_closes_environment_on_every_terminal_failure(
-    monkeypatch, failure
-):
+def test_priced_job_closes_environment_on_every_terminal_failure(monkeypatch, failure):
     class RecordingExecution:
         def __init__(self):
             self.close_calls = 0
@@ -235,9 +227,7 @@ def test_priced_job_closes_environment_on_every_terminal_failure(
     "failure",
     [None, ConfigError("refused"), RuntimeError("boom")],
 )
-def test_forward_preview_closes_environment_on_every_terminal_path(
-    monkeypatch, failure
-):
+def test_forward_preview_closes_environment_on_every_terminal_path(monkeypatch, failure):
     class RecordingOrchestration:
         @staticmethod
         def execute_prepared(_document, *, trace):
@@ -246,9 +236,7 @@ def test_forward_preview_closes_environment_on_every_terminal_path(
 
     class RecordingExecution:
         orchestration = RecordingOrchestration()
-        document = SimpleNamespace(
-            layers=(SimpleNamespace(configured="configured"),)
-        )
+        document = SimpleNamespace(layers=(SimpleNamespace(configured="configured"),))
         trace = "trace"
 
         def __init__(self):
@@ -258,9 +246,7 @@ def test_forward_preview_closes_environment_on_every_terminal_path(
             self.close_calls += 1
 
     prepared = SimpleNamespace(
-        source=SimpleNamespace(
-            layered_document={"model": {"adc": {"n_bits": 4}}}
-        )
+        source=SimpleNamespace(layered_document={"model": {"adc": {"n_bits": 4}}})
     )
     execution = RecordingExecution()
     monkeypatch.setattr(gui_worker, "_prepared_config", lambda _text: prepared)
@@ -283,9 +269,7 @@ def test_forward_preview_closes_environment_on_every_terminal_path(
     monkeypatch.setattr(gui_worker, "_bounded_preview_result", bounded)
 
     if failure is None:
-        assert gui_worker._run_forward_preview("exact yaml") == {
-            "waterfall": {}
-        }
+        assert gui_worker._run_forward_preview("exact yaml") == {"waterfall": {}}
     else:
         with pytest.raises(type(failure), match=str(failure)):
             gui_worker._run_forward_preview("exact yaml")
@@ -349,9 +333,7 @@ def test_worker_refuses_stdin_over_the_bounded_limit(monkeypatch):
         SimpleNamespace(buffer=BytesIO(b"123456789")),
     )
     frames = []
-    monkeypatch.setattr(
-        gui_worker, "_write_frame", lambda frame: frames.append(frame)
-    )
+    monkeypatch.setattr(gui_worker, "_write_frame", lambda frame: frames.append(frame))
 
     assert gui_worker.main(["validate"]) == 0
     assert len(frames) == 1
@@ -373,9 +355,7 @@ def test_worker_accepts_stdin_up_to_the_bounded_limit(monkeypatch):
         "_run_validation",
         lambda yaml_text: calls.append(yaml_text) or {"findings": []},
     )
-    monkeypatch.setattr(
-        gui_worker, "_write_frame", lambda frame: calls.append(frame)
-    )
+    monkeypatch.setattr(gui_worker, "_write_frame", lambda frame: calls.append(frame))
 
     assert gui_worker.main(["validate"]) == 0
     assert calls == [
@@ -419,13 +399,10 @@ def test_formal_worker_calls_plan4_dispatcher_with_exact_bytes(monkeypatch):
         b'\x1eRHEPLICANT_GUI_JOB {"status":"refused"}\n',
         b'\x1eRHEPLICANT_GUI_JOB {"status":"refused","message":1}\n',
         b'\x1eRHEPLICANT_GUI_JOB {"status":"error","message":"boom"}\n',
-        b'\x1eRHEPLICANT_GUI_JOB {"status":"error",'
-        b'"exception_type":1,"message":"boom"}\n',
+        b'\x1eRHEPLICANT_GUI_JOB {"status":"error","exception_type":1,"message":"boom"}\n',
     ],
 )
-def test_parent_rejects_malformed_worker_frames_with_stderr_context(
-    monkeypatch, stdout
-):
+def test_parent_rejects_malformed_worker_frames_with_stderr_context(monkeypatch, stdout):
     def fake_run(arguments, **_kwargs):
         return subprocess.CompletedProcess(
             arguments,
@@ -454,9 +431,7 @@ def test_parent_uses_the_last_raw_bytes_frame(monkeypatch):
 
     monkeypatch.setattr(jobs.subprocess, "run", fake_run)
 
-    assert jobs._run_isolated_job("validate", "schema_version: 1\n") == {
-        "layers": 2
-    }
+    assert jobs._run_isolated_job("validate", "schema_version: 1\n") == {"layers": 2}
 
 
 def test_parent_rejects_a_nonzero_worker_exit_before_parsing_frames(monkeypatch):
@@ -470,9 +445,7 @@ def test_parent_rejects_a_nonzero_worker_exit_before_parsing_frames(monkeypatch)
 
     monkeypatch.setattr(jobs.subprocess, "run", fake_run)
 
-    with pytest.raises(
-        RuntimeError, match="exited 7: worker process failed"
-    ):
+    with pytest.raises(RuntimeError, match="exited 7: worker process failed"):
         jobs._run_isolated_job("validate", "schema_version: 1\n")
 
 
@@ -482,8 +455,7 @@ def test_parent_converts_a_valid_worker_refusal_to_config_error(monkeypatch):
             arguments,
             0,
             stdout=(
-                b'\x1eRHEPLICANT_GUI_JOB {"status":"refused",'
-                b'"message":"scientific refusal"}\n'
+                b'\x1eRHEPLICANT_GUI_JOB {"status":"refused","message":"scientific refusal"}\n'
             ),
             stderr=b"",
         )
@@ -527,17 +499,17 @@ def test_worker_frames_an_assembly_refusal_as_refused(monkeypatch):
         raise AssemblyError("Transform 'beam_spill' feeds junction 't_ant_sum'")
 
     monkeypatch.setattr(gui_worker, "_run_validation", refuse)
-    monkeypatch.setattr(
-        gui_worker.sys, "stdin", SimpleNamespace(buffer=BytesIO(b"yaml"))
-    )
+    monkeypatch.setattr(gui_worker.sys, "stdin", SimpleNamespace(buffer=BytesIO(b"yaml")))
     frames = []
     monkeypatch.setattr(gui_worker, "_write_frame", frames.append)
 
     assert gui_worker.main(["validate"]) == 0
-    assert frames == [{
-        "status": "refused",
-        "message": "Transform 'beam_spill' feeds junction 't_ant_sum'",
-    }]
+    assert frames == [
+        {
+            "status": "refused",
+            "message": "Transform 'beam_spill' feeds junction 't_ant_sum'",
+        }
+    ]
 
 
 def test_validate_worker_refuses_a_model_the_fold_cannot_assemble():
@@ -546,11 +518,12 @@ def test_validate_worker_refuses_a_model_the_fold_cannot_assemble():
     document = synthetic_document()
     document["model"] = {
         "atmosphere": {"t_atm": {"value": 3.0, "unit": "K"}},
-        "beam_spill": {"sky_fraction": {"value": 0.95, "unit": "dimensionless"},
-                       "t_ground": {"value": 290.0, "unit": "K"}},
+        "beam_spill": {
+            "sky_fraction": {"value": 0.95, "unit": "dimensionless"},
+            "t_ground": {"value": 290.0, "unit": "K"},
+        },
     }
-    completed, frame = _invoke_worker(
-        "validate", yaml.safe_dump(document, sort_keys=False))
+    completed, frame = _invoke_worker("validate", yaml.safe_dump(document, sort_keys=False))
 
     assert completed.returncode == 0
     assert frame["status"] == "refused"

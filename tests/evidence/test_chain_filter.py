@@ -94,9 +94,7 @@ def test_the_filter_is_exact_under_jit():
             blocks, transition, values, names=bank.THETA_NAMES, shapes=((), ())
         )
 
-    assert float(jax.jit(density)(_values(probe))) == pytest.approx(
-        bank.oracle(probe), abs=1e-9
-    )
+    assert float(jax.jit(density)(_values(probe))) == pytest.approx(bank.oracle(probe), abs=1e-9)
 
 
 def test_the_filter_is_differentiable_in_the_transitions_own_parameters():
@@ -163,9 +161,7 @@ def test_the_log_likelihood_is_exactly_its_marginals_log_prob():
         wrapped = chain_log_likelihood(
             bank.stacked(), transition, values, bank.THETA_NAMES, ((), ())
         )
-        marginal = chain_marginal(
-            bank.stacked(), transition, values, bank.THETA_NAMES, ((), ())
-        )
+        marginal = chain_marginal(bank.stacked(), transition, values, bank.THETA_NAMES, ((), ()))
         assert float(wrapped) == float(marginal.log_prob(values)), (
             f"at theta={probe}, chain_log_likelihood returned {float(wrapped)!r} "
             f"but its own marginal's log_prob is "
@@ -240,16 +236,14 @@ def _wide_campaign(seed=7):
 
     keys = jax.random.split(jax.random.key(seed), 3 * n_epochs)
     designs = [
-        np.asarray(jax.random.normal(keys[e], (n_samples, n_theta)))
-        for e in range(n_epochs)
+        np.asarray(jax.random.normal(keys[e], (n_samples, n_theta))) for e in range(n_epochs)
     ]
     responses = [
         np.asarray(jax.random.normal(keys[n_epochs + e], (n_samples, n_zeta))) + 1.0
         for e in range(n_epochs)
     ]
     data = [
-        np.asarray(jax.random.normal(keys[2 * n_epochs + e], (n_samples,)))
-        for e in range(n_epochs)
+        np.asarray(jax.random.normal(keys[2 * n_epochs + e], (n_samples,))) for e in range(n_epochs)
     ]
 
     infos = []
@@ -265,11 +259,7 @@ def _wide_campaign(seed=7):
             shapes={"a": (), "b": (), "z": (n_zeta,)},
             epoch_id=f"wide{epoch}",
         )
-        infos.append(
-            SqrtInfo.combine(
-                SqrtInfo.null(term.info.names, term.info.shapes), term.info
-            )
-        )
+        infos.append(SqrtInfo.combine(SqrtInfo.null(term.info.names, term.info.shapes), term.info))
     blocks = (
         jnp.stack([info.factor for info in infos]),
         jnp.stack([info.target for info in infos]),
@@ -302,9 +292,7 @@ def _wide_campaign(seed=7):
     _, logdet = np.linalg.slogdet(covariance)
 
     def oracle(theta):
-        resid = (
-            np.concatenate(data) - big_a @ np.asarray(theta, float) - big_c @ mean_zeta
-        )
+        resid = np.concatenate(data) - big_a @ np.asarray(theta, float) - big_c @ mean_zeta
         return float(
             -0.5 * resid @ np.linalg.solve(covariance, resid)
             - 0.5 * (logdet + n_data * np.log(2 * np.pi))
@@ -346,9 +334,7 @@ def test_a_wide_chain_is_exact_too_which_is_what_fixes_the_scaling_side(theta):
 def test_the_blocks_must_be_as_wide_as_the_latents_they_claim_to_be_over():
     """A stored block is a form in an ordered vector, not a labelled table."""
     factors, targets, offsets = bank.stacked()
-    with pytest.raises(
-        chain.StateValidationError, match="a different one is not a rename"
-    ):
+    with pytest.raises(chain.StateValidationError, match="a different one is not a rename"):
         chain_marginal(
             (factors[:, :, :2], targets, offsets),
             _transition(),
@@ -429,9 +415,7 @@ def test_the_marginalisation_constant_is_carried(monkeypatch):
 
     def without_the_constant(factor, target, offset, n_block):
         width = factor.shape[1]
-        upper = jnp.linalg.qr(
-            jnp.concatenate([factor, target[:, None]], axis=1), mode="r"
-        )
+        upper = jnp.linalg.qr(jnp.concatenate([factor, target[:, None]], axis=1), mode="r")
         keep = min(upper.shape[0], width)
         corner = upper[keep:, width]
         return (
@@ -505,9 +489,7 @@ def test_the_marginalisation_corner_is_structurally_empty():
     blocks = bank.stacked()
     factor = blocks[0][0]
     width = factor.shape[1]
-    upper = jnp.linalg.qr(
-        jnp.concatenate([factor, blocks[1][0][:, None]], axis=1), mode="r"
-    )
+    upper = jnp.linalg.qr(jnp.concatenate([factor, blocks[1][0][:, None]], axis=1), mode="r")
     assert upper.shape[0] == width
     assert upper[min(upper.shape[0], width) :, width].shape == (0,)
 
@@ -525,13 +507,9 @@ def test_deleting_the_marginalisation_corner_changes_nothing(monkeypatch):
     def without_the_corner(factor, target, offset, n_block):
         calls.append(1)
         width = factor.shape[1]
-        upper = jnp.linalg.qr(
-            jnp.concatenate([factor, target[:, None]], axis=1), mode="r"
-        )
+        upper = jnp.linalg.qr(jnp.concatenate([factor, target[:, None]], axis=1), mode="r")
         keep = min(upper.shape[0], width)
-        new_factor, new_target, new_offset, pivots = real(
-            factor, target, offset, n_block
-        )
+        new_factor, new_target, new_offset, pivots = real(factor, target, offset, n_block)
         return (
             new_factor,
             new_target,
@@ -557,9 +535,7 @@ def test_the_masked_data_normalisation_reaches_the_answer():
         targets,
         offsets + 0.5 * bank.N_SAMPLES * float(np.log(2 * np.pi * bank.SIGMA**2)),
     )
-    assert _filtered(bank.PROBES[1], stripped) - base == pytest.approx(
-        -6.8408, abs=0.05
-    )
+    assert _filtered(bank.PROBES[1], stripped) - base == pytest.approx(-6.8408, abs=0.05)
 
 
 def test_the_final_marginalisation_happens_at_all():

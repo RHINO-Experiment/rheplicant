@@ -61,18 +61,22 @@ def write_cst(path, *, sigma_deg=15.0):
     """
     theta_deg = np.arange(0.0, 180.0 + THETA_STEP, THETA_STEP)
     phi_deg = np.arange(0.0, 360.0, PHI_STEP)
-    pattern = np.exp(
-        -0.5 * (np.deg2rad(theta_deg)[:, None] / np.deg2rad(sigma_deg)) ** 2
-    ) * np.ones_like(phi_deg)[None, :]
+    pattern = (
+        np.exp(-0.5 * (np.deg2rad(theta_deg)[:, None] / np.deg2rad(sigma_deg)) ** 2)
+        * np.ones_like(phi_deg)[None, :]
+    )
     rows = [
         f"{theta:10.3f} {phi:10.3f} {10.0 * np.log10(pattern[i, j]):22.14e} 0 0 0 0 0"
-        for j, phi in enumerate(phi_deg)      # theta runs fastest, as CST writes
+        for j, phi in enumerate(phi_deg)  # theta runs fastest, as CST writes
         for i, theta in enumerate(theta_deg)
     ]
     path.write_text(
         "Theta [deg.]  Phi [deg.]  Abs(Dir.)[dBi]  Abs(Theta)[dBi]  "
         "Phase(Theta)[deg.]  Abs(Phi)[dBi]  Phase(Phi)[deg.]  Ax.Ratio[dB]\n"
-        + "-" * 100 + "\n" + "\n".join(rows) + "\n"
+        + "-" * 100
+        + "\n"
+        + "\n".join(rows)
+        + "\n"
     )
 
 
@@ -83,7 +87,7 @@ class TestTheCstSeam:
         write_cst(tmp_path / "Horn70.txt")
         theta_deg, phi_deg, directivity = read_cst_farfield(tmp_path / "Horn70.txt")
         assert directivity.shape == (theta_deg.size, phi_deg.size)
-        assert np.all(directivity > 0.0)     # linear power, not dB
+        assert np.all(directivity > 0.0)  # linear power, not dB
 
     def test_the_frequency_table_is_in_HERTZ_on_this_side(self, tmp_path):
         """limTOD keys the table in MHz, as it does everywhere; this package
@@ -105,9 +109,7 @@ class TestTheCstSeam:
 
         from limTOD.cstbeam import cst_beam_maps as upstream
 
-        np.testing.assert_allclose(
-            maps, upstream(tmp_path, [70.0], nside=self.NSIDE), rtol=1e-12
-        )
+        np.testing.assert_allclose(maps, upstream(tmp_path, [70.0], nside=self.NSIDE), rtol=1e-12)
 
     def test_a_band_stated_in_hertz_is_the_band_enforced(self, tmp_path):
         """A unit slip at this seam would turn 70 MHz into 70 Hz and refuse
@@ -163,8 +165,7 @@ class TestTheRhinoHorn:
         _, _, directivity = read_cst_farfield(cst_frequency_table(RHINO_BEAMS)[70e6])
         theta_deg = np.arange(directivity.shape[0], dtype=float)
         weight = np.sin(np.deg2rad(theta_deg))[:, None]
-        raw = float((directivity * weight)[theta_deg > 90.0].sum()
-                    / (directivity * weight).sum())
+        raw = float((directivity * weight)[theta_deg > 90.0].sum() / (directivity * weight).sum())
 
         maps = cst_beam_maps(RHINO_BEAMS, [70e6], nside=self.NSIDE)[0]
         theta_hp, _ = hp.pix2ang(self.NSIDE, np.arange(hp.nside2npix(self.NSIDE)))

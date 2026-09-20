@@ -88,11 +88,9 @@ class TestTheSlot:
 
         fields = {one.name for one in dataclasses.fields(NoiseWaveOperator)}
         assert _NOISE_WAVE_LEAVES <= fields
-        assert _NOISE_WAVE_LEAVES == frozenset(
-            {"t_unc", "t_cos", "t_sin", "t_rx"})
+        assert _NOISE_WAVE_LEAVES == frozenset({"t_unc", "t_cos", "t_sin", "t_rx"})
 
-    def test_the_basis_detector_names_the_class_whose_graph_node_is_t_sys_extra(
-            self):
+    def test_the_basis_detector_names_the_class_whose_graph_node_is_t_sys_extra(self):
         """**The measured trap.**  ``BasisTemperatureOperator.graph_node`` is
         ``t_sys_extra``, NOT ``noise_wave`` -- a check that looked for the
         basis under ``model.noise_wave`` finds nothing and reports a number
@@ -122,31 +120,28 @@ class TestItStandsDown:
         """The anti-vacuity partner of the test above.  Without it, a check
         whose body is ``return ()`` passes every stand-down test in this
         class."""
-        found = axis_only(_document(parameters={
-            "t": {"init": 1.0, "into": "noise_wave.t_unc"}}), "C15")
+        found = axis_only(
+            _document(parameters={"t": {"init": 1.0, "into": "noise_wave.t_unc"}}), "C15"
+        )
         assert found.severity == REPORT
 
     def test_a_latent_into_another_node_is_not_a_noise_wave_temperature(self):
         """``gain.gain`` is a leaf and is not one of the four."""
-        assert silent_here(_document(parameters={
-            "g": {"init": 1.0, "into": "gain.gain"}}))
+        assert silent_here(_document(parameters={"g": {"init": 1.0, "into": "gain.gain"}}))
 
-    @pytest.mark.parametrize("into", ["bandpass.t_unc", "gain.t_rx",
-                                      "t_unc", "global_signal.depth.t_cos"])
-    def test_a_temperature_NAME_under_another_node_is_not_one_of_the_four(
-            self, into):
+    @pytest.mark.parametrize(
+        "into", ["bandpass.t_unc", "gain.t_rx", "t_unc", "global_signal.depth.t_cos"]
+    )
+    def test_a_temperature_NAME_under_another_node_is_not_one_of_the_four(self, into):
         """**Kills the path HEAD gate being dropped**, which no ``gain.gain``
         document can see: both halves must be gated, and a check that tested
         the LEAF alone counts a ``t_unc`` written under any node at all.  This
         is A33's own first-version mistake -- it gated the leaf and left the
         head open -- on the other side."""
-        assert silent_here(_document(parameters={
-            "x": {"init": 1.0, "into": into}}))
+        assert silent_here(_document(parameters={"x": {"init": 1.0, "into": into}}))
 
-    @pytest.mark.parametrize("into", ["noise_wave.gamma_src_re",
-                                      "noise_wave.switch_key"])
-    def test_a_noise_wave_field_that_is_not_one_of_the_four_is_not_counted(
-            self, into):
+    @pytest.mark.parametrize("into", ["noise_wave.gamma_src_re", "noise_wave.switch_key"])
+    def test_a_noise_wave_field_that_is_not_one_of_the_four_is_not_counted(self, into):
         """MAJOR 6: **kills the LEAF-membership gate being dropped**, which
         no document under another HEAD can see -- ``gamma_src_re`` and
         ``switch_key`` are ``NoiseWaveOperator``'s own fields, correctly
@@ -154,8 +149,7 @@ class TestItStandsDown:
         rather than one of the four counted temperatures.  Without this
         gate a latent into either would count as a freed temperature and
         raise ``k``."""
-        assert silent_here(_document(parameters={
-            "x": {"init": 1.0, "into": into}}))
+        assert silent_here(_document(parameters={"x": {"init": 1.0, "into": into}}))
 
 
 # --- the number -------------------------------------------------------------
@@ -171,13 +165,16 @@ class TestTheNumber:
         """
         document = preflight_document(
             model=NOISE_WAVE_MODEL,
-            observation={**BASE_OBSERVATION,
-                         "switching": NOISE_WAVE_SWITCHING},
-            inference=dict(parameters={
-                "a": {"init": 1.0, "into": "noise_wave.t_unc"},
-                "b": {"init": 1.0, "into": "noise_wave.t_cos"},
-                "c": {"init": 1.0, "into": "noise_wave.t_sin"},
-                "d": {"init": 1.0, "into": "noise_wave.t_rx"}}))
+            observation={**BASE_OBSERVATION, "switching": NOISE_WAVE_SWITCHING},
+            inference=dict(
+                parameters={
+                    "a": {"init": 1.0, "into": "noise_wave.t_unc"},
+                    "b": {"init": 1.0, "into": "noise_wave.t_cos"},
+                    "c": {"init": 1.0, "into": "noise_wave.t_sin"},
+                    "d": {"init": 1.0, "into": "noise_wave.t_rx"},
+                }
+            ),
+        )
         found = axis_only(document, "C15")
         assert "min(3, 4) * 8 = 24" in found.message
 
@@ -194,9 +191,13 @@ class TestTheNumber:
         document = preflight_document(
             model=NOISE_WAVE_MODEL,
             observation={**BASE_OBSERVATION, "pointing": {"mode": "none"}},
-            inference=dict(parameters={
-                "a": {"init": 1.0, "into": "noise_wave.t_unc"},
-                "b": {"init": 1.0, "into": "noise_wave.t_cos"}}))
+            inference=dict(
+                parameters={
+                    "a": {"init": 1.0, "into": "noise_wave.t_unc"},
+                    "b": {"init": 1.0, "into": "noise_wave.t_cos"},
+                }
+            ),
+        )
         found = axis_only(document, "C15")
         assert "min(1, 2) * 8 = 8" in found.message
 
@@ -207,9 +208,15 @@ class TestTheNumber:
         **Kills** a message that says only ``k = 2``, which tells a reader
         deciding a switching cadence nothing about WHICH two.
         """
-        found = axis_only(_document(parameters={
-            "a": {"init": 1.0, "into": "noise_wave.t_unc"},
-            "b": {"init": 1.0, "into": "noise_wave.t_rx"}}), "C15")
+        found = axis_only(
+            _document(
+                parameters={
+                    "a": {"init": 1.0, "into": "noise_wave.t_unc"},
+                    "b": {"init": 1.0, "into": "noise_wave.t_rx"},
+                }
+            ),
+            "C15",
+        )
         for leaf in _NOISE_WAVE_LEAVES:
             assert leaf in found.message
         assert "['t_rx', 't_unc']" in found.message
@@ -222,10 +229,8 @@ class TestTheNumber:
         Swept over every non-empty subset shape this check can reach, because
         a severity chosen inside one branch is exactly the shape that ships.
         """
-        for freed in (["t_unc"], ["t_unc", "t_cos"],
-                      ["t_unc", "t_cos", "t_sin", "t_rx"]):
-            parameters = {name: {"init": 1.0, "into": f"noise_wave.{name}"}
-                          for name in freed}
+        for freed in (["t_unc"], ["t_unc", "t_cos"], ["t_unc", "t_cos", "t_sin", "t_rx"]):
+            parameters = {name: {"init": 1.0, "into": f"noise_wave.{name}"} for name in freed}
             found = axis_findings(_document(parameters=parameters))
             mine = [one for one in found if one.check == "C15"]
             assert [one.severity for one in mine] == [REPORT], freed
@@ -234,10 +239,16 @@ class TestTheNumber:
         """``axis_only`` asserts it, and this names the property so the
         failure reads as "C15 fired per latent" rather than as an index
         error."""
-        axis_only(_document(parameters={
-            "a": {"init": 1.0, "into": "noise_wave.t_unc"},
-            "b": {"init": 1.0, "into": "noise_wave.t_cos"},
-            "c": {"init": 1.0, "into": "noise_wave.t_sin"}}), "C15")
+        axis_only(
+            _document(
+                parameters={
+                    "a": {"init": 1.0, "into": "noise_wave.t_unc"},
+                    "b": {"init": 1.0, "into": "noise_wave.t_cos"},
+                    "c": {"init": 1.0, "into": "noise_wave.t_sin"},
+                }
+            ),
+            "C15",
+        )
 
 
 # --- the twin: both routes into the leaf ------------------------------------
@@ -252,22 +263,38 @@ class TestTheTwin:
 
     def test_C15_counts_a_binding_as_well_as_an_into(self):
         """**Kills** reading ``inference.parameters`` alone."""
-        found = axis_only(_document(
-            parameters={"a": {"init": 1.0}},
-            bindings=[{"latents": ["a"], "into": "noise_wave.t_unc"}]), "C15")
+        found = axis_only(
+            _document(
+                parameters={"a": {"init": 1.0}},
+                bindings=[{"latents": ["a"], "into": "noise_wave.t_unc"}],
+            ),
+            "C15",
+        )
         assert "min(1, 1) * 8 = 8" in found.message
 
     def test_the_two_routes_agree_on_one_document(self):
         """The same freed set through each spelling gives the same number.
         **Kills** a binding walk that read the head where the ``into:`` walk
         read the leaf."""
-        through_into = axis_only(_document(parameters={
-            "a": {"init": 1.0, "into": "noise_wave.t_unc"},
-            "b": {"init": 1.0, "into": "noise_wave.t_cos"}}), "C15")
-        through_bindings = axis_only(_document(
-            parameters={"a": {"init": 1.0}, "b": {"init": 1.0}},
-            bindings=[{"latents": ["a"], "into": "noise_wave.t_unc"},
-                      {"latents": ["b"], "into": "noise_wave.t_cos"}]), "C15")
+        through_into = axis_only(
+            _document(
+                parameters={
+                    "a": {"init": 1.0, "into": "noise_wave.t_unc"},
+                    "b": {"init": 1.0, "into": "noise_wave.t_cos"},
+                }
+            ),
+            "C15",
+        )
+        through_bindings = axis_only(
+            _document(
+                parameters={"a": {"init": 1.0}, "b": {"init": 1.0}},
+                bindings=[
+                    {"latents": ["a"], "into": "noise_wave.t_unc"},
+                    {"latents": ["b"], "into": "noise_wave.t_cos"},
+                ],
+            ),
+            "C15",
+        )
         assert "min(1, 2) * 8 = 8" in through_into.message
         assert "min(1, 2) * 8 = 8" in through_bindings.message
 
@@ -275,9 +302,12 @@ class TestTheTwin:
         """``into:`` is legally a string OR a list of strings
         (``sections/parameters.py::_names``).  **Kills** a normalisation that
         only handled the string."""
-        found = axis_only(_document(parameters={
-            "a": {"init": 1.0,
-                  "into": ["noise_wave.t_unc", "noise_wave.t_cos"]}}), "C15")
+        found = axis_only(
+            _document(
+                parameters={"a": {"init": 1.0, "into": ["noise_wave.t_unc", "noise_wave.t_cos"]}}
+            ),
+            "C15",
+        )
         assert "min(1, 2) * 8 = 8" in found.message
 
     def test_an_index_after_the_leaf_still_counts_by_its_field(self):
@@ -287,17 +317,21 @@ class TestTheTwin:
         leaf is the LAST STRING segment -- the index is dropped before the
         membership test, not read as the leaf itself.  Without that,
         ``t_unc[0]`` silently drops out of ``freed`` and k reads one low."""
-        found = axis_only(_document(parameters={
-            "a": {"init": 1.0, "into": "noise_wave.t_unc[0]"}}), "C15")
+        found = axis_only(
+            _document(parameters={"a": {"init": 1.0, "into": "noise_wave.t_unc[0]"}}), "C15"
+        )
         assert "min(1, 1) * 8 = 8" in found.message
 
-    @pytest.mark.parametrize("bindings", [
-        [{"into": "noise_wave.t_unc"}],
-        [{"latents": 7, "into": "noise_wave.t_unc"}],
-        [{"latents": ["ghost"], "into": "noise_wave.t_unc"}],
-    ], ids=["missing", "non-string", "undeclared"])
-    def test_a_binding_whose_latents_cannot_be_read_frees_nothing(
-            self, bindings):
+    @pytest.mark.parametrize(
+        "bindings",
+        [
+            [{"into": "noise_wave.t_unc"}],
+            [{"latents": 7, "into": "noise_wave.t_unc"}],
+            [{"latents": ["ghost"], "into": "noise_wave.t_unc"}],
+        ],
+        ids=["missing", "non-string", "undeclared"],
+    )
+    def test_a_binding_whose_latents_cannot_be_read_frees_nothing(self, bindings):
         """MINOR 1 (fix round): ``_t2c_routes`` used to count a ``bindings[]``
         entry's ``into:`` whatever ``latents:`` said, while
         ``preflight/model.py::_t11_bindings`` (A33's own walk over this same
@@ -312,8 +346,7 @@ class TestTheTwin:
         exactly as ``_t11_bindings`` stands A33 down on the same three
         documents.
         """
-        assert silent_here(_document(parameters={"a": {"init": 1.0}},
-                                     bindings=bindings))
+        assert silent_here(_document(parameters={"a": {"init": 1.0}}, bindings=bindings))
 
 
 # --- declining --------------------------------------------------------------
@@ -332,13 +365,16 @@ class TestItDeclines:
         ``load_document`` would refuse it for a reason this test is not
         about.
         """
-        pytest.importorskip("rhino_cal_jax",
-                            reason="rhino_cal_jax comes with rheplicant[cal]")
+        pytest.importorskip("rhino_cal_jax", reason="rhino_cal_jax comes with rheplicant[cal]")
         document = preflight_document(
             model={**NOISE_WAVE_MODEL, "t_sys_extra": NOISE_WAVE_BASIS},
-            inference=dict(parameters={
-                **ONE_LATENT["parameters"],
-                "a": {"init": 1.0, "into": "noise_wave.t_unc"}}))
+            inference=dict(
+                parameters={
+                    **ONE_LATENT["parameters"],
+                    "a": {"init": 1.0, "into": "noise_wave.t_unc"},
+                }
+            ),
+        )
         found = axis_only(document, "C15")
         assert found.severity == REPORT
         assert "does not apply" in found.message
@@ -356,20 +392,33 @@ class TestItDeclines:
         document LOADS, so the wrong number was not even confined to a
         document nobody could run.
         """
-        pytest.importorskip("rhino_cal_jax",
-                            reason="rhino_cal_jax comes with rheplicant[cal]")
+        pytest.importorskip("rhino_cal_jax", reason="rhino_cal_jax comes with rheplicant[cal]")
         document = preflight_document(
-            model={**NOISE_WAVE_MODEL,
-                  "t_sys_extra": [{"from": "basis",
-                                   "basis": {"ref": "resources.bases.b"},
-                                   "coeff": {"zeros": [1, 3], "unit": "K"}}]},
-            resources={"bases": {"b": {"time": {"kind": "legendre",
-                                                "n_basis": 1},
-                                       "freq": {"kind": "legendre",
-                                               "n_basis": 3}}}},
-            inference=dict(parameters={
-                **ONE_LATENT["parameters"],
-                "a": {"init": 1.0, "into": "noise_wave.t_unc"}}))
+            model={
+                **NOISE_WAVE_MODEL,
+                "t_sys_extra": [
+                    {
+                        "from": "basis",
+                        "basis": {"ref": "resources.bases.b"},
+                        "coeff": {"zeros": [1, 3], "unit": "K"},
+                    }
+                ],
+            },
+            resources={
+                "bases": {
+                    "b": {
+                        "time": {"kind": "legendre", "n_basis": 1},
+                        "freq": {"kind": "legendre", "n_basis": 3},
+                    }
+                }
+            },
+            inference=dict(
+                parameters={
+                    **ONE_LATENT["parameters"],
+                    "a": {"init": 1.0, "into": "noise_wave.t_unc"},
+                }
+            ),
+        )
         found = axis_only(document, "C15")
         assert found.severity == REPORT
         assert "does not apply" in found.message
@@ -383,18 +432,26 @@ class TestItDeclines:
         ``python:`` clause away left every test in this class green, because
         nothing drove that branch.
         """
-        pytest.importorskip("rhino_cal_jax",
-                            reason="rhino_cal_jax comes with rheplicant[cal]")
+        pytest.importorskip("rhino_cal_jax", reason="rhino_cal_jax comes with rheplicant[cal]")
         document = preflight_document(
-            model={**NOISE_WAVE_MODEL,
-                  "t_sys_extra": [
-                      {"python": "rheplicant.radio:BasisTemperatureOperator",
-                       "coeff": {"zeros": [2, 3], "unit": "K"},
-                       "time_basis": {"ones": ["n_time", 2]},
-                       "freq_basis": {"ones": ["n_freq", 3]}}]},
-            inference=dict(parameters={
-                **ONE_LATENT["parameters"],
-                "a": {"init": 1.0, "into": "noise_wave.t_unc"}}))
+            model={
+                **NOISE_WAVE_MODEL,
+                "t_sys_extra": [
+                    {
+                        "python": "rheplicant.radio:BasisTemperatureOperator",
+                        "coeff": {"zeros": [2, 3], "unit": "K"},
+                        "time_basis": {"ones": ["n_time", 2]},
+                        "freq_basis": {"ones": ["n_freq", 3]},
+                    }
+                ],
+            },
+            inference=dict(
+                parameters={
+                    **ONE_LATENT["parameters"],
+                    "a": {"init": 1.0, "into": "noise_wave.t_unc"},
+                }
+            ),
+        )
         found = axis_only(document, "C15")
         assert found.severity == REPORT
         assert "does not apply" in found.message
@@ -405,9 +462,12 @@ class TestItDeclines:
         """A latent reaching the leaf through ``transform:``.  The SECOND
         route, and the one a task that only looked at ``model:`` would
         leave open."""
-        found = axis_only(_document(parameters={
-            "a": {"init": 1.0, "into": "noise_wave.t_unc",
-                  "transform": "exp"}}), "C15")
+        found = axis_only(
+            _document(
+                parameters={"a": {"init": 1.0, "into": "noise_wave.t_unc", "transform": "exp"}}
+            ),
+            "C15",
+        )
         assert found.severity == REPORT
         assert "does not apply" in found.message
         assert "min(1, 1) * 8" not in found.message
@@ -415,10 +475,13 @@ class TestItDeclines:
     def test_C15_declines_under_a_transform_on_a_binding(self):
         """The transform route's own twin: ``inference.bindings[].transform``.
         **Kills** a transform test that read ``inference.parameters`` only."""
-        found = axis_only(_document(
-            parameters={"a": {"init": 1.0}},
-            bindings=[{"latents": ["a"], "into": "noise_wave.t_unc",
-                       "transform": "exp"}]), "C15")
+        found = axis_only(
+            _document(
+                parameters={"a": {"init": 1.0}},
+                bindings=[{"latents": ["a"], "into": "noise_wave.t_unc", "transform": "exp"}],
+            ),
+            "C15",
+        )
         assert "does not apply" in found.message
 
     def test_identity_is_not_a_transform_that_breaks_the_counting(self):
@@ -430,9 +493,12 @@ class TestItDeclines:
         **Kills** ``transform is not None`` -- which would decline on the one
         transform that changes nothing.
         """
-        found = axis_only(_document(parameters={
-            "a": {"init": 1.0, "into": "noise_wave.t_unc",
-                  "transform": "identity"}}), "C15")
+        found = axis_only(
+            _document(
+                parameters={"a": {"init": 1.0, "into": "noise_wave.t_unc", "transform": "identity"}}
+            ),
+            "C15",
+        )
         assert "min(1, 1) * 8 = 8" in found.message
 
     def test_a_basis_at_t_sys_extra_of_another_type_does_not_decline(self):
@@ -447,17 +513,25 @@ class TestItDeclines:
         A6-refused on this node besides (only ``cal_loads`` is FAN-shaped; a
         SUM node like ``t_sys_extra`` takes a LIST).
         """
-        pytest.importorskip("rhino_cal_jax",
-                            reason="rhino_cal_jax comes with rheplicant[cal]")
+        pytest.importorskip("rhino_cal_jax", reason="rhino_cal_jax comes with rheplicant[cal]")
         document = preflight_document(
-            model={**NOISE_WAVE_MODEL,
-                  "t_sys_extra": [
-                      {"python": "rheplicant.radio:GroundPickupOperator",
-                       "coupling": {"value": 0.02, "unit": "dimensionless"},
-                       "t_ground": {"value": 300.0, "unit": "K"}}]},
-            inference=dict(parameters={
-                **ONE_LATENT["parameters"],
-                "a": {"init": 1.0, "into": "noise_wave.t_unc"}}))
+            model={
+                **NOISE_WAVE_MODEL,
+                "t_sys_extra": [
+                    {
+                        "python": "rheplicant.radio:GroundPickupOperator",
+                        "coupling": {"value": 0.02, "unit": "dimensionless"},
+                        "t_ground": {"value": 300.0, "unit": "K"},
+                    }
+                ],
+            },
+            inference=dict(
+                parameters={
+                    **ONE_LATENT["parameters"],
+                    "a": {"init": 1.0, "into": "noise_wave.t_unc"},
+                }
+            ),
+        )
         found = axis_only(document, "C15")
         assert "min(1, 1) * 8 = 8" in found.message
         load_document(document)
@@ -472,40 +546,48 @@ class TestItNeverRaises:
     ``paths.parse_path`` raises ``ConfigError`` on a non-``str`` and on a
     malformed path, and ``into:`` is user text."""
 
-    @pytest.mark.parametrize("into", [7, None, ["noise_wave.t_unc", 7],
-                                      "a..b", "", ["a..b"], {"x": 1},
-                                      ["noise_wave.t_unc", "a..b"]])
+    @pytest.mark.parametrize(
+        "into",
+        [
+            7,
+            None,
+            ["noise_wave.t_unc", 7],
+            "a..b",
+            "",
+            ["a..b"],
+            {"x": 1},
+            ["noise_wave.t_unc", "a..b"],
+        ],
+    )
     def test_an_unusable_into_does_not_abort_the_pass(self, into):
         """**Kills** a bare ``parse_path(path)``.  Its refusal is
         ``_selectors``'/``parse_path``'s own at build time, which names the
         value the user wrote; answering here would pre-empt it, and RAISING
         here would hide every finding after C15."""
-        axis_findings(_document(parameters={"a": {"init": 1.0,
-                                                  "into": into}}))
+        axis_findings(_document(parameters={"a": {"init": 1.0, "into": into}}))
 
-    @pytest.mark.parametrize("bindings", [7, "gain", [7], [{"into": 7}],
-                                          [{"latents": "a", "into": None}]])
-    def test_an_unusable_bindings_block_does_not_abort_the_pass(self,
-                                                                bindings):
-        axis_findings(_document(parameters={"a": {"init": 1.0}},
-                                bindings=bindings))
+    @pytest.mark.parametrize(
+        "bindings", [7, "gain", [7], [{"into": 7}], [{"latents": "a", "into": None}]]
+    )
+    def test_an_unusable_bindings_block_does_not_abort_the_pass(self, bindings):
+        axis_findings(_document(parameters={"a": {"init": 1.0}}, bindings=bindings))
 
-    @pytest.mark.parametrize("model", [{"t_sys_extra": 7},
-                                       {"t_sys_extra": [7]},
-                                       {"t_sys_extra": None}])
+    @pytest.mark.parametrize(
+        "model", [{"t_sys_extra": 7}, {"t_sys_extra": [7]}, {"t_sys_extra": None}]
+    )
     def test_an_unusable_t_sys_extra_does_not_abort_the_pass(self, model):
-        axis_findings(preflight_document(
-            model={**NOISE_WAVE_MODEL, **model},
-            inference=dict(parameters={
-                "a": {"init": 1.0, "into": "noise_wave.t_unc"}})))
+        axis_findings(
+            preflight_document(
+                model={**NOISE_WAVE_MODEL, **model},
+                inference=dict(parameters={"a": {"init": 1.0, "into": "noise_wave.t_unc"}}),
+            )
+        )
 
     def test_a_document_with_no_inference_section_is_silent(self):
-        assert silent_here(preflight_document(model=NOISE_WAVE_MODEL,
-                                              inference=None))
+        assert silent_here(preflight_document(model=NOISE_WAVE_MODEL, inference=None))
 
     @pytest.mark.parametrize("name", ["a b", "7", "", "a..b", "(1, 2)"])
-    def test_a_latent_NAME_that_is_not_a_path_segment_does_not_abort(self,
-                                                                     name):
+    def test_a_latent_NAME_that_is_not_a_path_segment_does_not_abort(self, name):
         """A latent's name is user text and reaches this pass BEFORE
         ``parse_latents`` has looked at it -- the axes hook runs at
         ``document.py``'s axes call and ``build_inference`` is two builders
@@ -515,10 +597,10 @@ class TestItNeverRaises:
 
         **Kills** the ``where`` being interpolated straight from the key.
         """
-        found = axis_findings(_document(parameters={
-            name: {"init": 1.0, "into": "noise_wave.t_unc"}}))
-        assert [one.where for one in found if one.check == "C15"] == [
-            "inference.parameters"]
+        found = axis_findings(
+            _document(parameters={name: {"init": 1.0, "into": "noise_wave.t_unc"}})
+        )
+        assert [one.where for one in found if one.check == "C15"] == ["inference.parameters"]
 
 
 # --- the whole message ------------------------------------------------------
@@ -561,33 +643,39 @@ C15_DECLINED = (
 #: of :data:`_T2C_BASIS_TYPE`.  Pinned separately because the two routes
 #: differ in exactly one clause, and a task that closed one and left the other
 #: is 3A's recorded twin failure.
-C15_DECLINED_BASIS = C15_DECLINED.replace("through a transform:,",
-                                          "through a frequency basis,")
+C15_DECLINED_BASIS = C15_DECLINED.replace("through a transform:,", "through a frequency basis,")
 
 
 class TestTheMessagesWhole:
     def test_the_report_is_pinned_whole(self):
-        found = axis_only(_document(parameters={
-            "a": {"init": 1.0, "into": "noise_wave.t_unc"}}), "C15")
+        found = axis_only(
+            _document(parameters={"a": {"init": 1.0, "into": "noise_wave.t_unc"}}), "C15"
+        )
         assert found.message == C15_ONE
 
     def test_the_decline_is_pinned_whole(self):
-        found = axis_only(_document(parameters={
-            "a": {"init": 1.0, "into": "noise_wave.t_unc",
-                  "transform": "exp"}}), "C15")
+        found = axis_only(
+            _document(
+                parameters={"a": {"init": 1.0, "into": "noise_wave.t_unc", "transform": "exp"}}
+            ),
+            "C15",
+        )
         assert found.message == C15_DECLINED
 
     def test_the_basis_decline_is_pinned_whole(self):
         """The twin of the test above.  **Kills** the basis route being
         re-worded, or collapsing into the transform route's sentence, where
         no substring pin could see it."""
-        pytest.importorskip("rhino_cal_jax",
-                            reason="rhino_cal_jax comes with rheplicant[cal]")
+        pytest.importorskip("rhino_cal_jax", reason="rhino_cal_jax comes with rheplicant[cal]")
         document = preflight_document(
             model={**NOISE_WAVE_MODEL, "t_sys_extra": NOISE_WAVE_BASIS},
-            inference=dict(parameters={
-                **ONE_LATENT["parameters"],
-                "a": {"init": 1.0, "into": "noise_wave.t_unc"}}))
+            inference=dict(
+                parameters={
+                    **ONE_LATENT["parameters"],
+                    "a": {"init": 1.0, "into": "noise_wave.t_unc"},
+                }
+            ),
+        )
         found = axis_only(document, "C15")
         assert found.message == C15_DECLINED_BASIS
         load_document(document)
@@ -595,13 +683,25 @@ class TestTheMessagesWhole:
     def test_the_where_is_the_latent_the_reader_edits(self):
         """``Finding.where`` is a path into the USER'S document; ``sweep``
         validates the first segment against the section names."""
-        assert axis_only(_document(parameters={
-            "a": {"init": 1.0, "into": "noise_wave.t_unc"}},
-        ), "C15").where == "inference.parameters.a"
-        assert axis_only(_document(
-            parameters={"a": {"init": 1.0}},
-            bindings=[{"latents": ["a"], "into": "noise_wave.t_unc"}],
-        ), "C15").where == "inference.bindings[0]"
+        assert (
+            axis_only(
+                _document(
+                    parameters={"a": {"init": 1.0, "into": "noise_wave.t_unc"}},
+                ),
+                "C15",
+            ).where
+            == "inference.parameters.a"
+        )
+        assert (
+            axis_only(
+                _document(
+                    parameters={"a": {"init": 1.0}},
+                    bindings=[{"latents": ["a"], "into": "noise_wave.t_unc"}],
+                ),
+                "C15",
+            ).where
+            == "inference.bindings[0]"
+        )
 
 
 # --- it does not stop the load ----------------------------------------------
@@ -619,13 +719,17 @@ class TestItDoesNotStopTheLoad:
         and a bare replacement of ``parameters:`` would be refused for that
         rather than for anything C15 decides.
         """
-        pytest.importorskip("rhino_cal_jax",
-                            reason="rhino_cal_jax comes with rheplicant[cal]")
-        built = load_document(preflight_document(
-            observation={**BASE_OBSERVATION,
-                         "switching": NOISE_WAVE_SWITCHING},
-            model={**NOISE_WAVE_MODEL, "cal_loads": NOISE_WAVE_LOADS},
-            inference=dict(parameters={
-                **ONE_LATENT["parameters"],
-                "a": {"init": 1.0, "into": "noise_wave.t_unc"}})))
+        pytest.importorskip("rhino_cal_jax", reason="rhino_cal_jax comes with rheplicant[cal]")
+        built = load_document(
+            preflight_document(
+                observation={**BASE_OBSERVATION, "switching": NOISE_WAVE_SWITCHING},
+                model={**NOISE_WAVE_MODEL, "cal_loads": NOISE_WAVE_LOADS},
+                inference=dict(
+                    parameters={
+                        **ONE_LATENT["parameters"],
+                        "a": {"init": 1.0, "into": "noise_wave.t_unc"},
+                    }
+                ),
+            )
+        )
         assert "noise_wave" in built.twin.lit

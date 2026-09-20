@@ -86,8 +86,7 @@ class TestUserExamples:
         o = ops()
         sky = SkyOperator(amplitude=jnp.array(1e3))
         asm = assemble(sky, o["io"], beam_stub())
-        hand = Pipeline(sky, o["io"], beam_stub().op,
-                        names=("uniform_sky", "ionosphere", "beam"))
+        hand = Pipeline(sky, o["io"], beam_stub().op, names=("uniform_sky", "ionosphere", "beam"))
         assert jnp.array_equal(asm(template_state).data, hand(template_state).data)
         assert asm.lit == ("uniform_sky", "ionosphere", "beam")
 
@@ -105,8 +104,10 @@ class TestCanonicalTopology:
         key = jax.random.key(5)
         source = SkySourceOperator(
             sky_model=PowerLawSkyModel(
-                amplitude=jnp.ones(6), spectral_index=jnp.array(2.5),
-                ref_freq=70e6, n_pix=6,
+                amplitude=jnp.ones(6),
+                spectral_index=jnp.array(2.5),
+                ref_freq=70e6,
+                n_pix=6,
             ),
             projector=MatrixProjector(matrix=jax.random.normal(key, (N_TIME, 6))),
         )
@@ -151,8 +152,9 @@ class TestCanonicalTopology:
         o = ops()
         asm = assemble(*o.values())
         astro = Pipeline(
-            SumOperator(o["gs"], o["fg"], o["ps"],
-                        names=("global_signal", "foregrounds", "point_sources")),
+            SumOperator(
+                o["gs"], o["fg"], o["ps"], names=("global_signal", "foregrounds", "point_sources")
+            ),
             o["io"],
             names=("astro_sum", "ionosphere"),
         )
@@ -161,7 +163,10 @@ class TestCanonicalTopology:
         # `field` reaches the antenna-temperature sum directly.
         t_ant = SumOperator(field, o["gd"], names=("field_sum", "ground_pickup"))
         hand = Pipeline(
-            t_ant, o["gn"], o["ns"], o["ad"],
+            t_ant,
+            o["gn"],
+            o["ns"],
+            o["ad"],
             names=("t_ant_sum", "gain", "noise", "adc"),
         )
         assert eqx.tree_equal(asm.operator, hand)
@@ -172,7 +177,8 @@ class TestCanonicalTopology:
 
         o = ops()
         asm = assemble(
-            SkyOperator(amplitude=jnp.array(1e3)), o["ns"],
+            SkyOperator(amplitude=jnp.array(1e3)),
+            o["ns"],
             FlaggingOperator(threshold=2e3),
             SiderealFilter(n_days=2, mode="remove"),
         )
@@ -195,9 +201,7 @@ class TestSwitchedCalibration:
 
         switch = jnp.array([0, 1, 0, 0, 1, 0, 0, 1])
         state = template_state.replace(
-            coords=template_state.coords.replace(
-                extra={"receiver_input": switch}
-            )
+            coords=template_state.coords.replace(extra={"receiver_input": switch})
         )
         asm = assemble(
             SkyOperator(amplitude=jnp.array(100.0)),
@@ -228,8 +232,8 @@ class TestSwitchedCalibration:
             CalLoadOperator(t_load=jnp.ones((2, 2)))(template_state)
         per_sample = jnp.linspace(280.0, 300.0, template_state.coords.time.shape[0])
         out = CalLoadOperator(t_load=per_sample[:, None])(template_state)
-        assert jnp.allclose(out.data[:, 0], per_sample)      # varies along TIME
-        assert jnp.allclose(out.data[0], per_sample[0])      # flat along FREQ
+        assert jnp.allclose(out.data[:, 0], per_sample)  # varies along TIME
+        assert jnp.allclose(out.data[0], per_sample[0])  # flat along FREQ
 
     def test_load_only_observation(self, template_state):
         """Only the load provided: selector passes it through (all samples load)."""
@@ -391,9 +395,10 @@ class TestRegistryCompleteness:
     def test_t_sys_extra_accepts_at_injection(self, template_state):
         asm = assemble(
             SkyOperator(amplitude=jnp.array(1e3)),
-            At("t_sys_extra", GroundPickupOperator(
-                coupling=jnp.array(0.02), t_ground=jnp.array(300.0)
-            )),
+            At(
+                "t_sys_extra",
+                GroundPickupOperator(coupling=jnp.array(0.02), t_ground=jnp.array(300.0)),
+            ),
         )
         assert isinstance(asm.operator, SumOperator)
         assert jnp.all(jnp.isfinite(asm(template_state).data))
@@ -457,9 +462,11 @@ class TestManyInstancesComposeLikeTheirConsumer:
         assert isinstance(selector, SelectOperator)
         assert selector.names == ("uniform_sky", "cal_loads_1", "cal_loads_2")
 
-        out = twin(template_state.replace(
-            coords=template_state.coords.replace(extra={"receiver_input": switch})
-        )).data
+        out = twin(
+            template_state.replace(
+                coords=template_state.coords.replace(extra={"receiver_input": switch})
+            )
+        ).data
         assert jnp.allclose(out[switch == 0], 100.0)
         assert jnp.allclose(out[switch == 1], 300.0)
         assert jnp.allclose(out[switch == 2], 400.0)
@@ -472,9 +479,11 @@ class TestManyInstancesComposeLikeTheirConsumer:
             SkyOperator(amplitude=jnp.array(100.0)),
             CalLoadOperator(t_load=jnp.array(300.0)),
             CalLoadOperator(t_load=jnp.array(400.0)),
-        )(template_state.replace(
-            coords=template_state.coords.replace(extra={"receiver_input": switch})
-        )).data
+        )(
+            template_state.replace(
+                coords=template_state.coords.replace(extra={"receiver_input": switch})
+            )
+        ).data
         assert jnp.allclose(out, 300.0)
         assert not jnp.allclose(out, 700.0)
 
@@ -484,36 +493,33 @@ class TestManyInstancesComposeLikeTheirConsumer:
         is not cosmetic: SumOperator splits the PRNG key per branch, so a
         flatter tree would be a different seeded run."""
         twin = assemble(
-            ForegroundOperator(amplitude=jnp.array(10.0),
-                               spectral_index=jnp.array(-2.5),
-                               ref_freq=jnp.array(70e6)),
-            ForegroundOperator(amplitude=jnp.array(20.0),
-                               spectral_index=jnp.array(-2.5),
-                               ref_freq=jnp.array(70e6)),
+            ForegroundOperator(
+                amplitude=jnp.array(10.0), spectral_index=jnp.array(-2.5), ref_freq=jnp.array(70e6)
+            ),
+            ForegroundOperator(
+                amplitude=jnp.array(20.0), spectral_index=jnp.array(-2.5), ref_freq=jnp.array(70e6)
+            ),
         )
         assert isinstance(twin.operator, SumOperator)
         assert twin.operator.names == ("foregrounds_1", "foregrounds_2")
         out = twin(template_state).data
         one = assemble(
-            ForegroundOperator(amplitude=jnp.array(30.0),
-                               spectral_index=jnp.array(-2.5),
-                               ref_freq=jnp.array(70e6))
+            ForegroundOperator(
+                amplitude=jnp.array(30.0), spectral_index=jnp.array(-2.5), ref_freq=jnp.array(70e6)
+            )
         )(template_state).data
         assert jnp.allclose(out, one)
 
-    def test_a_selector_with_one_live_branch_is_not_a_switch_at_all(
-        self, template_state
-    ):
+    def test_a_selector_with_one_live_branch_is_not_a_switch_at_all(self, template_state):
         """The other half of the rule. A selector materializes only when it has
         something to choose between; with one live upstream it is traversed as
         identity, needs no switch array in coords, and leaves no SelectOperator
         behind. That is what makes the load-free antenna chain cost nothing."""
-        twin = assemble(SkyOperator(amplitude=jnp.array(100.0)),
-                        GainOperator(gain=jnp.array(2.0)))
+        twin = assemble(SkyOperator(amplitude=jnp.array(100.0)), GainOperator(gain=jnp.array(2.0)))
         assert "receiver_input" in twin.skipped
         is_sel = lambda x: isinstance(x, SelectOperator)  # noqa: E731
         assert not any(map(is_sel, jax.tree.leaves(twin, is_leaf=is_sel)))
-        out = twin(template_state).data          # no coords.extra["receiver_input"]
+        out = twin(template_state).data  # no coords.extra["receiver_input"]
         assert jnp.allclose(out, 200.0)
 
     def test_one_cal_load_still_gives_a_two_position_switch(self, template_state):
@@ -524,9 +530,11 @@ class TestManyInstancesComposeLikeTheirConsumer:
             CalLoadOperator(t_load=jnp.array(300.0)),
         )
         assert twin["receiver_input"].names == ("uniform_sky", "cal_loads")
-        out = twin(template_state.replace(
-            coords=template_state.coords.replace(extra={"receiver_input": switch})
-        )).data
+        out = twin(
+            template_state.replace(
+                coords=template_state.coords.replace(extra={"receiver_input": switch})
+            )
+        ).data
         assert jnp.allclose(out[switch == 0], 100.0)
         assert jnp.allclose(out[switch == 1], 300.0)
 
@@ -612,9 +620,7 @@ class TestManyNodeSurvivesASibling:
         expected = 1.1 * (a(template_state).data + b(template_state).data)
         assert jnp.allclose(two(template_state).data, expected)
 
-    def test_replace_node_on_the_bare_id_refuses_instead_of_deleting(
-        self, template_state
-    ):
+    def test_replace_node_on_the_bare_id_refuses_instead_of_deleting(self, template_state):
         a = _TSysBasis(coeff=jnp.array([10.0, 1.0]), basis=_basis())
         b = _TSysBasis(coeff=jnp.array([2.0, 0.5]), basis=_basis())
         two = assemble(a, b, GainOperator(gain=jnp.array(1.1)))
@@ -625,9 +631,7 @@ class TestManyNodeSurvivesASibling:
         assert jnp.array_equal(two(template_state).data, before)
         # the named form drops instance 1 only, and says so in the output
         swapped = two.replace_node("t_sys_extra_1", zeroed)
-        assert jnp.allclose(
-            swapped(template_state).data, 1.1 * b(template_state).data
-        )
+        assert jnp.allclose(swapped(template_state).data, 1.1 * b(template_state).data)
 
     def test_a_fold_buried_in_a_pipeline_branch_is_caught_too(self, template_state):
         """The hardest shape for the old lookup: the many-instance Sum is not
@@ -641,9 +645,7 @@ class TestManyNodeSurvivesASibling:
             amplitude=jnp.array(20.0), spectral_index=jnp.array(2.5), ref_freq=70e6
         )
         io = IonosphereOperator(delta=jnp.array(0.01), ref_freq=70e6)
-        gd = GroundPickupOperator(
-            coupling=jnp.array(0.01), t_ground=jnp.array(300.0)
-        )
+        gd = GroundPickupOperator(coupling=jnp.array(0.01), t_ground=jnp.array(300.0))
         asm = assemble(f1, f2, io, gd)
         assert isinstance(asm.operator, SumOperator)
         assert isinstance(asm.operator.branches[0], Pipeline)  # not the root
@@ -655,6 +657,4 @@ class TestManyNodeSurvivesASibling:
         )
         without_f2 = asm.replace_node("foregrounds_2", zero)
         f1_only = assemble(f1, io, gd)
-        assert jnp.allclose(
-            without_f2(template_state).data, f1_only(template_state).data
-        )
+        assert jnp.allclose(without_f2(template_state).data, f1_only(template_state).data)

@@ -78,8 +78,7 @@ def test_t5_likelihood_noise_agrees_with_t5_model_noise():
     ADC output and therefore declares ``adc_count``.  Guard the numerical
     derivation and the intentional unit conversion independently.
     """
-    assert T5_LIKELIHOOD_NOISE["sigma"]["value"] == \
-        T5_MODEL_NOISE["sigma"]["value"]
+    assert T5_LIKELIHOOD_NOISE["sigma"]["value"] == T5_MODEL_NOISE["sigma"]["value"]
     assert T5_LIKELIHOOD_NOISE["sigma"]["unit"] == "adc_count"
     assert T5_MODEL_NOISE["sigma"]["unit"] == "K"
     assert T5_LIKELIHOOD_NOISE["kind"] == "homoscedastic"
@@ -125,10 +124,18 @@ def test_stands_down_without_an_adc():
 COMPOSED_ADC = {
     "compose": "cascade",
     "stages": [
-        {"name": "first", "type": "ADCOperator",
-         "scale": {"value": 1e6, "unit": "adc_count/K"}, "n_bits": 12},
-        {"name": "second", "type": "ADCOperator",
-         "scale": {"value": 1.0, "unit": "adc_count/K"}, "n_bits": 12},
+        {
+            "name": "first",
+            "type": "ADCOperator",
+            "scale": {"value": 1e6, "unit": "adc_count/K"},
+            "n_bits": 12,
+        },
+        {
+            "name": "second",
+            "type": "ADCOperator",
+            "scale": {"value": 1.0, "unit": "adc_count/K"},
+            "n_bits": 12,
+        },
     ],
 }
 
@@ -184,12 +191,11 @@ def test_an_unsaturated_document_with_an_upstream_latent_is_silent():
 # --- the >= boundary, on the base grid ---------------------------------------
 
 
-@pytest.mark.parametrize("scale, expected_fraction, expected_n",
-                         list(zip(T5_BOUNDARY_SCALES,
-                                 (0.0, 0.0078125, 0.0078125),
-                                 (128, 128, 128), strict=True)))
-def test_the_saturation_fraction_uses_ge_not_gt(scale, expected_fraction,
-                                                expected_n):
+@pytest.mark.parametrize(
+    "scale, expected_fraction, expected_n",
+    list(zip(T5_BOUNDARY_SCALES, (0.0, 0.0078125, 0.0078125), (128, 128, 128), strict=True)),
+)
+def test_the_saturation_fraction_uses_ge_not_gt(scale, expected_fraction, expected_n):
     """The three measured boundary cells, pinned exactly.
 
     **Kills ``>`` for ``>=``**: at the middle scale the achieved peak is
@@ -202,8 +208,7 @@ def test_the_saturation_fraction_uses_ge_not_gt(scale, expected_fraction,
     document = t5_case(model=t5_model({"scale": scale, "n_bits": 12}))
     payload = priced_run(document)
     node = payload.run.twin["adc"]
-    peak, fraction, n = digitising._saturation_stats(payload.run.twin,
-                                                      payload.run.state, node)
+    peak, fraction, n = digitising._saturation_stats(payload.run.twin, payload.run.state, node)
     assert fraction == expected_fraction
     assert n == expected_n
 
@@ -225,8 +230,8 @@ def test_the_refuse_threshold_is_not_tunable_to_let_128_samples_pass():
     here.
     """
     document = t5_case(
-        model=t5_model({"scale": T5_BOUNDARY_SCALES[1], "n_bits": 12}),
-        inference=None)
+        model=t5_model({"scale": T5_BOUNDARY_SCALES[1], "n_bits": 12}), inference=None
+    )
     found = priced_only(document, "C16")
     assert found.severity == "refuse"
 
@@ -247,12 +252,14 @@ def test_a_negative_rail_clip_is_counted():
     genuinely clips.
     """
     document = t5_case(
-        model={**t5_model({"scale": T5_BOUNDARY_SCALES[1], "n_bits": 12}),
-              "gain": {"gain": {"value": -1.1, "unit": "dimensionless"}}})
+        model={
+            **t5_model({"scale": T5_BOUNDARY_SCALES[1], "n_bits": 12}),
+            "gain": {"gain": {"value": -1.1, "unit": "dimensionless"}},
+        }
+    )
     payload = priced_run(document)
     node = payload.run.twin["adc"]
-    _peak, fraction, _n = digitising._saturation_stats(
-        payload.run.twin, payload.run.state, node)
+    _peak, fraction, _n = digitising._saturation_stats(payload.run.twin, payload.run.state, node)
     assert fraction == 0.0234375
     assert priced_only(document, "C16").severity == "refuse"
 
@@ -270,8 +277,8 @@ def test_a_saturating_document_with_an_upstream_latent_refuses():
     why the base grid cannot reach this band at all.
     """
     document = t5_case(
-        observation=WIDE_GRID,
-        model=t5_model({"scale": T5_WIDE_WARN_SCALE, "n_bits": 12}))
+        observation=WIDE_GRID, model=t5_model({"scale": T5_WIDE_WARN_SCALE, "n_bits": 12})
+    )
     found = priced_only(document, "C16")
     assert found.severity == "refuse"
     assert "bound latent" in found.message
@@ -295,7 +302,8 @@ def test_a_saturating_document_with_no_upstream_latent_warns_below_the_threshold
     document = t5_case(
         observation=WIDE_GRID,
         model=t5_model({"scale": T5_WIDE_WARN_SCALE, "n_bits": 12}),
-        inference=None)
+        inference=None,
+    )
     found = priced_only(document, "C16")
     assert found.severity == "warn"
     assert "bound latent" not in found.message
@@ -313,7 +321,8 @@ def test_a_binding_counts_as_well_as_an_into():
     document = t5_case(
         observation=WIDE_GRID,
         model=t5_model({"scale": T5_WIDE_WARN_SCALE, "n_bits": 12}),
-        inference=T5_BINDING_LATENT)
+        inference=T5_BINDING_LATENT,
+    )
     found = priced_only(document, "C16")
     assert found.severity == "refuse"
     assert "bound latent" in found.message
@@ -326,8 +335,14 @@ def test_a_binding_counts_as_well_as_an_into():
 #: ``into:`` -- a string or a list of strings -- so this is the twin route a
 #: check reading only the string spelling would miss.
 LIST_INTO = {
-    "parameters": {"g": {"init": 1.0, "linear": True, "into": ["gain.gain"],
-                         "prior": {"normal": {"loc": 1.0, "scale": 0.5}}}},
+    "parameters": {
+        "g": {
+            "init": 1.0,
+            "linear": True,
+            "into": ["gain.gain"],
+            "prior": {"normal": {"loc": 1.0, "scale": 0.5}},
+        }
+    },
     "noise": HOMOSCEDASTIC,
     "observed": {"from": "simulation", "at": {"g": TRUTH_G}, "twin": "full"},
 }
@@ -351,7 +366,8 @@ def test_a_list_form_into_reaches_the_escalator():
     document = t5_case(
         observation=WIDE_GRID,
         model=t5_model({"scale": T5_WIDE_WARN_SCALE, "n_bits": 12}),
-        inference=LIST_INTO)
+        inference=LIST_INTO,
+    )
     found = priced_only(document, "C16")
     assert found.severity == "refuse"
 
@@ -375,8 +391,7 @@ def test_the_message_names_scale_bits_peak_and_the_unit():
 
     payload = priced_run(document)
     node = payload.run.twin["adc"]
-    peak, _fraction, _n = digitising._saturation_stats(
-        payload.run.twin, payload.run.state, node)
+    peak, _fraction, _n = digitising._saturation_stats(payload.run.twin, payload.run.state, node)
     assert f"{peak:.6g}" in found.message
     assert f"of {_n} samples" in found.message
     assert "(check C16)" in found.message
@@ -397,14 +412,13 @@ def test_the_peak_is_the_maximum_magnitude_independently_measured():
     nothing clips) and reading ``max(abs(out))`` directly off its output --
     a computation that does not go through ``_saturation_stats`` at all.
     """
-    document = t5_case(model=t5_model({"scale": 1.0, "n_bits": 12}),
-                                  inference=None)
+    document = t5_case(model=t5_model({"scale": 1.0, "n_bits": 12}), inference=None)
     payload = priced_run(document)
     node = payload.run.twin["adc"]
-    unclipped = payload.run.twin.replace_node(
-        "adc", ADCOperator(scale=node.scale, n_bits=40))(payload.run.state).data
-    peak, _fraction, _n = digitising._saturation_stats(
-        payload.run.twin, payload.run.state, node)
+    unclipped = payload.run.twin.replace_node("adc", ADCOperator(scale=node.scale, n_bits=40))(
+        payload.run.state
+    ).data
+    peak, _fraction, _n = digitising._saturation_stats(payload.run.twin, payload.run.state, node)
     assert peak == float(jnp.max(jnp.abs(unclipped)))
     assert peak == pytest.approx(12.116166, abs=5e-6)
 
@@ -454,7 +468,8 @@ def test_the_message_reports_the_measured_fraction():
     document = t5_case(
         observation=WIDE_GRID,
         model=t5_model({"scale": T5_WIDE_WARN_SCALE, "n_bits": 12}),
-        inference=None)
+        inference=None,
+    )
     found = priced_only(document, "C16")
     assert "0.0488%" in found.message
 
@@ -478,20 +493,18 @@ def test_the_advice_names_a_target_and_applying_it_clears_the_refusal():
     found = priced_only(document, "C16")
     payload = priced_run(document)
     node = payload.run.twin["adc"]
-    peak, _fraction, _n = digitising._saturation_stats(
-        payload.run.twin, payload.run.state, node)
-    target_scale = digitising._t5_target_scale(peak, float(node.scale),
-                                                digitising._t5_limit(node.n_bits))
+    peak, _fraction, _n = digitising._saturation_stats(payload.run.twin, payload.run.state, node)
+    target_scale = digitising._t5_target_scale(
+        peak, float(node.scale), digitising._t5_limit(node.n_bits)
+    )
     target_bits = digitising._t5_target_bits(peak, node.n_bits)
     assert f"below {target_scale:.6g}" in found.message
     assert f"at least {target_bits}" in found.message
 
-    cleared_by_scale = t5_case(
-        model=t5_model({"scale": target_scale * 0.99, "n_bits": 12}))
+    cleared_by_scale = t5_case(model=t5_model({"scale": target_scale * 0.99, "n_bits": 12}))
     assert "C16" not in _ids(cleared_by_scale)
 
-    cleared_by_bits = t5_case(
-        model=t5_model({"scale": 1e6, "n_bits": target_bits + 1}))
+    cleared_by_bits = t5_case(model=t5_model({"scale": 1e6, "n_bits": target_bits + 1}))
     assert "C16" not in _ids(cleared_by_bits)
 
 
@@ -548,8 +561,7 @@ def test_the_dead_gradient_is_real():
     """
 
     def gradient_at(scale: float) -> float:
-        document = t5_case(model=t5_model({"scale": scale,
-                                                      "n_bits": 12}))
+        document = t5_case(model=t5_model({"scale": scale, "n_bits": 12}))
         payload = priced_run(document)
         twin, state = payload.run.twin, payload.run.state
         current_gain = twin["gain"].gain
@@ -660,9 +672,9 @@ def _refusal_checks(document) -> frozenset[str]:
     exists to close.
     """
     payload = priced_run(document)
-    return frozenset(found.check
-                     for found in (*payload.run.report.refusals(),
-                                   *priced(payload).refusals()))
+    return frozenset(
+        found.check for found in (*payload.run.report.refusals(), *priced(payload).refusals())
+    )
 
 
 #: Every document shape this module builds, and the refusals its report is
@@ -683,52 +695,75 @@ def _refusal_checks(document) -> frozenset[str]:
 _SHAPES: dict[str, tuple[dict, frozenset[str]]] = {
     "no adc at all": ({}, frozenset()),
     "composed adc": ({"model": t5_model(COMPOSED_ADC)}, frozenset()),
-    "unsaturated, no inference": ({"model": t5_model(ADC_UNSATURATED),
-                                   "inference": None}, frozenset()),
-    "unsaturated, base latent": ({"model": t5_model(ADC_UNSATURATED)},
-                                 frozenset()),
-    "boundary below": ({"model": t5_model({"scale": T5_BOUNDARY_SCALES[0],
-                                           "n_bits": 12})}, frozenset()),
-    "boundary at": ({"model": t5_model({"scale": T5_BOUNDARY_SCALES[1],
-                                        "n_bits": 12})}, frozenset({"C16"})),
-    "boundary above": ({"model": t5_model({"scale": T5_BOUNDARY_SCALES[2],
-                                           "n_bits": 12})}, frozenset({"C16"})),
-    "boundary at, no inference": ({"model": t5_model(
-        {"scale": T5_BOUNDARY_SCALES[1], "n_bits": 12}),
-        "inference": None}, frozenset({"C16"})),
-    "negative rail": ({"model": {**t5_model({"scale": T5_BOUNDARY_SCALES[1],
-                                             "n_bits": 12}),
-                                 "gain": {"gain": {"value": -1.1,
-                                                   "unit": "dimensionless"}}}},
-                      frozenset({"C16"})),
-    "wide, base latent": ({"observation": WIDE_GRID,
-                           "model": t5_model({"scale": T5_WIDE_WARN_SCALE,
-                                              "n_bits": 12})},
-                          frozenset({"C16"})),
+    "unsaturated, no inference": (
+        {"model": t5_model(ADC_UNSATURATED), "inference": None},
+        frozenset(),
+    ),
+    "unsaturated, base latent": ({"model": t5_model(ADC_UNSATURATED)}, frozenset()),
+    "boundary below": (
+        {"model": t5_model({"scale": T5_BOUNDARY_SCALES[0], "n_bits": 12})},
+        frozenset(),
+    ),
+    "boundary at": (
+        {"model": t5_model({"scale": T5_BOUNDARY_SCALES[1], "n_bits": 12})},
+        frozenset({"C16"}),
+    ),
+    "boundary above": (
+        {"model": t5_model({"scale": T5_BOUNDARY_SCALES[2], "n_bits": 12})},
+        frozenset({"C16"}),
+    ),
+    "boundary at, no inference": (
+        {"model": t5_model({"scale": T5_BOUNDARY_SCALES[1], "n_bits": 12}), "inference": None},
+        frozenset({"C16"}),
+    ),
+    "negative rail": (
+        {
+            "model": {
+                **t5_model({"scale": T5_BOUNDARY_SCALES[1], "n_bits": 12}),
+                "gain": {"gain": {"value": -1.1, "unit": "dimensionless"}},
+            }
+        },
+        frozenset({"C16"}),
+    ),
+    "wide, base latent": (
+        {"observation": WIDE_GRID, "model": t5_model({"scale": T5_WIDE_WARN_SCALE, "n_bits": 12})},
+        frozenset({"C16"}),
+    ),
     "wide, no inference (the WARN cell)": (
-        {"observation": WIDE_GRID,
-         "model": t5_model({"scale": T5_WIDE_WARN_SCALE, "n_bits": 12}),
-         "inference": None}, frozenset()),
-    "wide, bindings[] latent": ({"observation": WIDE_GRID,
-                                 "model": t5_model(
-                                     {"scale": T5_WIDE_WARN_SCALE,
-                                      "n_bits": 12}),
-                                 "inference": T5_BINDING_LATENT},
-                                frozenset({"C16"})),
-    "wide, list-form into": ({"observation": WIDE_GRID,
-                              "model": t5_model({"scale": T5_WIDE_WARN_SCALE,
-                                                 "n_bits": 12}),
-                              "inference": LIST_INTO}, frozenset({"C16"})),
+        {
+            "observation": WIDE_GRID,
+            "model": t5_model({"scale": T5_WIDE_WARN_SCALE, "n_bits": 12}),
+            "inference": None,
+        },
+        frozenset(),
+    ),
+    "wide, bindings[] latent": (
+        {
+            "observation": WIDE_GRID,
+            "model": t5_model({"scale": T5_WIDE_WARN_SCALE, "n_bits": 12}),
+            "inference": T5_BINDING_LATENT,
+        },
+        frozenset({"C16"}),
+    ),
+    "wide, list-form into": (
+        {
+            "observation": WIDE_GRID,
+            "model": t5_model({"scale": T5_WIDE_WARN_SCALE, "n_bits": 12}),
+            "inference": LIST_INTO,
+        },
+        frozenset({"C16"}),
+    ),
     "saturating": ({"model": t5_model(ADC_SATURATING)}, frozenset({"C16"})),
-    "saturating, no inference": ({"model": t5_model(ADC_SATURATING),
-                                  "inference": None}, frozenset({"C16"})),
-    "scale 1.0, no inference": ({"model": t5_model({"scale": 1.0,
-                                                    "n_bits": 12}),
-                                 "inference": None}, frozenset()),
-    "scale 1.0": ({"model": t5_model({"scale": 1.0, "n_bits": 12})},
-                  frozenset()),
-    "n_bits raised to 32": ({"model": t5_model({"scale": 1e6, "n_bits": 32})},
-                            frozenset()),
+    "saturating, no inference": (
+        {"model": t5_model(ADC_SATURATING), "inference": None},
+        frozenset({"C16"}),
+    ),
+    "scale 1.0, no inference": (
+        {"model": t5_model({"scale": 1.0, "n_bits": 12}), "inference": None},
+        frozenset(),
+    ),
+    "scale 1.0": ({"model": t5_model({"scale": 1.0, "n_bits": 12})}, frozenset()),
+    "n_bits raised to 32": ({"model": t5_model({"scale": 1e6, "n_bits": 32})}, frozenset()),
 }
 
 
@@ -778,9 +813,11 @@ def test_no_document_here_carries_a_refusal_that_is_not_c16s(name):
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
         load_document(document)
-    assert [str(one.message) for one in caught
-            if issubclass(one.category, ConfigWarning)
-            and "(check C16)" not in str(one.message)] == []
+    assert [
+        str(one.message)
+        for one in caught
+        if issubclass(one.category, ConfigWarning) and "(check C16)" not in str(one.message)
+    ] == []
 
 
 def test_the_shape_table_holds_both_kinds_of_cell():

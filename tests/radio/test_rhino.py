@@ -50,9 +50,7 @@ def make_file(
     n_time, n_freq = len(times), len(freqs)
     if temps is None:
         # column 0 = ambient (20 C), column 1 = hot (100 C)
-        temps = np.stack(
-            [np.full(n_time, 20.0), np.full(n_time, 100.0)], axis=1
-        )
+        temps = np.stack([np.full(n_time, 20.0), np.full(n_time, 100.0)], axis=1)
     if temp_times is None:
         # Independent by default only in name -- the thermistor log normally
         # shares the SDR's own time axis. A caller that wants to test a
@@ -78,9 +76,7 @@ def make_file(
         if temperature_group:
             tg = f.create_group("temperatures")
             if "temperature_times" in temperature_group:
-                tg.create_dataset(
-                    "temperature_times", data=np.asarray(temp_times, dtype=float)
-                )
+                tg.create_dataset("temperature_times", data=np.asarray(temp_times, dtype=float))
             if "temperatures" in temperature_group:
                 tg.create_dataset("temperatures", data=temps)
     return path
@@ -221,9 +217,7 @@ def test_an_empty_frequency_axis_raises(tmp_path):
 def test_an_empty_switch_log_raises_rather_than_dropping_every_sample(tmp_path):
     with pytest.raises(DataIngestionError, match="switch_times"):
         read_rhino_observation(
-            make_file(
-                tmp_path / "noswitch.hd5f", switch_times=np.array([]), switch_states=[]
-            ),
+            make_file(tmp_path / "noswitch.hd5f", switch_times=np.array([]), switch_states=[]),
             freq_unit="MHz",
             thermistor_columns=COLUMNS,
         )
@@ -368,9 +362,7 @@ def test_thermistor_columns_are_mapped_and_converted_to_kelvin(tmp_path):
     # Two labels sharing column 0 hold equal arrays -- that is how the
     # reference's "ambient covers everything but the hot load" rule is
     # written down once the caller has to state it.
-    np.testing.assert_allclose(
-        obs.thermistor_k["antenna"], obs.thermistor_k["internal_load"]
-    )
+    np.testing.assert_allclose(obs.thermistor_k["antenna"], obs.thermistor_k["internal_load"])
 
 
 def test_kelvin_input_is_not_offset_again(tmp_path):
@@ -439,9 +431,7 @@ def test_a_non_default_column_order_reads_back_correctly(tmp_path):
     # Hot in column 0, ambient in column 1 -- the reverse of what
     # save_to_hdf5's default save_temps order produces. The reference's magic
     # indices would silently swap them; a declared map cannot.
-    swapped = np.stack(
-        [np.full(len(TIME_S), 100.0), np.full(len(TIME_S), 20.0)], axis=1
-    )
+    swapped = np.stack([np.full(len(TIME_S), 100.0), np.full(len(TIME_S), 20.0)], axis=1)
     obs = read_rhino_observation(
         make_file(tmp_path / "swapped.hd5f", temps=swapped),
         freq_unit="MHz",
@@ -515,9 +505,7 @@ def test_a_nan_thermistor_reading_raises_and_names_the_source(tmp_path):
     # not propagate: a linear interpolant would spread it into every sample
     # whose bracketing interval touches it, and by the time it reached T_sys
     # nothing would point back at the thermistor log it came from.
-    temps = np.stack(
-        [np.full(len(TIME_S), 20.0), np.full(len(TIME_S), 100.0)], axis=1
-    )
+    temps = np.stack([np.full(len(TIME_S), 20.0), np.full(len(TIME_S), 100.0)], axis=1)
     temps[2, 1] = np.nan  # heated_load's column (1), source row 2
     with pytest.raises(DataIngestionError, match="heated_load") as excinfo:
         read_rhino_observation(
@@ -534,9 +522,7 @@ def test_a_nan_thermistor_reading_raises_and_names_the_source(tmp_path):
 def test_an_infinite_thermistor_reading_raises_and_names_the_source(tmp_path):
     # isfinite, not isnan -- an infinite temperature is equally not a
     # temperature, matching the frequency guard's own reasoning.
-    temps = np.stack(
-        [np.full(len(TIME_S), 20.0), np.full(len(TIME_S), 100.0)], axis=1
-    )
+    temps = np.stack([np.full(len(TIME_S), 20.0), np.full(len(TIME_S), 100.0)], axis=1)
     temps[5, 0] = np.inf  # column 0, shared by antenna and internal_load
     with pytest.raises(DataIngestionError, match="antenna") as excinfo:
         read_rhino_observation(
@@ -554,9 +540,7 @@ def test_a_non_finite_reading_in_an_unused_thermistor_column_does_not_raise(tmp_
     # Only the columns a present label actually uses are checked, matching
     # the labels-present policy: column 1 carries a NaN, but this file's
     # switch log never visits a label mapped to it.
-    temps = np.stack(
-        [np.full(len(TIME_S), 20.0), np.full(len(TIME_S), 100.0)], axis=1
-    )
+    temps = np.stack([np.full(len(TIME_S), 20.0), np.full(len(TIME_S), 100.0)], axis=1)
     temps[0, 1] = np.nan
     obs = read_rhino_observation(
         make_file(
@@ -805,9 +789,7 @@ def test_to_state_after_a_leading_drop_attributes_and_flags_the_kept_samples(tmp
     # point of the fixture: an inverted mask reports 15 flagged cells, not 18.
     flags = np.asarray(state.aux["flags"])
     assert flags.shape == (kept_times.size, obs.freq_hz.size)
-    np.testing.assert_array_equal(
-        flags, np.broadcast_to(~expected_settled[:, None], flags.shape)
-    )
+    np.testing.assert_array_equal(flags, np.broadcast_to(~expected_settled[:, None], flags.shape))
     assert flags.sum() == 6 * obs.freq_hz.size
 
 
@@ -853,9 +835,7 @@ class TestTheTimeAxisIsStoredFromTheStartOfTheRun:
             settle_seconds=0.0,
         )
 
-    def test_the_stored_axis_is_exact_and_the_epoch_recovers_the_absolute_time(
-        self, tmp_path
-    ):
+    def test_the_stored_axis_is_exact_and_the_epoch_recovers_the_absolute_time(self, tmp_path):
         obs = self._obs(tmp_path)
         state = to_state(obs, source_order=self.ORDER)
 
@@ -945,9 +925,7 @@ def test_to_state_rejects_a_source_order_with_duplicate_labels(tmp_path):
         thermistor_columns=COLUMNS,
     )
     with pytest.raises(DataIngestionError, match="antenna"):
-        to_state(
-            obs, source_order=("antenna", "antenna", "internal_load", "heated_load")
-        )
+        to_state(obs, source_order=("antenna", "antenna", "internal_load", "heated_load"))
 
 
 def test_to_state_rejects_a_non_boolean_settled_array(tmp_path):
@@ -979,9 +957,7 @@ def test_the_public_names_are_reachable_from_the_subpackage():
     # `from pkg import name` resolves through the module namespace, not
     # __all__, so this would still pass even with the trailing `__all__ +=`
     # block for this module deleted.
-    assert {"RhinoObservation", "read_rhino_observation", "rhino_to_state"}.issubset(
-        radio.__all__
-    )
+    assert {"RhinoObservation", "read_rhino_observation", "rhino_to_state"}.issubset(radio.__all__)
 
 
 class TestCalLoadOperatorsFromARecording:
@@ -1002,7 +978,7 @@ class TestCalLoadOperatorsFromARecording:
     #: opposite directions, so a swap between them is visible too.
     TEMPS = np.stack(
         [
-            np.linspace(19.0, 23.0, len(TIME_S)),   # ambient, rising
+            np.linspace(19.0, 23.0, len(TIME_S)),  # ambient, rising
             np.linspace(101.5, 98.0, len(TIME_S)),  # hot, falling
         ],
         axis=1,
@@ -1016,9 +992,7 @@ class TestCalLoadOperatorsFromARecording:
             thermistor_columns=COLUMNS,
         )
 
-    def test_it_builds_one_operator_per_label_carrying_that_label_temperature(
-        self, tmp_path
-    ):
+    def test_it_builds_one_operator_per_label_carrying_that_label_temperature(self, tmp_path):
         obs = self._obs(tmp_path)
         operators = cal_load_operators(obs)
 
@@ -1033,9 +1007,7 @@ class TestCalLoadOperatorsFromARecording:
                 rtol=1e-6,
             )
 
-    def test_the_temperature_varies_along_TIME_and_not_along_FREQUENCY(
-        self, tmp_path
-    ):
+    def test_the_temperature_varies_along_TIME_and_not_along_FREQUENCY(self, tmp_path):
         """The axis assertion, which is the whole reason for the column shape.
 
         A per-sample temperature applied per-channel would be finite, correctly
@@ -1086,9 +1058,7 @@ class TestCalLoadOperatorsFromARecording:
         model with no loads and no warning, which is the failure this whole
         route exists to remove.
         """
-        obs = read_rhino_observation(
-            make_file(tmp_path / "obs.hd5f"), freq_unit="MHz"
-        )
+        obs = read_rhino_observation(make_file(tmp_path / "obs.hd5f"), freq_unit="MHz")
         assert obs.thermistor_k == {}
         with pytest.raises(DataIngestionError, match="no thermistor temperatures"):
             cal_load_operators(obs)
@@ -1099,7 +1069,7 @@ class TestCalLoadOperatorsFromARecording:
             cal_load_operators(obs, labels=["nonexistent_load"])
 
     def test_the_two_refusals_say_different_things(self, tmp_path):
-        """"Unread log" and "label not in this file" are different mistakes.
+        """ "Unread log" and "label not in this file" are different mistakes.
 
         Both are DataIngestionError, and the reader's own docstring says the
         caller distinguishes them by what it declared -- so the two messages
@@ -1138,9 +1108,7 @@ class TestAMissingTemperatureGroupIsNamed:
         schema in this class would keep passing after the real one changed,
         which is the failure mode a fixture is supposed to remove.
         """
-        return make_file(
-            tmp_path / "no_temps.hd5f", temperature_group=keep
-        )
+        return make_file(tmp_path / "no_temps.hd5f", temperature_group=keep)
 
     def test_asking_for_the_log_names_the_file_and_the_dataset(self, tmp_path):
         with pytest.raises(DataIngestionError) as excinfo:
@@ -1167,9 +1135,7 @@ class TestAMissingTemperatureGroupIsNamed:
         refused the file outright, which is the opposite of the documented
         behaviour.
         """
-        obs = read_rhino_observation(
-            self._file_without_temperatures(tmp_path), freq_unit="MHz"
-        )
+        obs = read_rhino_observation(self._file_without_temperatures(tmp_path), freq_unit="MHz")
         assert obs.thermistor_k == {}
         assert obs.waterfall.shape == (len(TIME_S), len(FREQ_MHZ))
         assert obs.time_s.shape == (len(TIME_S),)
@@ -1178,12 +1144,8 @@ class TestAMissingTemperatureGroupIsNamed:
         ("keep", "absent"),
         [
             pytest.param((), "temperatures/temperatures", id="no-group-at-all"),
-            pytest.param(
-                ("temperatures",), "temperatures/temperature_times", id="log-times-only"
-            ),
-            pytest.param(
-                ("temperature_times",), "temperatures/temperatures", id="readings-only"
-            ),
+            pytest.param(("temperatures",), "temperatures/temperature_times", id="log-times-only"),
+            pytest.param(("temperature_times",), "temperatures/temperatures", id="readings-only"),
         ],
     )
     def test_half_a_temperature_group_is_named_too(self, tmp_path, keep, absent):
@@ -1210,4 +1172,3 @@ class TestAMissingTemperatureGroupIsNamed:
         )
         assert set(obs.thermistor_k) <= set(COLUMNS)
         assert obs.thermistor_k, "the fixture must actually carry temperatures"
-

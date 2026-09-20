@@ -238,9 +238,7 @@ def test_the_summary_is_about_a_hundred_bytes_an_epoch():
     """Section 9.3's size claim, which is what makes it storable for 1000 nights."""
     term = camp.terms(1, biased=False)[0]
     payload = (
-        np.asarray(term.residual_chi2).nbytes
-        + np.asarray(term.template_projections).nbytes
-        + 8
+        np.asarray(term.residual_chi2).nbytes + np.asarray(term.template_projections).nbytes + 8
     )
     assert payload <= 128
 

@@ -69,12 +69,14 @@ class TestItSpeaksForTheRightDocuments:
 
     def test_four_placeholder_nodes_earn_one_finding_naming_four(self):
         """The design, asserted rather than described."""
-        found = _findings(_graph(
-            uniform_sky={"amplitude": 1.0, "n_pix": 4},
-            gain={"gain": 1.0},
-            noise={"type": "NoiseOperator", "sigma": 0.1},
-            bandpass={"response": 1.0},
-        ))
+        found = _findings(
+            _graph(
+                uniform_sky={"amplitude": 1.0, "n_pix": 4},
+                gain={"gain": 1.0},
+                noise={"type": "NoiseOperator", "sigma": 0.1},
+                bandpass={"response": 1.0},
+            )
+        )
         assert len(found) == 1, f"{len(found)} findings; one was the point"
         for node in ("uniform_sky", "gain", "noise", "bandpass"):
             assert node in found[0].message, f"{node} is not named"
@@ -94,8 +96,9 @@ class TestItSpeaksForTheRightDocuments:
 
 class TestItStaysOutOfTheWay:
     def _report(self):
-        return Report(findings=tuple(
-            _findings(_graph(uniform_sky={"amplitude": 100.0, "n_pix": 12}))))
+        return Report(
+            findings=tuple(_findings(_graph(uniform_sky={"amplitude": 100.0, "n_pix": 12})))
+        )
 
     def test_the_severity_is_report_and_never_refuse_or_warn(self):
         assert [one.severity for one in self._report().findings] == [REPORT]
@@ -130,16 +133,18 @@ class TestItReadsTheRegistry:
         """
         real = capabilities()
         monkeypatch.setattr(
-            _LEVEL_SOURCE, "capabilities",
-            lambda: {**real, "SkyOperator": Maturity.MAINTAINED})
+            _LEVEL_SOURCE, "capabilities", lambda: {**real, "SkyOperator": Maturity.MAINTAINED}
+        )
         assert _findings(_graph(uniform_sky={"amplitude": 1.0, "n_pix": 4})) == []
 
     def test_lowering_a_level_starts_one(self, monkeypatch):
         """The other direction, so the test cannot pass by never firing."""
         real = capabilities()
         monkeypatch.setattr(
-            _LEVEL_SOURCE, "capabilities",
-            lambda: {**real, "AntennaLossOperator": Maturity.PLACEHOLDER})
+            _LEVEL_SOURCE,
+            "capabilities",
+            lambda: {**real, "AntennaLossOperator": Maturity.PLACEHOLDER},
+        )
         found = _findings(_graph(antenna_loss={"efficiency": 0.9}))
         assert len(found) == 1
         assert "AntennaLossOperator" in found[0].message
@@ -157,8 +162,15 @@ class TestItDeclinesRatherThanGuesses:
             _graph(not_a_node={"x": 1}),
             _graph(uniform_sky={"type": "NoSuchOperator"}),
         ],
-        ids=["no model", "model not a mapping", "pipeline kind", "no nodes",
-             "spec not a mapping", "unknown node", "unknown type"],
+        ids=[
+            "no model",
+            "model not a mapping",
+            "pipeline kind",
+            "no nodes",
+            "spec not a mapping",
+            "unknown node",
+            "unknown type",
+        ],
     )
     def test_shapes_that_name_no_resolvable_class_are_silent(self, document):
         """A decline can lose a notice; it must never invent one.

@@ -73,9 +73,7 @@ def resolve_names(
     return resolved
 
 
-def check_stage_ordering(
-    stages: Sequence[AbstractOperator], names: Sequence[str]
-) -> None:
+def check_stage_ordering(stages: Sequence[AbstractOperator], names: Sequence[str]) -> None:
     """Enforce ``must_precede`` against THIS SEQUENCE, for composition by hand.
 
     :func:`~rheplicant.core.graph.assemble` enforces the same declaration by
@@ -212,9 +210,7 @@ class Pipeline(AbstractOperator):
             try:
                 index = self.names.index(index)
             except ValueError:
-                raise KeyError(
-                    f"No stage named {index!r}; available: {self.names}"
-                ) from None
+                raise KeyError(f"No stage named {index!r}; available: {self.names}") from None
         return self.stages[index]
 
     def __len__(self) -> int:
@@ -239,9 +235,7 @@ class Pipeline(AbstractOperator):
             try:
                 index = self.names.index(index)
             except ValueError:
-                raise KeyError(
-                    f"No stage named {index!r}; available: {self.names}"
-                ) from None
+                raise KeyError(f"No stage named {index!r}; available: {self.names}") from None
         new_stages = list(self.stages)
         new_stages[index] = operator
         return Pipeline(*new_stages, names=self.names)

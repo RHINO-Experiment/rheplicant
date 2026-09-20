@@ -51,10 +51,8 @@ NAN = float("nan")
 # cheaper to build, and the 262144 case is measured once below for the cost
 # claim rather than in every test.
 
-C1_TIME = {"time": {"grid": {"arange": {"start": 1.75e9, "step": 100.0,
-                                        "num": 8}, "unit": "s"}}}
-C1_FIXED = {"time": {"grid": {"arange": {"start": 0.0, "step": 100.0,
-                                         "num": 8}, "unit": "s"}}}
+C1_TIME = {"time": {"grid": {"arange": {"start": 1.75e9, "step": 100.0, "num": 8}, "unit": "s"}}}
+C1_FIXED = {"time": {"grid": {"arange": {"start": 0.0, "step": 100.0, "num": 8}, "unit": "s"}}}
 C2_TIME = {"time": {"grid": {"list": [0.0, 2.0, NAN, 6.0], "unit": "s"}}}
 C2_TIME_FIXED = {"time": {"grid": {"list": [0.0, 2.0, 4.0, 6.0], "unit": "s"}}}
 
@@ -133,9 +131,8 @@ _C2_TAIL = (
     "legitimately NaN or infinite (check C2)."
 )
 
-LST_MESSAGE = ('observation.extra.lst_deg: coords.extra["lst_deg"]' + _C2_TAIL)
-SELFROT_MESSAGE = (
-    'observation.extra.selfrot_deg: coords.extra["selfrot_deg"]' + _C2_TAIL)
+LST_MESSAGE = 'observation.extra.lst_deg: coords.extra["lst_deg"]' + _C2_TAIL
+SELFROT_MESSAGE = 'observation.extra.selfrot_deg: coords.extra["selfrot_deg"]' + _C2_TAIL
 POINTING_MESSAGE = (
     "observation.pointing: coords.pointing holds 16 non-finite value(s), the "
     "first at sample 0 (0-based)." + _C2_TAIL.split("(0-based).", 1)[1]
@@ -167,9 +164,10 @@ class TestTheRegistry:
         set asserted equal: ``== {"C2"}`` carries the same property today and
         goes red the day any wave-1 check fires on a NaN axis.
         """
-        for document in (preflight_document(observation=C2_TIME),
-                         preflight_document(
-                             observation=_extra("lst_deg", LST_WITH_NAN))):
+        for document in (
+            preflight_document(observation=C2_TIME),
+            preflight_document(observation=_extra("lst_deg", LST_WITH_NAN)),
+        ):
             found = ids_of(document)
             assert "C2" in found
             assert "C2.time" not in found and "C2.pointing" not in found
@@ -219,8 +217,7 @@ class TestC1:
         assert found.where == "observation.time.grid"
 
     def test_the_whole_message(self):
-        assert axis_only(preflight_document(observation=C1_TIME),
-                         "C1").message == C1_MESSAGE
+        assert axis_only(preflight_document(observation=C1_TIME), "C1").message == C1_MESSAGE
 
     def test_the_hoisted_sentence_is_still_bound_where_it_was(self):
         """The words a reader sees are ``core/coordinates.py``'s, interpolated
@@ -228,12 +225,12 @@ class TestC1:
         walker's one documented exemption (that clause really does live in two
         modules -- the container's guard and ``CWCalibrationOperator``'s), so
         this asks for the clause that is the CONTAINER's alone."""
-        assert modules_carrying(
-            "must resolve its own sampling to at most") == ("core/coordinates.py",)
+        assert modules_carrying("must resolve its own sampling to at most") == (
+            "core/coordinates.py",
+        )
 
     def test_the_base_document_earns_no_C1(self):
-        assert "C1" not in {one.check for one in
-                            axis_findings(preflight_document())}
+        assert "C1" not in {one.check for one in axis_findings(preflight_document())}
 
     def test_an_ingested_run_is_sent_to_its_own_key(self):
         """``_time_where`` as a unit, because the branch is otherwise reachable
@@ -242,10 +239,10 @@ class TestC1:
         with "from_file and time: together say two things about one
         recording" -- so a refusal naming ``observation.time.grid`` would send
         the reader to a key their document must not contain."""
-        assert _time_where({"observation": {"from_file": {"path": "r.h5"}}}) \
-            == "observation.from_file"
-        assert _time_where({"observation": {"time": {}}}) \
-            == "observation.time.grid"
+        assert (
+            _time_where({"observation": {"from_file": {"path": "r.h5"}}}) == "observation.from_file"
+        )
+        assert _time_where({"observation": {"time": {}}}) == "observation.time.grid"
         assert _time_where({}) == "observation.time.grid"
 
 
@@ -258,27 +255,33 @@ class TestC2sTimeLeg:
         assert found.where == "observation.time.grid"
 
     def test_the_whole_message(self):
-        assert axis_only(preflight_document(observation=C2_TIME),
-                         "C2").message == C2_TIME_MESSAGE
+        assert axis_only(preflight_document(observation=C2_TIME), "C2").message == C2_TIME_MESSAGE
 
     def test_an_all_NaN_axis_is_refused_too(self):
         """The reason non-finite values are named FIRST.  Every gap on an
         all-NaN axis is NaN, NaN is not ``> 0``, so the smallest DISTINCT gap
         is empty and a comparison-based guard has nothing left to test.  A
         check that asked about the resolution first would let this through."""
-        found = axis_only(preflight_document(observation={
-            "time": {"grid": {"list": [NAN, NAN, NAN, NAN], "unit": "s"}}}),
-            "C2")
+        found = axis_only(
+            preflight_document(
+                observation={"time": {"grid": {"list": [NAN, NAN, NAN, NAN], "unit": "s"}}}
+            ),
+            "C2",
+        )
         assert found.message.startswith(
-            "coords.time holds 4 non-finite value(s), the first at index 0")
+            "coords.time holds 4 non-finite value(s), the first at index 0"
+        )
 
     def test_an_integer_axis_is_left_alone(self):
         """``np.spacing`` on an integer promotes to float64 and answers
         5.7e-14 -- the same dtype blindness from the other side.  The hoisted
         guard checks INEXACT dtypes only, and this is the test that the hoist
         did not lose that."""
-        assert silent_here(preflight_document(observation={
-            "time": {"grid": {"list": [0, 100, 200, 300], "unit": "s"}}}))
+        assert silent_here(
+            preflight_document(
+                observation={"time": {"grid": {"list": [0, 100, 200, 300], "unit": "s"}}}
+            )
+        )
 
 
 class TestC2sOtherThreeLegs:
@@ -287,53 +290,87 @@ class TestC2sOtherThreeLegs:
     ``lst_deg`` loads clean and evaluates clean."""
 
     def test_lst_deg(self):
-        found = axis_only(preflight_document(
-            observation=_extra("lst_deg", LST_WITH_NAN)), "C2")
+        found = axis_only(preflight_document(observation=_extra("lst_deg", LST_WITH_NAN)), "C2")
         assert found.where == "observation.extra.lst_deg"
         assert found.message == LST_MESSAGE
 
     def test_selfrot_deg(self):
         """The named twin beside ``lst_deg``, guarded rather than recorded."""
-        found = axis_only(preflight_document(
-            observation=_extra("selfrot_deg", LST_WITH_NAN)), "C2")
+        found = axis_only(preflight_document(observation=_extra("selfrot_deg", LST_WITH_NAN)), "C2")
         assert found.where == "observation.extra.selfrot_deg"
         assert found.message == SELFROT_MESSAGE
 
     def test_the_pointing_table(self):
-        found = axis_only(preflight_document(observation={
-            "pointing": {"mode": "drift", "materialise": ["pointing"],
-                         "el_deg": {"value": NAN, "unit": "deg"}}}), "C2")
+        found = axis_only(
+            preflight_document(
+                observation={
+                    "pointing": {
+                        "mode": "drift",
+                        "materialise": ["pointing"],
+                        "el_deg": {"value": NAN, "unit": "deg"},
+                    }
+                }
+            ),
+            "C2",
+        )
         assert found.where == "observation.pointing"
         assert found.message == POINTING_MESSAGE
 
     def test_the_index_is_the_SAMPLE_and_not_the_flat_position(self):
         """``coords.pointing`` is ``(n_time, k)``.  A flat index would report
         1 for a NaN ELEVATION on sample 0 and send the reader to sample 1."""
-        assert "the first at sample 0 (0-based)" in axis_only(
-            preflight_document(observation={
-                "pointing": {"mode": "drift", "materialise": ["pointing"],
-                             "el_deg": {"value": NAN, "unit": "deg"}}}),
-            "C2").message
+        assert (
+            "the first at sample 0 (0-based)"
+            in axis_only(
+                preflight_document(
+                    observation={
+                        "pointing": {
+                            "mode": "drift",
+                            "materialise": ["pointing"],
+                            "el_deg": {"value": NAN, "unit": "deg"},
+                        }
+                    }
+                ),
+                "C2",
+            ).message
+        )
 
     def test_the_where_falls_back_to_the_producer_that_wrote_it(self):
         """``coords.extra['selfrot_deg']`` has two producers and
         ``build_observation`` refuses a document that uses both.  Written
         through ``pointing.materialise`` there is no ``observation.extra`` key
         to name, so the reader is sent to ``observation.pointing``."""
-        found = axis_only(preflight_document(observation={
-            "pointing": {"mode": "drift", "materialise": ["selfrot_deg"],
-                         "selfrot_deg": {"value": NAN, "unit": "deg"}}}), "C2")
+        found = axis_only(
+            preflight_document(
+                observation={
+                    "pointing": {
+                        "mode": "drift",
+                        "materialise": ["selfrot_deg"],
+                        "selfrot_deg": {"value": NAN, "unit": "deg"},
+                    }
+                }
+            ),
+            "C2",
+        )
         assert found.where == "observation.pointing"
 
     def test_two_bad_axes_are_two_findings(self):
         """One sentence per line to edit.  ``axis_only`` would fail here, and
         that is the point of it being ``exactly one``."""
-        found = axis_findings(preflight_document(
-            observation={"extra": {
-                "lst_deg": {"value": LST_WITH_NAN, "unit": "deg"},
-                "selfrot_deg": {"value": LST_WITH_NAN, "unit": "deg"}}}))
+        found = axis_findings(
+            preflight_document(
+                observation={
+                    "extra": {
+                        "lst_deg": {"value": LST_WITH_NAN, "unit": "deg"},
+                        "selfrot_deg": {"value": LST_WITH_NAN, "unit": "deg"},
+                    }
+                }
+            )
+        )
         assert [one.where for one in found if one.check == "C2"] == [
-            "observation.extra.lst_deg", "observation.extra.selfrot_deg"]
+            "observation.extra.lst_deg",
+            "observation.extra.selfrot_deg",
+        ]
 
     def test_an_extra_key_C2_does_not_name_is_left_alone(self):
         """**The trap, and the mutant it kills.**  ``coords.extra`` is an OPEN
@@ -346,11 +383,17 @@ class TestC2sOtherThreeLegs:
         Measured: with the walk over ``extra`` itself, this document earns a
         C2 finding at ``observation.extra.my_weights``.
         """
-        assert silent_here(preflight_document(
-            observation=_extra("my_weights", LST_WITH_NAN)))
-        assert "C2" in ids_of(preflight_document(observation={"extra": {
-            "my_weights": {"value": LST_WITH_NAN, "unit": "deg"},
-            "lst_deg": {"value": LST_WITH_NAN, "unit": "deg"}}})), (
+        assert silent_here(preflight_document(observation=_extra("my_weights", LST_WITH_NAN)))
+        assert "C2" in ids_of(
+            preflight_document(
+                observation={
+                    "extra": {
+                        "my_weights": {"value": LST_WITH_NAN, "unit": "deg"},
+                        "lst_deg": {"value": LST_WITH_NAN, "unit": "deg"},
+                    }
+                }
+            )
+        ), (
             "the named key beside it must still be decided, or this test "
             "passes because the walk found nothing at all"
         )
@@ -360,9 +403,13 @@ class TestC2sOtherThreeLegs:
         ``receiver_input``, an integer index vector, into it.  The walk is
         over the NAMED keys for that reason, and this is the anti-vacuity
         case: a document with a switch cycle earns nothing here."""
-        facts = axis_facts(preflight_document(observation={
-            "switching": {"mode": "cycle", "order": ["antenna", "load"],
-                          "dwell": 4}}))
+        facts = axis_facts(
+            preflight_document(
+                observation={
+                    "switching": {"mode": "cycle", "order": ["antenna", "load"], "dwell": 4}
+                }
+            )
+        )
         assert "receiver_input" in facts.observation.extra
         assert {one.check for one in axes(facts).findings}.isdisjoint(MINE)
 
@@ -377,8 +424,7 @@ class TestTheyDoNotPreEmptABetterSentence:
         would send the reader to the observation section over a typo in the
         model."""
         with pytest.raises(ConfigError) as raised:
-            load_document(preflight_document(model={"gian": {}},
-                                             observation=C1_TIME))
+            load_document(preflight_document(model={"gian": {}}, observation=C1_TIME))
         assert "gian" in str(raised.value)
         assert "coords.time is stored as" not in str(raised.value)
 
@@ -388,8 +434,11 @@ class TestTheyDoNotPreEmptABetterSentence:
         words.  There is nothing for C2 to be about, because there is no
         materialised axis."""
         with pytest.raises(ConfigError) as raised:
-            load_document(preflight_document(observation={
-                "pointing": {"mode": "drift", "materialise": ["nope"]}}))
+            load_document(
+                preflight_document(
+                    observation={"pointing": {"mode": "drift", "materialise": ["nope"]}}
+                )
+            )
         assert "materialise entries are" in str(raised.value)
 
 
@@ -400,16 +449,13 @@ class TestApplyingTheirOwnAdvice:
     def test_C1s_remedy_builds(self):
         """*"stores time measured from the start of the run"* -- so the axis
         moves from unix 1.75e9 to 0.0 and everything else stays."""
-        assert load_document(preflight_document(
-            observation=C1_FIXED)) is not None
+        assert load_document(preflight_document(observation=C1_FIXED)) is not None
 
     def test_C2s_time_remedy_builds(self):
-        assert load_document(preflight_document(
-            observation=C2_TIME_FIXED)) is not None
+        assert load_document(preflight_document(observation=C2_TIME_FIXED)) is not None
 
     def test_C2s_pointing_remedy_builds(self):
-        assert load_document(preflight_document(
-            observation=_extra("lst_deg", _LST))) is not None
+        assert load_document(preflight_document(observation=_extra("lst_deg", _LST))) is not None
 
 
 class TestThePhaseProperty:
@@ -424,16 +470,17 @@ class TestThePhaseProperty:
 
     def test_a_bad_time_axis_beats_an_unreadable_beam(self):
         with pytest.raises(ConfigError) as raised:
-            load_document(preflight_document(observation=C1_TIME,
-                                             resources=UNREADABLE_BEAM))
+            load_document(preflight_document(observation=C1_TIME, resources=UNREADABLE_BEAM))
         assert str(raised.value) == C1_MESSAGE
         assert "no_such_beam" not in str(raised.value)
 
     def test_a_NaN_lst_beats_an_unreadable_beam(self):
         with pytest.raises(ConfigError) as raised:
-            load_document(preflight_document(
-                observation=_extra("lst_deg", LST_WITH_NAN),
-                resources=UNREADABLE_BEAM))
+            load_document(
+                preflight_document(
+                    observation=_extra("lst_deg", LST_WITH_NAN), resources=UNREADABLE_BEAM
+                )
+            )
         assert str(raised.value) == LST_MESSAGE
         assert "no_such_beam" not in str(raised.value)
 
@@ -453,14 +500,16 @@ class TestOneBindingPerRule:
     that vanished are exactly the rows nobody is checking any more.
     """
 
-    @pytest.mark.parametrize("literal", [
-        "This is the axes pass, which runs after build_observation and "
-        "before build_resources.",
-        "Nothing downstream says so and nothing raises: measured, a NaN at "
-        "index 5 of a 32-sample lst_deg loads clean and evaluates clean",
-        "A sample time, an LST, a pointing and a self-rotation are never "
-        "legitimately NaN or infinite",
-    ])
+    @pytest.mark.parametrize(
+        "literal",
+        [
+            "This is the axes pass, which runs after build_observation and before build_resources.",
+            "Nothing downstream says so and nothing raises: measured, a NaN at "
+            "index 5 of a 32-sample lst_deg loads clean and evaluates clean",
+            "A sample time, an LST, a pointing and a self-rotation are never "
+            "legitimately NaN or infinite",
+        ],
+    )
     def test_each_sentence_this_module_invents_is_bound_once(self, literal):
         assert_bound_once(literal)
 
@@ -468,8 +517,10 @@ class TestOneBindingPerRule:
         """Two clauses of C1's sentence, each in exactly one module.  A hoist
         that pasted the words into ``inflight/axes.py`` would put both in two,
         and every ``match=`` pin in the repository would still pass."""
-        for literal in ("The rounding happens when the axis is STORED",
-                        "an all-NaN axis has no gap left to test at all"):
+        for literal in (
+            "The rounding happens when the axis is STORED",
+            "an all-NaN axis has no gap left to test at all",
+        ):
             assert modules_carrying(literal) == ("core/coordinates.py",), literal
 
 
@@ -519,12 +570,13 @@ class TestTheCost:
       in front of and is 90.9 % of a load's wall time.
     """
 
-    @pytest.mark.parametrize(("num", "bound"), [(16, 0.09), (262144, 1.8)],
-                             ids=["worked", "big"])
+    @pytest.mark.parametrize(("num", "bound"), [(16, 0.09), (262144, 1.8)], ids=["worked", "big"])
     def test_the_axes_pass_stays_near_its_measured_cost(self, num, bound):
-        document = preflight_document(observation={
-            "time": {"grid": {"arange": {"start": 0.0, "step": 2.0,
-                                         "num": num}, "unit": "s"}}})
+        document = preflight_document(
+            observation={
+                "time": {"grid": {"arange": {"start": 0.0, "step": 2.0, "num": num}, "unit": "s"}}
+            }
+        )
         facts = axis_facts(document)
         axes(facts)  # warm
         assert best_ms(lambda: axes(facts), repeats=30) < bound * machine_factor()
@@ -547,9 +599,18 @@ class TestTheCost:
         the test below, because a single ``perf_counter`` around
         ``axis_findings`` also times the cold payload build and then fails for
         a reason it does not name."""
-        assert "C1" in ids_of(preflight_document(observation={
-            "time": {"grid": {"arange": {"start": 1.75e9, "step": 1.0,
-                                         "num": 262144}, "unit": "s"}}}))
+        assert "C1" in ids_of(
+            preflight_document(
+                observation={
+                    "time": {
+                        "grid": {
+                            "arange": {"start": 1.75e9, "step": 1.0, "num": 262144},
+                            "unit": "s",
+                        }
+                    }
+                }
+            )
+        )
 
     def test_refusing_the_big_axis_costs_a_fraction_of_the_load_it_replaces(self):
         """**1.6 ms against a measured 0.257 ms best case.**  The REFUSING
@@ -563,9 +624,18 @@ class TestTheCost:
         the payload build (~2 ms at this size) is outside the timed region
         because it is ``build_observation``'s cost and not this pass's.
         """
-        facts = axis_facts(preflight_document(observation={
-            "time": {"grid": {"arange": {"start": 1.75e9, "step": 1.0,
-                                         "num": 262144}, "unit": "s"}}}))
+        facts = axis_facts(
+            preflight_document(
+                observation={
+                    "time": {
+                        "grid": {
+                            "arange": {"start": 1.75e9, "step": 1.0, "num": 262144},
+                            "unit": "s",
+                        }
+                    }
+                }
+            )
+        )
         assert "C1" in {one.check for one in axes(facts).findings}, (
             "the timed call must be the REFUSING one, or this measures the "
             "clean path the test above already covers"

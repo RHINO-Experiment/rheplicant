@@ -45,14 +45,21 @@ def gaussian_beam(nside: int, fwhm_sigma_deg: float = 35.0, floor: float = 0.02)
 def polar_projector(nside: int, beam, *, horizon_mask: bool, apod_deg: float = 0.0):
     """Latitude 90, zenith pointing: the horizon IS the celestial equator."""
     return DriftScanProjector.from_beam_maps(
-        beam, lat_deg=90.0, az_deg=0.0, el_deg=90.0, lmax=3 * nside - 1,
-        normalize_beam=True, horizon_mask=horizon_mask, apod_deg=apod_deg,
+        beam,
+        lat_deg=90.0,
+        az_deg=0.0,
+        el_deg=90.0,
+        lmax=3 * nside - 1,
+        normalize_beam=True,
+        horizon_mask=horizon_mask,
+        apod_deg=apod_deg,
     )
 
 
 def polar_coords(nside: int):
     return Coordinates(
-        time=jnp.arange(float(N_TIME)), freq=jnp.array([70e6]),
+        time=jnp.arange(float(N_TIME)),
+        freq=jnp.array([70e6]),
         extra={"lst_deg": 360.0 * jnp.arange(N_TIME) / N_TIME},
     )
 
@@ -80,12 +87,8 @@ class TestClosureAgainstPaintedGround:
         coords = polar_coords(nside)
         uniform = jnp.full((1, hp.nside2npix(nside)), T_SKY)
 
-        exact = polar_projector(nside, beam, horizon_mask=False).forward(
-            painted_sky(theta), coords
-        )
-        masked = polar_projector(nside, beam, horizon_mask=True).forward(
-            uniform, coords
-        )
+        exact = polar_projector(nside, beam, horizon_mask=False).forward(painted_sky(theta), coords)
+        masked = polar_projector(nside, beam, horizon_mask=True).forward(uniform, coords)
         spill = BeamSpillOperator.from_projector(
             polar_projector(nside, beam, horizon_mask=False),
             t_ground=jnp.array(T_GROUND),
@@ -100,9 +103,7 @@ class TestClosureAgainstPaintedGround:
         nside = 8
         beam, theta = gaussian_beam(nside)
         coords = polar_coords(nside)
-        exact = polar_projector(nside, beam, horizon_mask=False).forward(
-            painted_sky(theta), coords
-        )
+        exact = polar_projector(nside, beam, horizon_mask=False).forward(painted_sky(theta), coords)
         naive = polar_projector(nside, beam, horizon_mask=False).forward(
             jnp.full((1, hp.nside2npix(nside)), T_SKY), coords
         )
@@ -143,15 +144,22 @@ class TestTheHorizonRingCountsHalf:
         beam, theta = gaussian_beam(nside)
         coords = polar_coords(nside)
         uniform = jnp.full((1, hp.nside2npix(nside)), T_SKY)
-        exact = float(polar_projector(nside, beam, horizon_mask=False)
-                      .forward(painted_sky(theta), coords).mean())
-        masked = float(polar_projector(nside, beam, horizon_mask=True)
-                       .forward(uniform, coords).mean())
+        exact = float(
+            polar_projector(nside, beam, horizon_mask=False)
+            .forward(painted_sky(theta), coords)
+            .mean()
+        )
+        masked = float(
+            polar_projector(nside, beam, horizon_mask=True).forward(uniform, coords).mean()
+        )
 
-        beam_map = np.asarray(ltj.alm2map(
-            ltj.map2alm_iter(beam[0], nside=nside, lmax=3 * nside - 1),
-            nside=nside, lmax=3 * nside - 1,
-        ))
+        beam_map = np.asarray(
+            ltj.alm2map(
+                ltj.map2alm_iter(beam[0], nside=nside, lmax=3 * nside - 1),
+                nside=nside,
+                lmax=3 * nside - 1,
+            )
+        )
         above = np.asarray(ltj.horizon_weights(nside, 0.0))
         on = np.isclose(theta, np.pi / 2)
 
@@ -164,8 +172,7 @@ class TestTheHorizonRingCountsHalf:
         assert strict < -1.0 and inclusive > 1.0
         assert abs(strict + inclusive) < 0.2 * abs(strict), "should be symmetric"
 
-        f_used = float(polar_projector(nside, beam, horizon_mask=False)
-                       .horizon_fraction()[0])
+        f_used = float(polar_projector(nside, beam, horizon_mask=False).horizon_fraction()[0])
         assert abs(f_used * masked + (1.0 - f_used) * T_GROUND - exact) < 0.1
 
 
@@ -196,9 +203,7 @@ class TestHorizonFraction:
     def test_it_is_refused_on_a_cached_reference_frame_projector(self):
         nside = 8
         beam, _ = gaussian_beam(nside)
-        cached = polar_projector(nside, beam, horizon_mask=True).to_reference_frame(
-            lst_ref_deg=0.0
-        )
+        cached = polar_projector(nside, beam, horizon_mask=True).to_reference_frame(lst_ref_deg=0.0)
         with pytest.raises(StateValidationError, match="beam_frame='reference'"):
             cached.horizon_fraction()
 
@@ -213,13 +218,11 @@ class TestHorizonFraction:
 class TestTheOperator:
     @pytest.fixture
     def coords(self):
-        return Coordinates(time=jnp.arange(float(N_TIME)),
-                           freq=jnp.linspace(60e6, 85e6, 4))
+        return Coordinates(time=jnp.arange(float(N_TIME)), freq=jnp.linspace(60e6, 85e6, 4))
 
     def test_no_spill_is_the_identity(self, coords):
         data = jnp.full((N_TIME, 4), 1234.0)
-        op = BeamSpillOperator(sky_fraction=jnp.array(1.0),
-                               t_ground=jnp.array(T_GROUND))
+        op = BeamSpillOperator(sky_fraction=jnp.array(1.0), t_ground=jnp.array(T_GROUND))
         assert jnp.array_equal(op(State(data=data, coords=coords)).data, data)
 
     @pytest.mark.parametrize("fraction", [0.0, 0.5, 0.9, 1.0])
@@ -230,8 +233,7 @@ class TestTheOperator:
         there the second term is the antenna's own emission, here it is another
         part of the same sky-plus-ground scene."""
         data = jnp.full((N_TIME, 4), T_GROUND)
-        op = BeamSpillOperator(sky_fraction=jnp.array(fraction),
-                               t_ground=jnp.array(T_GROUND))
+        op = BeamSpillOperator(sky_fraction=jnp.array(fraction), t_ground=jnp.array(T_GROUND))
         assert jnp.allclose(op(State(data=data, coords=coords)).data, T_GROUND)
 
     def test_a_per_channel_fraction_acts_per_channel(self, coords):
@@ -239,12 +241,10 @@ class TestTheOperator:
         data = jnp.full((N_TIME, 4), T_SKY)
         op = BeamSpillOperator(sky_fraction=f, t_ground=jnp.array(T_GROUND))
         expected = f * T_SKY + (1.0 - f) * T_GROUND
-        assert jnp.allclose(op(State(data=data, coords=coords)).data,
-                            expected[None, :])
+        assert jnp.allclose(op(State(data=data, coords=coords)).data, expected[None, :])
 
     def test_a_fraction_with_the_wrong_channel_count_is_refused(self, coords):
-        op = BeamSpillOperator(sky_fraction=jnp.ones(5),
-                               t_ground=jnp.array(T_GROUND))
+        op = BeamSpillOperator(sky_fraction=jnp.ones(5), t_ground=jnp.array(T_GROUND))
         with pytest.raises(StateValidationError, match="channels"):
             op(State(data=jnp.zeros((N_TIME, 4)), coords=coords))
 
@@ -259,9 +259,7 @@ class TestTheOperator:
             op = BeamSpillOperator(sky_fraction=f, t_ground=t_g)
             return jnp.sum(op(State(data=data, coords=coords)).data ** 2)
 
-        d_f, d_g = jax.jit(jax.grad(loss, argnums=(0, 1)))(
-            jnp.array(0.93), jnp.array(T_GROUND)
-        )
+        d_f, d_g = jax.jit(jax.grad(loss, argnums=(0, 1)))(jnp.array(0.93), jnp.array(T_GROUND))
         assert jnp.isfinite(d_f) and d_f != 0.0
         assert jnp.isfinite(d_g) and d_g != 0.0
 
@@ -271,8 +269,7 @@ class TestPlacement:
 
     @pytest.fixture
     def coords(self):
-        return Coordinates(time=jnp.arange(float(N_TIME)),
-                           freq=jnp.linspace(60e6, 85e6, 4))
+        return Coordinates(time=jnp.arange(float(N_TIME)), freq=jnp.linspace(60e6, 85e6, 4))
 
     def test_it_lands_between_the_astro_entrance_and_the_antenna_sum(self, coords):
         nside = 4
@@ -285,8 +282,7 @@ class TestPlacement:
                 sky_model=MapSky(maps=sky, freq=polar_coords(nside).freq),
                 projector=polar_projector(nside, beam, horizon_mask=True),
             ),
-            BeamSpillOperator(sky_fraction=jnp.array(0.9),
-                              t_ground=jnp.array(T_GROUND)),
+            BeamSpillOperator(sky_fraction=jnp.array(0.9), t_ground=jnp.array(T_GROUND)),
         )
         assert twin.lit == ("observed_astro_sky", "beam_spill")
         assert "astro_ant_sum" in twin.skipped
@@ -295,12 +291,10 @@ class TestPlacement:
         """ground_pickup, atmosphere and t_sys_extra are effective temperatures
         by D13's construction. Splitting them would weight them twice -- and
         ground_pickup in particular IS a below-horizon share already."""
-        split = BeamSpillOperator(sky_fraction=jnp.array(0.5),
-                                  t_ground=jnp.array(0.0))
+        split = BeamSpillOperator(sky_fraction=jnp.array(0.5), t_ground=jnp.array(0.0))
         leaves = (
             SkyOperator(amplitude=jnp.array(1000.0)),
-            GroundPickupOperator(coupling=jnp.array(0.1),
-                                 t_ground=jnp.array(200.0)),
+            GroundPickupOperator(coupling=jnp.array(0.1), t_ground=jnp.array(200.0)),
             AtmosphericEmissionOperator(t_atm=jnp.array(4.0)),
         )
         state = State(coords=coords)
@@ -313,11 +307,9 @@ class TestPlacement:
         switch = jnp.arange(N_TIME) % 2
         twin = assemble(
             SkyOperator(amplitude=jnp.array(1000.0)),
-            BeamSpillOperator(sky_fraction=jnp.array(0.5),
-                              t_ground=jnp.array(0.0)),
+            BeamSpillOperator(sky_fraction=jnp.array(0.5), t_ground=jnp.array(0.0)),
             CalLoadOperator(t_load=jnp.array(400.0)),
         )
-        out = twin(State(coords=coords.replace(
-            extra={"receiver_input": switch}))).data
+        out = twin(State(coords=coords.replace(extra={"receiver_input": switch}))).data
         assert jnp.allclose(out[switch == 1], 400.0, atol=1e-3)
         assert jnp.allclose(out[switch == 0], 500.0, atol=1e-3)

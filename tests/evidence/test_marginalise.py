@@ -35,9 +35,7 @@ def _joint(design_x, design_p, data, sigma, prior_std, prior_mean=0.0):
     std = jnp.broadcast_to(jnp.asarray(prior_std), (n_p,))
     mean = jnp.broadcast_to(jnp.asarray(prior_mean), (n_p,))
     top = jnp.concatenate([design_p / sigma, design_x / sigma], axis=1)
-    bottom = jnp.concatenate(
-        [jnp.diag(1.0 / std), jnp.zeros((n_p, design_x.shape[1]))], axis=1
-    )
+    bottom = jnp.concatenate([jnp.diag(1.0 / std), jnp.zeros((n_p, design_x.shape[1]))], axis=1)
     return SqrtInfo(
         factor=jnp.concatenate([top, bottom], axis=0),
         target=jnp.concatenate([data / sigma, mean / std]),
@@ -52,15 +50,14 @@ def _joint(design_x, design_p, data, sigma, prior_std, prior_mean=0.0):
 
 
 def _dense_marginal(design_x, design_p, data, sigma, prior_std, x):
-    cov = np.diag(np.full(len(data), sigma**2)) + design_p @ np.diag(
-        np.full(design_p.shape[1], prior_std**2)
-    ) @ design_p.T
+    cov = (
+        np.diag(np.full(len(data), sigma**2))
+        + design_p @ np.diag(np.full(design_p.shape[1], prior_std**2)) @ design_p.T
+    )
     resid = np.asarray(data) - np.asarray(design_x) @ np.asarray(x)
     sign, logdet = np.linalg.slogdet(cov)
     assert sign > 0
-    return -0.5 * (
-        resid @ np.linalg.solve(cov, resid) + logdet + len(data) * np.log(2 * np.pi)
-    )
+    return -0.5 * (resid @ np.linalg.solve(cov, resid) + logdet + len(data) * np.log(2 * np.pi))
 
 
 def _designs(key, n_data, n_x, n_p):
@@ -95,9 +92,7 @@ def test_it_agrees_with_compress_linear_absolutely():
     )
     marginal = marginalise(_joint(design_x, design_p, data, 0.1, 0.7), ("p",))
     x = jnp.array([0.3, 0.9])
-    assert float(marginal.log_prob({"x": x})) == pytest.approx(
-        float(term({"x": x})), rel=1e-10
-    )
+    assert float(marginal.log_prob({"x": x})) == pytest.approx(float(term({"x": x})), rel=1e-10)
 
 
 def test_it_still_agrees_with_twenty_five_nuisances_at_std_three():
@@ -116,9 +111,7 @@ def test_it_still_agrees_with_twenty_five_nuisances_at_std_three():
     )
     marginal = marginalise(_joint(design_x, design_p, data, 0.1, 3.0), ("p",))
     x = jnp.array([0.3, 0.9])
-    assert float(marginal.log_prob({"x": x})) == pytest.approx(
-        float(term({"x": x})), rel=1e-10
-    )
+    assert float(marginal.log_prob({"x": x})) == pytest.approx(float(term({"x": x})), rel=1e-10)
 
 
 def test_dropping_the_prior_normalisation_would_be_this_many_nats():
@@ -137,9 +130,7 @@ def test_dropping_the_prior_normalisation_would_be_this_many_nats():
 def test_a_nonzero_prior_mean_travels():
     design_x, design_p = _designs(jax.random.key(6), 40, 2, 3)
     data = jax.random.normal(jax.random.key(7), (40,))
-    shifted = marginalise(
-        _joint(design_x, design_p, data, 0.1, 0.7, prior_mean=1.5), ("p",)
-    )
+    shifted = marginalise(_joint(design_x, design_p, data, 0.1, 0.7, prior_mean=1.5), ("p",))
     centred = marginalise(_joint(design_x, design_p, data, 0.1, 0.7), ("p",))
     x = jnp.array([0.3, 0.9])
     assert float(shifted.log_prob({"x": x})) != pytest.approx(
@@ -156,9 +147,7 @@ def test_marginalising_every_latent_leaves_a_zero_width_term():
     assert everything.names == ()
     assert everything.factor.shape == (0, 0)
     stepwise = marginalise(marginalise(joint, ("p",)), ("x",))
-    assert float(everything.log_prob({})) == pytest.approx(
-        float(stepwise.log_prob({})), rel=1e-10
-    )
+    assert float(everything.log_prob({})) == pytest.approx(float(stepwise.log_prob({})), rel=1e-10)
 
 
 def test_marginalising_nothing_is_the_identity_the_no_nuisance_path_takes():
@@ -173,9 +162,7 @@ def test_marginalising_nothing_is_the_identity_the_no_nuisance_path_takes():
     same = marginalise(joint, ())
     values = {"p": jnp.array([0.2, -0.4]), "x": jnp.array([0.3, 0.9])}
     assert same.names == ("p", "x")
-    assert float(same.log_prob(values)) == pytest.approx(
-        float(joint.log_prob(values)), rel=1e-10
-    )
+    assert float(same.log_prob(values)) == pytest.approx(float(joint.log_prob(values)), rel=1e-10)
 
 
 def test_an_unconstrained_block_is_refused_rather_than_returning_plus_infinity():
@@ -263,25 +250,20 @@ def test_t1_with_an_affine_nuisance_matches_the_analytic_marginal():
         nuisance_prior_std={"offset": 0.5},
         nuisance_shapes={"offset": (2,)},
     )
-    tight = compress_reduced_basis(
-        basis, observed=data, noise=rhino_bank.noise(), epoch_id="e0"
-    )
+    tight = compress_reduced_basis(basis, observed=data, noise=rhino_bank.noise(), epoch_id="e0")
     predict, values = rhino_bank.forward()
 
     sigma = np.asarray(rhino_bank.noise().std(basis.rows.T @ basis.c_ref))
     design = np.asarray(nuisance)
     covariance = np.diag(sigma**2) + 0.5**2 * design @ design.T
     model = np.asarray(
-        basis.rows.T @ (basis.coefficients(values) - basis.c_ref)
-        + basis.rows.T @ basis.c_ref
+        basis.rows.T @ (basis.coefficients(values) - basis.c_ref) + basis.rows.T @ basis.c_ref
     )
     resid = np.asarray(data) - model
     sign, logdet = np.linalg.slogdet(covariance)
     assert sign > 0
     oracle = -0.5 * (
-        resid @ np.linalg.solve(covariance, resid)
-        + logdet
-        + len(resid) * np.log(2 * np.pi)
+        resid @ np.linalg.solve(covariance, resid) + logdet + len(resid) * np.log(2 * np.pi)
     )
     assert float(term(values)) == pytest.approx(oracle, rel=1e-9)
 

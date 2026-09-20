@@ -77,9 +77,7 @@ class Factorization(eqx.Module):
     hyper: Mapping[str, tuple[tuple[str, ...], Callable]] = eqx.field(
         static=True, default_factory=dict
     )
-    represents: Mapping[str, tuple[str, ...]] = eqx.field(
-        static=True, default_factory=dict
-    )
+    represents: Mapping[str, tuple[str, ...]] = eqx.field(static=True, default_factory=dict)
 
     def __check_init__(self):
         by_scope = {"global": [], "per_epoch": [], "linked": []}

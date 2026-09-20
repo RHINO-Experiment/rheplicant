@@ -51,8 +51,12 @@ def context():
 class TestBuildOrder:
     def test_an_entry_may_reference_one_declared_earlier(self, context):
         built = build_resources(
-            {"arrays": {"base": {"list": [1.0, 2.0]},
-                        "scaled": {"ref": "resources.arrays.base", "scale": 10.0}}},
+            {
+                "arrays": {
+                    "base": {"list": [1.0, 2.0]},
+                    "scaled": {"ref": "resources.arrays.base", "scale": 10.0},
+                }
+            },
             context,
         )
         scaled = built.resources["resources.arrays.scaled"]
@@ -61,8 +65,12 @@ class TestBuildOrder:
     def test_order_in_the_document_does_not_matter(self, context):
         """A mapping has an order and a reader should not have to know it."""
         built = build_resources(
-            {"arrays": {"scaled": {"ref": "resources.arrays.base", "scale": 10.0},
-                        "base": {"list": [1.0, 2.0]}}},
+            {
+                "arrays": {
+                    "scaled": {"ref": "resources.arrays.base", "scale": 10.0},
+                    "base": {"list": [1.0, 2.0]},
+                }
+            },
             context,
         )
         scaled = built.resources["resources.arrays.scaled"]
@@ -75,8 +83,12 @@ class TestBuildOrder:
     def test_a_cycle_is_refused_and_the_loop_is_named(self, context):
         with pytest.raises(ConfigError) as excinfo:
             build_resources(
-                {"arrays": {"a": {"ref": "resources.arrays.b"},
-                            "b": {"ref": "resources.arrays.a"}}},
+                {
+                    "arrays": {
+                        "a": {"ref": "resources.arrays.b"},
+                        "b": {"ref": "resources.arrays.a"},
+                    }
+                },
                 context,
             )
         message = str(excinfo.value)
@@ -97,9 +109,13 @@ class TestEachEntryIsBuiltOnce:
         share the array. Building each reference afresh passes every shape
         check and silently decouples them."""
         built = build_resources(
-            {"arrays": {"shared": {"list": [1.0]},
-                        "left": {"ref": "resources.arrays.shared"},
-                        "right": {"ref": "resources.arrays.shared"}}},
+            {
+                "arrays": {
+                    "shared": {"list": [1.0]},
+                    "left": {"ref": "resources.arrays.shared"},
+                    "right": {"ref": "resources.arrays.shared"},
+                }
+            },
             context,
         )
         assert built.resources["resources.arrays.left"] is built.resources["resources.arrays.right"]
@@ -108,14 +124,21 @@ class TestEachEntryIsBuiltOnce:
         """schema 2.1.6: config.resolved.yaml emits a shared_objects: map, so
         identity is visible in the artefact rather than only in the spec."""
         built = build_resources(
-            {"arrays": {"shared": {"list": [1.0]},
-                        "left": {"ref": "resources.arrays.shared"},
-                        "right": {"ref": "resources.arrays.shared"}}},
+            {
+                "arrays": {
+                    "shared": {"list": [1.0]},
+                    "left": {"ref": "resources.arrays.shared"},
+                    "right": {"ref": "resources.arrays.shared"},
+                }
+            },
             context,
         )
         groups = [set(group) for group in built.shared_objects]
-        assert {"resources.arrays.shared", "resources.arrays.left",
-                "resources.arrays.right"} in groups
+        assert {
+            "resources.arrays.shared",
+            "resources.arrays.left",
+            "resources.arrays.right",
+        } in groups
 
 
 class TestExtends:
@@ -129,9 +152,10 @@ class TestExtends:
         the parent -- a child asserting on a key it also supplied would pass
         even if the merge silently replaced the whole `z0` mapping instead of
         merging it key by key."""
-        merged = merge_extends({"kind": "termination", "z0": {"value": 75.0}},
-                               {"kind": "termination", "termination": "open",
-                                "z0": {"value": 50.0, "unit": "ohm"}})
+        merged = merge_extends(
+            {"kind": "termination", "z0": {"value": 75.0}},
+            {"kind": "termination", "termination": "open", "z0": {"value": 50.0, "unit": "ohm"}},
+        )
         assert merged["termination"] == "open"
         assert merged["z0"]["value"] == 75.0
         assert merged["z0"]["unit"] == "ohm"
@@ -140,13 +164,16 @@ class TestExtends:
         """schema §5 rule 4, and the reason one config holds a whole
         comparison: a split across files can silently disagree in exactly the
         keys the comparison is about."""
-        merged = merge_extends({"optimizations": ["cache_beam_rotation"]},
-                               {"optimizations": ["read_horizon_fraction", "x"]})
+        merged = merge_extends(
+            {"optimizations": ["cache_beam_rotation"]},
+            {"optimizations": ["read_horizon_fraction", "x"]},
+        )
         assert merged["optimizations"] == ["cache_beam_rotation"]
 
     def test_append_extends_a_list(self):
-        merged = merge_extends({"optimizations": {"append": ["cache_beam_rotation"]}},
-                               {"optimizations": ["a"]})
+        merged = merge_extends(
+            {"optimizations": {"append": ["cache_beam_rotation"]}}, {"optimizations": ["a"]}
+        )
         assert merged["optimizations"] == ["a", "cache_beam_rotation"]
 
     def test_append_preserves_an_inherited_self_cycle(self):
@@ -209,9 +236,7 @@ class TestExtends:
         with pytest.raises(ConfigError) as caught:
             merge_extends({"node": {"new": 2}}, {"node": shared})
 
-        assert str(caught.value) == (
-            "merge_extends: compatibility traversal or deepcopy failed."
-        )
+        assert str(caught.value) == ("merge_extends: compatibility traversal or deepcopy failed.")
         assert dict(shared) == {"old": 1}
 
     def test_root_dict_deepcopy_returning_self_is_not_mutated(self):
@@ -225,9 +250,7 @@ class TestExtends:
         with pytest.raises(ConfigError) as caught:
             merge_extends({"new": 2}, shared)
 
-        assert str(caught.value) == (
-            "merge_extends: compatibility traversal or deepcopy failed."
-        )
+        assert str(caught.value) == ("merge_extends: compatibility traversal or deepcopy failed.")
         assert shared == {"old": 1}
 
     def test_appended_list_deepcopy_returning_self_is_not_mutated(self):
@@ -239,13 +262,9 @@ class TestExtends:
         shared = ReturningSelfList(["old"])
 
         with pytest.raises(ConfigError) as caught:
-            merge_extends(
-                {"items": {"append": ["new"]}}, {"items": shared}
-            )
+            merge_extends({"items": {"append": ["new"]}}, {"items": shared})
 
-        assert str(caught.value) == (
-            "merge_extends: compatibility traversal or deepcopy failed."
-        )
+        assert str(caught.value) == ("merge_extends: compatibility traversal or deepcopy failed.")
         assert shared == ["old"]
 
     def test_mutated_custom_mapping_cannot_share_caller_owned_backing(self):
@@ -279,9 +298,7 @@ class TestExtends:
         with pytest.raises(ConfigError) as caught:
             merge_extends({"node": {"new": 2}}, {"node": shared})
 
-        assert str(caught.value) == (
-            "merge_extends: compatibility traversal or deepcopy failed."
-        )
+        assert str(caught.value) == ("merge_extends: compatibility traversal or deepcopy failed.")
         assert dict(shared) == {"old": 1}
 
     def test_mutated_custom_mapping_cannot_share_instance_dict_backing(self):
@@ -317,9 +334,7 @@ class TestExtends:
         with pytest.raises(ConfigError) as caught:
             merge_extends({"node": {"new": 2}}, {"node": source})
 
-        assert str(caught.value) == (
-            "merge_extends: compatibility traversal or deepcopy failed."
-        )
+        assert str(caught.value) == ("merge_extends: compatibility traversal or deepcopy failed.")
         assert dict(source) == {"old": 1}
 
     def test_mutated_custom_mapping_cannot_share_slotted_state(self):
@@ -366,17 +381,11 @@ class TestExtends:
         with pytest.raises(ConfigError) as caught:
             merge_extends({"node": {"new": 2}}, {"node": source})
 
-        assert str(caught.value) == (
-            "merge_extends: compatibility traversal or deepcopy failed."
-        )
+        assert str(caught.value) == ("merge_extends: compatibility traversal or deepcopy failed.")
         assert dict(source) == {"old": 1}
 
-    @pytest.mark.parametrize(
-        "backing_kind", ["bytearray", "memoryview", "new_memoryview"]
-    )
-    def test_mutated_custom_mapping_cannot_share_mutable_buffer(
-        self, backing_kind
-    ):
+    @pytest.mark.parametrize("backing_kind", ["bytearray", "memoryview", "new_memoryview"])
+    def test_mutated_custom_mapping_cannot_share_mutable_buffer(self, backing_kind):
         class BufferMapping(MutableMapping):
             def __init__(self, backing):
                 self.backing = backing
@@ -423,9 +432,7 @@ class TestExtends:
         with pytest.raises(ConfigError) as caught:
             merge_extends({"node": {"new": 2}}, {"node": source})
 
-        assert str(caught.value) == (
-            "merge_extends: compatibility traversal or deepcopy failed."
-        )
+        assert str(caught.value) == ("merge_extends: compatibility traversal or deepcopy failed.")
         assert raw == bytearray((1, 1, 0, 0))
 
     def test_function_leaf_retains_standard_deepcopy_semantics(self):
@@ -512,9 +519,7 @@ class TestExtends:
         with pytest.raises(ConfigError) as caught:
             merge_extends({"node": {"new": 2}}, {"node": source})
 
-        assert str(caught.value) == (
-            "merge_extends: compatibility traversal or deepcopy failed."
-        )
+        assert str(caught.value) == ("merge_extends: compatibility traversal or deepcopy failed.")
         assert callback.__dict__ == {}
         assert dict(source) == {"old": 1}
 
@@ -548,9 +553,7 @@ class TestExtends:
         assert dict(source) == {"old": 1, "window": window}
 
     @pytest.mark.parametrize("leaf_kind", ["property", "weakref"])
-    def test_referential_atomic_leaf_retains_standard_deepcopy_semantics(
-        self, leaf_kind
-    ):
+    def test_referential_atomic_leaf_retains_standard_deepcopy_semantics(self, leaf_kind):
         class Box(MutableMapping):
             def __init__(self, values):
                 self._data = dict(values)
@@ -573,6 +576,7 @@ class TestExtends:
         if leaf_kind == "property":
             leaf = property(lambda _: None)
         else:
+
             class SafeReferent:
                 pass
 
@@ -625,9 +629,7 @@ class TestExtends:
         assert dict(source) == {"old": 1, "callback": callback}
 
     @pytest.mark.parametrize("rebind", [False, True])
-    def test_mutated_custom_mapping_cannot_share_bound_method_state(
-        self, rebind
-    ):
+    def test_mutated_custom_mapping_cannot_share_bound_method_state(self, rebind):
         class Store:
             def __init__(self):
                 self.data = {"old": 1}
@@ -668,9 +670,7 @@ class TestExtends:
 
             def __deepcopy__(self, memo):
                 if rebind:
-                    callback = MethodType(
-                        self.callback.__func__, self.callback.__self__
-                    )
+                    callback = MethodType(self.callback.__func__, self.callback.__self__)
                 else:
                     callback = self.callback
                 copied = type(self)(callback)
@@ -683,9 +683,7 @@ class TestExtends:
         with pytest.raises(ConfigError) as caught:
             merge_extends({"node": {"new": 2}}, {"node": source})
 
-        assert str(caught.value) == (
-            "merge_extends: compatibility traversal or deepcopy failed."
-        )
+        assert str(caught.value) == ("merge_extends: compatibility traversal or deepcopy failed.")
         assert store.data == {"old": 1}
 
     def test_mutated_custom_mapping_cannot_share_deque_backing(self):
@@ -701,9 +699,7 @@ class TestExtends:
                 self.backing.append((key, value))
 
             def __delitem__(self, key, missing_ok=False):
-                retained = deque(
-                    pair for pair in self.backing if pair[0] != key
-                )
+                retained = deque(pair for pair in self.backing if pair[0] != key)
                 if len(retained) == len(self.backing) and not missing_ok:
                     raise KeyError(key)
                 self.backing.clear()
@@ -726,9 +722,7 @@ class TestExtends:
         with pytest.raises(ConfigError) as caught:
             merge_extends({"node": {"new": 2}}, {"node": source})
 
-        assert str(caught.value) == (
-            "merge_extends: compatibility traversal or deepcopy failed."
-        )
+        assert str(caught.value) == ("merge_extends: compatibility traversal or deepcopy failed.")
         assert backing == deque((("old", 1),))
 
     def test_mutated_custom_mapping_cannot_share_builtin_method_state(self):
@@ -766,17 +760,11 @@ class TestExtends:
         with pytest.raises(ConfigError) as caught:
             merge_extends({"node": {"new": 2}}, {"node": source})
 
-        assert str(caught.value) == (
-            "merge_extends: compatibility traversal or deepcopy failed."
-        )
+        assert str(caught.value) == ("merge_extends: compatibility traversal or deepcopy failed.")
         assert backing == [{"old": 1}]
 
-    @pytest.mark.parametrize(
-        "metadata_name", ["__doc__", "__module__", "__type_params__"]
-    )
-    def test_mutated_custom_mapping_cannot_share_function_metadata_state(
-        self, metadata_name
-    ):
+    @pytest.mark.parametrize("metadata_name", ["__doc__", "__module__", "__type_params__"])
+    def test_mutated_custom_mapping_cannot_share_function_metadata_state(self, metadata_name):
         backing = {"old": 1}
 
         def anchor():
@@ -830,14 +818,10 @@ class TestExtends:
         with pytest.raises(ConfigError) as caught:
             merge_extends({"node": {"new": 2}}, {"node": source})
 
-        assert str(caught.value) == (
-            "merge_extends: compatibility traversal or deepcopy failed."
-        )
+        assert str(caught.value) == ("merge_extends: compatibility traversal or deepcopy failed.")
         assert backing == {"old": 1}
 
-    def test_function_annotate_is_tracked_without_reading_annotations(
-        self, monkeypatch
-    ):
+    def test_function_annotate_is_tracked_without_reading_annotations(self, monkeypatch):
         from _rheplicant_bootstrap import layering as neutral_layering
 
         backing = {"old": 1}
@@ -849,9 +833,7 @@ class TestExtends:
         def anchor():
             return None
 
-        original_reader = (
-            neutral_layering._compatibility_builtin_descriptor_value
-        )
+        original_reader = neutral_layering._compatibility_builtin_descriptor_value
 
         def read_descriptor(value, owner, name):
             if value is anchor and owner is FunctionType:
@@ -897,15 +879,11 @@ class TestExtends:
         with pytest.raises(ConfigError) as caught:
             merge_extends({"node": {"new": 2}}, {"node": source})
 
-        assert str(caught.value) == (
-            "merge_extends: compatibility traversal or deepcopy failed."
-        )
+        assert str(caught.value) == ("merge_extends: compatibility traversal or deepcopy failed.")
         assert annotation_reads == []
         assert backing == {"old": 1}
 
-    def test_hidden_function_with_annotate_refuses_cached_annotations(
-        self, monkeypatch
-    ):
+    def test_hidden_function_with_annotate_refuses_cached_annotations(self, monkeypatch):
         from _rheplicant_bootstrap import layering as neutral_layering
 
         backing = {"old": 1}
@@ -919,9 +897,7 @@ class TestExtends:
 
         function_pairs = [(anchor, annotate)]
 
-        original_reader = (
-            neutral_layering._compatibility_builtin_descriptor_value
-        )
+        original_reader = neutral_layering._compatibility_builtin_descriptor_value
 
         def read_descriptor(value, owner, name):
             if owner is FunctionType:
@@ -989,9 +965,7 @@ class TestExtends:
 
         assert backing == {"old": 1}
         assert caught is not None
-        assert str(caught) == (
-            "merge_extends: compatibility traversal or deepcopy failed."
-        )
+        assert str(caught) == ("merge_extends: compatibility traversal or deepcopy failed.")
         assert annotation_reads == []
 
     @pytest.mark.skipif(
@@ -1002,8 +976,7 @@ class TestExtends:
         events = []
         namespace = {"events": events}
         exec(
-            "def callback(value: events.append('called') or int):\n"
-            "    return value\n",
+            "def callback(value: events.append('called') or int):\n    return value\n",
             namespace,
         )
         callback = namespace["callback"]
@@ -1060,9 +1033,7 @@ class TestExtends:
         with pytest.raises(ConfigError) as caught:
             merge_extends({"node": {"new": 2}}, {"node": source})
 
-        assert str(caught.value) == (
-            "merge_extends: compatibility traversal or deepcopy failed."
-        )
+        assert str(caught.value) == ("merge_extends: compatibility traversal or deepcopy failed.")
         assert events == []
         assert backing == {"old": 1}
 
@@ -1074,8 +1045,7 @@ class TestExtends:
         backing = {"old": 1}
         namespace = {"backing": backing}
         exec(
-            "def anchor(value: backing):\n"
-            "    return value\n",
+            "def anchor(value: backing):\n    return value\n",
             namespace,
         )
         anchor = namespace["anchor"]
@@ -1138,25 +1108,17 @@ class TestExtends:
 
         assert backing == {"old": 1}
         assert caught is not None
-        assert str(caught) == (
-            "merge_extends: compatibility traversal or deepcopy failed."
-        )
+        assert str(caught) == ("merge_extends: compatibility traversal or deepcopy failed.")
 
     @pytest.mark.parametrize("wrapper_kind", ["partial", "method"])
-    def test_function_metadata_is_followed_through_wrappers(
-        self, wrapper_kind
-    ):
+    def test_function_metadata_is_followed_through_wrappers(self, wrapper_kind):
         backing = {"old": 1}
 
         def callback():
             return None
 
         callback.__doc__ = backing
-        wrapper = (
-            partial(callback)
-            if wrapper_kind == "partial"
-            else MethodType(callback, object())
-        )
+        wrapper = partial(callback) if wrapper_kind == "partial" else MethodType(callback, object())
 
         def wrapped_function(value):
             return value.func if wrapper_kind == "partial" else value.__func__
@@ -1211,9 +1173,7 @@ class TestExtends:
         with pytest.raises(ConfigError) as caught:
             merge_extends({"node": {"new": 2}}, {"node": source})
 
-        assert str(caught.value) == (
-            "merge_extends: compatibility traversal or deepcopy failed."
-        )
+        assert str(caught.value) == ("merge_extends: compatibility traversal or deepcopy failed.")
         assert backing == {"old": 1}
 
     def test_mutated_custom_mapping_cannot_share_function_closure_state(self):
@@ -1263,9 +1223,7 @@ class TestExtends:
         with pytest.raises(ConfigError) as caught:
             merge_extends({"node": {"new": 2}}, {"node": source})
 
-        assert str(caught.value) == (
-            "merge_extends: compatibility traversal or deepcopy failed."
-        )
+        assert str(caught.value) == ("merge_extends: compatibility traversal or deepcopy failed.")
         assert backing == {"old": 1}
 
     def test_mutated_custom_mapping_cannot_share_closure_cell_state(self):
@@ -1347,9 +1305,7 @@ class TestExtends:
         with pytest.raises(ConfigError) as caught:
             merge_extends({"node": {"new": 2}}, {"node": source})
 
-        assert str(caught.value) == (
-            "merge_extends: compatibility traversal or deepcopy failed."
-        )
+        assert str(caught.value) == ("merge_extends: compatibility traversal or deepcopy failed.")
         assert anchor("snapshot") == {"old": 1}
 
     def test_mutated_custom_mapping_cannot_share_cell_contents(self):
@@ -1395,25 +1351,22 @@ class TestExtends:
         with pytest.raises(ConfigError) as caught:
             merge_extends({"node": {"new": 2}}, {"node": source})
 
-        assert str(caught.value) == (
-            "merge_extends: compatibility traversal or deepcopy failed."
-        )
+        assert str(caught.value) == ("merge_extends: compatibility traversal or deepcopy failed.")
         assert backing == {"old": 1}
 
-    @pytest.mark.parametrize(
-        "capture_kind", ["default", "kwdefault", "annotation", "attribute"]
-    )
-    def test_mutated_custom_mapping_cannot_share_function_referents(
-        self, capture_kind
-    ):
+    @pytest.mark.parametrize("capture_kind", ["default", "kwdefault", "annotation", "attribute"])
+    def test_mutated_custom_mapping_cannot_share_function_referents(self, capture_kind):
         backing = {"old": 1}
         if capture_kind == "default":
+
             def anchor(value=backing):
                 return value
         elif capture_kind == "kwdefault":
+
             def anchor(*, value=backing):
                 return value
         else:
+
             def anchor():
                 return None
 
@@ -1459,29 +1412,26 @@ class TestExtends:
         with pytest.raises(ConfigError) as caught:
             merge_extends({"node": {"new": 2}}, {"node": source})
 
-        assert str(caught.value) == (
-            "merge_extends: compatibility traversal or deepcopy failed."
-        )
+        assert str(caught.value) == ("merge_extends: compatibility traversal or deepcopy failed.")
         assert backing == {"old": 1}
 
-    @pytest.mark.parametrize(
-        "state_kind", ["attributes", "kwdefaults", "annotations"]
-    )
-    def test_mutated_custom_mapping_cannot_share_function_state_mapping(
-        self, state_kind
-    ):
+    @pytest.mark.parametrize("state_kind", ["attributes", "kwdefaults", "annotations"])
+    def test_mutated_custom_mapping_cannot_share_function_state_mapping(self, state_kind):
         if state_kind == "attributes":
+
             def anchor():
                 return None
 
             anchor.__dict__["old"] = 1
             backing = anchor.__dict__
         elif state_kind == "kwdefaults":
+
             def anchor(*, old=1):
                 return old
 
             backing = anchor.__kwdefaults__
         else:
+
             def anchor(old: 1):
                 return old
 
@@ -1524,17 +1474,14 @@ class TestExtends:
         with pytest.raises(ConfigError) as caught:
             merge_extends({"node": {"new": 2}}, {"node": source})
 
-        assert str(caught.value) == (
-            "merge_extends: compatibility traversal or deepcopy failed."
-        )
+        assert str(caught.value) == ("merge_extends: compatibility traversal or deepcopy failed.")
         assert backing == {"old": 1}
 
     @pytest.mark.parametrize("anchor_kind", ["property", "weakref"])
-    def test_mutated_custom_mapping_cannot_share_referential_atomic_state(
-        self, anchor_kind
-    ):
+    def test_mutated_custom_mapping_cannot_share_referential_atomic_state(self, anchor_kind):
         backing = {"old": 1}
         if anchor_kind == "property":
+
             def getter(_):
                 return backing
 
@@ -1543,6 +1490,7 @@ class TestExtends:
             def values():
                 return anchor.fget(None)
         else:
+
             class Store:
                 def __init__(self, data):
                     self.data = data
@@ -1582,9 +1530,7 @@ class TestExtends:
         with pytest.raises(ConfigError) as caught:
             merge_extends({"node": {"new": 2}}, {"node": source})
 
-        assert str(caught.value) == (
-            "merge_extends: compatibility traversal or deepcopy failed."
-        )
+        assert str(caught.value) == ("merge_extends: compatibility traversal or deepcopy failed.")
         assert backing == {"old": 1}
 
     def test_mutated_custom_mapping_cannot_share_property_doc_state(self):
@@ -1624,9 +1570,7 @@ class TestExtends:
         with pytest.raises(ConfigError) as caught:
             merge_extends({"node": {"new": 2}}, {"node": source})
 
-        assert str(caught.value) == (
-            "merge_extends: compatibility traversal or deepcopy failed."
-        )
+        assert str(caught.value) == ("merge_extends: compatibility traversal or deepcopy failed.")
         assert backing == {"old": 1}
 
     def test_property_state_scan_avoids_computed_descriptor_callbacks(self):
@@ -1676,16 +1620,12 @@ class TestExtends:
         assert dict(source) == {"old": 1}
         assert Getter.calls == 0
 
-    def test_property_name_is_in_the_safe_metadata_allowlist(
-        self, monkeypatch
-    ):
+    def test_property_name_is_in_the_safe_metadata_allowlist(self, monkeypatch):
         from _rheplicant_bootstrap import layering as neutral_layering
 
         backing = {"old": 1}
         descriptor = property()
-        original_reader = (
-            neutral_layering._compatibility_builtin_descriptor_value
-        )
+        original_reader = neutral_layering._compatibility_builtin_descriptor_value
         name_reads = []
 
         def read_descriptor(value, owner, name):
@@ -1730,9 +1670,7 @@ class TestExtends:
         with pytest.raises(ConfigError) as caught:
             merge_extends({"node": {"new": 2}}, {"node": source})
 
-        assert str(caught.value) == (
-            "merge_extends: compatibility traversal or deepcopy failed."
-        )
+        assert str(caught.value) == ("merge_extends: compatibility traversal or deepcopy failed.")
         assert name_reads
         assert backing == {"old": 1}
 
@@ -1778,9 +1716,7 @@ class TestExtends:
         with pytest.raises(ConfigError) as caught:
             merge_extends({"node": {"new": 2}}, {"node": source})
 
-        assert str(caught.value) == (
-            "merge_extends: compatibility traversal or deepcopy failed."
-        )
+        assert str(caught.value) == ("merge_extends: compatibility traversal or deepcopy failed.")
         assert backing == {"old": 1}
 
     def test_mutated_custom_mapping_cannot_share_builtin_metadata_state(
@@ -1823,9 +1759,7 @@ class TestExtends:
         with pytest.raises(ConfigError) as caught:
             merge_extends({"node": {"new": 2}}, {"node": source})
 
-        assert str(caught.value) == (
-            "merge_extends: compatibility traversal or deepcopy failed."
-        )
+        assert str(caught.value) == ("merge_extends: compatibility traversal or deepcopy failed.")
         assert backing == {"old": 1}
 
     def test_mutated_custom_mapping_cannot_share_weakref_subclass_state(
@@ -1877,15 +1811,11 @@ class TestExtends:
         with pytest.raises(ConfigError) as caught:
             merge_extends({"node": {"new": 2}}, {"node": source})
 
-        assert str(caught.value) == (
-            "merge_extends: compatibility traversal or deepcopy failed."
-        )
+        assert str(caught.value) == ("merge_extends: compatibility traversal or deepcopy failed.")
         assert store.data == {"old": 1}
 
     @pytest.mark.parametrize("callable_proxy", [False, True])
-    def test_mutated_custom_mapping_refuses_hidden_weakref_proxy(
-        self, callable_proxy
-    ):
+    def test_mutated_custom_mapping_refuses_hidden_weakref_proxy(self, callable_proxy):
         class Store:
             def __init__(self):
                 self.data = {"old": 1}
@@ -1925,15 +1855,11 @@ class TestExtends:
         with pytest.raises(ConfigError) as caught:
             merge_extends({"node": {"new": 2}}, {"node": source})
 
-        assert str(caught.value) == (
-            "merge_extends: compatibility traversal or deepcopy failed."
-        )
+        assert str(caught.value) == ("merge_extends: compatibility traversal or deepcopy failed.")
         assert store.data == {"old": 1}
 
     @pytest.mark.parametrize("callable_proxy", [False, True])
-    def test_public_weakref_proxy_retains_standard_deepcopy_semantics(
-        self, callable_proxy
-    ):
+    def test_public_weakref_proxy_retains_standard_deepcopy_semantics(self, callable_proxy):
         class Referent:
             def __init__(self):
                 self.state = []
@@ -2017,9 +1943,7 @@ class TestExtends:
         assert dict(source) == {"old": 1, "leaf": leaf}
 
     @pytest.mark.parametrize("reuse_holder", [True, False])
-    def test_mutated_custom_mapping_refuses_caller_owned_opaque_state(
-        self, reuse_holder
-    ):
+    def test_mutated_custom_mapping_refuses_caller_owned_opaque_state(self, reuse_holder):
         class Holder:
             def __init__(self, values):
                 self.data = dict(values)
@@ -2059,9 +1983,7 @@ class TestExtends:
         with pytest.raises(ConfigError) as caught:
             merge_extends({"node": {"new": 2}}, {"node": source})
 
-        assert str(caught.value) == (
-            "merge_extends: compatibility traversal or deepcopy failed."
-        )
+        assert str(caught.value) == ("merge_extends: compatibility traversal or deepcopy failed.")
         assert holder.data == {"old": 1}
 
     def test_unique_custom_mapping_with_arbitrary_leaf_remains_supported(self):
@@ -2176,14 +2098,13 @@ class TestExtends:
         assert dict(source) == {"old": 1, "leaf": leaf}
 
     @pytest.mark.parametrize("failure", ["config", "ordinary", "base"])
-    def test_unique_custom_mapping_does_not_read_instance_class(
-        self, failure
-    ):
+    def test_unique_custom_mapping_does_not_read_instance_class(self, failure):
         if failure == "config":
             marker = _HostileCallbackConfigError("private class marker")
         elif failure == "ordinary":
             marker = RuntimeError("private class marker")
         else:
+
             class StopNow(BaseException):
                 pass
 
@@ -2218,9 +2139,7 @@ class TestExtends:
 
         source = HostileClassMapping({"old": 1})
 
-        merged = merge_extends(
-            {"node": {"new": 2}}, {"node": source}
-        )
+        merged = merge_extends({"node": {"new": 2}}, {"node": source})
 
         assert dict(merged["node"]) == {"old": 1, "new": 2}
         assert dict(source) == {"old": 1}
@@ -2241,6 +2160,7 @@ class TestExtends:
 
     def test_frozen_mapping_replacements_keep_tuple_type_and_detach_leaves(self):
         """Catches the public merge converting tuples to lists or sharing leaves."""
+
         class MutableLeaf:
             def __init__(self, values):
                 self.values = values
@@ -2344,9 +2264,7 @@ class TestExtends:
     def test_recursively_patched_defaultdict_preserves_its_concrete_type(self):
         nested = defaultdict(list, {"old": 1})
 
-        copied = merge_extends(
-            {"nested": {"new": 2}}, {"nested": nested}
-        )["nested"]
+        copied = merge_extends({"nested": {"new": 2}}, {"nested": nested})["nested"]
 
         assert isinstance(copied, defaultdict)
         assert copied.default_factory is list
@@ -2357,9 +2275,7 @@ class TestExtends:
         nested = UserDict({"old": 1})
         nested.extra = {"state": []}
 
-        merged = merge_extends(
-            {"left": {"new": 2}}, {"left": nested, "right": nested}
-        )
+        merged = merge_extends({"left": {"new": 2}}, {"left": nested, "right": nested})
         copied = merged["left"]
         untouched = merged["right"]
 
@@ -2385,9 +2301,7 @@ class TestExtends:
         shared = ReconnectingDict({"old": 1})
         shared.ref = shared
 
-        merged = merge_extends(
-            {"left": {"new": 2}}, {"left": shared, "right": shared}
-        )
+        merged = merge_extends({"left": {"new": 2}}, {"left": shared, "right": shared})
 
         assert merged["left"] == {"old": 1, "new": 2}
         assert merged["right"] == {"old": 1}
@@ -2400,6 +2314,7 @@ class TestExtends:
         if kind == "userdict":
             shared = UserDict({"old": 1})
         else:
+
             class CopyingDict(dict):
                 def __copy__(self):
                     copied = type(self)(dict.items(self))
@@ -2410,23 +2325,18 @@ class TestExtends:
         shared.ref = shared
 
         with pytest.raises(ConfigError) as caught:
-            merge_extends(
-                {"left": {"new": 2}}, {"left": shared, "right": shared}
-            )
+            merge_extends({"left": {"new": 2}}, {"left": shared, "right": shared})
 
-        assert str(caught.value) == (
-            "merge_extends: compatibility traversal or deepcopy failed."
-        )
+        assert str(caught.value) == ("merge_extends: compatibility traversal or deepcopy failed.")
         assert shared.ref is shared
         assert "new" not in shared
 
     @pytest.mark.parametrize("failure", ["config", "ordinary", "base"])
-    def test_hidden_split_state_traversal_normalizes_only_exceptions(
-        self, failure
-    ):
+    def test_hidden_split_state_traversal_normalizes_only_exceptions(self, failure):
         if failure == "config":
             marker = _HostileCallbackConfigError("private state marker")
         elif failure == "ordinary":
+
             class HostileError(Exception):
                 def __str__(self):
                     raise AssertionError("marker text must not run")
@@ -2436,6 +2346,7 @@ class TestExtends:
 
             marker = HostileError("private state marker")
         else:
+
             class StopNow(BaseException):
                 pass
 
@@ -2478,9 +2389,7 @@ class TestExtends:
             )
 
         assert caught.value is not marker
-        assert str(caught.value) == (
-            "merge_extends: compatibility traversal or deepcopy failed."
-        )
+        assert str(caught.value) == ("merge_extends: compatibility traversal or deepcopy failed.")
 
     def test_recursive_patch_never_mutates_a_custom_mapping_alias_backing(self):
         class Box(MutableMapping):
@@ -2505,13 +2414,9 @@ class TestExtends:
 
         shared = Box({"old": 1})
         with pytest.raises(ConfigError) as caught:
-            merge_extends(
-                {"left": {"new": 2}}, {"left": shared, "right": shared}
-            )
+            merge_extends({"left": {"new": 2}}, {"left": shared, "right": shared})
 
-        assert str(caught.value) == (
-            "merge_extends: compatibility traversal or deepcopy failed."
-        )
+        assert str(caught.value) == ("merge_extends: compatibility traversal or deepcopy failed.")
         assert dict(shared) == {"old": 1}
 
     def test_recursive_copy_protocol_lookup_failure_is_replaced_statically(self):
@@ -2545,14 +2450,10 @@ class TestExtends:
         shared = HostileMapping({"old": 1})
 
         with pytest.raises(ConfigError) as caught:
-            merge_extends(
-                {"left": {"new": 2}}, {"left": shared, "right": shared}
-            )
+            merge_extends({"left": {"new": 2}}, {"left": shared, "right": shared})
 
         assert id(caught.value) != id(marker)
-        assert str(caught.value) == (
-            "merge_extends: compatibility traversal or deepcopy failed."
-        )
+        assert str(caught.value) == ("merge_extends: compatibility traversal or deepcopy failed.")
         assert dict(shared) == {"old": 1}
 
     def test_recursive_split_refuses_a_custom_copy_with_shared_backing(self):
@@ -2586,13 +2487,9 @@ class TestExtends:
         shared = CustomBox({"old": 1})
 
         with pytest.raises(ConfigError) as caught:
-            merge_extends(
-                {"left": {"new": 2}}, {"left": shared, "right": shared}
-            )
+            merge_extends({"left": {"new": 2}}, {"left": shared, "right": shared})
 
-        assert str(caught.value) == (
-            "merge_extends: compatibility traversal or deepcopy failed."
-        )
+        assert str(caught.value) == ("merge_extends: compatibility traversal or deepcopy failed.")
         assert dict(shared) == {"old": 1}
         assert CustomBox.mutations == 0
 
@@ -2622,19 +2519,13 @@ class TestExtends:
         shared = ExternalStoreDict({"old": 1})
 
         with pytest.raises(ConfigError) as caught:
-            merge_extends(
-                {"left": {"new": 2}}, {"left": shared, "right": shared}
-            )
+            merge_extends({"left": {"new": 2}}, {"left": shared, "right": shared})
 
-        assert str(caught.value) == (
-            "merge_extends: compatibility traversal or deepcopy failed."
-        )
+        assert str(caught.value) == ("merge_extends: compatibility traversal or deepcopy failed.")
         assert dict(shared.items()) == {"old": 1}
 
     @pytest.mark.parametrize("location", ["nested", "root"])
-    def test_unique_external_dict_subclass_storage_is_refused(
-        self, location
-    ):
+    def test_unique_external_dict_subclass_storage_is_refused(self, location):
         class ExternalStoreDict(dict):
             def __init__(self, values):
                 dict.__init__(self)
@@ -2660,9 +2551,7 @@ class TestExtends:
             else:
                 merge_extends({"new": 2}, shared)
 
-        assert str(caught.value) == (
-            "merge_extends: compatibility traversal or deepcopy failed."
-        )
+        assert str(caught.value) == ("merge_extends: compatibility traversal or deepcopy failed.")
         assert dict(shared.items()) == {"old": 1}
 
     def test_recursive_split_refuses_a_dict_getattribute_override(self):
@@ -2680,13 +2569,9 @@ class TestExtends:
         shared = AttributeDict({"old": 1})
 
         with pytest.raises(ConfigError) as caught:
-            merge_extends(
-                {"left": {"new": 2}}, {"left": shared, "right": shared}
-            )
+            merge_extends({"left": {"new": 2}}, {"left": shared, "right": shared})
 
-        assert str(caught.value) == (
-            "merge_extends: compatibility traversal or deepcopy failed."
-        )
+        assert str(caught.value) == ("merge_extends: compatibility traversal or deepcopy failed.")
         assert shared == {"old": 1}
         assert AttributeDict.lookup_calls == 0
 
@@ -2707,9 +2592,7 @@ class TestExtends:
                 {"left": shared, "right": shared},
             )
 
-        assert str(caught.value) == (
-            "merge_extends: compatibility traversal or deepcopy failed."
-        )
+        assert str(caught.value) == ("merge_extends: compatibility traversal or deepcopy failed.")
         assert shared.ref is nested
         assert nested == {"old": 1}
 
@@ -2723,13 +2606,9 @@ class TestExtends:
         shared["holder"] = holder
 
         with pytest.raises(ConfigError) as caught:
-            merge_extends(
-                {"left": {"new": 2}}, {"left": shared, "right": shared}
-            )
+            merge_extends({"left": {"new": 2}}, {"left": shared, "right": shared})
 
-        assert str(caught.value) == (
-            "merge_extends: compatibility traversal or deepcopy failed."
-        )
+        assert str(caught.value) == ("merge_extends: compatibility traversal or deepcopy failed.")
         assert holder.ref is shared
         assert "new" not in shared
 
@@ -2775,9 +2654,7 @@ class TestExtends:
         shared = {"nested": descendant}
         parent = {"left": shared, "right": shared}
 
-        merged = merge_extends(
-            {"left": {"nested": {"new": 2}}}, parent
-        )
+        merged = merge_extends({"left": {"nested": {"new": 2}}}, parent)
 
         assert merged["left"] is not merged["right"]
         assert merged["left"]["nested"] == {"old": 1, "new": 2}
@@ -2791,9 +2668,7 @@ class TestExtends:
         shared = {"items": items}
         parent = {"left": shared, "right": shared}
 
-        merged = merge_extends(
-            {"left": {"items": {"append": [2]}}}, parent
-        )
+        merged = merge_extends({"left": {"items": {"append": [2]}}}, parent)
 
         assert merged["left"]["items"] == [1, 2]
         assert merged["right"]["items"] == [1, 2]
@@ -2852,18 +2727,15 @@ class TestExtends:
             merge_extends({"node": HostileMapping({"old": 1})}, {})
 
         assert caught.value is not marker
-        assert str(caught.value) == (
-            "merge_extends: compatibility traversal or deepcopy failed."
-        )
+        assert str(caught.value) == ("merge_extends: compatibility traversal or deepcopy failed.")
 
     @pytest.mark.parametrize("seam", ["discover", "reachability"])
     @pytest.mark.parametrize("failure", ["config", "ordinary", "base"])
-    def test_compatibility_type_checks_do_not_run_metaclass_equality(
-        self, seam, failure
-    ):
+    def test_compatibility_type_checks_do_not_run_metaclass_equality(self, seam, failure):
         if failure == "config":
             marker = _HostileCallbackConfigError("private equality marker")
         elif failure == "ordinary":
+
             class HostileError(Exception):
                 def __str__(self):
                     raise AssertionError("marker text must not run")
@@ -2873,6 +2745,7 @@ class TestExtends:
 
             marker = HostileError("private equality marker")
         else:
+
             class StopNow(BaseException):
                 pass
 
@@ -2910,9 +2783,7 @@ class TestExtends:
 
     @pytest.mark.parametrize("hook", ["__eq__", "__hash__"])
     @pytest.mark.parametrize("failure", ["config", "ordinary", "base"])
-    def test_virtual_fallback_does_not_bind_metaclass_descriptors(
-        self, hook, failure
-    ):
+    def test_virtual_fallback_does_not_bind_metaclass_descriptors(self, hook, failure):
         from _rheplicant_bootstrap.layering import (
             _compatibility_has_mro_base,
         )
@@ -2922,6 +2793,7 @@ class TestExtends:
         elif failure == "ordinary":
             marker = RuntimeError("private descriptor marker")
         else:
+
             class StopNow(BaseException):
                 pass
 
@@ -2941,18 +2813,12 @@ class TestExtends:
         HostileMeta = type("HostileMeta", (type,), namespace)
         HostileLeaf = HostileMeta("HostileLeaf", (), {})
 
-        assert not _compatibility_has_mro_base(
-            HostileLeaf(), (dict, Mapping)
-        )
+        assert not _compatibility_has_mro_base(HostileLeaf(), (dict, Mapping))
         assert descriptor.calls == 0
 
-    @pytest.mark.parametrize(
-        "seam", ["merge_root", "recursive_root", "key", "append", "inherited"]
-    )
+    @pytest.mark.parametrize("seam", ["merge_root", "recursive_root", "key", "append", "inherited"])
     @pytest.mark.parametrize("failure", ["config", "ordinary", "base"])
-    def test_compatibility_diagnostics_do_not_run_metaclass_name_lookup(
-        self, seam, failure
-    ):
+    def test_compatibility_diagnostics_do_not_run_metaclass_name_lookup(self, seam, failure):
         from _rheplicant_bootstrap.layering import recursive_update
 
         if failure == "config":
@@ -2960,6 +2826,7 @@ class TestExtends:
         elif failure == "ordinary":
             marker = RuntimeError("private name marker")
         else:
+
             class StopNow(BaseException):
                 pass
 
@@ -3006,9 +2873,7 @@ class TestExtends:
 
         messages = {
             "merge_root": "merge_extends: child is a mapping; got HostileValue.",
-            "recursive_root": (
-                "recursive_update: patch is a mapping; got HostileValue."
-            ),
+            "recursive_root": ("recursive_update: patch is a mapping; got HostileValue."),
             "key": "merge_extends: keys are strings; got HostileValue.",
             "append": "'items': append is a sequence; got HostileValue.",
             "inherited": (
@@ -3020,9 +2885,7 @@ class TestExtends:
         assert HostileMeta.name_lookups == 0
 
     @pytest.mark.parametrize("failure", ["config", "ordinary", "base"])
-    def test_compatibility_type_name_normalizes_only_exceptions(
-        self, failure
-    ):
+    def test_compatibility_type_name_normalizes_only_exceptions(self, failure):
         from _rheplicant_bootstrap.layering import _compatibility_type_name
 
         if failure == "config":
@@ -3030,6 +2893,7 @@ class TestExtends:
         elif failure == "ordinary":
             marker = RuntimeError("private name marker")
         else:
+
             class StopNow(BaseException):
                 pass
 
@@ -3055,9 +2919,7 @@ class TestExtends:
             _compatibility_type_name(HostileValue())
 
         assert caught.value is not marker
-        assert str(caught.value) == (
-            "merge_extends: compatibility traversal or deepcopy failed."
-        )
+        assert str(caught.value) == ("merge_extends: compatibility traversal or deepcopy failed.")
 
     def test_recursive_patch_never_breaks_a_plain_dict_subclass_backref(self):
         class AttrDict(dict):
@@ -3067,13 +2929,9 @@ class TestExtends:
         shared.ref = shared
 
         try:
-            merged = merge_extends(
-                {"left": {"new": 2}}, {"left": shared, "right": shared}
-            )
+            merged = merge_extends({"left": {"new": 2}}, {"left": shared, "right": shared})
         except ConfigError as caught:
-            assert str(caught) == (
-                "merge_extends: compatibility traversal or deepcopy failed."
-            )
+            assert str(caught) == ("merge_extends: compatibility traversal or deepcopy failed.")
             assert shared.ref is shared
             assert "new" not in shared
             return
@@ -3158,9 +3016,7 @@ class TestExtends:
             node["self"] = node
 
         try:
-            merged_node = merge_extends(
-                {"node": {"added": 2}}, {"node": node}
-            )["node"]
+            merged_node = merge_extends({"node": {"added": 2}}, {"node": node})["node"]
         except ConfigError:
             return
 
@@ -3245,9 +3101,7 @@ class TestExtends:
         assert "merge_extends" in str(caught.value)
 
     @pytest.mark.parametrize("seam", ["items", "iter", "next", "unpack"])
-    def test_callback_configerror_from_mapping_traversal_is_replaced_statically(
-        self, seam
-    ):
+    def test_callback_configerror_from_mapping_traversal_is_replaced_statically(self, seam):
         marker = _HostileCallbackConfigError("private mapping marker")
 
         class FailingIterator:
@@ -3266,6 +3120,7 @@ class TestExtends:
                     raise StopIteration
                 self.done = True
                 if seam == "unpack":
+
                     class BrokenItem:
                         def __iter__(self):
                             raise marker
@@ -3441,9 +3296,7 @@ class TestExtends:
         assert completed.stdout == "False\n"
 
     @pytest.mark.parametrize("kind", ["list", "tuple", "set", "frozenset"])
-    def test_compatibility_reachability_identity_cache_handles_collisions(
-        self, kind, monkeypatch
-    ):
+    def test_compatibility_reachability_identity_cache_handles_collisions(self, kind, monkeypatch):
         from _rheplicant_bootstrap import layering as neutral_layering
 
         class HashableMapping(dict):
@@ -3465,21 +3318,16 @@ class TestExtends:
                 return 7
             return real_id(value)
 
-        monkeypatch.setattr(
-            neutral_layering, "id", colliding_id, raising=False
-        )
+        monkeypatch.setattr(neutral_layering, "id", colliding_id, raising=False)
 
-        assert neutral_layering._compatibility_reaches_mapping(
-            [reaching, empty], target
-        )
+        assert neutral_layering._compatibility_reaches_mapping([reaching, empty], target)
 
     @pytest.mark.parametrize("failure", ["config", "ordinary", "base"])
-    def test_appended_traversal_normalizes_only_ordinary_exceptions(
-        self, failure
-    ):
+    def test_appended_traversal_normalizes_only_ordinary_exceptions(self, failure):
         if failure == "config":
             marker = _HostileCallbackConfigError("private append marker")
         elif failure == "ordinary":
+
             class HostileError(Exception):
                 def __str__(self):
                     raise AssertionError("marker text must not run")
@@ -3489,6 +3337,7 @@ class TestExtends:
 
             marker = HostileError("private append marker")
         else:
+
             class StopNow(BaseException):
                 pass
 
@@ -3514,21 +3363,15 @@ class TestExtends:
 
         if failure == "base":
             with pytest.raises(BaseException) as caught:
-                merge_extends(
-                    {"items": {"append": appended}}, {"items": inherited}
-                )
+                merge_extends({"items": {"append": appended}}, {"items": inherited})
             assert caught.value is marker
             return
 
         with pytest.raises(ConfigError) as caught:
-            merge_extends(
-                {"items": {"append": appended}}, {"items": inherited}
-            )
+            merge_extends({"items": {"append": appended}}, {"items": inherited})
 
         assert id(caught.value) != id(marker)
-        assert str(caught.value) == (
-            "merge_extends: compatibility traversal or deepcopy failed."
-        )
+        assert str(caught.value) == ("merge_extends: compatibility traversal or deepcopy failed.")
 
     def test_append_does_not_reiterate_the_detached_inherited_list(self):
         marker = AssertionError("detached inherited list was iterated")
@@ -3559,9 +3402,7 @@ class TestExtends:
         assert list.__getitem__(items, 1) == "new"
 
     @pytest.mark.parametrize("kind", ["list", "tuple", "set", "frozenset"])
-    def test_public_merge_terminates_when_parent_contains_a_container_cycle(
-        self, kind
-    ):
+    def test_public_merge_terminates_when_parent_contains_a_container_cycle(self, kind):
         script = textwrap.dedent(
             """
             import sys
@@ -3663,9 +3504,7 @@ class TestExtends:
                 )
             )
 
-        assert [run.returncode for run in completed] == [0, 0], [
-            run.stderr for run in completed
-        ]
+        assert [run.returncode for run in completed] == [0, 0], [run.stderr for run in completed]
         assert [run.stdout for run in completed] == [
             "shared-graphs-ok\n",
             "shared-graphs-ok\n",
@@ -3695,8 +3534,9 @@ class TestExtends:
         parent's list and storing the whole child dict in its place. Any
         sibling key alongside `append` must be refused, not routed around."""
         with pytest.raises(ConfigError) as excinfo:
-            merge_extends({"optimizations": {"append": ["x"], "mode": "extra"}},
-                          {"optimizations": ["a"]})
+            merge_extends(
+                {"optimizations": {"append": ["x"], "mode": "extra"}}, {"optimizations": ["a"]}
+            )
         message = str(excinfo.value)
         assert "optimizations" in message
         assert "mode" in message
@@ -3718,8 +3558,10 @@ class TestExtends:
     def test_extending_a_sibling_of_another_kind_is_refused(self, context):
         with pytest.raises(ConfigError) as excinfo:
             build_resources(
-                {"arrays": {"a": {"list": [1.0]}},
-                 "bases": {"b": {"extends": "a", "time": {"kind": "legendre", "n_basis": 2}}}},
+                {
+                    "arrays": {"a": {"list": [1.0]}},
+                    "bases": {"b": {"extends": "a", "time": {"kind": "legendre", "n_basis": 2}}},
+                },
                 context,
             )
         message = str(excinfo.value)
@@ -3749,7 +3591,12 @@ class TestTheKindRegistry:
 
     def test_all_six_kinds_are_registered(self):
         assert set(RESOURCE_KINDS) == {
-            "arrays", "beams", "sky_models", "projectors", "s_params", "bases"
+            "arrays",
+            "beams",
+            "sky_models",
+            "projectors",
+            "s_params",
+            "bases",
         }
 
 
@@ -3818,8 +3665,11 @@ class TestUnknownKeyHints:
     def test_a_hint_is_appended_for_the_key_it_names(self):
         with pytest.raises(ConfigError) as excinfo:
             check_unknown_keys(
-                "resources.x.y", {"z0": 1.0}, frozenset({"kind"}),
-                label="kind: probe", hints={"z0": "z0 lives elsewhere."},
+                "resources.x.y",
+                {"z0": 1.0},
+                frozenset({"kind"}),
+                label="kind: probe",
+                hints={"z0": "z0 lives elsewhere."},
             )
         message = str(excinfo.value)
         assert message.endswith("z0 lives elsewhere.")
@@ -3828,14 +3678,21 @@ class TestUnknownKeyHints:
     def test_a_note_is_appended_unconditionally(self):
         with pytest.raises(ConfigError, match=r"it takes \['kind'\]\. Always\."):
             check_unknown_keys(
-                "resources.x.y", {"w": 1}, frozenset({"kind"}),
-                label="kind: probe", note="Always.",
+                "resources.x.y",
+                {"w": 1},
+                frozenset({"kind"}),
+                label="kind: probe",
+                note="Always.",
             )
 
     def test_no_unknown_keys_means_no_raise_even_with_hints(self):
         check_unknown_keys(
-            "resources.x.y", {"kind": "probe"}, frozenset({"kind"}),
-            label="kind: probe", note="Always.", hints={"z0": "..."},
+            "resources.x.y",
+            {"kind": "probe"},
+            frozenset({"kind"}),
+            label="kind: probe",
+            note="Always.",
+            hints={"z0": "..."},
         )
 
 
@@ -3915,9 +3772,7 @@ class TestAKindPrefixIsADependency:
         ``"." not in ...`` filter makes when it builds ``available``. An
         expansion that took every ``startswith`` match would claim a
         dependency on a name no entry answers to."""
-        declared = frozenset(
-            {"resources.s_params.hot", "resources.s_params.hot.calibration"}
-        )
+        declared = frozenset({"resources.s_params.hot", "resources.s_params.hot.calibration"})
         node = {"ref": "resources.s_params"}
         assert _referenced_names(node, declared) == {"resources.s_params.hot"}
 
@@ -3954,7 +3809,5 @@ class TestAKindPrefixIsADependency:
         of the expansion, false of the document. The entry cannot READ itself
         either way: the stack sees only what is already built.
         """
-        built = build_resources(
-            {"arrays": {**self.STACK, **self.ENTRIES}}, self._context()
-        )
+        built = build_resources({"arrays": {**self.STACK, **self.ENTRIES}}, self._context())
         assert "resources.arrays.stacked" in built.resources

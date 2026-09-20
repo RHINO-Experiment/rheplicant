@@ -290,9 +290,7 @@ _ZERO_AT_PROBE = (
 )
 
 
-def _resolve_log_names(
-    space: ParameterSpace, names: Sequence[str] | str
-) -> tuple[str, ...]:
+def _resolve_log_names(space: ParameterSpace, names: Sequence[str] | str) -> tuple[str, ...]:
     """The group form of :func:`_resolve_log_name`.
 
     Reuses :func:`~rheplicant.inference.linear._resolve_names` for every
@@ -404,8 +402,7 @@ def check_log_linearity(
     """
     if name is not None and names is not None:
         raise ParameterSpaceError(
-            "check_log_linearity() takes name= for one latent or names= for a group, "
-            "not both."
+            "check_log_linearity() takes name= for one latent or names= for a group, not both."
         )
     key = jax.random.key(0) if key is None else key
 
@@ -414,10 +411,7 @@ def check_log_linearity(
         g, zero = _isolate(space, pipeline, state_template, name, at)
         _require_inexact(space, (name,))
         probe_at: Callable[[int, float], Any] = _single_probe(space, name, key)
-        subject = (
-            f"log(prediction) is not affine in latent {name!r}, so it has no log-linear "
-            "block"
-        )
+        subject = f"log(prediction) is not affine in latent {name!r}, so it has no log-linear block"
         scale_of = "the latent's scale"
     else:
         selected = _resolve_log_names(space, names)
@@ -430,9 +424,7 @@ def check_log_linearity(
         )
         scale_of = "each latent's own scale"
 
-    _refuse_non_positive(
-        g(zero), "check_log_linearity, at the block's zero", None, _ZERO_AT_ORIGIN
-    )
+    _refuse_non_positive(g(zero), "check_log_linearity, at the block's zero", None, _ZERO_AT_ORIGIN)
     for index, scale in enumerate(scales):
         _refuse_non_positive(
             g(probe_at(index, scale)),
@@ -448,9 +440,7 @@ def check_log_linearity(
     # omission: the transform's whole purpose is to leave a noise that no
     # longer depends on the prediction, so 'the departure in units of sigma'
     # is a question about the ORIGINAL likelihood, not this one.
-    errors, _weighted, failed, rtol = _affinity_errors(
-        g_log, zero, probe_at, scales, rtol
-    )
+    errors, _weighted, failed, rtol = _affinity_errors(g_log, zero, probe_at, scales, rtol)
     if failed:
         detail = ", ".join(f"{scale:g}x -> {err:.2e}" for scale, err in errors.items())
         raise LinearityRefused(
@@ -598,9 +588,7 @@ def has_log_linear_block(
     return True
 
 
-def to_log_space(
-    observed: jax.Array, noise: NoiseModel
-) -> tuple[jax.Array, jax.Array]:
+def to_log_space(observed: jax.Array, noise: NoiseModel) -> tuple[jax.Array, jax.Array]:
     """Take the data to logs, and hand back the sigma that goes with it.
 
     One function for both because they must agree: the transformed data and the
@@ -637,8 +625,7 @@ def to_log_space(
     observed = jnp.asarray(observed)
     if flags is not None and jnp.shape(flags) != jnp.shape(observed):
         raise ParameterSpaceError(
-            f"flags shape {jnp.shape(flags)} does not match the data shape "
-            f"{jnp.shape(observed)}."
+            f"flags shape {jnp.shape(flags)} does not match the data shape {jnp.shape(observed)}."
         )
     _refuse_non_positive(
         observed,

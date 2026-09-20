@@ -32,10 +32,24 @@ CATALOG = widget_catalog()
 #: the plan: 18 single-slot nodes hold exactly one operator class, 2 hold two,
 #: 1 holds none, 3 are reserved, 5 are junctions or selectors and 4 are many.
 ONE_CLASS = (
-    "global_signal", "point_sources", "uniform_sky", "ionosphere", "rfi_field",
-    "observed_astro_sky", "ground_pickup", "atmosphere", "beam_spill",
-    "antenna_loss", "noise_wave", "cw_tone", "bandpass", "gain", "emi", "adc",
-    "averaging", "apply_cal",
+    "global_signal",
+    "point_sources",
+    "uniform_sky",
+    "ionosphere",
+    "rfi_field",
+    "observed_astro_sky",
+    "ground_pickup",
+    "atmosphere",
+    "beam_spill",
+    "antenna_loss",
+    "noise_wave",
+    "cw_tone",
+    "bandpass",
+    "gain",
+    "emi",
+    "adc",
+    "averaging",
+    "apply_cal",
 )
 TWO_CLASSES = ("noise", "flagging")
 NO_OPERATOR = ("snapshot",)
@@ -50,9 +64,7 @@ MANY = ("foregrounds", "t_sys_extra", "cal_loads", "filters")
 PYTHON_TARGET = "example_package.example_module.ExampleOperator"
 
 COMPOSITION_REASON = "Automatic junction or selector: not an operator slot."
-RESERVED_REASON = (
-    "Reserved graph slot with no shipped operator; configure it through python:."
-)
+RESERVED_REASON = "Reserved graph slot with no shipped operator; configure it through python:."
 MANY_REASON = "Many node: each instance carries its own fields."
 SHAPE_REASON = "Node settings are not a mapping; edit them as YAML."
 COMPOSE_REASON = "Composed node: the stages own the fields."
@@ -136,9 +148,7 @@ class TestTheGatesInOrder:
     def test_gate_5_beats_a_written_type(self):
         """A document carrying both is refused elsewhere; here the safe answer
         has to win regardless of the order the keys were written in."""
-        found = _project(
-            "gain", {"type": "GainOperator", "python": {"target": PYTHON_TARGET}}
-        )
+        found = _project("gain", {"type": "GainOperator", "python": {"target": PYTHON_TARGET}})
 
         assert found.typed_form is False
         assert found.typed_form_reason == PYTHON_REASON
@@ -454,9 +464,7 @@ class TestWhatAChangeOfTypeWouldCost:
     is the only side that knows which written keys belong to which class."""
 
     def test_it_names_the_keys_the_other_class_has_no_place_for(self):
-        found = _project(
-            "noise", {"type": "NoiseOperator", "sigma": {"value": 0.05, "unit": "K"}}
-        )
+        found = _project("noise", {"type": "NoiseOperator", "sigma": {"value": 0.05, "unit": "K"}})
 
         assert found.removed_by_type == {
             "NoiseOperator": (),
@@ -557,7 +565,10 @@ class TestOneFieldSetPerInstance:
         assert second.selected_type == "FourierBandFilter"
         assert {f.name for f in first.fields} == {"n_days", "mode"}
         assert {f.name for f in second.fields} == {
-            "axis", "low", "high", "mode",
+            "axis",
+            "low",
+            "high",
+            "mode",
         }
 
     def test_each_entry_reads_its_own_values(self):
@@ -724,8 +735,11 @@ class TestTheThreeFromRoutes:
     def test_a_route_reads_the_values_already_written(self):
         offered = from_route_fields(
             "t_sys_extra",
-            {"from": "basis", "basis": {"ref": "resources.bases.poly"},
-             "coeff": {"value": 2.0, "unit": "K"}},
+            {
+                "from": "basis",
+                "basis": {"ref": "resources.bases.poly"},
+                "coeff": {"value": 2.0, "unit": "K"},
+            },
             CATALOG,
         )
 
@@ -797,9 +811,14 @@ class TestWhichFormsAControlCanWrite:
 
     def test_every_field_can_write_the_form_it_is_already_written_in(self):
         """The switcher must never be the reason a value cannot be put back."""
-        found = _project("global_signal", {
-            "depth": {"value": 0.5, "unit": "K"}, "centre": "75 MHz", "width": 5.0,
-        })
+        found = _project(
+            "global_signal",
+            {
+                "depth": {"value": 0.5, "unit": "K"},
+                "centre": "75 MHz",
+                "width": 5.0,
+            },
+        )
         for name in ("depth", "centre", "width"):
             field = _field(found, name)
             assert field.form in field.forms, name

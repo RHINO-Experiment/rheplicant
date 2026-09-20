@@ -57,9 +57,7 @@ class _Normal:
         self.loc, self.scale = loc, scale
 
     def log_prob(self, x):
-        return -0.5 * (
-            ((x - self.loc) / self.scale) ** 2 + jnp.log(2 * jnp.pi * self.scale**2)
-        )
+        return -0.5 * (((x - self.loc) / self.scale) ** 2 + jnp.log(2 * jnp.pi * self.scale**2))
 
 
 def _design(rank=N_THETA, key=None):
@@ -68,9 +66,7 @@ def _design(rank=N_THETA, key=None):
     A repeated column is a genuinely rank-deficient epoch: the data constrains a
     subspace, which section 2.2 says is the normal case and not an error.
     """
-    columns = jax.random.normal(
-        jax.random.key(70) if key is None else key, (N_DATA, rank)
-    )
+    columns = jax.random.normal(jax.random.key(70) if key is None else key, (N_DATA, rank))
     if rank < N_THETA:
         columns = jnp.concatenate([columns, columns[:, :1]], axis=1)
     return columns
@@ -94,9 +90,7 @@ def _basis(design, n_basis=N_THETA, seed=0):
     it.
     """
     weight = jnp.ones(N_DATA)
-    filler = jax.random.normal(
-        jax.random.key(seed + 99), (max(n_basis - N_THETA, 0), N_DATA)
-    )
+    filler = jax.random.normal(jax.random.key(seed + 99), (max(n_basis - N_THETA, 0), N_DATA))
     candidates = jnp.concatenate([design.T, filler], axis=0)
     rows = orthonormalise(candidates * weight)[:n_basis] / weight
     return ReducedBasis(
@@ -196,9 +190,9 @@ def test_a_rank_deficient_epoch_agrees_across_tiers():
     """Section 2.2: one epoch constrains a subspace, and that is not an error."""
     design = _design(rank=N_THETA - 1)
     raw, reduced, quadratic = _tiers(design, 0.1)
-    assert int(
-        np.linalg.matrix_rank(np.asarray(quadratic.info.fisher()), tol=1e-9)
-    ) == (N_THETA - 1)
+    assert int(np.linalg.matrix_rank(np.asarray(quadratic.info.fisher()), tol=1e-9)) == (
+        N_THETA - 1
+    )
     # The dictionary is short by the same one direction, for the same reason.
     assert reduced.basis.n_basis == N_THETA - 1
     probe = _probes()["interior"]
@@ -274,9 +268,7 @@ def test_one_epoch_and_ten_thousand_agree_across_tiers(n_epochs):
     QR.
     """
     memory, total = _accumulate(_design(), 0.5, n_epochs)
-    assert float(memory.log_likelihood(_probes()["interior"])) == pytest.approx(
-        total, rel=1e-9
-    )
+    assert float(memory.log_likelihood(_probes()["interior"])) == pytest.approx(total, rel=1e-9)
 
 
 def test_remember_and_combine_are_the_same_accumulation():

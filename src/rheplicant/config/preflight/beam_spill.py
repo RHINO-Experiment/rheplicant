@@ -202,8 +202,7 @@ def _b2_spill_in(layer: Mapping[str, Any]) -> Iterable[Finding]:
             continue
         beam = _b2_entry(entry.get("beam"), _B2_BEAMS)
         beam_entry = specs.get(beam) if beam is not None else None
-        horizon = (beam_entry.get("horizon")
-                   if isinstance(beam_entry, Mapping) else None)
+        horizon = beam_entry.get("horizon") if isinstance(beam_entry, Mapping) else None
         if isinstance(horizon, Mapping) and horizon.get("mode") == "truncate_map":
             yield refuse("A50", where, _b2_leg_a(path, projector, beam))
 
@@ -275,12 +274,14 @@ def _b2_unmasked_in(layer: Mapping[str, Any]) -> Iterable[Finding]:
             if projector.startswith(_B2_PROJECTORS)
             and entry.get("engine") in _B2_BEAM_ENGINES
             and _b2_entry(entry.get("beam"), _B2_BEAMS) == beam
-            and not (entry.get("engine") == _B2_MASKING_ENGINE
-                     and entry.get("horizon_mask") is True)
+            and not (
+                entry.get("engine") == _B2_MASKING_ENGINE and entry.get("horizon_mask") is True
+            )
         ]
         if unmasked:
-            yield refuse("A50", longest_legal_prefix(f"{beam}.horizon.mode"),
-                         _b2_unmasked(beam, unmasked))
+            yield refuse(
+                "A50", longest_legal_prefix(f"{beam}.horizon.mode"), _b2_unmasked(beam, unmasked)
+            )
 
 
 def _b2_unmasked(beam: str, unmasked: list[tuple[str, Any]]) -> str:
@@ -297,25 +298,29 @@ def _b2_unmasked(beam: str, unmasked: list[tuple[str, Any]]) -> str:
         parts.append(f"{_b2_listed(masking)} {verb} not set horizon_mask: true.")
     parts.extend(
         f"{name} is engine: {engine}, which has no horizon mask."
-        for name, engine in unmasked if engine != _B2_MASKING_ENGINE
+        for name, engine in unmasked
+        if engine != _B2_MASKING_ENGINE
     )
     parts.append(
         "A projector that does not mask projects the sky below the horizon "
-        "through the beam's lower half, and nothing raises.")
+        "through the beam's lower half, and nothing raises."
+    )
     # Every reader named gets its own edit in this one sentence: naming only
     # the driftscan half sent a reader round twice, the second time about a
     # projector that cannot take the edit the first message offered.
     if masking and others:
-        remedy = (f"Set horizon_mask: true on {_b2_listed(masking)} and give "
-                  f"{_b2_listed(others)} a beam cut with horizon.mode: "
-                  f"truncate_map (an entry that extends {beam} will do)")
+        remedy = (
+            f"Set horizon_mask: true on {_b2_listed(masking)} and give "
+            f"{_b2_listed(others)} a beam cut with horizon.mode: "
+            f"truncate_map (an entry that extends {beam} will do)"
+        )
     elif masking:
         remedy = f"Set horizon_mask: true on {_b2_listed(masking)}"
     else:
-        remedy = ("Read this beam through a driftscan projector with "
-                  "horizon_mask: true")
-    parts.append(f"{remedy}, or cut the beam map itself with horizon.mode: "
-                 "truncate_map (check A50).")
+        remedy = "Read this beam through a driftscan projector with horizon_mask: true"
+    parts.append(
+        f"{remedy}, or cut the beam map itself with horizon.mode: truncate_map (check A50)."
+    )
     return " ".join(parts)
 
 

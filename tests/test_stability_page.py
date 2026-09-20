@@ -36,8 +36,12 @@ PAGE = ROOT / "docs" / "stability.md"
 SCHEMAS = ROOT / "src" / "rheplicant" / "config" / "schemas"
 
 NAMESPACES = (
-    "rheplicant", "rheplicant.core", "rheplicant.radio",
-    "rheplicant.inference", "rheplicant.config", "rheplicant.gui",
+    "rheplicant",
+    "rheplicant.core",
+    "rheplicant.radio",
+    "rheplicant.inference",
+    "rheplicant.config",
+    "rheplicant.gui",
 )
 
 
@@ -58,8 +62,7 @@ def _row(page: str, label: str) -> int:
 def test_the_page_states_each_namespaces_real_size(page, namespace):
     live = len(importlib.import_module(namespace).__all__)
     assert _row(page, namespace) == live, (
-        f"{PAGE.name} says {namespace} has {_row(page, namespace)} public "
-        f"names; it has {live}"
+        f"{PAGE.name} says {namespace} has {_row(page, namespace)} public names; it has {live}"
     )
 
 
@@ -78,7 +81,8 @@ def test_the_page_states_the_real_capability_total(page):
 
 
 @pytest.mark.parametrize(
-    "level", [Maturity.MAINTAINED, Maturity.EXPERIMENTAL, Maturity.PLACEHOLDER],
+    "level",
+    [Maturity.MAINTAINED, Maturity.EXPERIMENTAL, Maturity.PLACEHOLDER],
     ids=lambda level: level.name,
 )
 def test_the_page_states_each_levels_real_count(page, level):
@@ -144,9 +148,7 @@ def test_the_page_names_every_packaged_schema_and_its_version(page, name):
     assert f"`{name}.schema.json`" in page, (
         f"{PAGE.name} does not name the packaged schema {name}.schema.json"
     )
-    row = next(
-        (line for line in page.splitlines() if f"`{name}.schema.json`" in line), None
-    )
+    row = next((line for line in page.splitlines() if f"`{name}.schema.json`" in line), None)
     assert row is not None
     assert f"`{version}`" in row, (
         f"{PAGE.name}'s row for {name} does not state its version {version}"

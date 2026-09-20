@@ -88,9 +88,7 @@ def walk_operators(
         yield from walk_operators(child, child_label)
 
 
-def stages_requiring(
-    op: AbstractOperator, path: str
-) -> tuple[tuple[str, AbstractOperator], ...]:
+def stages_requiring(op: AbstractOperator, path: str) -> tuple[tuple[str, AbstractOperator], ...]:
     """Every stage of ``op`` whose ``requires`` names the State path ``path``."""
     return tuple((label, stage) for label, stage in walk_operators(op) if path in stage.requires)
 

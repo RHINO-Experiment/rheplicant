@@ -197,8 +197,7 @@ def signal_path_svg(
             for nid in nids:
                 neighbours = graph._in[nid] + graph._out[nid]
                 targets[nid] = (
-                    sum(xs[m] for m in neighbours) / len(neighbours)
-                    if neighbours else xs[nid]
+                    sum(xs[m] for m in neighbours) / len(neighbours) if neighbours else xs[nid]
                 )
             order = sorted(nids, key=lambda n: targets[n])
             mean_target = sum(targets.values()) / len(targets)
@@ -259,13 +258,11 @@ def signal_path_svg(
                 f'<g class="{"lit" if on else "dim"}" data-node-id="{escaped_id}" '
                 f'aria-disabled="true" data-node-kind="{escaped_kind}">'
                 f"<title>{title_text}; this composition node is not an operator slot.</title>"
-                f'{draw(x, y, pal["lit"] if on else pal["wire"], 1.6 if on else 1.1)}</g>'
+                f"{draw(x, y, pal['lit'] if on else pal['wire'], 1.6 if on else 1.1)}</g>"
             )
             continue
         state = "lit" if nid in lit_set else ("wire" if nid in active else "dim")
-        fill, border, text = pal[
-            "processing" if spec.segment == "processing" else spec.kind
-        ]
+        fill, border, text = pal["processing" if spec.segment == "processing" else spec.kind]
         if nid in lit_set:
             border = pal["lit"]
         border_w = 2 if nid in lit_set else 0.75
@@ -288,7 +285,7 @@ def signal_path_svg(
     return (
         f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" '
         f'viewBox="0 0 {width} {height}" role="img" aria-label="{label}">'
-        f'{"".join(parts)}</svg>'
+        f"{''.join(parts)}</svg>"
     )
 
 
@@ -305,14 +302,11 @@ def signal_path_html(
     counts = dict(counts or {})
     lit_line = _html.escape(
         ", ".join(
-            f"{nid} (x{counts[nid]})" if counts.get(nid, 1) > 1 else nid
-            for nid in sorted(set(lit))
+            f"{nid} (x{counts[nid]})" if counts.get(nid, 1) > 1 else nid for nid in sorted(set(lit))
         )
         or "none"
     )
-    svg = signal_path_svg(
-        graph, lit=lit, skipped=skipped, title=title, counts=counts, theme=theme
-    )
+    svg = signal_path_svg(graph, lit=lit, skipped=skipped, title=title, counts=counts, theme=theme)
     return (
         "<!doctype html><html><head><meta charset='utf-8'>"
         f"<title>{page_title}</title><style>{_page_style(theme)}</style></head><body>"

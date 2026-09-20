@@ -173,9 +173,6 @@ def _may_share_a_block(
     return True
 
 
-
-
-
 def auto_blocks(
     space: ParameterSpace,
     pipeline: AbstractOperator,
@@ -268,8 +265,14 @@ def auto_blocks(
         # through the other -- a partition that survives its own re-check is
         # one probed at the same points the re-check will use.
         check_linearity(
-            space, pipeline, state_template, names=(name,), at=at,
-            scales=scales, rtol=rtol, noise=noise,
+            space,
+            pipeline,
+            state_template,
+            names=(name,),
+            at=at,
+            scales=scales,
+            rtol=rtol,
+            noise=noise,
         )
 
     # The noise settles the log question before any probe is worth running:
@@ -284,8 +287,13 @@ def auto_blocks(
             name
             for name in candidates
             if has_log_linear_block(
-                space, pipeline, state_template, names=(name,), at=at,
-                scales=log_scales, rtol=rtol,
+                space,
+                pipeline,
+                state_template,
+                names=(name,),
+                at=at,
+                scales=log_scales,
+                rtol=rtol,
             )
         )
     )
@@ -327,20 +335,33 @@ def auto_blocks(
 
     def linear_pair(first: str, second: str) -> bool:
         return _may_share_a_block(
-            space, pipeline, state_template, first, second,
-            at=at, scales=scales, rtol=rtol, log=False, noise=noise,
+            space,
+            pipeline,
+            state_template,
+            first,
+            second,
+            at=at,
+            scales=scales,
+            rtol=rtol,
+            log=False,
+            noise=noise,
         )
 
     def log_pair(first: str, second: str) -> bool:
         return _may_share_a_block(
-            space, pipeline, state_template, first, second,
-            at=at, scales=log_scales, rtol=rtol, log=True,
+            space,
+            pipeline,
+            state_template,
+            first,
+            second,
+            at=at,
+            scales=log_scales,
+            rtol=rtol,
+            log=True,
         )
 
     blocks = [Block(*group) for group in first_fit(declared, linear_pair)]
-    blocks += [
-        Block(*group, engine=LOG_CONJUGATE) for group in first_fit(log_linear, log_pair)
-    ]
+    blocks += [Block(*group, engine=LOG_CONJUGATE) for group in first_fit(log_linear, log_pair)]
     if other:
         blocks.append(Block(*other, steps=steps, learning_rate=learning_rate))
     return tuple(blocks)

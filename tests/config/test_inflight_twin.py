@@ -52,8 +52,7 @@ MINE = frozenset({"B5", "C9"})
 
 def mine(document, **kwargs) -> frozenset[str]:
     """The ids from THIS module that fired on ``document``."""
-    return frozenset(one.check
-                     for one in built_findings(document, **kwargs)) & MINE
+    return frozenset(one.check for one in built_findings(document, **kwargs)) & MINE
 
 
 # --- the documents ---------------------------------------------------------
@@ -62,20 +61,22 @@ def mine(document, **kwargs) -> frozenset[str]:
 #: so the document is legal right up to the point B5 is about.
 THREE = {"mode": "cycle", "order": ["antenna", "ambient", "hot"]}
 TWO = {"mode": "cycle", "order": ["antenna", "ambient"]}
-LOADS = {"ambient": {"t_load": {"value": 300.0, "unit": "K"}},
-         "hot": {"t_load": {"value": 400.0, "unit": "K"}}}
+LOADS = {
+    "ambient": {"t_load": {"value": 300.0, "unit": "K"}},
+    "hot": {"t_load": {"value": 400.0, "unit": "K"}},
+}
 
 #: The base model with every antenna-side source removed.  ``gain`` and
 #: ``noise`` sit DOWNSTREAM of the switch, so the model still lights nodes --
 #: which is what makes this different from an empty model and is why the
 #: assembly still has a receiver_input to look at.
-DARK = {key: value for key, value in BASE_MODEL.items()
-        if key not in ("global_signal", "uniform_sky")}
+DARK = {
+    key: value for key, value in BASE_MODEL.items() if key not in ("global_signal", "uniform_sky")
+}
 
 #: A square grid: eight time samples against the base document's eight
 #: channels.  C9's whole condition.
-SQUARE_TIME = {"grid": {"arange": {"start": 0.0, "step": 2.0, "num": 8},
-                        "unit": "s"}}
+SQUARE_TIME = {"grid": {"arange": {"start": 0.0, "step": 2.0, "num": 8}, "unit": "s"}}
 
 
 def dark_antenna(**patch):
@@ -87,9 +88,9 @@ def dark_antenna(**patch):
 
 def lit_antenna(**patch):
     """B5's own advice applied to :func:`dark_antenna`: a source on the branch."""
-    return preflight_document(observation={"switching": THREE},
-                              model={**BASE_MODEL, "cal_loads": LOADS},
-                              **patch)
+    return preflight_document(
+        observation={"switching": THREE}, model={**BASE_MODEL, "cal_loads": LOADS}, **patch
+    )
 
 
 def square(cal_loads=None, model=None, switching=TWO, time=SQUARE_TIME):
@@ -99,21 +100,24 @@ def square(cal_loads=None, model=None, switching=TWO, time=SQUARE_TIME):
         patch["cal_loads"] = cal_loads
     return preflight_document(
         observation={**BASE_OBSERVATION, "time": time, "switching": switching},
-        model={**BASE_MODEL, **patch})
+        model={**BASE_MODEL, **patch},
+    )
 
 
 #: A ``noise_wave`` node whose four temperatures are written separately, so a
 #: test can make exactly one of them the ambiguous shape.
 def noise_wave(**over):
-    node = {"type": "NoiseWaveOperator",
-            "t_unc": {"value": 1.0, "unit": "K"},
-            "t_cos": {"value": 1.0, "unit": "K"},
-            "t_sin": {"value": 1.0, "unit": "K"},
-            "t_rx": {"value": 1.0, "unit": "K"},
-            "gamma_src_re": {"zeros": ["n_source", "n_freq"]},
-            "gamma_src_im": {"zeros": ["n_source", "n_freq"]},
-            "gamma_rec_re": {"zeros": ["n_freq"]},
-            "gamma_rec_im": {"zeros": ["n_freq"]}}
+    node = {
+        "type": "NoiseWaveOperator",
+        "t_unc": {"value": 1.0, "unit": "K"},
+        "t_cos": {"value": 1.0, "unit": "K"},
+        "t_sin": {"value": 1.0, "unit": "K"},
+        "t_rx": {"value": 1.0, "unit": "K"},
+        "gamma_src_re": {"zeros": ["n_source", "n_freq"]},
+        "gamma_src_im": {"zeros": ["n_source", "n_freq"]},
+        "gamma_rec_re": {"zeros": ["n_freq"]},
+        "gamma_rec_im": {"zeros": ["n_freq"]},
+    }
     node.update(over)
     return node
 
@@ -127,8 +131,7 @@ COLUMN = {"ones": ["n_time"], "unit": "K", "column": True}
 #: an index against one of them raises INSIDE the check, and ``sweep`` turns
 #: that into "check RAISED", which aborts the pass and hides every finding
 #: after it while every ``match=`` pin in the suite still passes.
-HOSTILE = ([], {}, set(), None, 3, [[1, 2], [3]], "text", (1, 2),
-           {"a": [1]}, [{"b": 2}], True, 0.5)
+HOSTILE = ([], {}, set(), None, 3, [[1, 2], [3]], "text", (1, 2), {"a": [1]}, [{"b": 2}], True, 0.5)
 
 
 @pytest.fixture(scope="module")
@@ -191,9 +194,10 @@ B5_TRAVERSED = (
     "'ambient'] and the receiver_input switch this run's twin built has 1."
     + _B5_REST.format(
         how="only one branch reaches receiver_input, so the fold traversed "
-            "the selector as identity: there is no switch at all and every "
-            "sample takes that one branch, whatever "
-            "coords.extra['receiver_input'] holds")
+        "the selector as identity: there is no switch at all and every "
+        "sample takes that one branch, whatever "
+        "coords.extra['receiver_input'] holds"
+    )
 )
 
 _C9_TAIL = (
@@ -218,13 +222,14 @@ _C9_HEAD = (
 C9_T_LOAD = (
     _C9_HEAD.format(where="model.cal_loads.ambient.t_load")
     + "scalar, (n_freq,) and (n_time, 1) -- and NOT (n_time, n_freq), which "
-      "CalLoadOperator refuses by name because a load whose spectrum also "
-      "moves is a different model than this one has." + _C9_TAIL
+    "CalLoadOperator refuses by name because a load whose spectrum also "
+    "moves is a different model than this one has." + _C9_TAIL
 )
 
 C9_T_UNC = (
     _C9_HEAD.format(where="model.noise_wave.t_unc")
-    + "scalar, (n_freq,), (n_time, 1) and (n_time, n_freq)." + _C9_TAIL
+    + "scalar, (n_freq,), (n_time, 1) and (n_time, n_freq)."
+    + _C9_TAIL
 )
 
 
@@ -252,14 +257,22 @@ class TestTheRegistry:
         and cannot be un-happened.
         """
         done = subprocess.run(
-            [sys.executable, "-c",
-             "from rheplicant.config.inflight import BUILT_CHECKS\n"
-             "assert {'B5', 'C9'} <= set(BUILT_CHECKS), sorted(BUILT_CHECKS)\n"],
-            capture_output=True, text=True, cwd=str(_ROOT), check=False)
+            [
+                sys.executable,
+                "-c",
+                "from rheplicant.config.inflight import BUILT_CHECKS\n"
+                "assert {'B5', 'C9'} <= set(BUILT_CHECKS), sorted(BUILT_CHECKS)\n",
+            ],
+            capture_output=True,
+            text=True,
+            cwd=str(_ROOT),
+            check=False,
+        )
         assert done.returncode == 0, (
             "B5/C9 are decorated but not wired: importing the package does "
             "not import inflight/twin.py, so the built pass never runs "
-            "them.\n" + done.stdout + done.stderr)
+            "them.\n" + done.stdout + done.stderr
+        )
 
     def test_the_module_name_collides_with_no_entry_point(self):
         """R13, checked rather than assumed.
@@ -324,20 +337,16 @@ class TestB5:
         the twin; check A31 now refuses it in the text pass, and the message
         names that check rather than the bare alternative.
         """
-        stripped = preflight_document(
-            observation={"switching": {"mode": "none"}})
+        stripped = preflight_document(observation={"switching": {"mode": "none"}})
         stripped["model"] = dict(DARK)
         with pytest.raises(ConfigError) as refused:
             load_document(stripped)
         assert "no source node" in str(refused.value)
         assert "(check A31)" in str(refused.value)
-        assert "pure transform chain" in built_only(dark_antenna(),
-                                                    "B5").message
-        assert "which check A31 refuses" in built_only(dark_antenna(),
-                                                       "B5").message
+        assert "pure transform chain" in built_only(dark_antenna(), "B5").message
+        assert "which check A31 refuses" in built_only(dark_antenna(), "B5").message
         # ... and on a run that HAS a source elsewhere, the same edit works.
-        with_source = preflight_document(
-            observation={"switching": {"mode": "none"}})
+        with_source = preflight_document(observation={"switching": {"mode": "none"}})
         assert load_document(with_source) is not None
         assert mine(with_source) == frozenset()
 
@@ -377,14 +386,11 @@ class TestB5:
         # repaired, and ``test_config_fixture_contract.py``'s census refuses it
         # by name -- measured, it named this test.
         document = lit_antenna(
-            inference={"twin": {"without": ["noise", "global_signal",
-                                            "uniform_sky"]}})
+            inference={"twin": {"without": ["noise", "global_signal", "uniform_sky"]}}
+        )
         run = built_run(document)
-        assert run.twin["receiver_input"].names == ("astro_sum",
-                                                    "cal_loads_1",
-                                                    "cal_loads_2")
-        assert run.inference.fit_twin["receiver_input"].names == (
-            "cal_loads_1", "cal_loads_2")
+        assert run.twin["receiver_input"].names == ("astro_sum", "cal_loads_1", "cal_loads_2")
+        assert run.inference.fit_twin["receiver_input"].names == ("cal_loads_1", "cal_loads_2")
         found = built_only(document, "B5")
         assert found.severity == REFUSE
         assert found.where == "inference.twin"
@@ -408,8 +414,7 @@ class TestB5:
         """``switching: {mode: none}`` is a run with no cycle: there is
         nothing to compare and the base document must stay silent."""
         assert "B5" not in mine(preflight_document())
-        assert "B5" not in mine(preflight_document(
-            observation={"switching": {"mode": "none"}}))
+        assert "B5" not in mine(preflight_document(observation={"switching": {"mode": "none"}}))
 
     def test_the_INGESTED_route_is_a_RECORDED_FALSE_NEGATIVE(self, tmp_path):
         """S3, and §0.3 E.6 ruling 6's "guard it or record the false negative".
@@ -441,24 +446,30 @@ class TestB5:
 
         make_file(tmp_path / "obs.hd5f")
         document = {
-            "schema_version": 1, "runtime": {"seed": 1},
+            "schema_version": 1,
+            "runtime": {"seed": 1},
             "observation": {
-                "from_file": {"format": "rhino_hdf5", "path": "obs.hd5f",
-                              "freq_unit": "MHz", "settle_seconds": 0.0},
-                "switching": {"order": ["antenna", "internal_load",
-                                        "heated_load"]}},
-            "model": {"cal_loads": {
-                "internal_load": {"t_load": {"value": 300.0, "unit": "K"}},
-                "heated_load": {"t_load": {"value": 400.0, "unit": "K"}}},
-                "gain": {"gain": {"value": 2.0, "unit": "dimensionless"}}},
+                "from_file": {
+                    "format": "rhino_hdf5",
+                    "path": "obs.hd5f",
+                    "freq_unit": "MHz",
+                    "settle_seconds": 0.0,
+                },
+                "switching": {"order": ["antenna", "internal_load", "heated_load"]},
+            },
+            "model": {
+                "cal_loads": {
+                    "internal_load": {"t_load": {"value": 300.0, "unit": "K"}},
+                    "heated_load": {"t_load": {"value": 400.0, "unit": "K"}},
+                },
+                "gain": {"gain": {"value": 2.0, "unit": "dimensionless"}},
+            },
             "runs": [{"kind": "forward"}],
         }
         run = built_run(document, base_dir=str(tmp_path))
         # The shape IS B5's -- two positions against three declared labels.
-        assert run.context.switch_order == ("antenna", "internal_load",
-                                            "heated_load")
-        assert run.twin["receiver_input"].names == ("cal_loads_1",
-                                                    "cal_loads_2")
+        assert run.context.switch_order == ("antenna", "internal_load", "heated_load")
+        assert run.twin["receiver_input"].names == ("cal_loads_1", "cal_loads_2")
         # ... and the run cannot be evaluated at all, for a reason that has
         # nothing to do with the switch and that no B5 edit could remove.
         with pytest.raises(AssemblyError, match="contains source operators"):
@@ -485,10 +496,8 @@ class TestB5:
         run = self._transform_only_ingested_run()
         assert "receiver_input" not in run.twin.materialized
         assert "receiver_input" not in run.twin.skipped
-        synthetic = dataclasses.replace(
-            run, context=dataclasses.replace(run.context, ingest=None))
-        assert synthetic.context.switch_order == ("antenna", "internal_load",
-                                                  "heated_load")
+        synthetic = dataclasses.replace(run, context=dataclasses.replace(run.context, ingest=None))
+        assert synthetic.context.switch_order == ("antenna", "internal_load", "heated_load")
         assert list(_switch_positions(synthetic)) == []
 
     @staticmethod
@@ -500,14 +509,18 @@ class TestB5:
         directory = pathlib.Path(tmp_path or tempfile.mkdtemp())
         make_file(directory / "obs.hd5f")
         document = {
-            "schema_version": 1, "runtime": {"seed": 1},
+            "schema_version": 1,
+            "runtime": {"seed": 1},
             "observation": {
-                "from_file": {"format": "rhino_hdf5", "path": "obs.hd5f",
-                              "freq_unit": "MHz", "settle_seconds": 0.0},
-                "switching": {"order": ["antenna", "internal_load",
-                                        "heated_load"]}},
-            "model": {"gain": {"gain": {"value": 2.0,
-                                        "unit": "dimensionless"}}},
+                "from_file": {
+                    "format": "rhino_hdf5",
+                    "path": "obs.hd5f",
+                    "freq_unit": "MHz",
+                    "settle_seconds": 0.0,
+                },
+                "switching": {"order": ["antenna", "internal_load", "heated_load"]},
+            },
+            "model": {"gain": {"gain": {"value": 2.0, "unit": "dimensionless"}}},
             "runs": [{"kind": "forward"}],
         }
         return built_run(document, base_dir=str(directory))
@@ -554,22 +567,25 @@ class TestC9:
     """``column:`` demanded exactly where the two axes are indistinguishable."""
 
     def test_it_fires_on_a_cal_load_and_names_the_label(self):
-        found = built_only(square(cal_loads={"ambient": {"t_load": AMBIGUOUS}}),
-                           "C9")
+        found = built_only(square(cal_loads={"ambient": {"t_load": AMBIGUOUS}}), "C9")
         assert found.severity == REFUSE
         assert found.where == "model.cal_loads.ambient"
 
     def test_the_whole_cal_load_message(self):
-        assert built_only(square(cal_loads={"ambient": {"t_load": AMBIGUOUS}}),
-                          "C9").message == C9_T_LOAD
+        assert (
+            built_only(square(cal_loads={"ambient": {"t_load": AMBIGUOUS}}), "C9").message
+            == C9_T_LOAD
+        )
 
     def test_it_fires_on_a_noise_wave_temperature(self):
-        pytest.importorskip("rhino_cal_jax",
-                            reason="rhino_cal_jax comes with rheplicant[cal]")
+        pytest.importorskip("rhino_cal_jax", reason="rhino_cal_jax comes with rheplicant[cal]")
         found = built_only(
-            square(cal_loads={"ambient": {"t_load": {"value": 300.0,
-                                                     "unit": "K"}}},
-                   model={"noise_wave": noise_wave(t_unc=AMBIGUOUS)}), "C9")
+            square(
+                cal_loads={"ambient": {"t_load": {"value": 300.0, "unit": "K"}}},
+                model={"noise_wave": noise_wave(t_unc=AMBIGUOUS)},
+            ),
+            "C9",
+        )
         assert found.where == "model.noise_wave"
         assert found.message == C9_T_UNC
 
@@ -578,16 +594,16 @@ class TestC9:
         """Schema §6's C9 row says "a ``noise_wave`` temperature", singular.
         There are four, and a check keyed on ``t_unc`` alone would let the
         other three through with every shape correct."""
-        pytest.importorskip("rhino_cal_jax",
-                            reason="rhino_cal_jax comes with rheplicant[cal]")
+        pytest.importorskip("rhino_cal_jax", reason="rhino_cal_jax comes with rheplicant[cal]")
         document = square(
             cal_loads={"ambient": {"t_load": {"value": 300.0, "unit": "K"}}},
-            model={"noise_wave": noise_wave(**{field: AMBIGUOUS})})
+            model={"noise_wave": noise_wave(**{field: AMBIGUOUS})},
+        )
         assert built_only(document, "C9").message.startswith(
-            f"model.noise_wave.{field}: this run's time and frequency axes")
+            f"model.noise_wave.{field}: this run's time and frequency axes"
+        )
 
-    def test_TWO_cal_loads_are_reached_by_their_MINTED_ids_and_labelled_right(
-            self):
+    def test_TWO_cal_loads_are_reached_by_their_MINTED_ids_and_labelled_right(self):
         """The ``many`` fan, which every other C9 document here misses.
 
         Two calibration loads make ``cal_loads`` a multi-instance node, and
@@ -611,11 +627,13 @@ class TestC9:
 
         document = square(
             switching=THREE,
-            cal_loads={"ambient": {"t_load": {"value": 300.0, "unit": "K"}},
-                       "hot": {"t_load": AMBIGUOUS}})
+            cal_loads={
+                "ambient": {"t_load": {"value": 300.0, "unit": "K"}},
+                "hot": {"t_load": AMBIGUOUS},
+            },
+        )
         run = built_run(document)
-        assert run.twin.instances == (("cal_loads",
-                                       ("cal_loads_1", "cal_loads_2")),)
+        assert run.twin.instances == (("cal_loads", ("cal_loads_1", "cal_loads_2")),)
         with pytest.raises(AmbiguousNodeError):
             run.twin["cal_loads"]
         found = built_only(document, "C9")
@@ -631,8 +649,11 @@ class TestC9:
         """
         document = square(
             switching=THREE,
-            cal_loads={"ambient": {"t_load": AMBIGUOUS},
-                       "hot": {"t_load": {"value": 400.0, "unit": "K"}}})
+            cal_loads={
+                "ambient": {"t_load": AMBIGUOUS},
+                "hot": {"t_load": {"value": 400.0, "unit": "K"}},
+            },
+        )
         assert built_only(document, "C9").where == "model.cal_loads.ambient"
 
     def test_TWO_ambiguous_temperatures_on_ONE_node_are_TWO_findings(self):
@@ -649,13 +670,14 @@ class TestC9:
         Subset-shaped rather than ``len(...) == 2``: the ``where``s are read
         off this module's own ids only.
         """
-        pytest.importorskip("rhino_cal_jax",
-                            reason="rhino_cal_jax comes with rheplicant[cal]")
+        pytest.importorskip("rhino_cal_jax", reason="rhino_cal_jax comes with rheplicant[cal]")
         document = square(
             cal_loads={"ambient": {"t_load": {"value": 300.0, "unit": "K"}}},
-            model={"noise_wave": noise_wave(t_unc=AMBIGUOUS, t_sin=AMBIGUOUS)})
-        fields = {one.message.split(":")[0]
-                  for one in built_findings(document) if one.check == "C9"}
+            model={"noise_wave": noise_wave(t_unc=AMBIGUOUS, t_sin=AMBIGUOUS)},
+        )
+        fields = {
+            one.message.split(":")[0] for one in built_findings(document) if one.check == "C9"
+        }
         assert {"model.noise_wave.t_unc", "model.noise_wave.t_sin"} <= fields
         assert "model.noise_wave.t_cos" not in fields
         assert "model.noise_wave.t_rx" not in fields
@@ -668,17 +690,17 @@ class TestC9:
         Asserted as the two sentences being different rather than as two
         substrings, because the mutant this kills is "quote one list".
         """
-        pytest.importorskip("rhino_cal_jax",
-                            reason="rhino_cal_jax comes with rheplicant[cal]")
+        pytest.importorskip("rhino_cal_jax", reason="rhino_cal_jax comes with rheplicant[cal]")
         assert "(n_time, n_freq)" in C9_T_UNC
         assert "NOT (n_time, n_freq)" in C9_T_LOAD
-        loads = built_only(square(cal_loads={"ambient": {"t_load": AMBIGUOUS}}),
-                           "C9").message
+        loads = built_only(square(cal_loads={"ambient": {"t_load": AMBIGUOUS}}), "C9").message
         temps = built_only(
-            square(cal_loads={"ambient": {"t_load": {"value": 300.0,
-                                                     "unit": "K"}}},
-                   model={"noise_wave": noise_wave(t_rx=AMBIGUOUS)}),
-            "C9").message
+            square(
+                cal_loads={"ambient": {"t_load": {"value": 300.0, "unit": "K"}}},
+                model={"noise_wave": noise_wave(t_rx=AMBIGUOUS)},
+            ),
+            "C9",
+        ).message
         assert loads != temps
 
     def test_it_stands_down_OFF_a_square_grid(self):
@@ -691,8 +713,8 @@ class TestC9:
         """
         rectangular = preflight_document(
             observation={"switching": TWO},
-            model={**BASE_MODEL,
-                   "cal_loads": {"ambient": {"t_load": PER_CHANNEL}}})
+            model={**BASE_MODEL, "cal_loads": {"ambient": {"t_load": PER_CHANNEL}}},
+        )
         assert mine(rectangular) == frozenset()
 
     def test_the_advice_applied_leaves_the_document_passing(self):
@@ -716,8 +738,7 @@ class TestC9:
 
     def test_a_scalar_and_a_2D_column_are_both_left_alone(self):
         for value in ({"value": 300.0, "unit": "K"}, COLUMN):
-            assert mine(square(cal_loads={"ambient": {"t_load": value}})) \
-                == frozenset()
+            assert mine(square(cal_loads={"ambient": {"t_load": value}})) == frozenset()
 
     def test_the_beam_wins_against_C9(self):
         """§5's ANTI-PROPERTY, for C9 as well as for B5.
@@ -728,8 +749,7 @@ class TestC9:
         beam**, and ``check C9`` never appears.
         """
         document = square(cal_loads={"ambient": {"t_load": AMBIGUOUS}})
-        document["resources"] = {**document.get("resources", {}),
-                                 **UNREADABLE_BEAM}
+        document["resources"] = {**document.get("resources", {}), **UNREADABLE_BEAM}
         with pytest.raises(ConfigError) as raised:
             load_document(document)
         assert "no_such_beam.npy" in str(raised.value)
@@ -748,8 +768,9 @@ class TestC9:
         obvious alternative -- reading the post-averaging extent -- silently
         stops firing on exactly these documents.
         """
-        averaged = square(cal_loads={"ambient": {"t_load": AMBIGUOUS}},
-                          model={"averaging": {"n_chunk": 2}})
+        averaged = square(
+            cal_loads={"ambient": {"t_load": AMBIGUOUS}}, model={"averaging": {"n_chunk": 2}}
+        )
         assert "C9" in mine(averaged)
 
     def test_the_INFERENCE_TWIN_REPLACE_route_is_walked(self):
@@ -763,22 +784,23 @@ class TestC9:
         the other -- so both are walked and the finding names the document key
         that built the offending leaf.
         """
-        document = square(
-            cal_loads={"ambient": {"t_load": {"value": 300.0, "unit": "K"}}})
+        document = square(cal_loads={"ambient": {"t_load": {"value": 300.0, "unit": "K"}}})
         document = preflight_document(
-            observation={**BASE_OBSERVATION, "time": SQUARE_TIME,
-                         "switching": TWO},
+            observation={**BASE_OBSERVATION, "time": SQUARE_TIME, "switching": TWO},
             model=document["model"],
-            inference={**document["inference"],
-                       "twin": {"without": ["noise"],
-                                "replace": {"cal_loads": {"t_load": AMBIGUOUS}}}})
+            inference={
+                **document["inference"],
+                "twin": {"without": ["noise"], "replace": {"cal_loads": {"t_load": AMBIGUOUS}}},
+            },
+        )
         run = built_run(document)
         assert run.inference.replaced == ("cal_loads",)
         found = built_only(document, "C9")
         assert found.where == "inference.twin.replace.cal_loads"
         assert found.message.startswith(
             "inference.twin.replace.cal_loads.t_load: this run's time and "
-            "frequency axes are both 8 long")
+            "frequency axes are both 8 long"
+        )
 
     def test_a_leaf_the_fit_twin_did_not_rebuild_is_reported_ONCE(self):
         """The de-duplication, as a property rather than as a comment.
@@ -812,8 +834,7 @@ class TestTheChecksSurviveAValueThatIsTheWrongPythonType:
     @pytest.mark.parametrize("value", HOSTILE)
     @pytest.mark.parametrize("key", ["model", "resources", "inference"])
     def test_a_hostile_section(self, payload, key, value):
-        run = dataclasses.replace(payload,
-                                  document={**payload.document, key: value})
+        run = dataclasses.replace(payload, document={**payload.document, key: value})
         assert isinstance(list(_switch_positions(run)), list)
         assert isinstance(list(_square_grid_column(run)), list)
 
@@ -822,14 +843,12 @@ class TestTheChecksSurviveAValueThatIsTheWrongPythonType:
         """The one document value C9 reads by name, to recover the label the
         twin's minted ``cal_loads_1`` id does not carry."""
         model = {**payload.document["model"], "cal_loads": value}
-        run = dataclasses.replace(payload,
-                                  document={**payload.document, "model": model})
+        run = dataclasses.replace(payload, document={**payload.document, "model": model})
         found = list(_square_grid_column(run))
         assert [one.check for one in found] == ["C9"]
         assert found[0].where.startswith("model.cal_loads")
 
-    @pytest.mark.parametrize("field", ["twin", "inference", "context",
-                                       "resources", "document"])
+    @pytest.mark.parametrize("field", ["twin", "inference", "context", "resources", "document"])
     def test_a_payload_field_that_is_not_what_it_should_be(self, payload, field):
         """A payload assembled by hand is a supported caller
         (``test_config_inflight.py`` assembles several), so neither check may
@@ -846,8 +865,7 @@ class TestTheChecksSurviveAValueThatIsTheWrongPythonType:
 
     @pytest.mark.parametrize("value", HOSTILE)
     @pytest.mark.parametrize("field", ["document", "context"])
-    def test_a_payload_field_holding_a_hostile_VALUE(self, payload, field,
-                                                     value):
+    def test_a_payload_field_holding_a_hostile_VALUE(self, payload, field, value):
         """The same sweep against the payload itself, not only its sections.
 
         Neither shape is reachable from a real document -- ``run.document`` is
@@ -861,8 +879,7 @@ class TestTheChecksSurviveAValueThatIsTheWrongPythonType:
         assert isinstance(list(_square_grid_column(run)), list)
 
     @pytest.mark.parametrize("value", HOSTILE)
-    def test_a_hostile_switch_order_or_grid_on_the_context(self, payload,
-                                                           value):
+    def test_a_hostile_switch_order_or_grid_on_the_context(self, payload, value):
         """``len(order)`` on an int and ``.shape`` on a list, guarded.
 
         B5 takes ``len()`` of ``context.switch_order`` and C9 reads
@@ -871,9 +888,8 @@ class TestTheChecksSurviveAValueThatIsTheWrongPythonType:
         """
         for field in ("switch_order", "time", "freq"):
             run = dataclasses.replace(
-                payload,
-                context=dataclasses.replace(payload.context,
-                                            **{field: value}))
+                payload, context=dataclasses.replace(payload.context, **{field: value})
+            )
             assert isinstance(list(_switch_positions(run)), list)
             assert isinstance(list(_square_grid_column(run)), list)
 
@@ -903,8 +919,8 @@ class TestTheBuiltPassDoesNotEvaluateTheTwin:
         calls = []
         original = Assembly.__call__
         monkeypatch.setattr(
-            Assembly, "__call__",
-            lambda self, state: (calls.append(1), original(self, state))[1])
+            Assembly, "__call__", lambda self, state: (calls.append(1), original(self, state))[1]
+        )
         report = built(run)
         assert "C9" in report.checks()
         assert calls == []
@@ -926,21 +942,26 @@ class TestTheBuiltPassDoesNotEvaluateTheTwin:
         """
         import builtins
 
-        document = square(switching=THREE,
-                          cal_loads={"ambient": {"t_load": AMBIGUOUS},
-                                     "hot": {"t_load": AMBIGUOUS}},
-                          model={key: value for key, value in BASE_MODEL.items()
-                                 if key not in ("global_signal",
-                                                "uniform_sky")})
+        document = square(
+            switching=THREE,
+            cal_loads={"ambient": {"t_load": AMBIGUOUS}, "hot": {"t_load": AMBIGUOUS}},
+            model={
+                key: value
+                for key, value in BASE_MODEL.items()
+                if key not in ("global_signal", "uniform_sky")
+            },
+        )
         document["model"] = {
-            key: value for key, value in document["model"].items()
-            if key not in ("global_signal", "uniform_sky")}
+            key: value
+            for key, value in document["model"].items()
+            if key not in ("global_signal", "uniform_sky")
+        }
         run = built_run(document)
         opened = []
         original = builtins.open
         monkeypatch.setattr(
-            builtins, "open",
-            lambda *a, **k: (opened.append(a[0]), original(*a, **k))[1])
+            builtins, "open", lambda *a, **k: (opened.append(a[0]), original(*a, **k))[1]
+        )
         fired = built(run).checks()
         assert {"B5", "C9"} <= fired, fired
         assert opened == []

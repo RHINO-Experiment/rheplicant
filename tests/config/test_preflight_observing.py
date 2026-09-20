@@ -38,10 +38,14 @@ ORDER = ["antenna", "ambient", "hot", "noise_source"]
 
 #: The other six fields NoiseWaveOperator requires, none of which A15 reads.
 #: Bound once so a test's own noise_wave spec is nothing but the gamma halves.
-OTHER_FIELDS = {"t_unc": {"zeros": ["n_freq"]}, "t_cos": {"zeros": ["n_freq"]},
-                "t_sin": {"zeros": ["n_freq"]}, "t_rx": {"zeros": ["n_freq"]},
-                "gamma_rec_re": {"zeros": ["n_freq"]},
-                "gamma_rec_im": {"zeros": ["n_freq"]}}
+OTHER_FIELDS = {
+    "t_unc": {"zeros": ["n_freq"]},
+    "t_cos": {"zeros": ["n_freq"]},
+    "t_sin": {"zeros": ["n_freq"]},
+    "t_rx": {"zeros": ["n_freq"]},
+    "gamma_rec_re": {"zeros": ["n_freq"]},
+    "gamma_rec_im": {"zeros": ["n_freq"]},
+}
 
 #: The class name the ``python:`` hatch relocates a noise wave with.
 NOISE_WAVE_CLASS = "rheplicant.radio:NoiseWaveOperator"
@@ -49,22 +53,26 @@ NOISE_WAVE_CLASS = "rheplicant.radio:NoiseWaveOperator"
 
 def switching(order=ORDER, **extra):
     """An observation that switches through ``order``."""
-    return {**BASE_OBSERVATION,
-            "switching": {"mode": "cycle", "order": list(order), "dwell": 4,
-                          **extra}}
+    return {
+        **BASE_OBSERVATION,
+        "switching": {"mode": "cycle", "order": list(order), "dwell": 4, **extra},
+    }
 
 
 def loads(order=ORDER):
     """``model.cal_loads`` matching ``order[1:]``, which A14 wants present."""
-    return {label: {"t_load": {"value": 300.0, "unit": "K"}}
-            for label in order[1:]}
+    return {label: {"t_load": {"value": 300.0, "unit": "K"}} for label in order[1:]}
 
 
 def noise_wave(re=None, im=None, **extra):
     """A ``model.noise_wave`` spec whose gamma halves are the test's own."""
     gamma = {"zeros": [4, 8]}
-    return {**OTHER_FIELDS, "gamma_src_re": re if re is not None else gamma,
-            "gamma_src_im": im if im is not None else gamma, **extra}
+    return {
+        **OTHER_FIELDS,
+        "gamma_src_re": re if re is not None else gamma,
+        "gamma_src_im": im if im is not None else gamma,
+        **extra,
+    }
 
 
 def ingested(order=("antenna", "internal_load", "heated_load"), **patch):
@@ -83,8 +91,12 @@ def ingested(order=("antenna", "internal_load", "heated_load"), **patch):
     """
     document = preflight_document(**patch)
     document["observation"] = {
-        "from_file": {"format": "rhino_hdf5", "path": "obs.hd5f",
-                      "freq_unit": "MHz", "settle_seconds": 0.0},
+        "from_file": {
+            "format": "rhino_hdf5",
+            "path": "obs.hd5f",
+            "freq_unit": "MHz",
+            "settle_seconds": 0.0,
+        },
         "switching": {"order": list(order)},
     }
     return document
@@ -102,8 +114,14 @@ def pipeline_document(**patch):
     document = preflight_document(**patch)
     document["model"] = {
         "kind": "pipeline",
-        "stages": [{"name": "gain", "type": "GainOperator",
-                    "gain": {"value": 1.1, "unit": "dimensionless"}}]}
+        "stages": [
+            {
+                "name": "gain",
+                "type": "GainOperator",
+                "gain": {"value": 1.1, "unit": "dimensionless"},
+            }
+        ],
+    }
     return document
 
 
@@ -158,8 +176,9 @@ class TestA14AnOrderWithNoLoadsBehindIt:
         """Kills a check that fires on the presence of an order rather than on
         the absence of the loads -- which would refuse every switching
         document in the repository."""
-        doc = preflight_document(observation=switching(),
-                                 model={**BASE_MODEL, "cal_loads": loads()})
+        doc = preflight_document(
+            observation=switching(), model={**BASE_MODEL, "cal_loads": loads()}
+        )
         assert list(_switch_order(doc)) == []
 
     def test_cal_loads_declared_with_the_wrong_shape_still_stands_down(self):
@@ -170,8 +189,7 @@ class TestA14AnOrderWithNoLoadsBehindIt:
         Mapping)``, which would tell this reader to declare a key they have
         declared while a better sentence about it is already queued.
         """
-        doc = preflight_document(observation=switching(),
-                                 model={**BASE_MODEL, "cal_loads": 3})
+        doc = preflight_document(observation=switching(), model={**BASE_MODEL, "cal_loads": 3})
         assert list(_switch_order(doc)) == []
 
     def test_a_relocated_cal_load_is_a_placement_and_not_a_key(self):
@@ -188,17 +206,21 @@ class TestA14AnOrderWithNoLoadsBehindIt:
         """
         doc = preflight_document(
             observation=switching(),
-            model={**BASE_MODEL,
-                   "bandpass": {"python": "rheplicant.radio:CalLoadOperator",
-                                "t_load": {"value": 300.0, "unit": "K"}}})
+            model={
+                **BASE_MODEL,
+                "bandpass": {
+                    "python": "rheplicant.radio:CalLoadOperator",
+                    "t_load": {"value": 300.0, "unit": "K"},
+                },
+            },
+        )
         assert list(_switch_order(doc)) == []
 
     def test_mode_none_declares_no_order_and_is_not_refused(self):
         """Kills a check that reads `order` without reading `mode`: a document
         may carry `switching: {mode: none, order: [...]}`-shaped leftovers, and
         `check_unknown_keys` (switching.py::compile_switching) is what refuses those."""
-        doc = preflight_document(observation={**BASE_OBSERVATION,
-                                              "switching": {"mode": "none"}})
+        doc = preflight_document(observation={**BASE_OBSERVATION, "switching": {"mode": "none"}})
         assert list(_switch_order(doc)) == []
 
     def test_no_switching_section_at_all_is_not_refused(self):
@@ -212,11 +234,20 @@ class TestA14AnOrderWithNoLoadsBehindIt:
         Kills a check that re-derives the acceptance test and reports a second,
         differently-worded refusal for a document that already has a right one.
         """
-        for order in ([], ["antenna"], ["ambient", "hot"],
-                      ["antenna", "hot", "hot"], "antenna,hot", [1, 2]):
-            doc = preflight_document(observation={
-                **BASE_OBSERVATION,
-                "switching": {"mode": "cycle", "order": order, "dwell": 4}})
+        for order in (
+            [],
+            ["antenna"],
+            ["ambient", "hot"],
+            ["antenna", "hot", "hot"],
+            "antenna,hot",
+            [1, 2],
+        ):
+            doc = preflight_document(
+                observation={
+                    **BASE_OBSERVATION,
+                    "switching": {"mode": "cycle", "order": order, "dwell": 4},
+                }
+            )
             assert list(_switch_order(doc)) == [], order
 
     def test_a_key_the_mode_does_not_take_is_the_key_sweeps_own_refusal(self):
@@ -240,8 +271,7 @@ class TestA14AnOrderWithNoLoadsBehindIt:
         not something it could declare. Kills the obvious implementation,
         `"cal_loads" not in document["model"]`, which refuses a document the
         package accepts."""
-        assert list(_switch_order(pipeline_document(
-            observation=switching()))) == []
+        assert list(_switch_order(pipeline_document(observation=switching()))) == []
 
     def test_a_model_that_is_not_a_mapping_keeps_the_builds_own_sentence(self):
         """``_structural`` guarantees ``model:`` is PRESENT, never that it is a
@@ -250,8 +280,7 @@ class TestA14AnOrderWithNoLoadsBehindIt:
         fix that cannot be typed into a string. Kills a check that reads
         ``model_nodes`` (which answers ``{}`` here) without asking what the section
         is."""
-        assert list(_switch_order(preflight_document(observation=switching(),
-                                                     model="graph"))) == []
+        assert list(_switch_order(preflight_document(observation=switching(), model="graph"))) == []
 
     def test_an_ingested_run_is_not_asked_for_cal_loads(self):
         """**The false refusal this check would otherwise ship.**
@@ -292,14 +321,19 @@ class TestA15TheRowCountOnEveryPath:
 
         Kills: not shipping the check (shape 3).
         """
-        doc = preflight_document(observation=switching(),
-                                 model={**BASE_MODEL, "cal_loads": loads(),
-                                        "noise_wave": noise_wave(
-                                            {"zeros": [3, 8]},
-                                            {"zeros": [3, 8]})})
+        doc = preflight_document(
+            observation=switching(),
+            model={
+                **BASE_MODEL,
+                "cal_loads": loads(),
+                "noise_wave": noise_wave({"zeros": [3, 8]}, {"zeros": [3, 8]}),
+            },
+        )
         found = list(_gamma_rows(doc))
         assert [finding.where for finding in found] == [
-            "model.noise_wave.gamma_src_re", "model.noise_wave.gamma_src_im"]
+            "model.noise_wave.gamma_src_re",
+            "model.noise_wave.gamma_src_im",
+        ]
         assert {finding.check for finding in found} == {"A15"}
         assert {finding.severity for finding in found} == {REFUSE}
 
@@ -308,11 +342,14 @@ class TestA15TheRowCountOnEveryPath:
         message carrying "4" and "3" passes an `in` test with the two swapped,
         and then tells the reader to change the order rather than the rows.
         """
-        doc = preflight_document(observation=switching(),
-                                 model={**BASE_MODEL, "cal_loads": loads(),
-                                        "noise_wave": noise_wave(
-                                            {"zeros": [3, 8]},
-                                            {"zeros": [3, 8]})})
+        doc = preflight_document(
+            observation=switching(),
+            model={
+                **BASE_MODEL,
+                "cal_loads": loads(),
+                "noise_wave": noise_wave({"zeros": [3, 8]}, {"zeros": [3, 8]}),
+            },
+        )
         message = list(_gamma_rows(doc))[0].message
         assert "declares 4 sources" in message
         assert "declares 3 rows" in message
@@ -326,11 +363,14 @@ class TestA15TheRowCountOnEveryPath:
         the number they already wrote, and every assertion above still
         passed because they all read the `why` sentence.
         """
-        doc = preflight_document(observation=switching(),
-                                 model={**BASE_MODEL, "cal_loads": loads(),
-                                        "noise_wave": noise_wave(
-                                            {"zeros": [3, 8]},
-                                            {"zeros": [3, 8]})})
+        doc = preflight_document(
+            observation=switching(),
+            model={
+                **BASE_MODEL,
+                "cal_loads": loads(),
+                "noise_wave": noise_wave({"zeros": [3, 8]}, {"zeros": [3, 8]}),
+            },
+        )
         message = list(_gamma_rows(doc))[0].message
         assert "Write 4 rows in switch order" in message
         assert "Write 3 rows" not in message
@@ -343,11 +383,14 @@ class TestA15TheRowCountOnEveryPath:
         cannot paste, from the one sentence whose whole job is to be pasted.
         The two halves must differ, so this reads both.
         """
-        doc = preflight_document(observation=switching(),
-                                 model={**BASE_MODEL, "cal_loads": loads(),
-                                        "noise_wave": noise_wave(
-                                            {"zeros": [3, 8]},
-                                            {"zeros": [3, 8]})})
+        doc = preflight_document(
+            observation=switching(),
+            model={
+                **BASE_MODEL,
+                "cal_loads": loads(),
+                "noise_wave": noise_wave({"zeros": [3, 8]}, {"zeros": [3, 8]}),
+            },
+        )
         first, second = list(_gamma_rows(doc))
         assert "part: re}}" in first.message
         assert "part: im}}" in second.message
@@ -361,29 +404,32 @@ class TestA15TheRowCountOnEveryPath:
 
         Kills dropping the prefix, which no `in` assertion elsewhere sees.
         """
-        doc = preflight_document(observation=switching(),
-                                 model={**BASE_MODEL, "cal_loads": loads(),
-                                        "noise_wave": noise_wave(
-                                            {"zeros": [3, 8]},
-                                            {"zeros": [3, 8]})})
+        doc = preflight_document(
+            observation=switching(),
+            model={
+                **BASE_MODEL,
+                "cal_loads": loads(),
+                "noise_wave": noise_wave({"zeros": [3, 8]}, {"zeros": [3, 8]}),
+            },
+        )
         found = list(_gamma_rows(doc))
-        assert found[0].message.startswith(
-            "model.noise_wave.gamma_src_re: ")
-        assert found[1].message.startswith(
-            "model.noise_wave.gamma_src_im: ")
+        assert found[0].message.startswith("model.noise_wave.gamma_src_re: ")
+        assert found[1].message.startswith("model.noise_wave.gamma_src_im: ")
 
     def test_the_why_names_every_label_the_order_declares(self):
         """`{list(order)}` -> `{list(order[1:])}` survived: "declares 4
         sources (['ambient', 'hot', 'noise_source'])" -- four sources beside
         three labels, in the sentence whose subject is the count."""
-        doc = preflight_document(observation=switching(),
-                                 model={**BASE_MODEL, "cal_loads": loads(),
-                                        "noise_wave": noise_wave(
-                                            {"zeros": [3, 8]},
-                                            {"zeros": [3, 8]})})
+        doc = preflight_document(
+            observation=switching(),
+            model={
+                **BASE_MODEL,
+                "cal_loads": loads(),
+                "noise_wave": noise_wave({"zeros": [3, 8]}, {"zeros": [3, 8]}),
+            },
+        )
         message = list(_gamma_rows(doc))[0].message
-        assert ("declares 4 sources (['antenna', 'ambient', 'hot', "
-                "'noise_source'])") in message
+        assert ("declares 4 sources (['antenna', 'ambient', 'hot', 'noise_source'])") in message
 
     def test_too_few_rows_and_too_many_are_told_apart(self):
         """The two directions differ in what the package does, so they differ
@@ -397,12 +443,17 @@ class TestA15TheRowCountOnEveryPath:
         first. Kills a single tail written for whichever direction the author
         happened to measure.
         """
+
         def message(rows):
             spelling = {"zeros": [rows, 8]}
             doc = preflight_document(
                 observation=switching(),
-                model={**BASE_MODEL, "cal_loads": loads(),
-                       "noise_wave": noise_wave(spelling, spelling)})
+                model={
+                    **BASE_MODEL,
+                    "cal_loads": loads(),
+                    "noise_wave": noise_wave(spelling, spelling),
+                },
+            )
             return list(_gamma_rows(doc))[0].message
 
         assert "until the twin is evaluated" in message(3)
@@ -412,9 +463,10 @@ class TestA15TheRowCountOnEveryPath:
 
     def test_the_right_row_count_is_not_refused(self):
         """Kills a check that refuses whenever a literal appears."""
-        doc = preflight_document(observation=switching(),
-                                 model={**BASE_MODEL, "cal_loads": loads(),
-                                        "noise_wave": noise_wave()})
+        doc = preflight_document(
+            observation=switching(),
+            model={**BASE_MODEL, "cal_loads": loads(), "noise_wave": noise_wave()},
+        )
         assert list(_gamma_rows(doc)) == []
 
     def test_the_symbol_spelling_is_read_rather_than_refused(self):
@@ -422,10 +474,14 @@ class TestA15TheRowCountOnEveryPath:
         (4, 8) -- measured. Kills an implementation that only understands
         literal integers and refuses the spelling the schema recommends."""
         symbolic = {"zeros": ["n_source", "n_freq"]}
-        doc = preflight_document(observation=switching(),
-                                 model={**BASE_MODEL, "cal_loads": loads(),
-                                        "noise_wave": noise_wave(symbolic,
-                                                                 symbolic)})
+        doc = preflight_document(
+            observation=switching(),
+            model={
+                **BASE_MODEL,
+                "cal_loads": loads(),
+                "noise_wave": noise_wave(symbolic, symbolic),
+            },
+        )
         assert list(_gamma_rows(doc)) == []
 
     def test_n_load_is_refused_as_the_off_by_one_it_is(self):
@@ -436,33 +492,35 @@ class TestA15TheRowCountOnEveryPath:
         which is the tempting shortcut and is wrong for exactly one symbol in
         the table."""
         wrong = {"zeros": ["n_load", "n_freq"]}
-        doc = preflight_document(observation=switching(),
-                                 model={**BASE_MODEL, "cal_loads": loads(),
-                                        "noise_wave": noise_wave(wrong, wrong)})
+        doc = preflight_document(
+            observation=switching(),
+            model={**BASE_MODEL, "cal_loads": loads(), "noise_wave": noise_wave(wrong, wrong)},
+        )
         found = list(_gamma_rows(doc))
         assert len(found) == 2
         assert "declares 3 rows" in found[0].message
 
-    @pytest.mark.parametrize("spelling, rows", [
-        ({"ones": [3, 8]}, 3),
-        ({"full": {"shape": [3, 8], "value": 0.0}}, 3),
-        ({"list": [[0.0] * 8] * 3}, 3),
-        ({"stack": [{"ref": "resources.arrays.row"}] * 3}, 3),
-        ({"normal": {"shape": [3, 8],
-                     "seed": {"from": "runtime.seeds.g"}}}, 3),
-        # The OTHER draw form.  `normal` alone leaves `uniform` untested, and
-        # the two are separate branches of the same walk -- 2C's shape 4 in
-        # the form this very docstring warns about.
-        ({"uniform": {"shape": [3, 8],
-                      "seed": {"from": "runtime.seeds.g"}}}, 3),
-        # A STRING `axis:` is the noise-sigma modifier, not stack's own
-        # argument (refs.py::_ref), so the stack is still on axis 0 and its
-        # rows are still its entries -- measured, four such entries build at
-        # (4, 8).  Kills `node.get("axis", 0) == 0`, which reads 'time' as a
-        # non-zero axis and declines to count a stack it could have counted.
-        ({"stack": [{"ref": "resources.arrays.row"}] * 3, "axis": "time"}, 3),
-    ], ids=["ones", "full", "list", "stack", "normal", "uniform",
-            "stack-under-a-modifier-axis"])
+    @pytest.mark.parametrize(
+        "spelling, rows",
+        [
+            ({"ones": [3, 8]}, 3),
+            ({"full": {"shape": [3, 8], "value": 0.0}}, 3),
+            ({"list": [[0.0] * 8] * 3}, 3),
+            ({"stack": [{"ref": "resources.arrays.row"}] * 3}, 3),
+            ({"normal": {"shape": [3, 8], "seed": {"from": "runtime.seeds.g"}}}, 3),
+            # The OTHER draw form.  `normal` alone leaves `uniform` untested, and
+            # the two are separate branches of the same walk -- 2C's shape 4 in
+            # the form this very docstring warns about.
+            ({"uniform": {"shape": [3, 8], "seed": {"from": "runtime.seeds.g"}}}, 3),
+            # A STRING `axis:` is the noise-sigma modifier, not stack's own
+            # argument (refs.py::_ref), so the stack is still on axis 0 and its
+            # rows are still its entries -- measured, four such entries build at
+            # (4, 8).  Kills `node.get("axis", 0) == 0`, which reads 'time' as a
+            # non-zero axis and declines to count a stack it could have counted.
+            ({"stack": [{"ref": "resources.arrays.row"}] * 3, "axis": "time"}, 3),
+        ],
+        ids=["ones", "full", "list", "stack", "normal", "uniform", "stack-under-a-modifier-axis"],
+    )
     def test_every_countable_form_is_counted(self, spelling, rows):
         """Each of these declares three rows in its own text -- measured, one
         document per row, every one of them refused late by the switch cycle.
@@ -473,42 +531,60 @@ class TestA15TheRowCountOnEveryPath:
         check A41, and "a report that depends on which constructor the writer
         reached for is worse than no report".
         """
-        doc = preflight_document(observation=switching(),
-                                 model={**BASE_MODEL, "cal_loads": loads(),
-                                        "noise_wave": noise_wave(spelling,
-                                                                 spelling)})
+        doc = preflight_document(
+            observation=switching(),
+            model={
+                **BASE_MODEL,
+                "cal_loads": loads(),
+                "noise_wave": noise_wave(spelling, spelling),
+            },
+        )
         found = list(_gamma_rows(doc))
         assert len(found) == 2
         assert f"declares {rows} rows" in found[0].message
 
-    @pytest.mark.parametrize("spelling", [
-        {"ref": "resources.arrays.gamma"},
-        {"file": {"path": "gamma.npz", "format": "npz", "key": "g"}},
-        {"zeros": ["2 * n_source", 8]},
-        {"stack": [{"ref": "resources.arrays.row"}] * 3, "axis": 1},
-        {"from_switch_order": {"resource": "resources.s_params", "part": "re"}},
-        {"zeros": [True, 8]},
-        {"value": 0.0},
-        {"zeros": [3]},
-        {"normal": {"shape": [3, 8, 2], "seed": {"from": "runtime.seeds.g"}}},
-        {"list": []},
-        {"stack": []},
-        # `axis: true` and `axis: 0.0` DO stack on axis 0 (refs.py::_ref's
-        # `mine` test excludes them), so counting them would be arithmetically
-        # right and would still pre-empt: the modifier alphabet refuses both
-        # in their own words, and a row count in front of that names a fix
-        # that is not the fault.  `axis: 'nope'` is the same refusal from the
-        # string side.
-        {"stack": [{"ref": "resources.arrays.row"}] * 3, "axis": True},
-        {"stack": [{"ref": "resources.arrays.row"}] * 3, "axis": 0.0},
-        {"stack": [{"ref": "resources.arrays.row"}] * 3, "axis": "nope"},
-    ], ids=["ref", "file", "arithmetic-symbol", "stack-on-axis-1",
-            "from_switch_order", "bool-is-not-a-row-count", "scalar",
-            "one-dimensional", "three-dimensional", "empty-list",
-            "empty-stack", "stack-on-a-bool-axis", "stack-on-a-float-axis",
-            "stack-on-an-unknown-axis"])
-    def test_a_row_count_the_text_does_not_declare_is_left_alone(self,
-                                                                 spelling):
+    @pytest.mark.parametrize(
+        "spelling",
+        [
+            {"ref": "resources.arrays.gamma"},
+            {"file": {"path": "gamma.npz", "format": "npz", "key": "g"}},
+            {"zeros": ["2 * n_source", 8]},
+            {"stack": [{"ref": "resources.arrays.row"}] * 3, "axis": 1},
+            {"from_switch_order": {"resource": "resources.s_params", "part": "re"}},
+            {"zeros": [True, 8]},
+            {"value": 0.0},
+            {"zeros": [3]},
+            {"normal": {"shape": [3, 8, 2], "seed": {"from": "runtime.seeds.g"}}},
+            {"list": []},
+            {"stack": []},
+            # `axis: true` and `axis: 0.0` DO stack on axis 0 (refs.py::_ref's
+            # `mine` test excludes them), so counting them would be arithmetically
+            # right and would still pre-empt: the modifier alphabet refuses both
+            # in their own words, and a row count in front of that names a fix
+            # that is not the fault.  `axis: 'nope'` is the same refusal from the
+            # string side.
+            {"stack": [{"ref": "resources.arrays.row"}] * 3, "axis": True},
+            {"stack": [{"ref": "resources.arrays.row"}] * 3, "axis": 0.0},
+            {"stack": [{"ref": "resources.arrays.row"}] * 3, "axis": "nope"},
+        ],
+        ids=[
+            "ref",
+            "file",
+            "arithmetic-symbol",
+            "stack-on-axis-1",
+            "from_switch_order",
+            "bool-is-not-a-row-count",
+            "scalar",
+            "one-dimensional",
+            "three-dimensional",
+            "empty-list",
+            "empty-stack",
+            "stack-on-a-bool-axis",
+            "stack-on-a-float-axis",
+            "stack-on-an-unknown-axis",
+        ],
+    )
+    def test_a_row_count_the_text_does_not_declare_is_left_alone(self, spelling):
         """The boundary of Plan 3A, as a test rather than a sentence.
 
         Kills a check that reaches for `shape[0]` on anything shaped like a
@@ -526,10 +602,14 @@ class TestA15TheRowCountOnEveryPath:
         `not isinstance(x, bool)` half of the guard is what this cell defends,
         and nothing else here reaches it.
         """
-        doc = preflight_document(observation=switching(),
-                                 model={**BASE_MODEL, "cal_loads": loads(),
-                                        "noise_wave": noise_wave(spelling,
-                                                                 spelling)})
+        doc = preflight_document(
+            observation=switching(),
+            model={
+                **BASE_MODEL,
+                "cal_loads": loads(),
+                "noise_wave": noise_wave(spelling, spelling),
+            },
+        )
         assert list(_gamma_rows(doc)) == []
 
     def test_a_malformed_order_produces_no_row_count_refusal(self):
@@ -551,20 +631,24 @@ class TestA15TheRowCountOnEveryPath:
         or none at all, so none of them can see it.
         """
         countable = {"zeros": [3, 8]}
-        for bad in (["hot", "ambient"], ["antenna", "hot", "hot"],
-                    "antenna,hot", [1, 2]):
+        for bad in (["hot", "ambient"], ["antenna", "hot", "hot"], "antenna,hot", [1, 2]):
             doc = preflight_document(
-                observation={**BASE_OBSERVATION,
-                             "switching": {"mode": "cycle", "order": bad,
-                                           "dwell": 4}},
-                model={**BASE_MODEL, "cal_loads": loads(),
-                       "noise_wave": noise_wave(countable, countable)})
+                observation={
+                    **BASE_OBSERVATION,
+                    "switching": {"mode": "cycle", "order": bad, "dwell": 4},
+                },
+                model={
+                    **BASE_MODEL,
+                    "cal_loads": loads(),
+                    "noise_wave": noise_wave(countable, countable),
+                },
+            )
             assert list(_gamma_rows(doc)) == [], bad
         # ...and the `()` half still decides, or the guard above is just a
         # switched-off check.
         no_switching = preflight_document(
-            model={**BASE_MODEL,
-                   "noise_wave": noise_wave(countable, countable)})
+            model={**BASE_MODEL, "noise_wave": noise_wave(countable, countable)}
+        )
         assert len(list(_gamma_rows(no_switching))) == 2
 
     def test_each_half_is_checked_on_its_own(self):
@@ -577,12 +661,14 @@ class TestA15TheRowCountOnEveryPath:
         """
         doc = preflight_document(
             observation=switching(),
-            model={**BASE_MODEL, "cal_loads": loads(),
-                   "noise_wave": noise_wave({"ref": "resources.arrays.gamma"},
-                                            {"zeros": [3, 8]})})
+            model={
+                **BASE_MODEL,
+                "cal_loads": loads(),
+                "noise_wave": noise_wave({"ref": "resources.arrays.gamma"}, {"zeros": [3, 8]}),
+            },
+        )
         found = list(_gamma_rows(doc))
-        assert [finding.where for finding in found] == [
-            "model.noise_wave.gamma_src_im"]
+        assert [finding.where for finding in found] == ["model.noise_wave.gamma_src_im"]
 
     def test_the_replacement_twin_is_checked_too(self):
         """Measured: `inference.twin.replace.noise_wave` with three rows under
@@ -594,15 +680,18 @@ class TestA15TheRowCountOnEveryPath:
         reader is least likely to think of."""
         doc = preflight_document(
             observation=switching(),
-            model={**BASE_MODEL, "cal_loads": loads(),
-                   "noise_wave": noise_wave()},
-            inference={"twin": {"replace": {
-                "noise_wave": noise_wave({"zeros": [3, 8]},
-                                         {"zeros": [3, 8]})}}})
+            model={**BASE_MODEL, "cal_loads": loads(), "noise_wave": noise_wave()},
+            inference={
+                "twin": {
+                    "replace": {"noise_wave": noise_wave({"zeros": [3, 8]}, {"zeros": [3, 8]})}
+                }
+            },
+        )
         found = list(_gamma_rows(doc))
         assert [finding.where for finding in found] == [
             "inference.twin.replace.noise_wave.gamma_src_re",
-            "inference.twin.replace.noise_wave.gamma_src_im"]
+            "inference.twin.replace.noise_wave.gamma_src_im",
+        ]
 
     def test_a_pipeline_model_gets_no_row_count_for_its_twin_block(self):
         """**A14's own stand-down, which A15 was missing.**
@@ -622,9 +711,12 @@ class TestA15TheRowCountOnEveryPath:
         """
         doc = pipeline_document(
             observation=switching(),
-            inference={"twin": {"replace": {
-                "noise_wave": noise_wave({"zeros": [3, 8]},
-                                         {"zeros": [3, 8]})}}})
+            inference={
+                "twin": {
+                    "replace": {"noise_wave": noise_wave({"zeros": [3, 8]}, {"zeros": [3, 8]})}
+                }
+            },
+        )
         assert list(_gamma_rows(doc)) == []
 
     def test_a_noise_wave_key_holding_another_class_is_not_asked(self):
@@ -644,12 +736,17 @@ class TestA15TheRowCountOnEveryPath:
         """
         doc = preflight_document(
             observation=switching(),
-            model={**BASE_MODEL, "cal_loads": loads(),
-                   "noise_wave": {"type": "GainOperator",
-                                  "gain": {"value": 1.1,
-                                           "unit": "dimensionless"},
-                                  "gamma_src_re": {"zeros": [3, 8]},
-                                  "gamma_src_im": {"zeros": [3, 8]}}})
+            model={
+                **BASE_MODEL,
+                "cal_loads": loads(),
+                "noise_wave": {
+                    "type": "GainOperator",
+                    "gain": {"value": 1.1, "unit": "dimensionless"},
+                    "gamma_src_re": {"zeros": [3, 8]},
+                    "gamma_src_im": {"zeros": [3, 8]},
+                },
+            },
+        )
         assert list(_gamma_rows(doc)) == []
 
     def test_the_twin_half_reads_its_key_the_way_the_model_half_does(self):
@@ -672,19 +769,21 @@ class TestA15TheRowCountOnEveryPath:
         gate, which would emit a ``where`` the path grammar cannot spell and
         take the whole pass down from outside its own ``try``.
         """
-        wrong = noise_wave({"zeros": [3, 8]}, {"zeros": [3, 8]},
-                           python=NOISE_WAVE_CLASS)
+        wrong = noise_wave({"zeros": [3, 8]}, {"zeros": [3, 8]}, python=NOISE_WAVE_CLASS)
         doc = preflight_document(
             observation=switching(),
             model={**BASE_MODEL, "cal_loads": loads()},
-            inference={"twin": {"replace": {"bandpass": wrong}}})
+            inference={"twin": {"replace": {"bandpass": wrong}}},
+        )
         assert [finding.where for finding in _gamma_rows(doc)] == [
             "inference.twin.replace.bandpass.gamma_src_re",
-            "inference.twin.replace.bandpass.gamma_src_im"]
+            "inference.twin.replace.bandpass.gamma_src_im",
+        ]
         unspellable = preflight_document(
             observation=switching(),
             model={**BASE_MODEL, "cal_loads": loads()},
-            inference={"twin": {"replace": {"not-a-node": wrong}}})
+            inference={"twin": {"replace": {"not-a-node": wrong}}},
+        )
         assert list(_gamma_rows(unspellable)) == []
 
     def test_a_relocated_noise_wave_is_checked_where_it_lands(self):
@@ -700,15 +799,19 @@ class TestA15TheRowCountOnEveryPath:
         wrong = {"zeros": [3, 8]}
         doc = preflight_document(
             observation=switching(),
-            model={**BASE_MODEL, "cal_loads": loads(),
-                   "bandpass": noise_wave(wrong, wrong,
-                                          python=NOISE_WAVE_CLASS)})
+            model={
+                **BASE_MODEL,
+                "cal_loads": loads(),
+                "bandpass": noise_wave(wrong, wrong, python=NOISE_WAVE_CLASS),
+            },
+        )
         found = list(_gamma_rows(doc))
         assert [finding.where for finding in found] == [
-            "model.bandpass.gamma_src_re", "model.bandpass.gamma_src_im"]
+            "model.bandpass.gamma_src_re",
+            "model.bandpass.gamma_src_im",
+        ]
 
-    @pytest.mark.parametrize("rows, refusals", [(3, 0), (2, 2)],
-                             ids=["right", "wrong"])
+    @pytest.mark.parametrize("rows, refusals", [(3, 0), (2, 2)], ids=["right", "wrong"])
     def test_an_ingested_order_counts_the_same_way(self, rows, refusals):
         """**The grammar the plan's own reader gets wrong**, and the only test
         that can see it.
@@ -729,9 +832,11 @@ class TestA15TheRowCountOnEveryPath:
         two readers.
         """
         spelling = {"zeros": [rows, 8]}
-        found = list(_gamma_rows(ingested(
-            model={**BASE_MODEL, "noise_wave": noise_wave(spelling,
-                                                          spelling)})))
+        found = list(
+            _gamma_rows(
+                ingested(model={**BASE_MODEL, "noise_wave": noise_wave(spelling, spelling)})
+            )
+        )
         assert len(found) == refusals
         for finding in found:
             assert "declares 3 sources" in finding.message
@@ -749,9 +854,15 @@ class TestA15TheRowCountOnEveryPath:
         """
         doc = preflight_document(
             observation=switching(),
-            model={**BASE_MODEL, "cal_loads": loads(),
-                   "gain": {"gain": {"value": 1.1, "unit": "dimensionless"},
-                            "gamma_src_re": {"zeros": [3, 8]}}})
+            model={
+                **BASE_MODEL,
+                "cal_loads": loads(),
+                "gain": {
+                    "gain": {"value": 1.1, "unit": "dimensionless"},
+                    "gamma_src_re": {"zeros": [3, 8]},
+                },
+            },
+        )
         assert list(_gamma_rows(doc)) == []
 
 
@@ -762,10 +873,9 @@ class TestSection415ModeNoneIsTheSameRule:
         the beam. Kills an implementation that computes the expected count as
         `len(order)`, which is ZERO here and would refuse the correct one-row
         document while accepting this one."""
-        doc = preflight_document(model={**BASE_MODEL,
-                                        "noise_wave": noise_wave(
-                                            {"zeros": [3, 8]},
-                                            {"zeros": [3, 8]})})
+        doc = preflight_document(
+            model={**BASE_MODEL, "noise_wave": noise_wave({"zeros": [3, 8]}, {"zeros": [3, 8]})}
+        )
         found = list(_gamma_rows(doc))
         assert len(found) == 2
         assert "exactly one source" in found[0].message
@@ -774,8 +884,7 @@ class TestSection415ModeNoneIsTheSameRule:
         """The correct document, which loads and runs. Kills an off-by-one in
         the other direction."""
         one = {"zeros": [1, 8]}
-        doc = preflight_document(model={**BASE_MODEL,
-                                        "noise_wave": noise_wave(one, one)})
+        doc = preflight_document(model={**BASE_MODEL, "noise_wave": noise_wave(one, one)})
         assert list(_gamma_rows(doc)) == []
 
     def test_the_mode_none_finding_is_still_check_a15(self):
@@ -783,10 +892,9 @@ class TestSection415ModeNoneIsTheSameRule:
         property at n_source == 1, so it carries A15's id and cites §4.1.5 in
         the message. Kills a later edit that gives it `check=""`, which would
         drop it out of `Report.checks()` and out of the docs table."""
-        doc = preflight_document(model={**BASE_MODEL,
-                                        "noise_wave": noise_wave(
-                                            {"zeros": [3, 8]},
-                                            {"zeros": [3, 8]})})
+        doc = preflight_document(
+            model={**BASE_MODEL, "noise_wave": noise_wave({"zeros": [3, 8]}, {"zeros": [3, 8]})}
+        )
         found = list(_gamma_rows(doc))
         assert {finding.check for finding in found} == {"A15"}
         assert "§4.1.5" in found[0].message
@@ -803,10 +911,9 @@ class TestSection415ModeNoneIsTheSameRule:
         ``NoiseWaveOperator._source_index``, which refuses at call time
         because ``coords.extra['receiver_input']`` is absent.
         """
-        doc = preflight_document(model={**BASE_MODEL,
-                                        "noise_wave": noise_wave(
-                                            {"zeros": [3, 8]},
-                                            {"zeros": [3, 8]})})
+        doc = preflight_document(
+            model={**BASE_MODEL, "noise_wave": noise_wave({"zeros": [3, 8]}, {"zeros": [3, 8]})}
+        )
         message = list(_gamma_rows(doc))[0].message
         assert "no switch index to choose a row with" in message
         assert "never used" not in message
@@ -817,13 +924,13 @@ class TestSection415ModeNoneIsTheSameRule:
         switching." survived: only the "§4.1.5" substring was pinned, so the
         gloss that says what mode: none MEANS and the mode: cycle alternative
         could both vanish silently."""
-        doc = preflight_document(model={**BASE_MODEL,
-                                        "noise_wave": noise_wave(
-                                            {"zeros": [3, 8]},
-                                            {"zeros": [3, 8]})})
+        doc = preflight_document(
+            model={**BASE_MODEL, "noise_wave": noise_wave({"zeros": [3, 8]}, {"zeros": [3, 8]})}
+        )
         message = list(_gamma_rows(doc))[0].message
-        assert ("schema §4.1.5: mode: none means no cal_loads and a single "
-                "gamma_src row") in message
+        assert (
+            "schema §4.1.5: mode: none means no cal_loads and a single gamma_src row"
+        ) in message
         assert "switching: {mode: cycle, order: [antenna, ...]}" in message
 
     def test_every_a15_finding_carries_its_check_tag(self):
@@ -831,11 +938,14 @@ class TestSection415ModeNoneIsTheSameRule:
         applied to a check with a fork in it). Kills a tag appended to the
         switching branch alone."""
         for observation in (switching(), BASE_OBSERVATION):
-            doc = preflight_document(observation=observation,
-                                     model={**BASE_MODEL, "cal_loads": loads(),
-                                            "noise_wave": noise_wave(
-                                                {"zeros": [7, 8]},
-                                                {"zeros": [7, 8]})})
+            doc = preflight_document(
+                observation=observation,
+                model={
+                    **BASE_MODEL,
+                    "cal_loads": loads(),
+                    "noise_wave": noise_wave({"zeros": [7, 8]}, {"zeros": [7, 8]}),
+                },
+            )
             found = list(_gamma_rows(doc))
             assert found, observation is switching()
             for finding in found:
@@ -848,56 +958,92 @@ class TestNeitherCheckCanTakeThePassDown:
     ``KeyError`` becomes "check RAISED" and discards every other finding.
     """
 
-    @pytest.mark.parametrize("patch", [
-        {"observation": 3},
-        {"observation": {**BASE_OBSERVATION, "switching": 3}},
-        {"observation": {**BASE_OBSERVATION, "switching": {"mode": []}}},
-        {"observation": {**BASE_OBSERVATION,
-                         "switching": {"mode": "cycle", "order": ORDER,
-                                       "nope": 1}}},
-        {"model": 3},
-        {"model": {"kind": []}},
-        {"observation": switching(), "model": {**BASE_MODEL,
-                                               "noise_wave": 3}},
-        {"observation": switching(),
-         "model": {**BASE_MODEL, "noise_wave": [1, 2]}},
-        {"observation": switching(),
-         "model": {**BASE_MODEL,
-                   "noise_wave": {"gamma_src_re": 3, "gamma_src_im": []}}},
-        {"observation": switching(),
-         "model": {**BASE_MODEL,
-                   "noise_wave": {"gamma_src_re": {"zeros": 3},
-                                  "gamma_src_im": {"zeros": []}}}},
-        {"observation": switching(),
-         "model": {**BASE_MODEL,
-                   "noise_wave": {"gamma_src_re": {"zeros": [{}, 8]},
-                                  "gamma_src_im": {"list": "rows"}}}},
-        {"observation": switching(),
-         "model": {**BASE_MODEL,
-                   "noise_wave": {"full": 3, "normal": {"shape": 3},
-                                  "stack": {}}}},
-        {"inference": 3},
-        {"inference": {"twin": 3}},
-        {"inference": {"twin": {"replace": 3}}},
-        {"inference": {"twin": {"replace": {"noise_wave": 3}}}},
-        {"inference": {"twin": {"replace": {"noise_wave": []}}}},
-        # A key the path grammar cannot spell, on both routes: without the
-        # graph-node gate these reach `_check_where`, which raises OUTSIDE
-        # the per-check `try` and takes the whole pass down.
-        {"observation": switching(),
-         "model": {**BASE_MODEL,
-                   "bad-key": {"python": NOISE_WAVE_CLASS,
-                               "gamma_src_re": {"zeros": [3, 8]},
-                               "gamma_src_im": {"zeros": [3, 8]}}}},
-        {"observation": switching(),
-         "inference": {"twin": {"replace": {
-             "bad-key": {"python": NOISE_WAVE_CLASS,
-                         "gamma_src_re": {"zeros": [3, 8]},
-                         "gamma_src_im": {"zeros": [3, 8]}}}}}},
-        {"observation": switching(),
-         "model": {**BASE_MODEL, "noise_wave": {"type": [], "gamma_src_re":
-                                                {"zeros": [3, 8]}}}},
-    ])
+    @pytest.mark.parametrize(
+        "patch",
+        [
+            {"observation": 3},
+            {"observation": {**BASE_OBSERVATION, "switching": 3}},
+            {"observation": {**BASE_OBSERVATION, "switching": {"mode": []}}},
+            {
+                "observation": {
+                    **BASE_OBSERVATION,
+                    "switching": {"mode": "cycle", "order": ORDER, "nope": 1},
+                }
+            },
+            {"model": 3},
+            {"model": {"kind": []}},
+            {"observation": switching(), "model": {**BASE_MODEL, "noise_wave": 3}},
+            {"observation": switching(), "model": {**BASE_MODEL, "noise_wave": [1, 2]}},
+            {
+                "observation": switching(),
+                "model": {**BASE_MODEL, "noise_wave": {"gamma_src_re": 3, "gamma_src_im": []}},
+            },
+            {
+                "observation": switching(),
+                "model": {
+                    **BASE_MODEL,
+                    "noise_wave": {"gamma_src_re": {"zeros": 3}, "gamma_src_im": {"zeros": []}},
+                },
+            },
+            {
+                "observation": switching(),
+                "model": {
+                    **BASE_MODEL,
+                    "noise_wave": {
+                        "gamma_src_re": {"zeros": [{}, 8]},
+                        "gamma_src_im": {"list": "rows"},
+                    },
+                },
+            },
+            {
+                "observation": switching(),
+                "model": {
+                    **BASE_MODEL,
+                    "noise_wave": {"full": 3, "normal": {"shape": 3}, "stack": {}},
+                },
+            },
+            {"inference": 3},
+            {"inference": {"twin": 3}},
+            {"inference": {"twin": {"replace": 3}}},
+            {"inference": {"twin": {"replace": {"noise_wave": 3}}}},
+            {"inference": {"twin": {"replace": {"noise_wave": []}}}},
+            # A key the path grammar cannot spell, on both routes: without the
+            # graph-node gate these reach `_check_where`, which raises OUTSIDE
+            # the per-check `try` and takes the whole pass down.
+            {
+                "observation": switching(),
+                "model": {
+                    **BASE_MODEL,
+                    "bad-key": {
+                        "python": NOISE_WAVE_CLASS,
+                        "gamma_src_re": {"zeros": [3, 8]},
+                        "gamma_src_im": {"zeros": [3, 8]},
+                    },
+                },
+            },
+            {
+                "observation": switching(),
+                "inference": {
+                    "twin": {
+                        "replace": {
+                            "bad-key": {
+                                "python": NOISE_WAVE_CLASS,
+                                "gamma_src_re": {"zeros": [3, 8]},
+                                "gamma_src_im": {"zeros": [3, 8]},
+                            }
+                        }
+                    }
+                },
+            },
+            {
+                "observation": switching(),
+                "model": {
+                    **BASE_MODEL,
+                    "noise_wave": {"type": [], "gamma_src_re": {"zeros": [3, 8]}},
+                },
+            },
+        ],
+    )
     def test_a_hostile_shape_reports_rather_than_raises(self, patch):
         """Kills every ``document["x"]``, ``spec[key]`` and ``shape[0]``
         written without asking what it is holding. The assertion is that the
@@ -915,18 +1061,19 @@ class TestNeitherCheckCanTakeThePassDown:
         is what tests them; calling the functions directly never reaches it.
         """
         wrong = {"zeros": [3, 8]}
-        report = preflight(preflight_document(
-            observation=switching(),
-            model={**BASE_MODEL,
-                   "bandpass": noise_wave(wrong, wrong,
-                                          python=NOISE_WAVE_CLASS)},
-            inference={"twin": {"replace": {
-                "noise_wave": noise_wave(wrong, wrong)}}}))
+        report = preflight(
+            preflight_document(
+                observation=switching(),
+                model={**BASE_MODEL, "bandpass": noise_wave(wrong, wrong, python=NOISE_WAVE_CLASS)},
+                inference={"twin": {"replace": {"noise_wave": noise_wave(wrong, wrong)}}},
+            )
+        )
         assert {"A14", "A15"} <= report.checks()
         assert {finding.where for finding in report.refusals()} >= {
             "model.cal_loads",
             "model.bandpass.gamma_src_re",
-            "inference.twin.replace.noise_wave.gamma_src_im"}
+            "inference.twin.replace.noise_wave.gamma_src_im",
+        }
 
 
 class TestBothChecksReachThePass:
@@ -942,11 +1089,10 @@ class TestBothChecksReachThePass:
         the user two round trips. Kills a check that raises instead of
         returning findings, which would abort the pass and hide the second.
         """
-        doc = preflight_document(observation=switching(),
-                                 model={**BASE_MODEL,
-                                        "noise_wave": noise_wave(
-                                            {"zeros": [3, 8]},
-                                            {"zeros": [3, 8]})})
+        doc = preflight_document(
+            observation=switching(),
+            model={**BASE_MODEL, "noise_wave": noise_wave({"zeros": [3, 8]}, {"zeros": [3, 8]})},
+        )
         report = preflight(doc)
         assert {"A14", "A15"} <= report.checks()
 
@@ -966,8 +1112,7 @@ class TestBothChecksReachThePass:
         from rheplicant.config.document import load_document
         from rheplicant.config.errors import ConfigError
 
-        document = preflight_document(observation=switching(),
-                                      resources=UNREADABLE_BEAM)
+        document = preflight_document(observation=switching(), resources=UNREADABLE_BEAM)
         with pytest.raises(ConfigError) as caught:
             load_document(document)
         assert "check A14" in str(caught.value)
@@ -985,9 +1130,9 @@ class TestBothChecksReachThePass:
         wrong = {"zeros": [3, 8]}
         document = preflight_document(
             observation=switching(),
-            model={**BASE_MODEL, "cal_loads": loads(),
-                   "noise_wave": noise_wave(wrong, wrong)},
-            resources=UNREADABLE_BEAM)
+            model={**BASE_MODEL, "cal_loads": loads(), "noise_wave": noise_wave(wrong, wrong)},
+            resources=UNREADABLE_BEAM,
+        )
         with pytest.raises(ConfigError) as caught:
             load_document(document)
         assert "check A15" in str(caught.value)
@@ -1013,9 +1158,11 @@ def _relocated_load(target):
     """
     return preflight_document(
         observation=switching(),
-        model={**BASE_MODEL,
-               "bandpass": {"python": target,
-                            "t_load": {"value": 300.0, "unit": "K"}}})
+        model={
+            **BASE_MODEL,
+            "bandpass": {"python": target, "t_load": {"value": 300.0, "unit": "K"}},
+        },
+    )
 
 
 class TestTheLoadThePassCouldNotSee:
@@ -1045,8 +1192,9 @@ class TestTheLoadThePassCouldNotSee:
         The document differs in one field -- the class named -- and
         ``GainOperator`` lands at ``gain``, not at ``cal_loads``.
         """
-        found = list(_switch_order(
-            _relocated_load("rheplicant.radio.instrument.gain:GainOperator")))
+        found = list(
+            _switch_order(_relocated_load("rheplicant.radio.instrument.gain:GainOperator"))
+        )
         assert [one.check for one in found] == ["A14"]
 
     def test_a_class_this_pass_cannot_name_stands_the_check_down(self):
@@ -1076,8 +1224,7 @@ class TestTheLoadThePassCouldNotSee:
         from rheplicant.config.document import load_document
         from rheplicant.config.errors import ConfigError
 
-        document = {**_relocated_load(LOAD_BY_MODULE),
-                    "resources": UNREADABLE_BEAM}
+        document = {**_relocated_load(LOAD_BY_MODULE), "resources": UNREADABLE_BEAM}
         with pytest.raises(ConfigError) as caught:
             load_document(document)
         assert "no_such_beam" in str(caught.value)
@@ -1100,9 +1247,11 @@ class TestA14AndA15AreNotAClosedLoop:
     def _document(self, order=("antenna", "ambient"), rows=2):
         return preflight_document(
             observation=switching(order=list(order)),
-            model={**BASE_MODEL,
-                   "noise_wave": noise_wave({"zeros": [rows, 8]},
-                                            {"zeros": [rows, 8]})})
+            model={
+                **BASE_MODEL,
+                "noise_wave": noise_wave({"zeros": [rows, 8]}, {"zeros": [rows, 8]}),
+            },
+        )
 
     def test_the_loop_closed_before_the_fix(self):
         """The measurement itself, kept as a test: the two documents the two
@@ -1114,9 +1263,7 @@ class TestA14AndA15AreNotAClosedLoop:
         subject.
         """
         step0 = self._document()
-        step1 = {**step0,
-                 "observation": {**step0["observation"],
-                                 "switching": {"mode": "none"}}}
+        step1 = {**step0, "observation": {**step0["observation"], "switching": {"mode": "none"}}}
         step2 = {**step1, "observation": step0["observation"]}
         assert "A14" in preflight(step0).checks()
         assert "A15" in preflight(step1).checks()
@@ -1137,7 +1284,8 @@ class TestA14AndA15AreNotAClosedLoop:
             "'model.noise_wave.gamma_src_re'] to a single row each -- mode: "
             "none is one source, and check A15 refuses any other gamma_src "
             "row count under it, so dropping the order alone trades this "
-            "refusal for that one (check A14).")
+            "refusal for that one (check A14)."
+        )
 
     def test_following_the_whole_remedy_clears_both_checks(self):
         """The loop, exited.  Kills a clause that names the coupled edit and
@@ -1145,11 +1293,8 @@ class TestA14AndA15AreNotAClosedLoop:
         step0 = self._document()
         followed = {
             **step0,
-            "observation": {**step0["observation"],
-                            "switching": {"mode": "none"}},
-            "model": {**BASE_MODEL,
-                      "noise_wave": noise_wave({"zeros": [1, 8]},
-                                               {"zeros": [1, 8]})},
+            "observation": {**step0["observation"], "switching": {"mode": "none"}},
+            "model": {**BASE_MODEL, "noise_wave": noise_wave({"zeros": [1, 8]}, {"zeros": [1, 8]})},
         }
         assert not {"A14", "A15"} & preflight(followed).checks()
 
@@ -1165,10 +1310,13 @@ class TestA14AndA15AreNotAClosedLoop:
         """
         document = preflight_document(
             observation=switching(order=["antenna", "ambient"]),
-            model={**BASE_MODEL,
-                   "noise_wave": noise_wave({"zeros": ["n_source", 8]},
-                                            {"zeros": ["n_source", 8]})})
+            model={
+                **BASE_MODEL,
+                "noise_wave": noise_wave({"zeros": ["n_source", 8]}, {"zeros": ["n_source", 8]}),
+            },
+        )
         found = list(_switch_order(document))
         assert found[0].message.endswith(
             "Declare model.cal_loads with the keys ['ambient'] in that order, "
-            "or write switching: {mode: none} (check A14).")
+            "or write switching: {mode: none} (check A14)."
+        )

@@ -42,9 +42,7 @@ def bank():
 
 @pytest.fixture(scope="module")
 def scores():
-    return score_directions(
-        rhino_bank.space(), rhino_bank.pipeline(), rhino_bank.state()
-    )
+    return score_directions(rhino_bank.space(), rhino_bank.pipeline(), rhino_bank.state())
 
 
 def _svd_only(bank, n_basis=3):
@@ -135,9 +133,7 @@ def test_a_tolerance_a_good_basis_meets_does_not_fire(bank, scores):
     basis_fidelity(_seeded(bank), scores).refuse_above(0.01)
 
 
-def test_a_latent_the_prediction_does_not_respond_to_is_named_not_divided_by_zero(
-    bank, scores
-):
+def test_a_latent_the_prediction_does_not_respond_to_is_named_not_divided_by_zero(bank, scores):
     blind = {**scores, "dead": jnp.zeros((1, rhino_bank.N_FREQ))}
     report = basis_fidelity(_seeded(bank), blind)
     assert np.isnan(report.residuals["dead"])

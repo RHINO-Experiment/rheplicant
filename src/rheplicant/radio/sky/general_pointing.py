@@ -88,6 +88,7 @@ class GeneralPointingProjector(AbstractSkyProjector):
         normalize_beam: numpy limTOD's ``normalize_beam`` semantics — divide
             each sample by the rotated beam's pixel sum (static).
     """
+
     maturity: ClassVar[Maturity] = Maturity.MAINTAINED
 
     beam_alms: jax.Array
@@ -110,13 +111,11 @@ class GeneralPointingProjector(AbstractSkyProjector):
     def _validate_coords(self, coords: Coordinates) -> None:
         if coords is None or coords.pointing is None:
             raise StateValidationError(
-                "GeneralPointingProjector requires coords.pointing (n_time, 2) "
-                "az/el in degrees."
+                "GeneralPointingProjector requires coords.pointing (n_time, 2) az/el in degrees."
             )
         if coords.extra.get("lst_deg") is None:
             raise StateValidationError(
-                'GeneralPointingProjector requires coords.extra["lst_deg"] '
-                "(n_time,) in degrees."
+                'GeneralPointingProjector requires coords.extra["lst_deg"] (n_time,) in degrees.'
             )
         self._refuse_a_pointing_the_adjoint_would_silently_zero(coords)
 
@@ -230,8 +229,12 @@ class GeneralPointingProjector(AbstractSkyProjector):
         def one_freq(beam_alm, sky_map):
             sky_alm = ltj.map2alm_quad(sky_map, nside=self.nside, lmax=self.lmax)
             return ltj.generate_tod_sky(
-                beam_alm, sky_alm, angles,
-                lmax=self.lmax, normalize=self.normalize_beam, ones_alm=ones_alm,
+                beam_alm,
+                sky_alm,
+                angles,
+                lmax=self.lmax,
+                normalize=self.normalize_beam,
+                ones_alm=ones_alm,
             )
 
         return jax.vmap(one_freq)(self.beam_alms, sky).T
@@ -242,8 +245,7 @@ class GeneralPointingProjector(AbstractSkyProjector):
         n_time, n_freq = coords.pointing.shape[0], self.beam_alms.shape[0]
         if tod.ndim != 2 or tod.shape[0] != n_time or tod.shape[1] != n_freq:
             raise StateValidationError(
-                f"tod must be (n_time={n_time}, n_freq={n_freq}), "
-                f"got {tod.shape}."
+                f"tod must be (n_time={n_time}, n_freq={n_freq}), got {tod.shape}."
             )
         ltj = _limtod_jax()
         angles = self._zyz(ltj, coords)
@@ -251,8 +253,12 @@ class GeneralPointingProjector(AbstractSkyProjector):
 
         def one_freq(beam_alm, tod_t):
             alm = ltj.generate_tod_sky_adjoint(
-                tod_t, beam_alm, angles,
-                lmax=self.lmax, normalize=self.normalize_beam, ones_alm=ones_alm,
+                tod_t,
+                beam_alm,
+                angles,
+                lmax=self.lmax,
+                normalize=self.normalize_beam,
+                ones_alm=ones_alm,
             )
             return ltj.alm2map(alm, nside=self.nside, lmax=self.lmax)
 

@@ -66,7 +66,9 @@ def test_a_float32_collinear_pair_is_certified_within_a_tenth_of_a_sigma(shape, 
     sd = np.sqrt(np.diag(np.linalg.inv(precision)))
     plan, pipeline = _template_plan(eps, 3.0, exact + 20.0 * sd, dtype=jnp.float32)
     estimate = plan.estimate(
-        pipeline, _grid_state(*shape), jnp.asarray(data),
+        pipeline,
+        _grid_state(*shape),
+        jnp.asarray(data),
         noise=HomoscedasticNoise(sigma=jnp.array(TEMPLATE_SIGMA, jnp.float32)),
         max_iter=1000,
     )
@@ -92,18 +94,24 @@ def _power_law_map(freq, observed, sigma):
         power = x ** (-beta)
         residual = (data - amplitude * power) / sigma
         d_amplitude, d_beta = power, -amplitude * log_x * power
-        gradient = np.array([
-            -(residual @ d_amplitude) / sigma + (amplitude - A_PRIOR[0]) / A_PRIOR[1] ** 2,
-            -(residual @ d_beta) / sigma + (beta - BETA_PRIOR[0]) / BETA_PRIOR[1] ** 2,
-        ])
+        gradient = np.array(
+            [
+                -(residual @ d_amplitude) / sigma + (amplitude - A_PRIOR[0]) / A_PRIOR[1] ** 2,
+                -(residual @ d_beta) / sigma + (beta - BETA_PRIOR[0]) / BETA_PRIOR[1] ** 2,
+            ]
+        )
         cross = d_amplitude @ d_beta / sigma**2 + (residual @ (log_x * power)) / sigma
-        curvature = (d_beta @ d_beta / sigma**2
-                     - (residual @ (amplitude * log_x**2 * power)) / sigma
-                     + 1.0 / BETA_PRIOR[1] ** 2)
-        hessian = np.array([
-            [d_amplitude @ d_amplitude / sigma**2 + 1.0 / A_PRIOR[1] ** 2, cross],
-            [cross, curvature],
-        ])
+        curvature = (
+            d_beta @ d_beta / sigma**2
+            - (residual @ (amplitude * log_x**2 * power)) / sigma
+            + 1.0 / BETA_PRIOR[1] ** 2
+        )
+        hessian = np.array(
+            [
+                [d_amplitude @ d_amplitude / sigma**2 + 1.0 / A_PRIOR[1] ** 2, cross],
+                [cross, curvature],
+            ]
+        )
         return gradient, hessian
 
     params = np.array([A_TRUE, BETA_TRUE])
@@ -127,11 +135,9 @@ def _power_law_run(n_freq, sigma):
     def f32(value):
         return jnp.array(value, jnp.float32)
 
-    state = State(coords=Coordinates(time=jnp.arange(1.0),
-                                     freq=jnp.asarray(freq, jnp.float32)))
+    state = State(coords=Coordinates(time=jnp.arange(1.0), freq=jnp.asarray(freq, jnp.float32)))
     pipeline = Pipeline(
-        ForegroundOperator(amplitude=f32(A_TRUE), spectral_index=f32(BETA_TRUE),
-                           ref_freq=REF_FREQ),
+        ForegroundOperator(amplitude=f32(A_TRUE), spectral_index=f32(BETA_TRUE), ref_freq=REF_FREQ),
         names=("fg",),
     )
     space = ParameterSpace(
@@ -148,8 +154,11 @@ def _power_law_run(n_freq, sigma):
 
     def run():
         return plan.estimate(
-            pipeline, state, jnp.asarray(data[None, :]),
-            noise=HomoscedasticNoise(sigma=f32(sigma)), max_iter=400,
+            pipeline,
+            state,
+            jnp.asarray(data[None, :]),
+            noise=HomoscedasticNoise(sigma=f32(sigma)),
+            max_iter=400,
         )
 
     return run, exact, precision

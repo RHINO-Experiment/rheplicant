@@ -234,8 +234,7 @@ def _a10_sites(document: Mapping[str, Any]) -> list[tuple[str, Mapping]]:
     for section, block in document.items():
         if isinstance(section, str) and section != "variants":
             sites.extend(_a10_file_nodes(block, section))
-    return [(where, spec) for where, spec in sites
-            if spec.get("format") == RHINO_FORMAT]
+    return [(where, spec) for where, spec in sites if spec.get("format") == RHINO_FORMAT]
 
 
 def _a45_written_keys(document: Mapping[str, Any]) -> frozenset[str] | None:
@@ -297,8 +296,7 @@ def _a45_sites(document: Mapping[str, Any]) -> list[tuple[str, str, Any]]:
     for node_id, spec in model_nodes(document).items():
         if node_id not in graph.nodes:
             continue
-        for path, entry in _t4_entries(node_id, spec,
-                                       many=graph.nodes[node_id].many):
+        for path, entry in _t4_entries(node_id, spec, many=graph.nodes[node_id].many):
             sites.append((f"model.{path}", node_id, entry))
     model = document.get("model")
     if not isinstance(model, Mapping) or model.get("kind", "graph") != "graph":
@@ -309,8 +307,7 @@ def _a45_sites(document: Mapping[str, Any]) -> list[tuple[str, str, Any]]:
     if isinstance(replace, Mapping):
         for node_id, entry in replace.items():
             if isinstance(node_id, str) and node_id in graph.nodes:
-                sites.append((f"inference.twin.replace.{node_id}", node_id,
-                              entry))
+                sites.append((f"inference.twin.replace.{node_id}", node_id, entry))
     return sites
 
 
@@ -334,8 +331,7 @@ def _a45_carries_switch_key(cls: Any) -> bool:
     return _A45_FIELD in field_specs(cls)
 
 
-def _a46_loads(document: Mapping[str, Any]) -> tuple[list[tuple[str, str]],
-                                                  list[tuple[str, str]]]:
+def _a46_loads(document: Mapping[str, Any]) -> tuple[list[tuple[str, str]], list[tuple[str, str]]]:
     """``(model entries, twin-replace entries)`` reading the thermistor log.
 
     Each entry is ``(document path, the label: VALUE)``.  The two halves come
@@ -373,8 +369,7 @@ def _a46_loads(document: Mapping[str, Any]) -> tuple[list[tuple[str, str]],
     twin = inference.get("twin") if isinstance(inference, Mapping) else None
     replace = twin.get("replace") if isinstance(twin, Mapping) else None
     if isinstance(replace, Mapping):
-        found = labelled(f"inference.twin.replace.{_A46_NODE}",
-                         replace.get(_A46_NODE))
+        found = labelled(f"inference.twin.replace.{_A46_NODE}", replace.get(_A46_NODE))
         if found is not None:
             replace_loads.append(found)
     return model_loads, replace_loads
@@ -402,9 +397,7 @@ def _a10_in(layer: Mapping[str, Any]) -> Iterable[Finding]:
     for where, spec in _a10_sites(layer):
         problem = freq_unit_problem(spec)
         if problem is not None:
-            yield refuse(
-                "A10", longest_legal_prefix(where), f"{problem} (check A10)."
-            )
+            yield refuse("A10", longest_legal_prefix(where), f"{problem} (check A10).")
 
 
 @register("A10")
@@ -466,8 +459,7 @@ def _a45_in(layer: Mapping[str, Any]) -> Iterable[Finding]:
     for path, node_id, entry in _a45_sites(layer):
         if not isinstance(entry, Mapping) or _A45_FIELD not in entry:
             continue
-        if not _a45_carries_switch_key(_a15_declared_class(node_id, entry,
-                                                           table)):
+        if not _a45_carries_switch_key(_a15_declared_class(node_id, entry, table)):
             continue
         value = entry[_A45_FIELD]
         if not isinstance(value, str):
@@ -478,14 +470,16 @@ def _a45_in(layer: Mapping[str, Any]) -> Iterable[Finding]:
         if value in written:
             continue
         yield refuse(
-            "A45", longest_legal_prefix(f"{path}.{_A45_FIELD}"),
+            "A45",
+            longest_legal_prefix(f"{path}.{_A45_FIELD}"),
             f"{path}.{_A45_FIELD}: {value!r} is not a key this run writes "
             f"into coords.extra, so the operator has no switch index to read "
             f"-- with more than one source the twin refuses the moment it is "
             f"evaluated, and with one it silently takes the first. This run "
             f"writes {sorted(written)}; observation.extra and "
             f"observation.pointing's materialise:/lst: are where another one "
-            f"would come from (check A45).")
+            f"would come from (check A45).",
+        )
 
 
 @register("A45")
@@ -529,8 +523,7 @@ def _a46_in(layer: Mapping[str, Any]) -> Iterable[Finding]:
     if not isinstance(observation, Mapping):
         return
     from_file = observation.get("from_file")
-    if (not isinstance(from_file, Mapping)
-            or from_file.get("format") != RHINO_FORMAT):
+    if not isinstance(from_file, Mapping) or from_file.get("format") != RHINO_FORMAT:
         return
     columns = from_file.get("thermistor_columns")
     if columns is not None and not isinstance(columns, Mapping):
@@ -540,7 +533,8 @@ def _a46_in(layer: Mapping[str, Any]) -> Iterable[Finding]:
     for where, label in model_loads + replace_loads:
         if columns is None or label not in columns:
             yield refuse(
-                "A46", longest_legal_prefix(where),
+                "A46",
+                longest_legal_prefix(where),
                 f"{where}: label: {label!r} has no entry in "
                 f"observation.from_file.thermistor_columns, so this load's "
                 f"t_load is asked for a column the recording was never read "
@@ -548,7 +542,8 @@ def _a46_in(layer: Mapping[str, Any]) -> Iterable[Finding]:
                 f"no key of this document. Declare thermistor_columns with a "
                 f"column for {label!r} AND for every other switch label the "
                 f"recording visits, the antenna included -- the reader "
-                f"refuses a partial map (check A46).")
+                f"refuses a partial map (check A46).",
+            )
     if not isinstance(columns, Mapping):
         return
     shared: dict[int, set[str]] = {}
@@ -562,14 +557,16 @@ def _a46_in(layer: Mapping[str, Any]) -> Iterable[Finding]:
         if len(labels) < 2:
             continue
         yield warn(
-            "A46", f"model.{_A46_NODE}",
+            "A46",
+            f"model.{_A46_NODE}",
             f"model.{_A46_NODE}: {labels} share column {column} of "
             f"observation.from_file.thermistor_columns, so their load "
             f"operators carry one physical temperature between them and the "
             f"calibration cannot tell those loads apart. Give each load the "
             f"column its own thermistor was recorded in; a column shared "
             f"with a label no load reads -- the antenna -- is legal and the "
-            f"file's own map often forces it (check A46).")
+            f"file's own map often forces it (check A46).",
+        )
 
 
 @register("A46")

@@ -31,7 +31,7 @@ _DIRECTIONS_SHOWN: int = 3
 
 
 def _as_names(names: Any) -> tuple[str, ...]:
-    """"One or many" for latent names — careful not to explode a string.
+    """ "One or many" for latent names — careful not to explode a string.
 
     ``over="fg_beta"`` must mean one latent, not four characters. The same
     convention :class:`~rheplicant.inference.parameters.Bind` uses for its
@@ -62,9 +62,7 @@ def _bayesmith_prior(prior: "JeffreysPrior") -> Any:
     return bayesmith.JeffreysPrior(over=prior.over, rank_rtol=prior.rank_rtol)
 
 
-def _rows_in_sorted_order(
-    matrix: jax.Array, over: tuple[str, ...], values: Any
-) -> jax.Array:
+def _rows_in_sorted_order(matrix: jax.Array, over: tuple[str, ...], values: Any) -> jax.Array:
     """Permute a block matrix from ``over``'s order into ``sorted(over)``'s.
 
     D24's execution. The far side lays the block out in the order ``over``
@@ -84,9 +82,11 @@ def _rows_in_sorted_order(
     for name in over:
         spans[name] = (start, start + sizes[name])
         start += sizes[name]
-    order = jnp.concatenate(
-        [jnp.arange(*spans[name]) for name in sorted(over)]
-    ) if over else jnp.arange(0)
+    order = (
+        jnp.concatenate([jnp.arange(*spans[name]) for name in sorted(over)])
+        if over
+        else jnp.arange(0)
+    )
     return matrix[jnp.ix_(order, order)]
 
 
@@ -250,9 +250,7 @@ class JeffreysPrior(eqx.Module):
 
     # ------------------------------------------------------------ refusing --
 
-    def validate_against(
-        self, declared: Sequence[str], with_prior: Sequence[str]
-    ) -> None:
+    def validate_against(self, declared: Sequence[str], with_prior: Sequence[str]) -> None:
         """Check ``over`` against a space's latents. Raises, or returns ``None``.
 
         Called by :meth:`~rheplicant.inference.parameters.ParameterSpace.__check_init__`
@@ -420,9 +418,7 @@ class JeffreysPrior(eqx.Module):
                 "from the names that are present, which is a prior over a different "
                 "block."
             )
-        graph = graph_for_information(
-            forward, values, as_noise_model(noise_std, flags)
-        )
+        graph = graph_for_information(forward, values, as_noise_model(noise_std, flags))
         with translate("JeffreysPrior.information"):
             matrix = _bayesmith_prior(self).information(graph, values)
         # Rows come back in sorted(over) order, not over= order -- D24. The far
@@ -452,9 +448,7 @@ class JeffreysPrior(eqx.Module):
 
         Arguments are :meth:`information`'s.
         """
-        return self.half_log_determinant(
-            self.information(forward, values, noise_std, flags)
-        )
+        return self.half_log_determinant(self.information(forward, values, noise_std, flags))
 
     def half_log_determinant(self, matrix: jax.Array) -> jax.Array:
         """``0.5 * log det`` by eigendecomposition, with the rank floor applied.

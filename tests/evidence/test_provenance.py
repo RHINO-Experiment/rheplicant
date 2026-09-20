@@ -92,9 +92,7 @@ def test_a_deliberate_share_is_allowed_by_name():
     """D17's posture: legitimate double-counting is a choice made deliberately."""
     memory = BayesMemory(camp.factorization())
     memory = memory.remember(_term("n0", {"beam_map": "sha:abc"}))
-    memory = memory.remember(
-        _term("n1", {"beam_map": "sha:abc"}), shared_inputs=True
-    )
+    memory = memory.remember(_term("n1", {"beam_map": "sha:abc"}), shared_inputs=True)
     assert len(memory.archive) == 2
 
 

@@ -246,8 +246,7 @@ def _space(names):
     return ParameterSpace(
         latents=latents,
         bindings=tuple(
-            Bind(latent.name, into=lambda p, n=latent.name: getattr(p, n))
-            for latent in latents
+            Bind(latent.name, into=lambda p, n=latent.name: getattr(p, n)) for latent in latents
         ),
     )
 
@@ -285,9 +284,7 @@ def test_a_t1_term_expanding_in_a_SUBSET_is_accepted():
     assert term.latents == ("t21_depth", "index")
     memory = _memory().remember(term)
     _, values = rhino_bank.forward()
-    assert float(memory.log_likelihood(values)) == pytest.approx(
-        float(term(values)), rel=1e-12
-    )
+    assert float(memory.log_likelihood(values)) == pytest.approx(float(term(values)), rel=1e-12)
 
 
 # --------------------------------------------------------------- the shapes --
@@ -392,8 +389,7 @@ def test_the_numpyro_model_carries_the_reduced_half_too(basis):
     space = ParameterSpace(
         latents=latents,
         bindings=tuple(
-            Bind(latent.name, into=lambda p, n=latent.name: getattr(p, n))
-            for latent in latents
+            Bind(latent.name, into=lambda p, n=latent.name: getattr(p, n)) for latent in latents
         ),
     )
     memory = BayesMemory(Factorization(space))

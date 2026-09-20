@@ -164,8 +164,7 @@ def _lit(document: Mapping[str, Any]) -> frozenset[str]:
     return frozenset(lit)
 
 
-def _t4_entries(node_id: str, spec: Any, *,
-                many: bool) -> list[tuple[str, Any]]:
+def _t4_entries(node_id: str, spec: Any, *, many: bool) -> list[tuple[str, Any]]:
     """``(the document path, the spec)`` per operator a node key declares.
 
     A single node declares one; a ``many`` node declares one per list entry or
@@ -181,18 +180,15 @@ def _t4_entries(node_id: str, spec: Any, *,
     """
     if many:
         if isinstance(spec, list):
-            return [(f"{node_id}[{index}]", entry)
-                    for index, entry in enumerate(spec)]
+            return [(f"{node_id}[{index}]", entry) for index, entry in enumerate(spec)]
         if isinstance(spec, Mapping):
-            return [(f"{node_id}.{label}", entry)
-                    for label, entry in spec.items()]
+            return [(f"{node_id}.{label}", entry) for label, entry in spec.items()]
         return []
     if isinstance(spec, Mapping) and "compose" in spec:
         stages = spec.get("stages")
         if not isinstance(stages, list):
             return []
-        return [(f"{node_id}.stages[{index}]", entry)
-                for index, entry in enumerate(stages)]
+        return [(f"{node_id}.stages[{index}]", entry) for index, entry in enumerate(stages)]
     return [(node_id, spec)]
 
 
@@ -260,8 +256,7 @@ def _graph_shape(document: Mapping[str, Any]) -> Iterable[Finding]:
                 # `where` kills the pass from outside its per-check `try`.
                 # Unreachable while `cal_loads` is the only FAN node and
                 # registers one class; live the day a second one ships.
-                yield refuse("A7", longest_legal_prefix(f"model.{where}"),
-                             f"{problem} (check A7).")
+                yield refuse("A7", longest_legal_prefix(f"model.{where}"), f"{problem} (check A7).")
 
 
 @register("A32")
@@ -274,8 +269,7 @@ def _double_count(document: Mapping[str, Any]) -> Iterable[Finding]:
     section = document.get("model")
     if not isinstance(section, Mapping):
         return
-    problem = double_count_problem(
-        model_nodes(document), section.get("acknowledge_double_count"))
+    problem = double_count_problem(model_nodes(document), section.get("acknowledge_double_count"))
     if problem is not None:
         yield refuse("A32", "model", problem)
 
@@ -321,12 +315,8 @@ def _capability_level(document: Mapping[str, Any]) -> Iterable[Finding]:
     rows = node_levels(document)
     if not rows:
         return
-    placeholders = [
-        f"{row.node_id} ({row.type})" for row in at_level(rows, Maturity.PLACEHOLDER)
-    ]
-    experimental = [
-        f"{row.node_id} ({row.type})" for row in at_level(rows, Maturity.EXPERIMENTAL)
-    ]
+    placeholders = [f"{row.node_id} ({row.type})" for row in at_level(rows, Maturity.PLACEHOLDER)]
+    experimental = [f"{row.node_id} ({row.type})" for row in at_level(rows, Maturity.EXPERIMENTAL)]
     if not placeholders and not experimental:
         return
     parts = []
@@ -511,8 +501,7 @@ def _t5_radio_class(spec: Any):
     # already holds and imports nothing.  The identity test is what makes the
     # widening exact rather than a guess -- a module that binds this name to
     # something else, or does not bind it at all, is a decline.
-    return shipped if getattr(sys.modules.get(module), attribute,
-                              None) is shipped else None
+    return shipped if getattr(sys.modules.get(module), attribute, None) is shipped else None
 
 
 def _t5_claims(key: Any, spec: Any) -> tuple[str, ...]:
@@ -711,11 +700,13 @@ def _two_at_one_node(document: Mapping[str, Any]) -> Iterable[Finding]:
         occupant = node if node in keys else keys[0]
         for intruder in [key for key in keys if key != occupant]:
             yield refuse(
-                "A5", f"model.{intruder}",
+                "A5",
+                f"model.{intruder}",
                 f"model.{intruder}: puts a second operator at node {node!r}, "
                 f"which model.{occupant} already fills, and this node accepts "
                 "a single instance. "
-                f"{_a5_remedy(node, specs.get(intruder))} (check A5).")
+                f"{_a5_remedy(node, specs.get(intruder))} (check A5).",
+            )
 
 
 def _a5_remedy(node: str, spec: Any) -> str:
@@ -735,14 +726,18 @@ def _a5_remedy(node: str, spec: Any) -> str:
     required = tuple(getattr(cls, "must_precede", ()) or ())
     home = getattr(cls, "graph_node", None)
     if node not in required or not isinstance(home, str):
-        return ("Compose them under one key instead -- compose: cascade at a "
-                "transform node, compose: sum at a source node, which is how "
-                "this document spells At(...)")
-    return (f"Give it its own node, {home!r}: {cls.__name__} declares "
-            f"must_precede={list(required)}, so it has to come BEFORE the "
-            f"{node!r} operator and composing the two under {node!r} puts it "
-            f"inside the stage it is there to track -- check A8, which fires "
-            "on this same node, says what that costs")
+        return (
+            "Compose them under one key instead -- compose: cascade at a "
+            "transform node, compose: sum at a source node, which is how "
+            "this document spells At(...)"
+        )
+    return (
+        f"Give it its own node, {home!r}: {cls.__name__} declares "
+        f"must_precede={list(required)}, so it has to come BEFORE the "
+        f"{node!r} operator and composing the two under {node!r} puts it "
+        f"inside the stage it is there to track -- check A8, which fires "
+        "on this same node, says what that costs"
+    )
 
 
 @register("A8")
@@ -830,8 +825,7 @@ def _tone_placement(document: Mapping[str, Any]) -> Iterable[Finding]:
             # is why ``check_stage_ordering`` deliberately says nothing about
             # a ``SumOperator`` (``pipeline.py::check_stage_ordering``).
             continue
-        for index, (where, entry) in enumerate(
-                _t4_entries(key, spec, many=graph.nodes[key].many)):
+        for index, (where, entry) in enumerate(_t4_entries(key, spec, many=graph.nodes[key].many)):
             cls = _t5_radio_class(entry)
             required = tuple(getattr(cls, "must_precede", ()) or ())
             if not required:
@@ -841,7 +835,8 @@ def _tone_placement(document: Mapping[str, Any]) -> Iterable[Finding]:
                     continue
                 if cascade:
                     yield refuse(
-                        "A8", longest_legal_prefix(f"model.{where}"),
+                        "A8",
+                        longest_legal_prefix(f"model.{where}"),
                         f"model.{where}: puts {cls.__name__} at node {node!r} "
                         f"-- the node it declares it must precede -- as stage "
                         f"{index} of a compose: cascade, which applies its "
@@ -854,7 +849,8 @@ def _tone_placement(document: Mapping[str, Any]) -> Iterable[Finding]:
                         f"document gave a name: to "
                         f"(core/pipeline.py:129). Make it stage 0 of the "
                         f"cascade, or give it its own node, "
-                        f"{cls.graph_node!r} (check A8).")
+                        f"{cls.graph_node!r} (check A8).",
+                    )
                     continue
                 yield refuse(
                     # `_task3_where` on every leg: a FAN label is a name the
@@ -862,7 +858,8 @@ def _tone_placement(document: Mapping[str, Any]) -> Iterable[Finding]:
                     # the per-check `try` and kills the whole pass.  Measured
                     # identity on a node id, which is what the single-entry
                     # leg passes it.
-                    "A8", longest_legal_prefix(f"model.{where}"),
+                    "A8",
+                    longest_legal_prefix(f"model.{where}"),
                     f"model.{where}: puts {cls.__name__} IN the {node!r} "
                     f"slot, so this document declares no {node!r} operator "
                     f"for it to pass through -- it replaced the stage it is "
@@ -871,20 +868,25 @@ def _tone_placement(document: Mapping[str, Any]) -> Iterable[Finding]:
                     f"stage is deliberately no violation there "
                     f"(core/fold.py:271), while the document still has "
                     f"the key and the operator apart. Give it its own node, "
-                    f"{cls.graph_node!r} (check A8).")
+                    f"{cls.graph_node!r} (check A8).",
+                )
                 continue
-            blocked = [target for target in required
-                       if target in lit
-                       and target not in _t5_downstream(graph, node)]
+            blocked = [
+                target
+                for target in required
+                if target in lit and target not in _t5_downstream(graph, node)
+            ]
             if blocked:
                 yield refuse(
-                    "A8", longest_legal_prefix(f"model.{where}"),
+                    "A8",
+                    longest_legal_prefix(f"model.{where}"),
                     f"model.{where}: places {cls.__name__} at {node!r}, from "
                     f"which {blocked} cannot be reached -- and this document "
                     f"lights {'them' if len(blocked) > 1 else 'it'}, so "
                     f"nothing this operator contributes ever passes through. "
                     f"{cls.must_precede_because} Place it upstream: its own "
-                    f"node is {cls.graph_node!r} (check A8).")
+                    f"node is {cls.graph_node!r} (check A8).",
+                )
 
 
 @register("A31")
@@ -924,17 +926,18 @@ def _data_with_sources(document: Mapping[str, Any]) -> Iterable[Finding]:
     if section.get("data") is None or "from_file" in section:
         return
     graph = _t4_graph()
-    sources = sorted(node for node in _lit(document)
-                     if graph.nodes[node].kind == "source")
+    sources = sorted(node for node in _lit(document) if graph.nodes[node].kind == "source")
     if not sources:
         return
     yield refuse(
-        "A31", "observation.data",
+        "A31",
+        "observation.data",
         "observation.data: is the data a transform chain acts ON, and this "
         f"model lights the source nodes {sources} -- an assembly with sources "
         "GENERATES its own data, so the array declared here would be "
         "discarded rather than fitted. Drop observation.data (the twin makes "
-        "it), or drop the sources to leave a transform chain (check A31).")
+        "it), or drop the sources to leave a transform chain (check A31).",
+    )
 
 
 @register("A31.no_source")
@@ -997,21 +1000,25 @@ def _no_source_and_no_data(document: Mapping[str, Any]) -> Iterable[Finding]:
     if any(graph.nodes[node].kind == "source" for node in placed):
         return
     antenna_sources = [
-        node for node, spec in graph.nodes.items()
-        if spec.kind == "source" and not spec.reserved
+        node
+        for node, spec in graph.nodes.items()
+        if spec.kind == "source"
+        and not spec.reserved
         and "antenna_loss" in _t5_downstream(graph, node)
     ]
     choices = ", ".join(antenna_sources[:-1]) + f" or {antenna_sources[-1]}"
     lit = [node for node in graph.nodes if node in placed]
     yield refuse(
-        "A31", "model",
+        "A31",
+        "model",
         f"model: lights {lit} and no source node, so its twin is a pure "
         "transform chain, and observation declares no data for it to act on. "
         "Every run that evaluates the twin would stop with 'This assembly is "
         "a pure transform chain (no source operators)'. Light a source on "
         f"the antenna branch ({choices}), or declare the data the chain "
         "transforms: observation.data, or observation.from_file for a "
-        "recording (check A31).")
+        "recording (check A31).",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1045,9 +1052,8 @@ def _no_source_and_no_data(document: Mapping[str, Any]) -> Iterable[Finding]:
 #: pins ``_KINDS`` by MEMBERSHIP and is what makes the day a genuinely
 #: non-fitting kind ships a day someone looks; its failure message is the
 #: instruction to classify the new one.
-_A30_NOT_FITTING: frozenset[str] = frozenset(
-    {"forward", "mmodes", "compare", "benchmark"}
-)
+_A30_NOT_FITTING: frozenset[str] = frozenset({"forward", "mmodes", "compare", "benchmark"})
+
 
 def _a30_exits(document: Mapping[str, Any]) -> tuple[str, ...]:
     """The declared kinds whose exit A30 is actually about, sorted.
@@ -1090,11 +1096,12 @@ def _a30_exits(document: Mapping[str, Any]) -> tuple[str, ...]:
     """
     from rheplicant.config.sections.runs import _KINDS
 
-    live = {run["kind"] for run in _runs(document)
-            if isinstance(run.get("kind"), str)
-            and run.get("expect") != "refuse"}
-    return tuple(sorted(
-        (_kinds(document) & live & frozenset(_KINDS)) - _A30_NOT_FITTING))
+    live = {
+        run["kind"]
+        for run in _runs(document)
+        if isinstance(run.get("kind"), str) and run.get("expect") != "refuse"
+    }
+    return tuple(sorted((_kinds(document) & live & frozenset(_KINDS)) - _A30_NOT_FITTING))
 
 
 #: The registry name of the identifiability convention A33 advises.
@@ -1213,8 +1220,7 @@ def _a30_stochastic(node_id: Any, spec: Any, table: Mapping) -> str | None:
     return None
 
 
-def _a30_placements(document: Mapping[str, Any],
-                    table: Mapping) -> dict[str, tuple[str, str]]:
+def _a30_placements(document: Mapping[str, Any], table: Mapping) -> dict[str, tuple[str, str]]:
     """node id -> ``(the site that put it there, the class name)``.
 
     **Keyed by NODE, not by the model key**, and that is the whole reason this
@@ -1255,8 +1261,7 @@ def _a30_placements(document: Mapping[str, Any],
             claims.setdefault(node_id, []).append((key, found))
     placements: dict[str, tuple[str, str]] = {}
     for node_id, entries in claims.items():
-        key, found = next(
-            (one for one in entries if one[0] == node_id), min(entries))
+        key, found = next((one for one in entries if one[0] == node_id), min(entries))
         placements[node_id] = (f"model.{key}", found)
     return placements
 
@@ -1357,9 +1362,11 @@ def _stochastic_in_fit_twin(document: Mapping[str, Any]) -> Iterable[Finding]:
     twin = twin if isinstance(twin, Mapping) else {}
 
     dropped = twin.get("without")
-    dropped = tuple(one for one in dropped
-                    if isinstance(one, str)) if isinstance(
-                        dropped, (list, tuple)) else ()
+    dropped = (
+        tuple(one for one in dropped if isinstance(one, str))
+        if isinstance(dropped, (list, tuple))
+        else ()
+    )
     for node_id in dropped:
         placements.pop(node_id, None)
     replace = twin.get("replace")
@@ -1381,8 +1388,7 @@ def _stochastic_in_fit_twin(document: Mapping[str, Any]) -> Iterable[Finding]:
             if found is None:
                 placements.pop(node_id, None)
             else:
-                placements[node_id] = (
-                    f"inference.twin.replace.{node_id}", found)
+                placements[node_id] = (f"inference.twin.replace.{node_id}", found)
     if not placements:
         return ()
 
@@ -1396,22 +1402,29 @@ def _stochastic_in_fit_twin(document: Mapping[str, Any]) -> Iterable[Finding]:
         # two stochastic nodes give two findings, and a constant makes
         # `raise_if_refused`'s tail locate the second one by a path that names
         # nothing.  The line to ADD is spelled out in the message instead.
-        findings.append(refuse("A30", site, (
-            f"{site} puts {operator} at node {node_id!r}, which draws its own "
-            f"randomness -- {operator} declares {RANDOMNESS!r} in requires "
-            "-- and inference.twin.without: does not drop it. This document "
-            f"declares {named}, and these fitting exits close "
-            "the fit twin over ONE template state, so that draw would be the "
-            "SAME realisation added to every prediction alike: a bias that is "
-            "exactly affine and full rank, which is why no shape check, no "
-            "linearity check and no rank test sees it. Write "
-            f"inference.twin.without: [{node_id}] -- kind: forward keeps the "
-            "node, and simulating with it is what it is for (check A30).")))
+        findings.append(
+            refuse(
+                "A30",
+                site,
+                (
+                    f"{site} puts {operator} at node {node_id!r}, which draws its own "
+                    f"randomness -- {operator} declares {RANDOMNESS!r} in requires "
+                    "-- and inference.twin.without: does not drop it. This document "
+                    f"declares {named}, and these fitting exits close "
+                    "the fit twin over ONE template state, so that draw would be the "
+                    "SAME realisation added to every prediction alike: a bias that is "
+                    "exactly affine and full rank, which is why no shape check, no "
+                    "linearity check and no rank test sees it. Write "
+                    f"inference.twin.without: [{node_id}] -- kind: forward keeps the "
+                    "node, and simulating with it is what it is for (check A30)."
+                ),
+            )
+        )
     return tuple(findings)
 
 
 def _t11_bindings(
-        document: Mapping[str, Any]
+    document: Mapping[str, Any],
 ) -> tuple[tuple[str, frozenset[str], tuple[str, ...], Any], ...]:
     """``(document path, latent NAMES, into-path HEADS, transform)`` per binding.
 
@@ -1465,8 +1478,7 @@ def _t11_bindings(
     section = section if isinstance(section, Mapping) else {}
     declared = _latents(document)
     written: list[tuple[str, tuple[str, ...], Any, Any]] = [
-        (f"inference.parameters.{name}", (name,), spec.get("into"),
-         spec.get("transform"))
+        (f"inference.parameters.{name}", (name,), spec.get("into"), spec.get("transform"))
         for name, spec in declared.items()
         if spec.get("into") is not None
     ]
@@ -1477,13 +1489,16 @@ def _t11_bindings(
                 continue
             latents = entry.get("latents")
             latents = (latents,) if isinstance(latents, str) else latents
-            names = tuple(one for one in latents
-                          if isinstance(one, str) and one in declared) \
-                if isinstance(latents, (list, tuple)) else ()
+            names = (
+                tuple(one for one in latents if isinstance(one, str) and one in declared)
+                if isinstance(latents, (list, tuple))
+                else ()
+            )
             if not names:
                 continue
-            written.append((f"inference.bindings[{index}]", names,
-                            entry.get("into"), entry.get("transform")))
+            written.append(
+                (f"inference.bindings[{index}]", names, entry.get("into"), entry.get("transform"))
+            )
 
     out: list[tuple[str, frozenset[str], tuple[str, ...], Any]] = []
     for where, names, into, transform in written:
@@ -1583,26 +1598,32 @@ def _bandpass_and_gain(document: Mapping[str, Any]) -> Iterable[Finding]:
     on_bandpass = [one for one in bindings if "bandpass" in one[2]]
     if not on_bandpass:
         return ()
-    on_bandpass_latents = frozenset().union(
-        *(names for _, names, _, _ in on_bandpass))
+    on_bandpass_latents = frozenset().union(*(names for _, names, _, _ in on_bandpass))
     on_gain_latents = frozenset().union(
-        *(names for _, names, heads, _ in bindings if "gain" in heads))
+        *(names for _, names, heads, _ in bindings if "gain" in heads)
+    )
     # The DIFFERENCE, not the presence: a latent written into both leaves is
     # one degree of freedom and the product IS constrained, so there is
     # nothing to trade and nothing to refuse.
     if not on_gain_latents - on_bandpass_latents:
         return ()
-    verdicts = [_a33_convention(transform) for _, _, _, transform
-                in on_bandpass]
+    verdicts = [_a33_convention(transform) for _, _, _, transform in on_bandpass]
     if any(verdict is not False for verdict in verdicts):
         return ()
     where = on_bandpass[0][0]
-    return (refuse("A33", longest_legal_prefix(f"{where}.transform"), (
-        f"{where} is free into bandpass and this document also frees a "
-        "latent into gain. The receiver's bandpass and the gain multiply the "
-        "same prediction, so only their PRODUCT is constrained: the fit has "
-        "one exactly null direction and returns a finite, correctly-shaped "
-        "answer in which the two have traded an arbitrary constant. Declare "
-        f"transform: {_A33_CONVENTION} on the bandpass binding -- it divides "
-        "out the mean, which is the convention that makes the pair "
-        "identifiable (check A33).")),)
+    return (
+        refuse(
+            "A33",
+            longest_legal_prefix(f"{where}.transform"),
+            (
+                f"{where} is free into bandpass and this document also frees a "
+                "latent into gain. The receiver's bandpass and the gain multiply the "
+                "same prediction, so only their PRODUCT is constrained: the fit has "
+                "one exactly null direction and returns a finite, correctly-shaped "
+                "answer in which the two have traded an arbitrary constant. Declare "
+                f"transform: {_A33_CONVENTION} on the bandpass binding -- it divides "
+                "out the mean, which is the convention that makes the pair "
+                "identifiable (check A33)."
+            ),
+        ),
+    )

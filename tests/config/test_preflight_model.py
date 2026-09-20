@@ -71,18 +71,25 @@ GAIN = {"gain": {"value": 1.1, "unit": "dimensionless"}}
 #: ``GlobalSignalOperator``'s fields are ``centre``/``depth``/``width``, and
 #: the ``amplitude``/``center_freq`` spelling this plan's draft used is
 #: refused by ``build_model`` before any check here is reached.
-GLOBAL_SIGNAL = {"depth": {"value": 0.5, "unit": "K"},
-                 "centre": {"value": 75.0, "unit": "MHz"},
-                 "width": {"value": 5.0, "unit": "MHz"}}
-FOREGROUND = {"amplitude": {"value": 2500.0, "unit": "K"},
-              "spectral_index": 2.55,
-              "ref_freq": {"value": 70.0, "unit": "MHz"}}
-SPILL = {"sky_fraction": {"value": 0.1, "unit": "dimensionless"},
-         "t_ground": {"value": 300.0, "unit": "K"}}
-PICKUP = {"t_ground": {"value": 300.0, "unit": "K"},
-          "coupling": {"value": 0.05, "unit": "dimensionless"}}
-FILTER = {"type": "FourierBandFilter", "axis": 0, "low": 0.02, "high": 0.5,
-          "mode": "extract"}
+GLOBAL_SIGNAL = {
+    "depth": {"value": 0.5, "unit": "K"},
+    "centre": {"value": 75.0, "unit": "MHz"},
+    "width": {"value": 5.0, "unit": "MHz"},
+}
+FOREGROUND = {
+    "amplitude": {"value": 2500.0, "unit": "K"},
+    "spectral_index": 2.55,
+    "ref_freq": {"value": 70.0, "unit": "MHz"},
+}
+SPILL = {
+    "sky_fraction": {"value": 0.1, "unit": "dimensionless"},
+    "t_ground": {"value": 300.0, "unit": "K"},
+}
+PICKUP = {
+    "t_ground": {"value": 300.0, "unit": "K"},
+    "coupling": {"value": 0.05, "unit": "dimensionless"},
+}
+FILTER = {"type": "FourierBandFilter", "axis": 0, "low": 0.02, "high": 0.5, "mode": "extract"}
 #: D-10 (Plan 3C Task 6): 0.05, matching exit_helpers.SIGMA_K -- several
 #: documents built from this constant reach load_document, where a numeric
 #: C18 compares this model's drawn sigma against the base inference block's
@@ -104,8 +111,9 @@ BARE = ResolutionContext(dtype="float32")
 #: here refuses before a value node is resolved and takes :data:`BARE`.  They
 #: are ``preflight_helpers``' base ``observation:`` read back as arrays --
 #: ``linspace(60, 85, 8) MHz`` and ``arange(0, 32, 2) s``.
-GRIDDED = ResolutionContext(freq=jnp.linspace(60e6, 85e6, 8),
-                            time=jnp.arange(0.0, 32.0, 2.0), dtype="float32")
+GRIDDED = ResolutionContext(
+    freq=jnp.linspace(60e6, 85e6, 8), time=jnp.arange(0.0, 32.0, 2.0), dtype="float32"
+)
 
 #: The check ids this task decides.  A filter on THESE rather than on
 #: ``refusals()`` outright: the pass runs every registered check, so an "and
@@ -125,44 +133,76 @@ MINE = frozenset({"A2", "A3", "A4", "A6", "A7", "A14", "A32"})
 #: acts on.  Each clause below was MEASURED off the live refusal at
 #: ``f303af8``, copied character for character.
 MOVED = [
-    ("A2", {"gian": GAIN},
-     "model: 'gian' is not a node of graph 'single-antenna'; known nodes: ["),
-    ("A3", {"astro_sum": {}, "gain": GAIN},
-     "model.astro_sum: is a junction -- never an operator slot; it "
-     "materializes automatically. The switch cycle is observation.switching."),
-    ("A3", {"receiver_input": {}, "gain": GAIN},
-     "model.receiver_input: is a selector -- never an operator slot; it "
-     "materializes automatically. The switch cycle is observation.switching."),
-    ("A4", {"beam": {"type": "GainOperator"}, "gain": GAIN},
-     "model.beam: is reserved -- no shipped operator registers there; "
-     "python: is the route."),
-    ("A6", {"gain": [GAIN, GAIN]},
-     "model.gain: this node holds a single instance; a list is the shape of "
-     "a many node (foregrounds, t_sys_extra, cal_loads, filters)."),
-    ("A6", {"foregrounds": FOREGROUND, "gain": GAIN},
-     "model.foregrounds: is a non-empty list (SUM); got dict ("),
-    ("A6", {"foregrounds": [], "gain": GAIN},
-     "model.foregrounds: is a non-empty list (SUM); got list ([])."),
-    ("A6", {"filters": FILTER, "gain": GAIN},
-     "model.filters: is a non-empty list (CHAIN); got dict ("),
-    ("A6", {"cal_loads": [GAIN], "gain": GAIN},
-     "model.cal_loads: is a label-keyed mapping (FAN) -- the keys ARE "
-     "observation.switching.order[1:], in that order; got list."),
-    ("A7", {"noise": {"sigma": SIGMA}, "gain": GAIN},
-     "model.noise: 2 classes register at this node (['NoiseOperator', "
-     "'RadiometerNoiseOperator']); type: is required."),
-    ("A7", {"filters": [{"axis": 0, "low": 0.02, "high": 0.5}],
-            "gain": GAIN},
-     "model.filters: 3 classes register at this node (['FourierBandFilter', "
-     "'SiderealFilter', 'SkySpaceFilter']); type: is required."),
-    ("A7", {"flagging": {"threshold": {"value": 3.0,
-                                         "unit": "adc_count"}}, "gain": GAIN},
-     "model.flagging: 2 classes register at this node (['FlaggingOperator', "
-     "'MomentRFIFlaggingOperator']); type: is required."),
-    ("A32", {"beam_spill": SPILL, "ground_pickup": PICKUP, "gain": GAIN},
-     "model: beam_spill and ground_pickup both lit describe the ground twice "
-     "(the spill term and the pickup term overlap); if that is deliberate, "
-     "say so: acknowledge_double_count: true (check A32, decided as D-C13)."),
+    ("A2", {"gian": GAIN}, "model: 'gian' is not a node of graph 'single-antenna'; known nodes: ["),
+    (
+        "A3",
+        {"astro_sum": {}, "gain": GAIN},
+        "model.astro_sum: is a junction -- never an operator slot; it "
+        "materializes automatically. The switch cycle is observation.switching.",
+    ),
+    (
+        "A3",
+        {"receiver_input": {}, "gain": GAIN},
+        "model.receiver_input: is a selector -- never an operator slot; it "
+        "materializes automatically. The switch cycle is observation.switching.",
+    ),
+    (
+        "A4",
+        {"beam": {"type": "GainOperator"}, "gain": GAIN},
+        "model.beam: is reserved -- no shipped operator registers there; python: is the route.",
+    ),
+    (
+        "A6",
+        {"gain": [GAIN, GAIN]},
+        "model.gain: this node holds a single instance; a list is the shape of "
+        "a many node (foregrounds, t_sys_extra, cal_loads, filters).",
+    ),
+    (
+        "A6",
+        {"foregrounds": FOREGROUND, "gain": GAIN},
+        "model.foregrounds: is a non-empty list (SUM); got dict (",
+    ),
+    (
+        "A6",
+        {"foregrounds": [], "gain": GAIN},
+        "model.foregrounds: is a non-empty list (SUM); got list ([]).",
+    ),
+    (
+        "A6",
+        {"filters": FILTER, "gain": GAIN},
+        "model.filters: is a non-empty list (CHAIN); got dict (",
+    ),
+    (
+        "A6",
+        {"cal_loads": [GAIN], "gain": GAIN},
+        "model.cal_loads: is a label-keyed mapping (FAN) -- the keys ARE "
+        "observation.switching.order[1:], in that order; got list.",
+    ),
+    (
+        "A7",
+        {"noise": {"sigma": SIGMA}, "gain": GAIN},
+        "model.noise: 2 classes register at this node (['NoiseOperator', "
+        "'RadiometerNoiseOperator']); type: is required.",
+    ),
+    (
+        "A7",
+        {"filters": [{"axis": 0, "low": 0.02, "high": 0.5}], "gain": GAIN},
+        "model.filters: 3 classes register at this node (['FourierBandFilter', "
+        "'SiderealFilter', 'SkySpaceFilter']); type: is required.",
+    ),
+    (
+        "A7",
+        {"flagging": {"threshold": {"value": 3.0, "unit": "adc_count"}}, "gain": GAIN},
+        "model.flagging: 2 classes register at this node (['FlaggingOperator', "
+        "'MomentRFIFlaggingOperator']); type: is required.",
+    ),
+    (
+        "A32",
+        {"beam_spill": SPILL, "ground_pickup": PICKUP, "gain": GAIN},
+        "model: beam_spill and ground_pickup both lit describe the ground twice "
+        "(the spill term and the pickup term overlap); if that is deliberate, "
+        "say so: acknowledge_double_count: true (check A32, decided as D-C13).",
+    ),
 ]
 
 #: ``observation.switching`` declaring a three-position cycle, and the loads
@@ -181,10 +221,12 @@ REVERSED_LOADS = {"hot": LOADS["hot"], "ambient": LOAD}
 #: ``cw_tone:`` key carrying the shipped class cannot be moved and a check
 #: keyed on ``model.cw_tone.at`` would guard a key no document can contain.
 PY_GAIN = dict(GAIN, python="rheplicant.radio:GainOperator")
-TONE = {"tone_freq": {"value": 70.0, "unit": "MHz"},
-        "amplitude": {"value": 1.0, "unit": "K"},
-        "line_width": {"value": 0.5, "unit": "MHz"},
-        "python": "rheplicant.radio:CWCalibrationOperator"}
+TONE = {
+    "tone_freq": {"value": 70.0, "unit": "MHz"},
+    "amplitude": {"value": 1.0, "unit": "K"},
+    "line_width": {"value": 0.5, "unit": "MHz"},
+    "python": "rheplicant.radio:CWCalibrationOperator",
+}
 #: The same tone written the ordinary way, at its own node: no ``python:``,
 #: so nothing relocates it.
 BARE_TONE = {key: value for key, value in TONE.items() if key != "python"}
@@ -192,8 +234,11 @@ BANDPASS = {"bandpass": {"value": [1.0] * 8, "unit": "dimensionless"}}
 #: A shipped class whose ``graph_node`` is neither of the tone's targets.
 #: Written under a ``bandpass:`` key it lands at ``adc``, which is what makes
 #: it the document where a key and its operator's node come furthest apart.
-ADC = {"python": "rheplicant.radio:ADCOperator", "n_bits": 8,
-       "scale": {"value": 1.0, "unit": "adc_count/K"}}
+ADC = {
+    "python": "rheplicant.radio:ADCOperator",
+    "n_bits": 8,
+    "scale": {"value": 1.0, "unit": "adc_count/K"},
+}
 SKY = {"amplitude": {"value": 10.0, "unit": "K"}}
 DATA = {"zeros": ["n_time", "n_freq"]}
 NOISE_STAGE = {"type": "NoiseOperator", "sigma": SIGMA}
@@ -212,8 +257,7 @@ _ABSENT = object()
 
 def _with_data(document, data=DATA):
     """``observation.data``, added to a helper-built document by copy."""
-    return {**document,
-            "observation": {**document["observation"], "data": data}}
+    return {**document, "observation": {**document["observation"], "data": data}}
 
 
 def _model_only(model):
@@ -247,8 +291,7 @@ def _t5_refused(document, check):
     across every registered check and is a function of how many tasks have
     landed rather than of this one.
     """
-    return [one for one in preflight(document).refusals()
-            if one.check == check]
+    return [one for one in preflight(document).refusals() if one.check == check]
 
 
 def _findings(model, check=None):
@@ -259,14 +302,16 @@ def _findings(model, check=None):
     as this module's defect.
     """
     report = preflight(preflight_document(model=model))
-    return [one for one in report.refusals()
-            if one.check == check or (check is None and one.check in MINE)]
+    return [
+        one
+        for one in report.refusals()
+        if one.check == check or (check is None and one.check in MINE)
+    ]
 
 
 def _observed(model, observation):
     """The same, with an ``observation:`` patch merged in as well."""
-    report = preflight(preflight_document(model=model,
-                                          observation=observation))
+    report = preflight(preflight_document(model=model, observation=observation))
     return [one for one in report.refusals() if one.check in MINE]
 
 
@@ -283,22 +328,23 @@ def _ingested(model, switching):
     document = preflight_document(model=model)
     document["observation"] = {
         "meta": {"telescope": "RHINO"},
-        "from_file": {"format": "rhino_hdf5", "path": "obs.hd5f",
-                      "freq_unit": "MHz", "settle_seconds": 0.0,
-                      "thermistor_columns": {"antenna": 0, "ambient": 0,
-                                             "hot": 1}},
+        "from_file": {
+            "format": "rhino_hdf5",
+            "path": "obs.hd5f",
+            "freq_unit": "MHz",
+            "settle_seconds": 0.0,
+            "thermistor_columns": {"antenna": 0, "ambient": 0, "hot": 1},
+        },
         "switching": switching,
     }
-    return [one for one in preflight(document).refusals()
-            if one.check in MINE]
+    return [one for one in preflight(document).refusals() if one.check in MINE]
 
 
 class TestTheGraphShapeChecks:
     """A2, A3, A4, A6, A7 -- moved in front of ``build_resources``."""
 
     @pytest.mark.parametrize("check, model, fragment", MOVED)
-    def test_every_moved_message_is_the_sections_own_word_for_word(
-            self, check, model, fragment):
+    def test_every_moved_message_is_the_sections_own_word_for_word(self, check, model, fragment):
         """The refactor's whole claim, as an assertion -- in TWO parts, and
         only the second one can fail.
 
@@ -326,8 +372,7 @@ class TestTheGraphShapeChecks:
         assert len(found) == 1, found
         tail = f" (check {check})."
         message = found[0].message
-        stripped = (message[:-len(tail)] if message.endswith(tail)
-                    else message)
+        stripped = message[: -len(tail)] if message.endswith(tail) else message
         assert stripped == str(raised.value)
         assert fragment in message
 
@@ -357,8 +402,7 @@ class TestTheGraphShapeChecks:
         assert "'gian'" in found[0].message and "'gaain'" not in found[0].message
         assert "'gaain'" in found[1].message
 
-    def test_two_placement_problems_both_arrive_and_the_build_raises_the_first(
-            self):
+    def test_two_placement_problems_both_arrive_and_the_build_raises_the_first(self):
         """Collect-versus-raise, and the ORDER, in one assertion.
 
         The pass exists so that a user with two mistakes sees two (§2.3), and
@@ -374,10 +418,10 @@ class TestTheGraphShapeChecks:
         with pytest.raises(ConfigError, match="'gian' is not a node"):
             build_model(dict(model), BARE, switch_order=())
 
-    @pytest.mark.parametrize("node, kind", [("astro_sum", "junction"),
-                                            ("receiver_input", "selector")])
-    def test_a_junction_and_a_selector_are_named_by_their_own_kind(
-            self, node, kind):
+    @pytest.mark.parametrize(
+        "node, kind", [("astro_sum", "junction"), ("receiver_input", "selector")]
+    )
+    def test_a_junction_and_a_selector_are_named_by_their_own_kind(self, node, kind):
         # 2C's shape 1: `assert "never an operator slot" in msg` passes with
         # the two kinds swapped, and the reader is told a selector is a
         # junction.  Both cells pin the WORD.
@@ -396,19 +440,21 @@ class TestTheGraphShapeChecks:
         dropped the ``"type" in spec`` condition would report A4 here and the
         reader would go looking for a ``type:`` they never wrote.
         """
-        found = _findings({"beam": {"type": "GainOperator"}, "gain": GAIN},
-                          "A4")
+        found = _findings({"beam": {"type": "GainOperator"}, "gain": GAIN}, "A4")
         assert len(found) == 1
         assert found[0].where == "model.beam"
         assert _findings({"beam": {}, "gain": GAIN}, "A4") == []
 
-    @pytest.mark.parametrize("spec, wanted", [
-        (3, "a node spec is a mapping"),
-        ("type", "a node spec is a mapping"),
-        (["type"], "this node holds a single instance"),
-    ], ids=["int", "str", "list"])
-    def test_a_reserved_node_whose_spec_is_no_mapping_is_not_asked_for_a_type(
-            self, spec, wanted):
+    @pytest.mark.parametrize(
+        "spec, wanted",
+        [
+            (3, "a node spec is a mapping"),
+            ("type", "a node spec is a mapping"),
+            (["type"], "this node holds a single instance"),
+        ],
+        ids=["int", "str", "list"],
+    )
+    def test_a_reserved_node_whose_spec_is_no_mapping_is_not_asked_for_a_type(self, spec, wanted):
         """``"type" in spec`` on a spec that is not a mapping.
 
         Measured at ``f303af8``, BEFORE this task: ``model: {beam: 3}`` left
@@ -429,12 +475,15 @@ class TestTheGraphShapeChecks:
         with pytest.raises(ConfigError, match=wanted):
             build_model({"beam": spec, "gain": GAIN}, BARE, switch_order=())
 
-    @pytest.mark.parametrize("model, wanted", [
-        ({"gain": [GAIN, GAIN]}, "single instance"),
-        ({"foregrounds": FOREGROUND, "gain": GAIN}, "(SUM)"),
-        ({"filters": FILTER, "gain": GAIN}, "(CHAIN)"),
-        ({"cal_loads": [GAIN], "gain": GAIN}, "(FAN)"),
-    ])
+    @pytest.mark.parametrize(
+        "model, wanted",
+        [
+            ({"gain": [GAIN, GAIN]}, "single instance"),
+            ({"foregrounds": FOREGROUND, "gain": GAIN}, "(SUM)"),
+            ({"filters": FILTER, "gain": GAIN}, "(CHAIN)"),
+            ({"cal_loads": [GAIN], "gain": GAIN}, "(FAN)"),
+        ],
+    )
     def test_each_many_shape_names_the_shape_it_wanted(self, model, wanted):
         # SUM/CHAIN/FAN swapped is 2C's shape 1 again: "is a non-empty list"
         # is true of both a SUM and a CHAIN, and the reader who is told SUM
@@ -454,8 +503,7 @@ class TestTheGraphShapeChecks:
         not: one route closed, its twin open.
         """
         found = _findings({"gain": [GAIN], "foregrounds": FOREGROUND}, "A6")
-        assert [one.where for one in found] == ["model.gain",
-                                                "model.foregrounds"]
+        assert [one.where for one in found] == ["model.gain", "model.foregrounds"]
 
     def test_a_shape_problem_is_the_only_sentence_that_node_earns(self):
         """One mistake, one sentence -- the ``continue`` after A6.
@@ -493,23 +541,23 @@ class TestTheGraphShapeChecks:
         with pytest.raises(ConfigError, match="'gian' is not a node"):
             build_model(dict(model), BARE, switch_order=())
 
-    @pytest.mark.parametrize("model, check_fires", [
-        ({"noise": {"sigma": SIGMA}, "gain": GAIN}, True),
-        ({"noise": {"type": "NoiseOperator", "sigma": SIGMA}, "gain": GAIN},
-         False),
-        ({"filters": [{"axis": 0, "low": 0.02, "high": 0.5}], "gain": GAIN},
-         True),
-        ({"gain": GAIN}, False),
-        # `type: None` WRITTEN OUT.  `ambiguous_class_problem` asks
-        # `spec.get("type") is not None`, so this must fire exactly as the
-        # absent key does -- and a version written `"type" not in spec`
-        # would let a document silence A7 by declaring the key empty, then
-        # die inside `_pick_class` after every beam had been read.  No other
-        # cell here distinguishes the two spellings.
-        ({"noise": {"type": None, "sigma": SIGMA}, "gain": GAIN}, True),
-    ])
-    def test_type_is_required_exactly_where_two_or_more_classes_register(
-            self, model, check_fires):
+    @pytest.mark.parametrize(
+        "model, check_fires",
+        [
+            ({"noise": {"sigma": SIGMA}, "gain": GAIN}, True),
+            ({"noise": {"type": "NoiseOperator", "sigma": SIGMA}, "gain": GAIN}, False),
+            ({"filters": [{"axis": 0, "low": 0.02, "high": 0.5}], "gain": GAIN}, True),
+            ({"gain": GAIN}, False),
+            # `type: None` WRITTEN OUT.  `ambiguous_class_problem` asks
+            # `spec.get("type") is not None`, so this must fire exactly as the
+            # absent key does -- and a version written `"type" not in spec`
+            # would let a document silence A7 by declaring the key empty, then
+            # die inside `_pick_class` after every beam had been read.  No other
+            # cell here distinguishes the two spellings.
+            ({"noise": {"type": None, "sigma": SIGMA}, "gain": GAIN}, True),
+        ],
+    )
+    def test_type_is_required_exactly_where_two_or_more_classes_register(self, model, check_fires):
         # Both halves: it fires at the three nodes with a choice (noise,
         # flagging, filters -- measured off operator_table()) and does NOT
         # fire at the twenty-odd with one, nor where `type:` decided it.
@@ -519,16 +567,20 @@ class TestTheGraphShapeChecks:
         # `where` is the line to edit.  A check that reported "model.filters"
         # for a three-entry chain leaves the reader to find which entry, and
         # the assertion that would have caught it is this one.
-        found = _findings({"filters": [FILTER, {"axis": 0, "low": 0.02,
-                                                "high": 0.5}],
-                           "gain": GAIN}, "A7")
+        found = _findings(
+            {"filters": [FILTER, {"axis": 0, "low": 0.02, "high": 0.5}], "gain": GAIN}, "A7"
+        )
         assert len(found) == 1
         assert found[0].where == "model.filters[1]"
 
-    @pytest.mark.parametrize("spec", [
-        {"python": "rheplicant.radio:NoiseOperator", "sigma": SIGMA},
-        {"from": "thermistors", "label": "ambient"},
-    ], ids=["python", "from"])
+    @pytest.mark.parametrize(
+        "spec",
+        [
+            {"python": "rheplicant.radio:NoiseOperator", "sigma": SIGMA},
+            {"from": "thermistors", "label": "ambient"},
+        ],
+        ids=["python", "from"],
+    )
     def test_a_python_or_from_entry_is_never_asked_for_a_type(self, spec):
         # `_pick_class` is not on either route (`build_node_operator` branches
         # to `_python_operator` and `_from_route` before it), so a check that
@@ -549,22 +601,32 @@ class TestTheGraphShapeChecks:
         direction this pass must never be wrong in.
         """
         typed = {"name": "b", "type": "NoiseOperator", "sigma": SIGMA}
-        assert _findings({"gain": GAIN,
-                          "noise": {"compose": "cascade",
-                                    "stages": [dict(typed, name="a"),
-                                               typed]}}, "A7") == []
-        found = _findings({"gain": GAIN,
-                           "noise": {"compose": "cascade",
-                                     "stages": [{"name": "a",
-                                                 "sigma": SIGMA}, typed]}},
-                          "A7")
+        assert (
+            _findings(
+                {
+                    "gain": GAIN,
+                    "noise": {"compose": "cascade", "stages": [dict(typed, name="a"), typed]},
+                },
+                "A7",
+            )
+            == []
+        )
+        found = _findings(
+            {
+                "gain": GAIN,
+                "noise": {"compose": "cascade", "stages": [{"name": "a", "sigma": SIGMA}, typed]},
+            },
+            "A7",
+        )
         assert len(found) == 1
         assert found[0].where == "model.noise.stages[0]"
 
-    @pytest.mark.parametrize("stages", ["everything", 3, {"a": {}}, None],
-                             ids=["a-string", "an-int", "a-mapping", "absent"])
-    def test_a_compose_whose_stages_are_not_a_list_is_asked_nothing(
-            self, stages):
+    @pytest.mark.parametrize(
+        "stages",
+        ["everything", 3, {"a": {}}, None],
+        ids=["a-string", "an-int", "a-mapping", "absent"],
+    )
+    def test_a_compose_whose_stages_are_not_a_list_is_asked_nothing(self, stages):
         """The malformed branch of the same route, and the sentence there is
         the wrong one.
 
@@ -593,11 +655,11 @@ class TestTheGraphShapeChecks:
         # `kind:` would report `stages` as an unknown node id and refuse a
         # legal document.
         document = preflight_document()
-        document["model"] = {"kind": "pipeline",
-                             "stages": [{"name": "g", "type": "GainOperator",
-                                         **GAIN}]}
-        found = [one for one in preflight(document).refusals()
-                 if one.check in MINE]
+        document["model"] = {
+            "kind": "pipeline",
+            "stages": [{"name": "g", "type": "GainOperator", **GAIN}],
+        }
+        found = [one for one in preflight(document).refusals() if one.check in MINE]
         assert found == []
 
     def test_a_section_level_key_is_not_read_as_a_node(self):
@@ -605,10 +667,13 @@ class TestTheGraphShapeChecks:
         # what both callers use, and `acknowledge_double_count` is a
         # section-level key -- a second copy of that rule in preflight/ would
         # refuse it as an unknown node id while the build accepted it.
-        model = {"beam_spill": SPILL, "ground_pickup": PICKUP, "gain": GAIN,
-                 "acknowledge_double_count": True}
-        assert set(node_specs(model)) == {"beam_spill", "ground_pickup",
-                                          "gain"}
+        model = {
+            "beam_spill": SPILL,
+            "ground_pickup": PICKUP,
+            "gain": GAIN,
+            "acknowledge_double_count": True,
+        }
+        assert set(node_specs(model)) == {"beam_spill", "ground_pickup", "gain"}
         assert _findings(model, "A2") == []
 
 
@@ -622,12 +687,16 @@ class TestTheReadersEveryModelCheckStartsFrom:
     decision with no test" shape, and these are the tests that close it.
     """
 
-    @pytest.mark.parametrize("document", [
-        {},
-        {"model": None},
-        {"model": ["gain"]},
-        {"model": {"kind": "pipeline", "stages": []}},
-    ], ids=["no-model", "model-none", "model-not-a-mapping", "kind-pipeline"])
+    @pytest.mark.parametrize(
+        "document",
+        [
+            {},
+            {"model": None},
+            {"model": ["gain"]},
+            {"model": {"kind": "pipeline", "stages": []}},
+        ],
+        ids=["no-model", "model-none", "model-not-a-mapping", "kind-pipeline"],
+    )
     def test_nodes_is_empty_for_every_shape_that_declares_none(self, document):
         # Kills `document["model"]` (a KeyError that aborts the pass on a
         # document `_structural` never sees -- Task 5 and Task 11 call these
@@ -636,8 +705,7 @@ class TestTheReadersEveryModelCheckStartsFrom:
         assert model_nodes(document) == {}
 
     def test_nodes_drops_the_section_level_keys_and_keeps_the_rest(self):
-        section = {"gain": GAIN, "kind": "graph",
-                   "acknowledge_double_count": True}
+        section = {"gain": GAIN, "kind": "graph", "acknowledge_double_count": True}
         assert model_nodes({"model": section}) == {"gain": GAIN}
 
     def test_a_kind_this_layer_does_not_know_declares_no_nodes_either(self):
@@ -654,20 +722,36 @@ class TestTheReadersEveryModelCheckStartsFrom:
         document = preflight_document()
         document["model"] = {"kind": "banana", "gian": GAIN}
         assert model_nodes(document) == {}
-        assert [one for one in preflight(document).refusals()
-                if one.check in MINE] == []
+        assert [one for one in preflight(document).refusals() if one.check in MINE] == []
 
-    @pytest.mark.parametrize("model, replace", [
-        ({}, False),
-        ({"cw_tone": {"python": "rheplicant:SnapshotOperator", "name": "tap",
-                      "at": ["noise_wave", "cw_tone"]}}, False),
-        ({"foregrounds": [FOREGROUND]}, False),
-        ({"noise": {**PY_GAIN, "snapshot_before": "tap"}}, False),
-        ({"global_signal": GLOBAL_SIGNAL, "noise": PY_GAIN}, True),
-        ({"global_signal": GLOBAL_SIGNAL,
-          "bandpass": dict(PY_GAIN, at=["gain"])}, True),
-    ], ids=["the-base-model", "an-at-region", "a-many-node", "a-snapshot",
-            "a-python-class-off-its-key", "a-one-element-at-list"])
+    @pytest.mark.parametrize(
+        "model, replace",
+        [
+            ({}, False),
+            (
+                {
+                    "cw_tone": {
+                        "python": "rheplicant:SnapshotOperator",
+                        "name": "tap",
+                        "at": ["noise_wave", "cw_tone"],
+                    }
+                },
+                False,
+            ),
+            ({"foregrounds": [FOREGROUND]}, False),
+            ({"noise": {**PY_GAIN, "snapshot_before": "tap"}}, False),
+            ({"global_signal": GLOBAL_SIGNAL, "noise": PY_GAIN}, True),
+            ({"global_signal": GLOBAL_SIGNAL, "bandpass": dict(PY_GAIN, at=["gain"])}, True),
+        ],
+        ids=[
+            "the-base-model",
+            "an-at-region",
+            "a-many-node",
+            "a-snapshot",
+            "a-python-class-off-its-key",
+            "a-one-element-at-list",
+        ],
+    )
     def test_lit_is_what_the_assembly_itself_reports(self, model, replace):
         """``_lit``'s docstring claims it reports what ``Assembly.lit`` will,
         so the claim is asserted against a real assembly rather than trusted.
@@ -696,8 +780,7 @@ class TestTheReadersEveryModelCheckStartsFrom:
         ``(key,)`` rather than merely standing down, so a guard rewritten to
         return ``()`` loses ``noise`` here and nowhere else.
         """
-        document = (_model_only(model) if replace
-                    else preflight_document(model=model))
+        document = _model_only(model) if replace else preflight_document(model=model)
         twin = build_model(document["model"], GRIDDED, switch_order=())
         assert _lit(document) == frozenset(twin.lit)
 
@@ -721,8 +804,8 @@ class TestTheReadersEveryModelCheckStartsFrom:
         """
         document = preflight_document(
             model={"cal_loads": {"at": "noise_wave"}},
-            observation={"switching": {"mode": "cycle",
-                                       "order": ["antenna", "at"]}})
+            observation={"switching": {"mode": "cycle", "order": ["antenna", "at"]}},
+        )
         lit = _lit(document)
         assert "cal_loads" in lit
         assert "noise_wave" not in lit
@@ -732,32 +815,48 @@ class TestTheReadersEveryModelCheckStartsFrom:
         # carrying both goes to `_compose`, which refuses `at` as an unknown
         # key ("compose: takes stages: and nothing else").  Nothing is placed
         # at those nodes on any path, so `_lit` must not report them.
-        document = preflight_document(model={
-            "noise": {"compose": "cascade", "at": ["noise_wave", "cw_tone"],
-                      "stages": [{"name": "a", "type": "NoiseOperator",
-                                  "sigma": SIGMA},
-                                 {"name": "b", "type": "NoiseOperator",
-                                  "sigma": SIGMA}]}})
+        document = preflight_document(
+            model={
+                "noise": {
+                    "compose": "cascade",
+                    "at": ["noise_wave", "cw_tone"],
+                    "stages": [
+                        {"name": "a", "type": "NoiseOperator", "sigma": SIGMA},
+                        {"name": "b", "type": "NoiseOperator", "sigma": SIGMA},
+                    ],
+                }
+            }
+        )
         lit = _lit(document)
         assert "noise" in lit
         assert not ({"noise_wave", "cw_tone"} & lit)
         with pytest.raises(ConfigError, match="compose: takes stages:"):
             build_model(document["model"], BARE, switch_order=())
 
-    @pytest.mark.parametrize("at, extra", [
-        ("cw_tone", {"cw_tone"}),
-        ("noise_wave", set()),
-        (["cw_tone"], {"cw_tone"}),
-        (["noise_wave", "cw_tone"], {"noise_wave", "cw_tone"}),
-        (["noise_wave", "not_a_node"], {"noise_wave", "cw_tone"}),
-        (["noise_wave", 4], set()),
-        ({"node": "cw_tone"}, set()),
-        (_ABSENT, set()),
-    ], ids=["a-string-restating-the-key", "a-string-disagreeing-with-the-key",
-            "a-one-element-list", "a-list", "a-list-with-a-stranger",
-            "a-list-with-an-int", "a-mapping", "absent"])
-    def test_lit_reads_an_at_claim_in_both_spellings_and_no_other(
-            self, at, extra):
+    @pytest.mark.parametrize(
+        "at, extra",
+        [
+            ("cw_tone", {"cw_tone"}),
+            ("noise_wave", set()),
+            (["cw_tone"], {"cw_tone"}),
+            (["noise_wave", "cw_tone"], {"noise_wave", "cw_tone"}),
+            (["noise_wave", "not_a_node"], {"noise_wave", "cw_tone"}),
+            (["noise_wave", 4], set()),
+            ({"node": "cw_tone"}, set()),
+            (_ABSENT, set()),
+        ],
+        ids=[
+            "a-string-restating-the-key",
+            "a-string-disagreeing-with-the-key",
+            "a-one-element-list",
+            "a-list",
+            "a-list-with-a-stranger",
+            "a-list-with-an-int",
+            "a-mapping",
+            "absent",
+        ],
+    )
+    def test_lit_reads_an_at_claim_in_both_spellings_and_no_other(self, at, extra):
         """``at:`` is read by ``_lit``, by A5 and by A8 through ONE binding
         (:func:`_t5_claims`), so these cells are what say which shapes it
         honours -- and every expectation below was MEASURED against
@@ -788,19 +887,24 @@ class TestTheReadersEveryModelCheckStartsFrom:
         spec = {"python": "rheplicant:SnapshotOperator", "name": "tap"}
         if at is not _ABSENT:
             spec = {**spec, "at": at}
-        lit = (_lit(preflight_document(model={"cw_tone": spec}))
-               - _lit(preflight_document()))
+        lit = _lit(preflight_document(model={"cw_tone": spec})) - _lit(preflight_document())
         assert lit == extra
 
 
 class TestTheDoubleCountAcknowledgement:
     """A32 / D-C13, moved and not rewritten."""
 
-    @pytest.mark.parametrize("acknowledgement, refused", [
-        (None, True), (True, False), ("yes", True), (1, True),
-    ], ids=["absent", "true", "yes", "one"])
-    def test_both_ground_terms_lit_need_the_acknowledgement(
-            self, acknowledgement, refused):
+    @pytest.mark.parametrize(
+        "acknowledgement, refused",
+        [
+            (None, True),
+            (True, False),
+            ("yes", True),
+            (1, True),
+        ],
+        ids=["absent", "true", "yes", "one"],
+    )
+    def test_both_ground_terms_lit_need_the_acknowledgement(self, acknowledgement, refused):
         # `is True`, not truthiness: 'yes' and 1 are both truthy and neither
         # is the sentence the document has to contain.  The `1` cell is the
         # one that fails a `== True` implementation, because `1 == True`.
@@ -809,10 +913,14 @@ class TestTheDoubleCountAcknowledgement:
             model = {**model, "acknowledge_double_count": acknowledgement}
         assert bool(_findings(model, "A32")) is refused
 
-    @pytest.mark.parametrize("model", [
-        {"beam_spill": SPILL, "gain": GAIN},
-        {"ground_pickup": PICKUP, "gain": GAIN},
-    ], ids=["spill-alone", "pickup-alone"])
+    @pytest.mark.parametrize(
+        "model",
+        [
+            {"beam_spill": SPILL, "gain": GAIN},
+            {"ground_pickup": PICKUP, "gain": GAIN},
+        ],
+        ids=["spill-alone", "pickup-alone"],
+    )
     def test_one_ground_term_on_its_own_describes_the_ground_once(self, model):
         # Kills `or` for `and`, which refuses every document that models the
         # ground at all -- and `beam_spill` alone is the ordinary way to do
@@ -824,8 +932,7 @@ class TestTheDoubleCountAcknowledgement:
         # `_double_count` written like `_graph_shape` -- append the tail --
         # produces a sentence citing A32 twice, which is how a reader learns
         # not to trust the citations.
-        found = _findings({"beam_spill": SPILL, "ground_pickup": PICKUP,
-                           "gain": GAIN}, "A32")
+        found = _findings({"beam_spill": SPILL, "ground_pickup": PICKUP, "gain": GAIN}, "A32")
         assert len(found) == 1
         assert found[0].message.count("check A32") == 1
         assert found[0].message.endswith("(check A32, decided as D-C13).")
@@ -844,19 +951,17 @@ class TestTheLoadKeysAgainstTheSwitchOrder:
     and runs at ``build_model``, one call after the beam.
     """
 
-    def test_load_keys_out_of_order_are_refused_in_the_sections_own_words(
-            self):
-        found = _observed({"cal_loads": REVERSED_LOADS},
-                          {"switching": CYCLE})
+    def test_load_keys_out_of_order_are_refused_in_the_sections_own_words(self):
+        found = _observed({"cal_loads": REVERSED_LOADS}, {"switching": CYCLE})
         assert len(found) == 1
         assert found[0].check == "A14"
         assert found[0].where == "model.cal_loads"
         with pytest.raises(ConfigError) as raised:
-            build_model({"cal_loads": REVERSED_LOADS}, BARE,
-                        switch_order=("antenna", "ambient", "hot"))
+            build_model(
+                {"cal_loads": REVERSED_LOADS}, BARE, switch_order=("antenna", "ambient", "hot")
+            )
         assert found[0].message == f"{raised.value} (check A14)."
-        assert "expected ['ambient', 'hot'], got ['hot', 'ambient']" in (
-            found[0].message)
+        assert "expected ['ambient', 'hot'], got ['hot', 'ambient']" in (found[0].message)
 
     def test_loads_declared_with_no_switch_cycle_at_all_are_refused(self):
         # The base document declares no `switching:`, so this is the shape a
@@ -865,27 +970,38 @@ class TestTheLoadKeysAgainstTheSwitchOrder:
         # load would silently have no switch index.
         found = _findings({"cal_loads": {"ambient": LOAD}}, "A14")
         assert len(found) == 1
-        assert "declared without an observation.switching order" in (
-            found[0].message)
+        assert "declared without an observation.switching order" in (found[0].message)
 
     def test_loads_that_match_the_order_earn_nothing(self):
         assert _observed({"cal_loads": LOADS}, {"switching": CYCLE}) == []
 
-    @pytest.mark.parametrize("switching", [
-        {"mode": "cycle", "order": ["ambient", "hot"]},
-        {"mode": "cycle", "order": ["antenna", "hot", "hot"]},
-        {"mode": "cycle", "order": "antenna"},
-        {"mode": "cycle"},
-        {"mode": "spin", "order": ["antenna", "ambient", "hot"]},
-        {"mode": [], "order": ["antenna", "ambient", "hot"]},
-        {"mode": {"cycle": True}, "order": ["antenna", "ambient", "hot"]},
-        {"order": ["antenna", "ambient", "hot"]},
-        {"mode": "none", "order": ["antenna", "ambient", "hot"]},
-        "cycle",
-    ], ids=["antenna-not-first", "a-repeated-label", "order-not-a-list",
-            "no-order", "an-unknown-mode", "an-unhashable-mode",
-            "a-mapping-mode", "an-order-with-no-mode",
-            "an-order-under-mode-none", "switching-not-a-mapping"])
+    @pytest.mark.parametrize(
+        "switching",
+        [
+            {"mode": "cycle", "order": ["ambient", "hot"]},
+            {"mode": "cycle", "order": ["antenna", "hot", "hot"]},
+            {"mode": "cycle", "order": "antenna"},
+            {"mode": "cycle"},
+            {"mode": "spin", "order": ["antenna", "ambient", "hot"]},
+            {"mode": [], "order": ["antenna", "ambient", "hot"]},
+            {"mode": {"cycle": True}, "order": ["antenna", "ambient", "hot"]},
+            {"order": ["antenna", "ambient", "hot"]},
+            {"mode": "none", "order": ["antenna", "ambient", "hot"]},
+            "cycle",
+        ],
+        ids=[
+            "antenna-not-first",
+            "a-repeated-label",
+            "order-not-a-list",
+            "no-order",
+            "an-unknown-mode",
+            "an-unhashable-mode",
+            "a-mapping-mode",
+            "an-order-with-no-mode",
+            "an-order-under-mode-none",
+            "switching-not-a-mapping",
+        ],
+    )
     def test_an_order_this_layer_cannot_read_stands_down(self, switching):
         """Each of these is somebody else's refusal, and every one of them
         already fires before the beam.
@@ -910,15 +1026,17 @@ class TestTheLoadKeysAgainstTheSwitchOrder:
         other finding -- §2.3's TRAP, in the module whose own docstring is
         about it.
         """
-        assert _observed({"cal_loads": REVERSED_LOADS},
-                         {"switching": switching}) == []
+        assert _observed({"cal_loads": REVERSED_LOADS}, {"switching": switching}) == []
 
-    @pytest.mark.parametrize("loads, refused", [
-        (LOADS, False),
-        (REVERSED_LOADS, True),
-    ], ids=["in-order", "out-of-order"])
-    def test_an_ingested_run_declares_its_order_in_a_grammar_of_its_own(
-            self, loads, refused):
+    @pytest.mark.parametrize(
+        "loads, refused",
+        [
+            (LOADS, False),
+            (REVERSED_LOADS, True),
+        ],
+        ids=["in-order", "out-of-order"],
+    )
+    def test_an_ingested_run_declares_its_order_in_a_grammar_of_its_own(self, loads, refused):
         """The twin grammar, and reading `switching:` with one of them refuses
         a document that BUILDS.
 
@@ -938,22 +1056,24 @@ class TestTheLoadKeysAgainstTheSwitchOrder:
         every ingested run", which would lose the check on exactly the
         documents ``cal_loads`` is written for.
         """
-        found = _ingested({"cal_loads": loads},
-                          {"order": ["antenna", "ambient", "hot"]})
+        found = _ingested({"cal_loads": loads}, {"order": ["antenna", "ambient", "hot"]})
         assert bool(found) is refused
         if refused:
             assert found[0].check == "A14"
 
-    def test_an_ingested_run_that_declares_a_mode_is_someone_elses_refusal(
-            self):
+    def test_an_ingested_run_that_declares_a_mode_is_someone_elses_refusal(self):
         # `observation.py::_data`: an ingested run declares `order:` only,
         # and anything else is that clause's refusal -- which fires in
         # `build_observation`, before the beam.  A check that read the order
         # anyway would answer A14 about a document already refused for a
         # different reason, and the reader would edit `model.cal_loads`.
-        assert _ingested({"cal_loads": REVERSED_LOADS},
-                         {"mode": "cycle",
-                          "order": ["antenna", "ambient", "hot"]}) == []
+        assert (
+            _ingested(
+                {"cal_loads": REVERSED_LOADS},
+                {"mode": "cycle", "order": ["antenna", "ambient", "hot"]},
+            )
+            == []
+        )
 
     def test_a_load_mapping_of_the_wrong_shape_is_a_shape_problem_only(self):
         # A6 and A14 are two sentences about one key, and the build says the
@@ -973,18 +1093,19 @@ class TestTheLoadKeysAgainstTheSwitchOrder:
         """
         order = ("antenna", "ambient", "hot")
         for spec, switch_order, refused in [
-                (LOADS, order, False),
-                (REVERSED_LOADS, order, True),
-                ({"ambient": LOAD}, order, True),
-                ({"ambient": LOAD}, (), True)]:
+            (LOADS, order, False),
+            (REVERSED_LOADS, order, True),
+            ({"ambient": LOAD}, order, True),
+            ({"ambient": LOAD}, (), True),
+        ]:
             raised = None
             try:
-                build_model({"cal_loads": spec}, BARE,
-                            switch_order=switch_order)
+                build_model({"cal_loads": spec}, BARE, switch_order=switch_order)
             except ConfigError as error:
                 raised = str(error)
-            switching = ({"mode": "cycle", "order": list(switch_order)}
-                         if switch_order else {"mode": "none"})
+            switching = (
+                {"mode": "cycle", "order": list(switch_order)} if switch_order else {"mode": "none"}
+            )
             found = _observed({"cal_loads": spec}, {"switching": switching})
             assert bool(found) is refused, (spec, switch_order, found)
             if refused:
@@ -1021,25 +1142,29 @@ class TestTheGraphChecksInThePass:
         # one goes through `preflight` and asks for the ids by name, so a
         # module that is never imported at the foot of `preflight/__init__`
         # fails here rather than passing every direct-call test above.
-        model = {"gian": GAIN, "astro_sum": {},
-                 "beam": {"type": "GainOperator"}, "gain": [GAIN],
-                 "noise": {"sigma": SIGMA},
-                 "beam_spill": SPILL, "ground_pickup": PICKUP}
+        model = {
+            "gian": GAIN,
+            "astro_sum": {},
+            "beam": {"type": "GainOperator"},
+            "gain": [GAIN],
+            "noise": {"sigma": SIGMA},
+            "beam_spill": SPILL,
+            "ground_pickup": PICKUP,
+        }
         fired = preflight(preflight_document(model=model)).checks()
         assert {"A2", "A3", "A4", "A6", "A7", "A32"} <= fired
 
     def test_a_malformed_model_produces_findings_and_never_raises(self):
         # §2.3's TRAP: a check that raises aborts the pass and hides every
         # later finding.  None of these specs is a mapping.
-        model = {"gain": None, "foregrounds": 3, "beam": "type",
-                 "filters": "everything"}
+        model = {"gain": None, "foregrounds": 3, "beam": "type", "filters": "everything"}
         report = preflight(preflight_document(model=model))
         assert report.refusals()
 
     def test_a_non_string_model_key_is_rejected_at_the_evidence_boundary(self):
         with pytest.raises(
-                ConfigError,
-                match=r"initial_merge document: unsupported evidence mapping key type int"):
+            ConfigError, match=r"initial_merge document: unsupported evidence mapping key type int"
+        ):
             preflight(preflight_document(model={4: {}}))
 
     def test_every_where_is_a_path_into_the_document(self):
@@ -1054,26 +1179,28 @@ class TestTheGraphChecksInThePass:
         checks, because ``where`` is built four different ways here -- the
         section, a node, a list entry and a compose stage.
         """
-        model = {"gian": GAIN, "astro_sum": {}, "gain": [GAIN],
-                 "noise": {"compose": "cascade",
-                           "stages": [{"name": "a", "sigma": SIGMA},
-                                      {"name": "b", "sigma": SIGMA}]},
-                 "filters": [{"axis": 0}],
-                 "beam_spill": SPILL, "ground_pickup": PICKUP,
-                 "cal_loads": {"ambient": LOAD}}
+        model = {
+            "gian": GAIN,
+            "astro_sum": {},
+            "gain": [GAIN],
+            "noise": {
+                "compose": "cascade",
+                "stages": [{"name": "a", "sigma": SIGMA}, {"name": "b", "sigma": SIGMA}],
+            },
+            "filters": [{"axis": 0}],
+            "beam_spill": SPILL,
+            "ground_pickup": PICKUP,
+            "cal_loads": {"ambient": LOAD},
+        }
         document = preflight_document(model=model)
-        emitted = [*_graph_shape(document), *_double_count(document),
-                   *_a14_cal_load_keys(document)]
+        emitted = [*_graph_shape(document), *_double_count(document), *_a14_cal_load_keys(document)]
         assert len(emitted) >= 6, emitted
-        assert {"model.noise.stages[0]", "model.filters[0]"} <= {
-            one.where for one in emitted}
+        assert {"model.noise.stages[0]", "model.filters[0]"} <= {one.where for one in emitted}
         for finding in emitted:
             assert parse_path(finding.where)[0] == "model"
 
-    @pytest.mark.parametrize("section", [["gain"], "gain", 3],
-                             ids=["list", "str", "int"])
-    def test_a_model_that_is_not_a_mapping_is_left_to_its_own_builder(
-            self, section):
+    @pytest.mark.parametrize("section", [["gain"], "gain", 3], ids=["list", "str", "int"])
+    def test_a_model_that_is_not_a_mapping_is_left_to_its_own_builder(self, section):
         """``_structural`` guarantees the SECTION is present, never that it is
         a mapping -- so every reader here needs its own guard, and
         ``_double_count``'s is one no other test touches.
@@ -1085,28 +1212,22 @@ class TestTheGraphChecksInThePass:
         it got.
         """
         document = preflight_document(model=section)
-        found = [one for one in preflight(document).refusals()
-                 if one.check in MINE]
+        found = [one for one in preflight(document).refusals() if one.check in MINE]
         assert found == []
 
-    @pytest.mark.parametrize("section", ["one hour", ["freq"], 3],
-                             ids=["str", "list", "int"])
-    def test_an_observation_that_is_not_a_mapping_leaves_the_loads_alone(
-            self, section):
+    @pytest.mark.parametrize("section", ["one hour", ["freq"], 3], ids=["str", "list", "int"])
+    def test_an_observation_that_is_not_a_mapping_leaves_the_loads_alone(self, section):
         # The same hole one section over, and the one A14's leg reads: the
         # switch order comes off `observation:`, and a document whose
         # `observation:` is not a mapping is `build_observation`'s refusal --
         # which precedes the beam anyway.  Without the guard the pass dies
         # with "check 'A14.cal_loads' RAISED AttributeError".
-        document = preflight_document(model={"cal_loads": {"ambient": LOAD}},
-                                      observation=section)
-        found = [one for one in preflight(document).refusals()
-                 if one.check == "A14"]
+        document = preflight_document(model={"cal_loads": {"ambient": LOAD}}, observation=section)
+        found = [one for one in preflight(document).refusals() if one.check == "A14"]
         assert found == []
 
     @pytest.mark.parametrize("check, model, _fragment", MOVED)
-    def test_every_message_ends_with_its_own_check_tag_once(
-            self, check, model, _fragment):
+    def test_every_message_ends_with_its_own_check_tag_once(self, check, model, _fragment):
         """The convention Task 3 shipped as a test over its own five checks,
         written for this module's.
 
@@ -1132,8 +1253,7 @@ class TestTheGraphChecksInThePass:
         # before `build_model`.
         from rheplicant.config.document import load_document
 
-        document = preflight_document(model={"gian": GAIN},
-                                      resources=UNREADABLE_BEAM)
+        document = preflight_document(model={"gian": GAIN}, resources=UNREADABLE_BEAM)
         with pytest.raises(ConfigError) as caught:
             load_document(document)
         assert "'gian' is not a node" in str(caught.value)
@@ -1149,7 +1269,8 @@ class TestTheGraphChecksInThePass:
         document = preflight_document(
             model={"cal_loads": REVERSED_LOADS},
             observation={"switching": CYCLE},
-            resources=UNREADABLE_BEAM)
+            resources=UNREADABLE_BEAM,
+        )
         with pytest.raises(ConfigError) as caught:
             load_document(document)
         assert "the keys are switching.order[1:]" in str(caught.value)
@@ -1168,27 +1289,31 @@ class TestASecondOperatorAtOneNode:
         node passes every config check today and arrives as an
         ``AssemblyError`` after every beam has been read.
         """
-        model = {"global_signal": GLOBAL_SIGNAL, "gain": GAIN,
-                 "bandpass": dict(PY_GAIN, at=["gain"])}
+        model = {
+            "global_signal": GLOBAL_SIGNAL,
+            "gain": GAIN,
+            "bandpass": dict(PY_GAIN, at=["gain"]),
+        }
         assert _t5_one(model, "A5").where == "model.bandpass"
 
-    def test_a_shipped_class_relocated_by_python_collides_at_its_own_node(
-            self):
+    def test_a_shipped_class_relocated_by_python_collides_at_its_own_node(self):
         # No `at:` at all: a `python:` operator lands at its CLASS's
         # graph_node and the key is ignored.  Measured -- this exact model is
         # the `Two operators provided for node 'gain'` AssemblyError quoted in
         # the task body, and a `_t5_claims` that credited the key instead
         # would find no collision here at all.
-        model = {"global_signal": GLOBAL_SIGNAL, "gain": GAIN,
-                 "noise": PY_GAIN}
+        model = {"global_signal": GLOBAL_SIGNAL, "gain": GAIN, "noise": PY_GAIN}
         assert _t5_one(model, "A5").where == "model.noise"
 
     def test_the_message_names_both_keys_and_the_node(self):
         # 2C's shape 1.  "two operators at one node" with the keys swapped
         # sends the reader to delete the entry that was right.  Three pins:
         # the node, the key that is second, and the key that was first.
-        model = {"global_signal": GLOBAL_SIGNAL, "gain": GAIN,
-                 "bandpass": dict(PY_GAIN, at=["gain"])}
+        model = {
+            "global_signal": GLOBAL_SIGNAL,
+            "gain": GAIN,
+            "bandpass": dict(PY_GAIN, at=["gain"]),
+        }
         message = _t5_one(model, "A5").message
         assert message.startswith("model.bandpass:")
         assert "node 'gain'" in message
@@ -1211,14 +1336,13 @@ class TestASecondOperatorAtOneNode:
         cell here (all of them single nodes) and refuses the commonest
         multi-source sky in the repository.
         """
-        model = {"foregrounds": [FOREGROUND],
-                 "gain": dict(PY_GAIN, at=["foregrounds"])}
+        model = {"foregrounds": [FOREGROUND], "gain": dict(PY_GAIN, at=["foregrounds"])}
         assert _t5_refused(preflight_document(model=model), "A5") == []
 
-    @pytest.mark.parametrize("key, at", [("noise", ["gain", "noise"]),
-                                         ("bandpass", ["gain", "noise"])])
-    def test_a_multi_node_region_is_left_to_the_regions_own_refusals(
-            self, key, at):
+    @pytest.mark.parametrize(
+        "key, at", [("noise", ["gain", "noise"]), ("bandpass", ["gain", "noise"])]
+    )
+    def test_a_multi_node_region_is_left_to_the_regions_own_refusals(self, key, at):
         """Two claims of the same node is not always check A5.
 
         Measured, these two documents get ``Node 'gain' is claimed both by the
@@ -1227,8 +1351,7 @@ class TestASecondOperatorAtOneNode:
         wording and ``_check_disjoint_claims``'.  A5 answering here would name
         the wrong fix in a better voice.
         """
-        model = {"global_signal": GLOBAL_SIGNAL, "gain": GAIN,
-                 key: dict(PY_GAIN, at=at)}
+        model = {"global_signal": GLOBAL_SIGNAL, "gain": GAIN, key: dict(PY_GAIN, at=at)}
         assert _t5_refused(preflight_document(model=model), "A5") == []
 
     def test_a_snapshot_pins_its_operator_to_the_key_it_is_written_under(self):
@@ -1245,8 +1368,11 @@ class TestASecondOperatorAtOneNode:
         perfectly: the one direction the task body says a pre-flight pass must
         never be wrong in.
         """
-        model = {"global_signal": GLOBAL_SIGNAL, "gain": GAIN,
-                 "noise": {**PY_GAIN, "snapshot_before": "tap"}}
+        model = {
+            "global_signal": GLOBAL_SIGNAL,
+            "gain": GAIN,
+            "noise": {**PY_GAIN, "snapshot_before": "tap"},
+        }
         assert _t5_refused(preflight_document(model=model), "A5") == []
         twin = build_model(dict(model), BARE, switch_order=())
         assert {"gain", "noise"} <= set(twin.lit)
@@ -1256,9 +1382,11 @@ class TestASecondOperatorAtOneNode:
         # nothing is placed anywhere and neither the `at:` node nor the key is
         # claimed.  A check that took the `at:` answers A5 about a collision
         # the build never gets far enough to have.
-        model = {"global_signal": GLOBAL_SIGNAL, "gain": GAIN,
-                 "noise": {**PY_GAIN, "at": ["gain"],
-                           "snapshot_before": "tap"}}
+        model = {
+            "global_signal": GLOBAL_SIGNAL,
+            "gain": GAIN,
+            "noise": {**PY_GAIN, "at": ["gain"], "snapshot_before": "tap"},
+        }
         assert _t5_refused(preflight_document(model=model), "A5") == []
         with pytest.raises(ConfigError, match="at: and snapshot_before:"):
             build_model(dict(model), BARE, switch_order=())
@@ -1275,11 +1403,16 @@ class TestASecondOperatorAtOneNode:
         whose fault is an unknown key in a ``compose:`` block.  Task 4's
         ``_lit`` closed this hole for lighting; this is its twin for claiming.
         """
-        model = {"global_signal": GLOBAL_SIGNAL, "gain": GAIN,
-                 "cw_tone": BARE_TONE,
-                 "noise": {"compose": "cascade", "at": ["cw_tone"],
-                           "stages": [dict(NOISE_STAGE, name="a"),
-                                      dict(NOISE_STAGE, name="b")]}}
+        model = {
+            "global_signal": GLOBAL_SIGNAL,
+            "gain": GAIN,
+            "cw_tone": BARE_TONE,
+            "noise": {
+                "compose": "cascade",
+                "at": ["cw_tone"],
+                "stages": [dict(NOISE_STAGE, name="a"), dict(NOISE_STAGE, name="b")],
+            },
+        }
         assert _t5_refused(preflight_document(model=model), "A5") == []
         with pytest.raises(ConfigError, match="compose: takes stages:"):
             build_model(dict(model), BARE, switch_order=())
@@ -1295,15 +1428,13 @@ class TestASecondOperatorAtOneNode:
         """
         model = {"cal_loads": {"at": "noise_wave"}, "noise_wave": {}}
         document = preflight_document(
-            model=model,
-            observation={"switching": {"mode": "cycle",
-                                       "order": ["antenna", "at"]}})
+            model=model, observation={"switching": {"mode": "cycle", "order": ["antenna", "at"]}}
+        )
         assert _t5_refused(document, "A5") == []
         with pytest.raises(ConfigError, match="a node spec is a mapping"):
             build_model(dict(model), BARE, switch_order=("antenna", "at"))
 
-    def test_a_key_that_is_not_a_graph_node_places_nothing_to_collide_with(
-            self):
+    def test_a_key_that_is_not_a_graph_node_places_nothing_to_collide_with(self):
         """The first bullet of ``_t5_claims``, pinned rather than reasoned.
 
         Measured: ``build_model`` refuses an unknown node id outright, so
@@ -1312,22 +1443,29 @@ class TestASecondOperatorAtOneNode:
         class anyway credits ``gain``, finds ``model.gain`` there and hands
         the reader A5 for a document whose only fault is a typo in the key.
         """
-        model = {"global_signal": GLOBAL_SIGNAL, "gain": GAIN,
-                 "gian": PY_GAIN}
+        model = {"global_signal": GLOBAL_SIGNAL, "gain": GAIN, "gian": PY_GAIN}
         assert _t5_refused(_model_only(model), "A5") == []
         with pytest.raises(ConfigError, match="'gian' is not a node"):
             build_model(dict(model), BARE, switch_order=())
 
-    @pytest.mark.parametrize("target", [
-        "rheplicant:SnapshotOperator",
-        "rheplicant.core.operator:GainOperator",
-        "myproject.radio:GainOperator",
-        "rheplicant.radio:GainOperator:extra",
-        "rheplicant.radio",
-    ], ids=["a-name-radio-does-not-export", "radios-name-off-another-module",
-            "a-module-whose-name-ends-in-radio", "two-colons", "no-colon"])
-    def test_a_python_target_this_layer_will_not_import_claims_nothing(
-            self, target):
+    @pytest.mark.parametrize(
+        "target",
+        [
+            "rheplicant:SnapshotOperator",
+            "rheplicant.core.operator:GainOperator",
+            "myproject.radio:GainOperator",
+            "rheplicant.radio:GainOperator:extra",
+            "rheplicant.radio",
+        ],
+        ids=[
+            "a-name-radio-does-not-export",
+            "radios-name-off-another-module",
+            "a-module-whose-name-ends-in-radio",
+            "two-colons",
+            "no-colon",
+        ],
+    )
+    def test_a_python_target_this_layer_will_not_import_claims_nothing(self, target):
         """The trap in the task body's table, as an assertion.
 
         A ``python:`` target this layer will not import lands at ITS OWN
@@ -1347,8 +1485,11 @@ class TestASecondOperatorAtOneNode:
         extra'`` and ``''`` are neither of them exported names -- and they are
         here as the shapes, not as discriminating cells.
         """
-        model = {"global_signal": GLOBAL_SIGNAL, "gain": GAIN,
-                 "noise": {"python": target, "name": "tap"}}
+        model = {
+            "global_signal": GLOBAL_SIGNAL,
+            "gain": GAIN,
+            "noise": {"python": target, "name": "tap"},
+        }
         assert _t5_refused(preflight_document(model=model), "A5") == []
 
     def test_the_assemblys_own_refusal_is_still_the_backstop(self):
@@ -1360,8 +1501,7 @@ class TestASecondOperatorAtOneNode:
         because "preflight covers it now" leaves those documents building two
         operators onto one node.
         """
-        model = {"global_signal": GLOBAL_SIGNAL, "gain": GAIN,
-                 "noise": PY_GAIN}
+        model = {"global_signal": GLOBAL_SIGNAL, "gain": GAIN, "noise": PY_GAIN}
         with pytest.raises(AssemblyError, match="Two operators provided"):
             build_model(dict(model), BARE, switch_order=())
 
@@ -1377,10 +1517,8 @@ class TestASecondOperatorAtOneNode:
         that is right.  The occupant is knowable from the placements
         (``claim == key``), so this is order-independent by construction.
         """
-        for model in ({"gain": GAIN, "noise": PY_GAIN},
-                      {"noise": PY_GAIN, "gain": GAIN}):
-            found = only(_model_only({"global_signal": GLOBAL_SIGNAL,
-                                      **model}), "A5")
+        for model in ({"gain": GAIN, "noise": PY_GAIN}, {"noise": PY_GAIN, "gain": GAIN}):
+            found = only(_model_only({"global_signal": GLOBAL_SIGNAL, **model}), "A5")
             assert found.where == "model.noise"
             assert "model.gain already fills" in found.message
 
@@ -1394,9 +1532,12 @@ class TestASecondOperatorAtOneNode:
         -- it names the last and ``model.bandpass`` never appears at all.  One
         finding per intruder, each at its own ``where``.
         """
-        model = {"global_signal": GLOBAL_SIGNAL, "gain": GAIN,
-                 "bandpass": dict(PY_GAIN, at=["gain"]),
-                 "emi": dict(PY_GAIN, at=["gain"])}
+        model = {
+            "global_signal": GLOBAL_SIGNAL,
+            "gain": GAIN,
+            "bandpass": dict(PY_GAIN, at=["gain"]),
+            "emi": dict(PY_GAIN, at=["gain"]),
+        }
         found = _t5_refused(_model_only(model), "A5")
         assert [one.where for one in found] == ["model.bandpass", "model.emi"]
         assert all("model.gain already fills" in one.message for one in found)
@@ -1412,9 +1553,11 @@ class TestASecondOperatorAtOneNode:
         and A5 must fire.  Kills ``"snapshot_before" in spec``, which drops
         the claim here and loses the check on a document that collides.
         """
-        model = {"global_signal": GLOBAL_SIGNAL, "gain": GAIN,
-                 "noise": {**PY_GAIN, "at": ["gain"],
-                           "snapshot_before": None}}
+        model = {
+            "global_signal": GLOBAL_SIGNAL,
+            "gain": GAIN,
+            "noise": {**PY_GAIN, "at": ["gain"], "snapshot_before": None},
+        }
         assert only(_model_only(model), "A5").where == "model.noise"
         with pytest.raises(AssemblyError, match="Two operators provided"):
             build_model(dict(model), BARE, switch_order=())
@@ -1436,8 +1579,7 @@ class TestASecondOperatorAtOneNode:
         twin = build_model(dict(model), GRIDDED, switch_order=())
         assert set(twin.lit) == {"gain", "global_signal"}
 
-    def test_a_key_whose_spec_is_no_mapping_fills_nothing_to_collide_with(
-            self):
+    def test_a_key_whose_spec_is_no_mapping_fills_nothing_to_collide_with(self):
         """A ``many`` node's list places at its key; a single node's does not.
 
         Measured: ``_single`` refuses ``gain: null`` with "a node spec is a
@@ -1448,18 +1590,20 @@ class TestASecondOperatorAtOneNode:
         this document's real fault is the ``null``.  Found by a mutation round
         after the reviewer's, so it is here as a cell rather than as a claim.
         """
-        model = {"global_signal": GLOBAL_SIGNAL, "gain": None,
-                 "noise": PY_GAIN}
+        model = {"global_signal": GLOBAL_SIGNAL, "gain": None, "noise": PY_GAIN}
         assert _t5_refused(_model_only(model), "A5") == []
         with pytest.raises(ConfigError, match="a node spec is a mapping"):
             build_model(dict(model), BARE, switch_order=())
 
-    @pytest.mark.parametrize("spec, wanted", [
-        (dict(PY_GAIN, at="gain"), "restates its own key"),
-        (dict(GAIN, at=["gain"]), "declares no graph node of its own"),
-    ], ids=["a-string-at-disagreeing-with-its-key", "an-at-with-no-python"])
-    def test_an_at_single_refuses_more_precisely_than_a5_could(
-            self, spec, wanted):
+    @pytest.mark.parametrize(
+        "spec, wanted",
+        [
+            (dict(PY_GAIN, at="gain"), "restates its own key"),
+            (dict(GAIN, at=["gain"]), "declares no graph node of its own"),
+        ],
+        ids=["a-string-at-disagreeing-with-its-key", "an-at-with-no-python"],
+    )
+    def test_an_at_single_refuses_more_precisely_than_a5_could(self, spec, wanted):
         """``_single`` names the real fault; A5 would name a generic one.
 
         Both of these are ``at:`` shapes ``_single`` refuses OUTRIGHT, so no
@@ -1469,8 +1613,7 @@ class TestASecondOperatorAtOneNode:
         which sends the reader to compose two entries that were never both
         going to be placed.
         """
-        model = {"global_signal": GLOBAL_SIGNAL, "gain": GAIN,
-                 "bandpass": spec}
+        model = {"global_signal": GLOBAL_SIGNAL, "gain": GAIN, "bandpass": spec}
         assert _t5_refused(_model_only(model), "A5") == []
         with pytest.raises(ConfigError, match=wanted):
             build_model(dict(model), BARE, switch_order=())
@@ -1488,9 +1631,14 @@ class TestASecondOperatorAtOneNode:
         finding a raising A5 would take down with it is a fault about a
         DIFFERENT line, which the reader would never see.
         """
-        document = _model_only({"global_signal": GLOBAL_SIGNAL, "gian": GAIN,
-                                "bandpass": dict(PY_GAIN, at=["nope"]),
-                                "emi": dict(PY_GAIN, at=["nope"])})
+        document = _model_only(
+            {
+                "global_signal": GLOBAL_SIGNAL,
+                "gian": GAIN,
+                "bandpass": dict(PY_GAIN, at=["nope"]),
+                "emi": dict(PY_GAIN, at=["nope"]),
+            }
+        )
         assert _t5_refused(document, "A5") == []
         assert "A2" in preflight(document).checks()
 
@@ -1502,13 +1650,16 @@ class TestWhereTheToneMayGo:
         # The ordinary document.  A check that fired on the presence of a
         # cw_tone rather than on its placement refuses every calibrated model
         # in the repository.
-        model = {"global_signal": GLOBAL_SIGNAL, "cw_tone": BARE_TONE,
-                 "bandpass": BANDPASS, "gain": GAIN}
+        model = {
+            "global_signal": GLOBAL_SIGNAL,
+            "cw_tone": BARE_TONE,
+            "bandpass": BANDPASS,
+            "gain": GAIN,
+        }
         assert _t5_refused(preflight_document(model=model), "A8") == []
 
     @pytest.mark.parametrize("node", ["noise", "emi"])
-    def test_the_tone_downstream_of_the_bandpass_is_refused_in_its_own_words(
-            self, node):
+    def test_the_tone_downstream_of_the_bandpass_is_refused_in_its_own_words(self, node):
         """``must_precede_because`` verbatim, and BOTH blocked targets named.
 
         Paraphrasing the operator's sentence is how the config layer and the
@@ -1517,8 +1668,12 @@ class TestWhereTheToneMayGo:
         message naming only 'bandpass' leaves the reader believing 'gain' is
         fine.
         """
-        model = {"global_signal": GLOBAL_SIGNAL, "bandpass": BANDPASS,
-                 "gain": GAIN, node: dict(TONE, at=node)}
+        model = {
+            "global_signal": GLOBAL_SIGNAL,
+            "bandpass": BANDPASS,
+            "gain": GAIN,
+            node: dict(TONE, at=node),
+        }
         found = _t5_one(model, "A8")
         assert found.where == f"model.{node}"
         assert CWCalibrationOperator.must_precede_because in found.message
@@ -1537,15 +1692,17 @@ class TestWhereTheToneMayGo:
         fix that is not the one -- there IS no bandpass, because the tone is
         standing in it.
         """
-        model = {"global_signal": GLOBAL_SIGNAL, "gain": GAIN,
-                 "bandpass": dict(TONE, at="bandpass")}
+        model = {
+            "global_signal": GLOBAL_SIGNAL,
+            "gain": GAIN,
+            "bandpass": dict(TONE, at="bandpass"),
+        }
         found = _t5_one(model, "A8")
         assert "IN the 'bandpass' slot" in found.message
         assert "cannot be reached" not in found.message
         assert "'cw_tone'" in found.message
 
-    def test_the_tone_in_the_gain_slot_is_the_same_refusal_as_in_bandpass(
-            self):
+    def test_the_tone_in_the_gain_slot_is_the_same_refusal_as_in_bandpass(self):
         """2C's shape 4: a hole closed on one route and left open on its twin.
 
         ``must_precede`` is ``("bandpass", "gain")`` -- TWO nodes -- and §2.6
@@ -1556,8 +1713,11 @@ class TestWhereTheToneMayGo:
         the "cannot be reached" one are different sentences naming different
         fixes.
         """
-        model = {"global_signal": GLOBAL_SIGNAL, "bandpass": BANDPASS,
-                 "gain": dict(TONE, at="gain")}
+        model = {
+            "global_signal": GLOBAL_SIGNAL,
+            "bandpass": BANDPASS,
+            "gain": dict(TONE, at="gain"),
+        }
         found = _t5_one(model, "A8")
         assert "IN the 'gain' slot" in found.message
         assert "cannot be reached" not in found.message
@@ -1572,14 +1732,16 @@ class TestWhereTheToneMayGo:
         just as silently.  A ``_t5_claims`` reading only ``isinstance(at, str)``
         loses A8 on this whole spelling and every cell above stays green.
         """
-        model = {"global_signal": GLOBAL_SIGNAL, "gain": GAIN,
-                 "bandpass": dict(TONE, at=["bandpass"])}
+        model = {
+            "global_signal": GLOBAL_SIGNAL,
+            "gain": GAIN,
+            "bandpass": dict(TONE, at=["bandpass"]),
+        }
         assert "IN the 'bandpass' slot" in _t5_one(model, "A8").message
         twin = build_model(dict(model), BARE, switch_order=())
         assert "cw_tone" not in twin.lit
 
-    def test_a_multi_node_region_carrying_the_tone_is_left_to_the_assembly(
-            self):
+    def test_a_multi_node_region_carrying_the_tone_is_left_to_the_assembly(self):
         """A region is A47's and ``_check_disjoint_claims``', here as in A5.
 
         Measured: ``at: ['noise', 'emi']`` under ``emi:`` really is refused,
@@ -1589,8 +1751,12 @@ class TestWhereTheToneMayGo:
         region would make A8 answer here in a voice that names one node when
         the document names two.
         """
-        model = {"global_signal": GLOBAL_SIGNAL, "bandpass": BANDPASS,
-                 "gain": GAIN, "emi": dict(TONE, at=["noise", "emi"])}
+        model = {
+            "global_signal": GLOBAL_SIGNAL,
+            "bandpass": BANDPASS,
+            "gain": GAIN,
+            "emi": dict(TONE, at=["noise", "emi"]),
+        }
         assert _t5_refused(preflight_document(model=model), "A8") == []
         with pytest.raises(AssemblyError, match="must_precede"):
             build_model(dict(model), BARE, switch_order=())
@@ -1603,8 +1769,11 @@ class TestWhereTheToneMayGo:
         When the package starts refusing it this test goes red -- which is the
         signal that §2.6 item 1's decision can be revisited.
         """
-        model = {"global_signal": GLOBAL_SIGNAL, "gain": GAIN,
-                 "bandpass": dict(TONE, at="bandpass")}
+        model = {
+            "global_signal": GLOBAL_SIGNAL,
+            "gain": GAIN,
+            "bandpass": dict(TONE, at="bandpass"),
+        }
         twin = build_model(dict(model), BARE, switch_order=())
         assert "bandpass" in twin.lit
         assert "cw_tone" not in twin.lit
@@ -1632,8 +1801,12 @@ class TestWhereTheToneMayGo:
         nothing", every negative cell in this class still passes, and the
         check silently refuses the correct document.
         """
-        model = {"global_signal": GLOBAL_SIGNAL, "bandpass": BANDPASS,
-                 "gain": GAIN, "cw_tone": dict(TONE, at="cw_tone")}
+        model = {
+            "global_signal": GLOBAL_SIGNAL,
+            "bandpass": BANDPASS,
+            "gain": GAIN,
+            "cw_tone": dict(TONE, at="cw_tone"),
+        }
         assert _t5_refused(preflight_document(model=model), "A8") == []
 
     def test_a_region_lights_the_nodes_it_covers_but_does_not_key(self):
@@ -1647,13 +1820,15 @@ class TestWhereTheToneMayGo:
         class can see, because every A2/A3/A4/A6/A7 cell keys the node it
         lights.
         """
-        model = {"global_signal": GLOBAL_SIGNAL, "gain": GAIN,
-                 "noise": dict(PY_GAIN, at=["bandpass", "gain", "noise"]),
-                 "emi": dict(TONE, at="emi")}
+        model = {
+            "global_signal": GLOBAL_SIGNAL,
+            "gain": GAIN,
+            "noise": dict(PY_GAIN, at=["bandpass", "gain", "noise"]),
+            "emi": dict(TONE, at="emi"),
+        }
         assert "['bandpass', 'gain']" in _t5_one(model, "A8").message
 
-    def test_a_key_holding_a_relocated_operator_does_not_light_its_own_node(
-            self):
+    def test_a_key_holding_a_relocated_operator_does_not_light_its_own_node(self):
         """The document A8 refused while it BUILDS -- ``_lit``'s defect, seen
         from A8.
 
@@ -1665,8 +1840,7 @@ class TestWhereTheToneMayGo:
         not, because ``_lit`` credited the KEY.  A refusal that asserts a fact
         about the document that is false is worse than a missing check.
         """
-        model = {"global_signal": GLOBAL_SIGNAL, "bandpass": ADC,
-                 "emi": dict(TONE, at="emi")}
+        model = {"global_signal": GLOBAL_SIGNAL, "bandpass": ADC, "emi": dict(TONE, at="emi")}
         assert _t5_refused(_model_only(model), "A8") == []
         twin = build_model(dict(model), GRIDDED, switch_order=())
         assert set(twin.lit) == {"adc", "emi", "global_signal"}
@@ -1682,8 +1856,7 @@ class TestWhereTheToneMayGo:
         reaches the ``len(blocked) == 1`` branch, so it kills a message
         hard-coded to the plural.
         """
-        model = {"global_signal": GLOBAL_SIGNAL, "bandpass": PY_GAIN,
-                 "emi": dict(TONE, at="emi")}
+        model = {"global_signal": GLOBAL_SIGNAL, "bandpass": PY_GAIN, "emi": dict(TONE, at="emi")}
         found = only(_model_only(model), "A8")
         assert "['gain']" in found.message
         assert "bandpass" not in found.message
@@ -1701,8 +1874,12 @@ class TestWhereTheToneMayGo:
         ``cw_tone``, so the reader is told to do what the document does.  The
         real fault is the ``at:``.
         """
-        model = {"global_signal": GLOBAL_SIGNAL, "bandpass": BANDPASS,
-                 "gain": GAIN, "cw_tone": dict(TONE, at="noise")}
+        model = {
+            "global_signal": GLOBAL_SIGNAL,
+            "bandpass": BANDPASS,
+            "gain": GAIN,
+            "cw_tone": dict(TONE, at="noise"),
+        }
         assert _t5_refused(_model_only(model), "A8") == []
         with pytest.raises(ConfigError, match="restates its own key"):
             build_model(dict(model), GRIDDED, switch_order=())
@@ -1717,8 +1894,12 @@ class TestWhereTheToneMayGo:
         earlier draft of ``_tone_placement``'s docstring denied.  A check that
         stood down for the ``cw_tone`` key would lose this document.
         """
-        model = {"global_signal": GLOBAL_SIGNAL, "bandpass": BANDPASS,
-                 "gain": GAIN, "cw_tone": dict(TONE, at=["noise"])}
+        model = {
+            "global_signal": GLOBAL_SIGNAL,
+            "bandpass": BANDPASS,
+            "gain": GAIN,
+            "cw_tone": dict(TONE, at=["noise"]),
+        }
         found = only(_model_only(model), "A8")
         assert found.where == "model.cw_tone"
         assert "['bandpass', 'gain']" in found.message
@@ -1729,9 +1910,15 @@ class TestWhereTheToneMayGo:
         # about `gian` -- a different line, and a real fault -- down with it.
         # A LIST, because the string spelling stands down at the
         # key-restatement rule before it ever gets here.
-        document = _model_only({"global_signal": GLOBAL_SIGNAL, "gian": GAIN,
-                                "bandpass": BANDPASS, "gain": GAIN,
-                                "cw_tone": dict(TONE, at=["nope"])})
+        document = _model_only(
+            {
+                "global_signal": GLOBAL_SIGNAL,
+                "gian": GAIN,
+                "bandpass": BANDPASS,
+                "gain": GAIN,
+                "cw_tone": dict(TONE, at=["nope"]),
+            }
+        )
         assert _t5_refused(document, "A8") == []
         assert "A2" in preflight(document).checks()
 
@@ -1743,8 +1930,7 @@ class TestWhereTheToneMayGo:
         assert CWCalibrationOperator.graph_node == "cw_tone"
         assert CWCalibrationOperator.must_precede_because
 
-    def test_the_tone_is_the_only_shipped_class_with_an_ordering_constraint(
-            self):
+    def test_the_tone_is_the_only_shipped_class_with_an_ordering_constraint(self):
         """Measured at ``48b359d``: 1 of the names in
         ``rheplicant.radio.__all__`` (58 then, 61 now -- the count is not what
         this asserts, and spelling it here was a second copy of a number
@@ -1762,18 +1948,25 @@ class TestWhereTheToneMayGo:
         import rheplicant.radio as radio
         from rheplicant.core.operator import AbstractOperator
 
-        declaring = [name for name in radio.__all__
-                     if isinstance(getattr(radio, name), type)
-                     and issubclass(getattr(radio, name), AbstractOperator)
-                     and not inspect.isabstract(getattr(radio, name))
-                     and getattr(getattr(radio, name), "must_precede", ())]
+        declaring = [
+            name
+            for name in radio.__all__
+            if isinstance(getattr(radio, name), type)
+            and issubclass(getattr(radio, name), AbstractOperator)
+            and not inspect.isabstract(getattr(radio, name))
+            and getattr(getattr(radio, name), "must_precede", ())
+        ]
         assert declaring == ["CWCalibrationOperator"]
 
     def test_the_assemblys_ordering_refusal_is_still_the_backstop(self):
         # `_check_ordering` catches the relocations text cannot resolve -- a
         # `python:` target from outside `rheplicant.radio`.  It stays.
-        model = {"global_signal": GLOBAL_SIGNAL, "bandpass": BANDPASS,
-                 "gain": GAIN, "noise": dict(TONE, at="noise")}
+        model = {
+            "global_signal": GLOBAL_SIGNAL,
+            "bandpass": BANDPASS,
+            "gain": GAIN,
+            "noise": dict(TONE, at="noise"),
+        }
         with pytest.raises(AssemblyError, match="must_precede"):
             build_model(dict(model), BARE, switch_order=())
 
@@ -1781,12 +1974,10 @@ class TestWhereTheToneMayGo:
 class TestDeclaredDataAndSources:
     """A31: an assembly that generates its own data, handed some."""
 
-    def test_declared_data_with_a_source_model_is_refused_naming_the_sources(
-            self):
+    def test_declared_data_with_a_source_model_is_refused_naming_the_sources(self):
         # The reader has to know WHICH nodes made the twin a generator --
         # "this model lights sources" leaves them reading 33 node ids.
-        document = _with_data(_model_only(
-            {"global_signal": GLOBAL_SIGNAL, "gain": GAIN}))
+        document = _with_data(_model_only({"global_signal": GLOBAL_SIGNAL, "gain": GAIN}))
         found = only(document, "A31")
         assert found.where == "observation.data"
         assert "['global_signal']" in found.message
@@ -1798,8 +1989,7 @@ class TestDeclaredDataAndSources:
         -- it is the documented route for applying a chain to an array.  A
         check on ``observation.data`` alone refuses it.
         """
-        assert _t5_refused(_with_data(_model_only({"gain": GAIN})),
-                           "A31") == []
+        assert _t5_refused(_with_data(_model_only({"gain": GAIN})), "A31") == []
 
     def test_a_source_key_whose_operator_left_it_is_no_source_at_all(self):
         """The refusal that told a transform chain to delete the data it
@@ -1829,17 +2019,15 @@ class TestDeclaredDataAndSources:
         refusal.  Kills ``sorted(...)[:1]``, which every other cell here
         passes because every other cell lights exactly one source.
         """
-        document = _with_data(_model_only(
-            {"global_signal": GLOBAL_SIGNAL, "uniform_sky": SKY,
-             "gain": GAIN}))
-        assert "['global_signal', 'uniform_sky']" in only(document,
-                                                          "A31").message
+        document = _with_data(
+            _model_only({"global_signal": GLOBAL_SIGNAL, "uniform_sky": SKY, "gain": GAIN})
+        )
+        assert "['global_signal', 'uniform_sky']" in only(document, "A31").message
 
     def test_a_source_model_with_no_data_is_untouched(self):
         # The other half: sources alone are the ordinary simulating document,
         # and refusing them refuses the package's main use.
-        document = preflight_document(
-            model={"global_signal": GLOBAL_SIGNAL, "gain": GAIN})
+        document = preflight_document(model={"global_signal": GLOBAL_SIGNAL, "gain": GAIN})
         assert _t5_refused(document, "A31") == []
 
     def test_a_data_key_written_empty_declares_no_data(self):
@@ -1856,12 +2044,11 @@ class TestDeclaredDataAndSources:
 
         assert _data(None, BARE, n_time=1, n_freq=1) is None
         document = _with_data(
-            _model_only({"global_signal": GLOBAL_SIGNAL, "gain": GAIN}),
-            data=None)
+            _model_only({"global_signal": GLOBAL_SIGNAL, "gain": GAIN}), data=None
+        )
         assert _t5_refused(document, "A31") == []
 
-    def test_a_recording_beside_declared_data_keeps_the_sections_own_words(
-            self, monkeypatch):
+    def test_a_recording_beside_declared_data_keeps_the_sections_own_words(self, monkeypatch):
         """``from_file`` and ``data`` together is ``build_observation``'s, and
         it already precedes the beam.
 
@@ -1879,25 +2066,29 @@ class TestDeclaredDataAndSources:
         # environment's optional-dependency inventory.
         monkeypatch.setitem(sys.modules, "h5py", object())
 
-        document = {**preflight_document(
-            model={"global_signal": GLOBAL_SIGNAL, "gain": GAIN}),
-            "observation": {"meta": {"telescope": "RHINO"},
-                            "from_file": {"format": "rhino_hdf5",
-                                          "path": "obs.hd5f",
-                                          "freq_unit": "MHz"},
-                            "data": DATA}}
+        document = {
+            **preflight_document(model={"global_signal": GLOBAL_SIGNAL, "gain": GAIN}),
+            "observation": {
+                "meta": {"telescope": "RHINO"},
+                "from_file": {"format": "rhino_hdf5", "path": "obs.hd5f", "freq_unit": "MHz"},
+                "data": DATA,
+            },
+        }
         assert _t5_refused(document, "A31") == []
         with pytest.raises(ConfigError, match="from_file and data"):
             load_document(document)
 
-    @pytest.mark.parametrize("model", [
-        {"global_signal": GLOBAL_SIGNAL, "gain": GAIN},
-        {"gain": GAIN},
-        {"gain": GAIN, "noise": {"type": "NoiseOperator", "sigma": SIGMA}},
-        {"uniform_sky": SKY},
-        {"foregrounds": [FOREGROUND], "gain": GAIN},
-        {"atmosphere": {"t_atm": {"value": 3.0, "unit": "K"}}, "gain": GAIN},
-    ])
+    @pytest.mark.parametrize(
+        "model",
+        [
+            {"global_signal": GLOBAL_SIGNAL, "gain": GAIN},
+            {"gain": GAIN},
+            {"gain": GAIN, "noise": {"type": "NoiseOperator", "sigma": SIGMA}},
+            {"uniform_sky": SKY},
+            {"foregrounds": [FOREGROUND], "gain": GAIN},
+            {"atmosphere": {"t_atm": {"value": 3.0, "unit": "K"}}, "gain": GAIN},
+        ],
+    )
     def test_the_static_source_predicate_is_the_assemblys_own(self, model):
         """``kind == "source"`` over the lit ids IS ``Assembly.has_source``.
 
@@ -1940,12 +2131,13 @@ class TestDeclaredDataAndSources:
         ``test_config_document.py::TestLaterErrorsCarryTheCompletedReport.test_a_builder_error_carries_the_completed_passes_report.explode``,
         which has to move with it.
         """
-        document = {**preflight_document(
-            model={"global_signal": GLOBAL_SIGNAL, "gain": GAIN}),
-            "observation": {"meta": {"telescope": "RHINO"},
-                            "from_file": {"format": "rhino_hdf5",
-                                          "path": "obs.hd5f",
-                                          "freq_unit": "MHz"}}}
+        document = {
+            **preflight_document(model={"global_signal": GLOBAL_SIGNAL, "gain": GAIN}),
+            "observation": {
+                "meta": {"telescope": "RHINO"},
+                "from_file": {"format": "rhino_hdf5", "path": "obs.hd5f", "freq_unit": "MHz"},
+            },
+        }
         assert _t5_refused(document, "A31") == []
 
     def test_a_junction_is_not_a_source_however_lit_it_is(self):
@@ -2012,19 +2204,31 @@ class TestAModelWithNoSourceAndNoData:
             load_document(_model_only({"beam_spill": SPILL}))
         assert NO_SOURCE_MESSAGE in str(caught.value)
 
-    @pytest.mark.parametrize("model", [
-        {"beam_spill": SPILL},
-        {"gain": GAIN},
-        {"gain": GAIN, "noise": {"type": "NoiseOperator", "sigma": SIGMA}},
-        {"global_signal": PY_GAIN},
-        {"uniform_sky": SKY},
-        {"global_signal": GLOBAL_SIGNAL, "gain": GAIN},
-        {"atmosphere": {"t_atm": {"value": 3.0, "unit": "K"}}, "gain": GAIN},
-        {"foregrounds": [FOREGROUND], "gain": GAIN},
-        {"gain": dict(SKY, python="rheplicant.radio:SkyOperator")},
-    ], ids=["spill", "gain", "gain-noise", "gain-under-a-source-key", "sky",
-            "global-signal", "atmosphere", "foregrounds",
-            "a-source-under-a-transform-key"])
+    @pytest.mark.parametrize(
+        "model",
+        [
+            {"beam_spill": SPILL},
+            {"gain": GAIN},
+            {"gain": GAIN, "noise": {"type": "NoiseOperator", "sigma": SIGMA}},
+            {"global_signal": PY_GAIN},
+            {"uniform_sky": SKY},
+            {"global_signal": GLOBAL_SIGNAL, "gain": GAIN},
+            {"atmosphere": {"t_atm": {"value": 3.0, "unit": "K"}}, "gain": GAIN},
+            {"foregrounds": [FOREGROUND], "gain": GAIN},
+            {"gain": dict(SKY, python="rheplicant.radio:SkyOperator")},
+        ],
+        ids=[
+            "spill",
+            "gain",
+            "gain-noise",
+            "gain-under-a-source-key",
+            "sky",
+            "global-signal",
+            "atmosphere",
+            "foregrounds",
+            "a-source-under-a-transform-key",
+        ],
+    )
     def test_the_refusal_is_exactly_the_assemblys_own_predicate(self, model):
         """Refused iff the assembly the build makes has no source.
 
@@ -2033,10 +2237,14 @@ class TestAModelWithNoSourceAndNoData:
         lands at ``gain`` and lights no source, and a sky written under
         ``gain:`` lands at ``uniform_sky`` and lights one.
         """
-        twin = build_model({key: (dict(value) if isinstance(value, dict)
-                                  else value)
-                            for key, value in model.items()},
-                           BARE, switch_order=())
+        twin = build_model(
+            {
+                key: (dict(value) if isinstance(value, dict) else value)
+                for key, value in model.items()
+            },
+            BARE,
+            switch_order=(),
+        )
         refused = _t5_refused(_model_only(model), "A31") != []
         assert refused is (not twin.has_source)
 
@@ -2044,40 +2252,39 @@ class TestAModelWithNoSourceAndNoData:
         """``cal_loads`` is a source node, so its assembly generates data and
         the call guard does not fire.  Whether the ANTENNA branch is dark is
         B5's question, asked after the build."""
-        document = _model_only({"cal_loads": {"ambient": LOAD, "hot": LOAD},
-                                "gain": GAIN})
+        document = _model_only({"cal_loads": {"ambient": LOAD, "hot": LOAD}, "gain": GAIN})
         assert _t5_refused(document, "A31") == []
 
     def test_a_recording_is_the_data_the_chain_acts_on(self, monkeypatch):
         monkeypatch.setitem(sys.modules, "h5py", object())
-        document = {**_model_only({"gain": GAIN}),
-                    "observation": {"meta": {"telescope": "RHINO"},
-                                    "from_file": {"format": "rhino_hdf5",
-                                                  "path": "obs.hd5f",
-                                                  "freq_unit": "MHz"}}}
+        document = {
+            **_model_only({"gain": GAIN}),
+            "observation": {
+                "meta": {"telescope": "RHINO"},
+                "from_file": {"format": "rhino_hdf5", "path": "obs.hd5f", "freq_unit": "MHz"},
+            },
+        }
         assert _t5_refused(document, "A31") == []
 
     def test_a_pipeline_model_is_not_an_assembly(self):
-        document = _model_only({"kind": "pipeline",
-                                "stages": [{"type": "GainOperator", **GAIN}]})
+        document = _model_only({"kind": "pipeline", "stages": [{"type": "GainOperator", **GAIN}]})
         assert _t5_refused(document, "A31") == []
 
     def test_an_entry_text_cannot_place_stands_the_check_down(self):
         """A ``python:`` class this pass will not import lands wherever the
         class declares -- possibly a source -- so absence cannot be read."""
-        document = _model_only({"gain": dict(GAIN,
-                                             python="my_package:MyGain")})
+        document = _model_only({"gain": dict(GAIN, python="my_package:MyGain")})
         assert _t5_refused(document, "A31") == []
 
     def test_an_entry_the_build_refuses_keeps_its_own_sentence(self):
         """An ``at:`` that disagrees with its key places nothing, and
         ``_single`` names that fault; "no source" would pre-empt it."""
-        document = _model_only({"uniform_sky": dict(
-            SKY, python="rheplicant.radio:SkyOperator", at="gain")})
+        document = _model_only(
+            {"uniform_sky": dict(SKY, python="rheplicant.radio:SkyOperator", at="gain")}
+        )
         assert _t5_refused(document, "A31") == []
 
-    def test_a_model_already_refused_for_its_node_ids_is_not_refused_twice(
-            self):
+    def test_a_model_already_refused_for_its_node_ids_is_not_refused_twice(self):
         """A misspelled source is A2's; telling the reader it lights no
         source as well sends them looking for a second fault."""
         document = _model_only({"uniform_skyy": SKY, "gain": GAIN})
@@ -2093,12 +2300,10 @@ class TestAModelWithNoSourceAndNoData:
         document = _model_only({"gain": GAIN})
         del document["inference"]
         document["runs"] = [{"kind": "mmodes"}]
-        found = [one for one in _t5_refused(document, "A31")
-                 if one.where == "model"]
+        found = [one for one in _t5_refused(document, "A31") if one.where == "model"]
         assert len(found) == 1
 
-    def test_the_rhino_preset_document_is_refused_by_the_command_line(
-            self, tmp_path, capsys):
+    def test_the_rhino_preset_document_is_refused_by_the_command_line(self, tmp_path, capsys):
         """The reported document, end to end: exit 2, the sentence, no
         traceback, and no "configuration valid"."""
         from _rheplicant_bootstrap.cli import main
@@ -2158,24 +2363,54 @@ class TestTheReVoicedChecksInThePass:
         # Registration, again: this one asks for the ids by name on ONE
         # document that trips all three, so a module that is imported but
         # whose decorator was dropped fails here.
-        document = _with_data(preflight_document(model={
-            "global_signal": GLOBAL_SIGNAL, "gain": GAIN,
-            "bandpass": dict(PY_GAIN, at=["gain"]),
-            "emi": dict(TONE, at="emi")}))
+        document = _with_data(
+            preflight_document(
+                model={
+                    "global_signal": GLOBAL_SIGNAL,
+                    "gain": GAIN,
+                    "bandpass": dict(PY_GAIN, at=["gain"]),
+                    "emi": dict(TONE, at="emi"),
+                }
+            )
+        )
         assert T5_CHECKS <= preflight(document).checks()
 
-    @pytest.mark.parametrize("check, model, observation", [
-        ("A5", {"global_signal": GLOBAL_SIGNAL, "gain": GAIN,
-                "bandpass": dict(PY_GAIN, at=["gain"])}, None),
-        ("A8", {"global_signal": GLOBAL_SIGNAL, "bandpass": BANDPASS,
-                "gain": GAIN, "emi": dict(TONE, at="emi")}, None),
-        ("A8", {"global_signal": GLOBAL_SIGNAL, "gain": GAIN,
-                "bandpass": dict(TONE, at="bandpass")}, None),
-        ("A31", {"global_signal": GLOBAL_SIGNAL, "gain": GAIN},
-         {"data": DATA}),
-    ], ids=["A5", "A8-unreachable", "A8-displaced", "A31"])
-    def test_every_message_ends_with_its_own_check_tag_once(
-            self, check, model, observation):
+    @pytest.mark.parametrize(
+        "check, model, observation",
+        [
+            (
+                "A5",
+                {
+                    "global_signal": GLOBAL_SIGNAL,
+                    "gain": GAIN,
+                    "bandpass": dict(PY_GAIN, at=["gain"]),
+                },
+                None,
+            ),
+            (
+                "A8",
+                {
+                    "global_signal": GLOBAL_SIGNAL,
+                    "bandpass": BANDPASS,
+                    "gain": GAIN,
+                    "emi": dict(TONE, at="emi"),
+                },
+                None,
+            ),
+            (
+                "A8",
+                {
+                    "global_signal": GLOBAL_SIGNAL,
+                    "gain": GAIN,
+                    "bandpass": dict(TONE, at="bandpass"),
+                },
+                None,
+            ),
+            ("A31", {"global_signal": GLOBAL_SIGNAL, "gain": GAIN}, {"data": DATA}),
+        ],
+        ids=["A5", "A8-unreachable", "A8-displaced", "A31"],
+    )
+    def test_every_message_ends_with_its_own_check_tag_once(self, check, model, observation):
         """The convention Task 3 shipped over its own five checks, written for
         these three -- and A8 has TWO messages, which is why it has two rows.
 
@@ -2199,15 +2434,23 @@ class TestTheReVoicedChecksInThePass:
         other finding (Task 3 paid for this and its carry-forward says so).
         Driven over all three checks at once, and over both of A8's messages.
         """
-        document = _with_data(preflight_document(model={
-            "global_signal": GLOBAL_SIGNAL, "gain": GAIN,
-            "bandpass": dict(PY_GAIN, at=["gain"]),
-            "emi": dict(TONE, at="emi")}))
-        emitted = [*_two_at_one_node(document), *_tone_placement(document),
-                   *_data_with_sources(document)]
+        document = _with_data(
+            preflight_document(
+                model={
+                    "global_signal": GLOBAL_SIGNAL,
+                    "gain": GAIN,
+                    "bandpass": dict(PY_GAIN, at=["gain"]),
+                    "emi": dict(TONE, at="emi"),
+                }
+            )
+        )
+        emitted = [
+            *_two_at_one_node(document),
+            *_tone_placement(document),
+            *_data_with_sources(document),
+        ]
         assert len(emitted) == 3, emitted
-        assert {parse_path(one.where)[0] for one in emitted} == {
-            "model", "observation"}
+        assert {parse_path(one.where)[0] for one in emitted} == {"model", "observation"}
 
     def test_every_node_id_is_a_segment_the_path_grammar_can_spell(self):
         """Why A5 and A8 need no ``_task3_where`` cut-back, as an assertion.
@@ -2267,12 +2510,19 @@ class TestTheReVoicedChecksInThePass:
         aborts the whole pass, so the finding about ``gian`` -- a fault the
         reader really does have to fix -- is what disappears.
         """
-        document = _with_data(preflight_document(model={
-            "gain": None, "foregrounds": 3, "gian": GAIN,
-            "noise": {"python": "rheplicant.radio:Typo", "name": "t"},
-            "bandpass": dict(PY_GAIN, at=["nope"]),
-            "emi": dict(PY_GAIN, at=["nope"]),
-            "cal_loads": {"at": ["gain", 5]}}))
+        document = _with_data(
+            preflight_document(
+                model={
+                    "gain": None,
+                    "foregrounds": 3,
+                    "gian": GAIN,
+                    "noise": {"python": "rheplicant.radio:Typo", "name": "t"},
+                    "bandpass": dict(PY_GAIN, at=["nope"]),
+                    "emi": dict(PY_GAIN, at=["nope"]),
+                    "cal_loads": {"at": ["gain", 5]},
+                }
+            )
+        )
         assert {"A2", "A31"} <= preflight(document).checks()
 
     def test_a_second_operator_wins_against_a_beam_that_cannot_be_read(self):
@@ -2288,9 +2538,13 @@ class TestTheReVoicedChecksInThePass:
         from rheplicant.config.document import load_document
 
         document = preflight_document(
-            model={"global_signal": GLOBAL_SIGNAL, "gain": GAIN,
-                   "bandpass": dict(PY_GAIN, at=["gain"])},
-            resources=UNREADABLE_BEAM)
+            model={
+                "global_signal": GLOBAL_SIGNAL,
+                "gain": GAIN,
+                "bandpass": dict(PY_GAIN, at=["gain"]),
+            },
+            resources=UNREADABLE_BEAM,
+        )
         with pytest.raises(ConfigError) as caught:
             load_document(document)
         assert "model.gain already fills" in str(caught.value)
@@ -2411,8 +2665,7 @@ def _t11_relocated(twin):
     ``test_config_fixture_contract._rolls_its_own`` route B is written to
     catch exactly that.
     """
-    document = _model_only({"global_signal": GLOBAL_SIGNAL, "gain": GAIN,
-                            "emi": PY_NOISE})
+    document = _model_only({"global_signal": GLOBAL_SIGNAL, "gain": GAIN, "emi": PY_NOISE})
     document["inference"]["twin"] = twin
     document["runs"] = [{"kind": "fisher"}]
     return document
@@ -2498,41 +2751,48 @@ class TestTheStochasticFitTwin:
         # fit twin, and simulating WITH the noise is what a forward run is
         # for.  A check that fired here would refuse every simulation this
         # package exists to produce.
-        assert "A30" not in preflight(
-            _t11_fit(twin=None, runs=[{"kind": "forward"}])).checks()
+        assert "A30" not in preflight(_t11_fit(twin=None, runs=[{"kind": "forward"}])).checks()
 
     def test_the_other_non_fitting_exits_do_not_earn_a30(self):
         # _run_mmodes expands a projector against a sky; compare consumes
         # prior products; benchmark evaluates prepared-layer forward calls.
         # None closes a ParameterSpace over built.inference.fit_twin.
         for kind in ("mmodes", "compare", "benchmark"):
-            assert "A30" not in preflight(
-                _t11_fit(twin=None, runs=[{"kind": kind}])).checks()
+            assert "A30" not in preflight(_t11_fit(twin=None, runs=[{"kind": kind}])).checks()
 
     def test_a_forward_run_beside_a_fitting_one_is_still_refused(self):
         # Kills: the condition read off the FIRST run, or the complement test
         # written as an intersection.  A document that simulates and then fits
         # is the ordinary case, and the fit is what cannot have the node.
-        report = preflight(_t11_fit(
-            twin=None, runs=[{"name": "sim", "kind": "forward"},
-                             {"name": "fit", "kind": "fisher"}]))
+        report = preflight(
+            _t11_fit(
+                twin=None,
+                runs=[{"name": "sim", "kind": "forward"}, {"name": "fit", "kind": "fisher"}],
+            )
+        )
         assert "A30" in report.checks()
 
     def test_every_fitting_kind_the_document_declares_is_named(self):
         # Kills: naming only the first fitting kind.  The reader has to know
         # which of its runs the refusal is about.
-        found = only(_t11_fit(twin=None,
-                              runs=[{"name": "a", "kind": "nuts"},
-                                    {"name": "b", "kind": "fisher"},
-                                    {"name": "c", "kind": "forward"}]), "A30")
+        found = only(
+            _t11_fit(
+                twin=None,
+                runs=[
+                    {"name": "a", "kind": "nuts"},
+                    {"name": "b", "kind": "fisher"},
+                    {"name": "c", "kind": "forward"},
+                ],
+            ),
+            "A30",
+        )
         assert "kind: fisher / kind: nuts" in found.message
 
     def test_the_without_repair_clears_it(self):
         # Kills: ignoring inference.twin.without entirely, which would refuse
         # every document in tests/config -- all twelve *_document builders
         # carry the node in model: and drop it in the repair.
-        assert "A30" not in preflight(
-            _t11_fit(twin={"without": ["noise"]})).checks()
+        assert "A30" not in preflight(_t11_fit(twin={"without": ["noise"]})).checks()
 
     def test_a_without_that_is_not_a_list_is_no_repair_and_never_raises(self):
         # §2.3's TRAP: `without: "noise"` is a string, and a check that
@@ -2551,16 +2811,19 @@ class TestTheStochasticFitTwin:
         # `model:` would report the wrong class.  Measured through
         # load_document: this exact twin gives a fit twin carrying
         # RadiometerNoiseOperator at 'noise'.
-        found = only(_t11_fit(twin={"replace": {
-            "noise": {"type": "RadiometerNoiseOperator",
-                      **RADIOMETER_NODE}}}), "A30")
+        found = only(
+            _t11_fit(
+                twin={"replace": {"noise": {"type": "RadiometerNoiseOperator", **RADIOMETER_NODE}}}
+            ),
+            "A30",
+        )
         assert "RadiometerNoiseOperator" in found.message
         assert found.message.startswith("inference.twin.replace.noise puts ")
 
-    @pytest.mark.parametrize("spec", [{"from": "gain"}, None, 3, "noise", []],
-                             ids=["from", "null", "int", "str", "list"])
-    def test_a_replace_this_pass_cannot_decide_stands_the_node_down(self,
-                                                                   spec):
+    @pytest.mark.parametrize(
+        "spec", [{"from": "gain"}, None, 3, "noise", []], ids=["from", "null", "int", "str", "list"]
+    )
+    def test_a_replace_this_pass_cannot_decide_stands_the_node_down(self, spec):
         # `from:` derives the operator from another node, which is
         # CONSTRUCTION and outside P-1 (§2.4); the other four are shapes
         # `build_node_operator` refuses in its own words.  A replacement A30
@@ -2568,18 +2831,24 @@ class TestTheStochasticFitTwin:
         # direction -- and reading a non-mapping as `{}` would reach the
         # unanimity clause, where both classes at `noise` draw and every one
         # of these becomes a refusal.
-        assert "A30" not in preflight(_t11_fit(
-            twin={"replace": {"noise": spec}})).checks()
+        assert "A30" not in preflight(_t11_fit(twin={"replace": {"noise": spec}})).checks()
 
     def test_a_replace_after_a_without_is_left_to_the_package(self):
         # Measured: `without: [noise]` then `replace: {noise: ...}` raises
         # KeyError("No node named 'noise' in this assembly") out of
         # Assembly.replace_node -- there is nothing left to replace.  A30
         # inventing a refusal there would name a fix the document contains.
-        assert "A30" not in preflight(_t11_fit(twin={
-            "without": ["noise"],
-            "replace": {"noise": {"type": "NoiseOperator",
-                                  "sigma": SIGMA}}})).checks()
+        assert (
+            "A30"
+            not in preflight(
+                _t11_fit(
+                    twin={
+                        "without": ["noise"],
+                        "replace": {"noise": {"type": "NoiseOperator", "sigma": SIGMA}},
+                    }
+                )
+            ).checks()
+        )
 
     def test_a_replace_naming_a_node_the_model_never_lights_is_the_same(self):
         """The other face of the SAME ``KeyError``, and the one that shipped.
@@ -2595,8 +2864,12 @@ class TestTheStochasticFitTwin:
         assert "rfi_field" not in _lit(_t11_fit())
         # With the repair kept, `rfi_field` is the only thing A30 could
         # possibly be about -- so a presence assertion is exact here.
-        assert "A30" not in preflight(_t11_fit(twin={
-            "without": ["noise"], "replace": {"rfi_field": RFI}})).checks()
+        assert (
+            "A30"
+            not in preflight(
+                _t11_fit(twin={"without": ["noise"], "replace": {"rfi_field": RFI}})
+            ).checks()
+        )
         # Without it, `model.noise` earns a CORRECT refusal, so the assertion
         # has to be about the SUBJECT: nothing may be said about rfi_field.
         # A presence assertion here would have passed for the wrong reason.
@@ -2614,7 +2887,8 @@ class TestTheStochasticFitTwin:
         # drives `twin=None` only and never reached this.
         document = repatch(
             _t11_fit(twin={"replace": {"noise": NOISE_NODE}}),
-            model={"kind": "pipeline", "stages": []})
+            model={"kind": "pipeline", "stages": []},
+        )
         assert _lit(document) == frozenset()
         assert "A30" not in preflight(document).checks()
 
@@ -2623,9 +2897,12 @@ class TestTheStochasticFitTwin:
         # callable.  The class such a node builds is not in the table, so
         # reading the table there attributes a declaration to an operator the
         # document did not ask for.
-        assert "A30" not in preflight(_t11_fit(
-            model={**STOCHASTIC_MODEL, "noise": FOREIGN_NOISE},
-            twin=None)).checks()
+        assert (
+            "A30"
+            not in preflight(
+                _t11_fit(model={**STOCHASTIC_MODEL, "noise": FOREIGN_NOISE}, twin=None)
+            ).checks()
+        )
 
     def test_a_python_target_this_layer_CAN_resolve_is_not_a_stand_down(self):
         """The hole the task body's draft left open, measured shut.
@@ -2640,8 +2917,7 @@ class TestTheStochasticFitTwin:
         there is a lost check rather than a boundary.
         """
         found = only(_t11_relocated(None), "A30")
-        assert found.message.startswith(
-            "model.emi puts NoiseOperator at node 'noise'")
+        assert found.message.startswith("model.emi puts NoiseOperator at node 'noise'")
         assert "inference.twin.without: [noise]" in found.message
 
     def test_the_repair_is_read_in_NODE_ids_and_not_in_model_keys(self):
@@ -2663,8 +2939,7 @@ class TestTheStochasticFitTwin:
         built = load_document(repatch(cleared, runs=[{"kind": "forward"}]))
         assert stages_requiring(built.twin, RANDOMNESS)
         assert stages_requiring(built.inference.fit_twin, RANDOMNESS) == ()
-        assert "A30" in preflight(
-            _t11_relocated({"without": ["emi"]})).checks()
+        assert "A30" in preflight(_t11_relocated({"without": ["emi"]})).checks()
 
     def test_a_compose_is_read_stage_by_stage_and_not_off_the_node(self):
         """Kills the unanimity fallback applied to a ``compose:`` block.
@@ -2676,15 +2951,25 @@ class TestTheStochasticFitTwin:
         refuse a document the package runs.
         """
         stages = [{"name": "a", **PY_GAIN}, {"name": "b", **PY_GAIN}]
-        assert "A30" not in preflight(_t11_fit(
-            model={**STOCHASTIC_MODEL,
-                   "noise": {"compose": "cascade", "stages": stages}},
-            twin=None)).checks()
+        assert (
+            "A30"
+            not in preflight(
+                _t11_fit(
+                    model={**STOCHASTIC_MODEL, "noise": {"compose": "cascade", "stages": stages}},
+                    twin=None,
+                )
+            ).checks()
+        )
         noisy = [{"name": "a", **NOISE_NODE}, {"name": "b", **NOISE_NODE}]
-        assert "A30" in preflight(_t11_fit(
-            model={**STOCHASTIC_MODEL,
-                   "noise": {"compose": "cascade", "stages": noisy}},
-            twin=None)).checks()
+        assert (
+            "A30"
+            in preflight(
+                _t11_fit(
+                    model={**STOCHASTIC_MODEL, "noise": {"compose": "cascade", "stages": noisy}},
+                    twin=None,
+                )
+            ).checks()
+        )
 
     def test_a_region_is_answered_at_the_node_its_operator_occupies(self):
         """A relocating ``at:`` naming SEVERAL nodes is an ``At(...)`` region,
@@ -2697,8 +2982,13 @@ class TestTheStochasticFitTwin:
         every single placement and names the wrong node here -- and a
         ``without:`` naming that node is the one the assembly refuses.
         """
-        document = _model_only({"global_signal": GLOBAL_SIGNAL, "gain": GAIN,
-                                "emi": {**PY_NOISE, "at": ["noise", "emi"]}})
+        document = _model_only(
+            {
+                "global_signal": GLOBAL_SIGNAL,
+                "gain": GAIN,
+                "emi": {**PY_NOISE, "at": ["noise", "emi"]},
+            }
+        )
         document["inference"]["twin"] = None
         document["runs"] = [{"kind": "fisher"}]
         found = only(document, "A30")
@@ -2716,16 +3006,18 @@ class TestTheStochasticFitTwin:
         # puts the base's own keys first, which would make document order and
         # sorted order agree and this assertion decide nothing.  Measured:
         # with the merge, blaming in document order survives every test here.
-        document = _model_only({"rfi_field": RFI,
-                                "global_signal": GLOBAL_SIGNAL,
-                                "gain": GAIN, "noise": NOISE_NODE})
+        document = _model_only(
+            {"rfi_field": RFI, "global_signal": GLOBAL_SIGNAL, "gain": GAIN, "noise": NOISE_NODE}
+        )
         document["inference"]["twin"] = None
         document["runs"] = [{"kind": "fisher"}]
         report = preflight(document)
         found = [one for one in report.refusals() if one.check == "A30"]
         assert len(found) == 2, found
         assert [one.message.split(" puts ")[0] for one in found] == [
-            "model.noise", "model.rfi_field"]
+            "model.noise",
+            "model.rfi_field",
+        ]
         assert "RFIOperator" in found[1].message
 
     def test_two_entries_at_one_node_blame_the_occupant_either_way_round(self):
@@ -2737,10 +3029,10 @@ class TestTheStochasticFitTwin:
         rather than whichever key came first, or reordering the document sends
         the reader to a different line about the same fault.
         """
-        for model in ({"global_signal": GLOBAL_SIGNAL, "gain": GAIN,
-                       "noise": NOISE_NODE, "emi": PY_NOISE},
-                      {"emi": PY_NOISE, "noise": NOISE_NODE,
-                       "gain": GAIN, "global_signal": GLOBAL_SIGNAL}):
+        for model in (
+            {"global_signal": GLOBAL_SIGNAL, "gain": GAIN, "noise": NOISE_NODE, "emi": PY_NOISE},
+            {"emi": PY_NOISE, "noise": NOISE_NODE, "gain": GAIN, "global_signal": GLOBAL_SIGNAL},
+        ):
             document = _model_only(model)
             document["inference"]["twin"] = None
             document["runs"] = [{"kind": "fisher"}]
@@ -2750,14 +3042,12 @@ class TestTheStochasticFitTwin:
         # The negative half of the capability route.  `_model_only`, not a
         # `model=` patch: `preflight_document` MERGES one level deep, so a
         # patch cannot express the REMOVAL of the base document's noise node.
-        document = _model_only({"global_signal": GLOBAL_SIGNAL, "gain": GAIN,
-                                "bandpass": BANDPASS})
+        document = _model_only({"global_signal": GLOBAL_SIGNAL, "gain": GAIN, "bandpass": BANDPASS})
         document["inference"]["twin"] = None
         document["runs"] = [{"kind": "fisher"}]
         assert "A30" not in preflight(document).checks()
 
-    @pytest.mark.parametrize("declared",
-                             ["GainOperator", 7, [], {}, True, None])
+    @pytest.mark.parametrize("declared", ["GainOperator", 7, [], {}, True, None])
     def test_a_type_this_node_does_not_offer_stands_down(self, declared):
         # `_pick_class` refuses the vocabulary in its own words (check A7);
         # A30 answering first would name the wrong fix.  The NON-STRING cells
@@ -2766,18 +3056,27 @@ class TestTheStochasticFitTwin:
         # fall-through calls every malformed spec there stochastic.  `None` is
         # the cell that needs the test to be on key PRESENCE rather than on
         # `spec.get("type") is not None`.
-        assert "A30" not in preflight(_t11_fit(
-            model={**STOCHASTIC_MODEL,
-                   "noise": {"type": declared, "sigma": SIGMA}},
-            twin=None)).checks()
+        assert (
+            "A30"
+            not in preflight(
+                _t11_fit(
+                    model={**STOCHASTIC_MODEL, "noise": {"type": declared, "sigma": SIGMA}},
+                    twin=None,
+                )
+            ).checks()
+        )
 
     @pytest.mark.parametrize("spec", [None, 3, "noise", []])
     def test_a_node_spec_that_is_not_a_mapping_places_nothing(self, spec):
         # `_single` refuses a non-mapping spec outright, so nothing is placed
         # and there is no operator to ask about -- and reading `{}` in its
         # place would reach the unanimity clause and call it stochastic.
-        assert "A30" not in preflight(_t11_fit(
-            model={**STOCHASTIC_MODEL, "noise": spec}, twin=None)).checks()
+        assert (
+            "A30"
+            not in preflight(
+                _t11_fit(model={**STOCHASTIC_MODEL, "noise": spec}, twin=None)
+            ).checks()
+        )
 
     def test_a_fitting_run_with_no_latents_is_someone_elses_refusal(self):
         """Task 5's rule, and the one that says the task body's "this refuses
@@ -2812,8 +3111,7 @@ class TestTheStochasticFitTwin:
         # rather than the check silently choosing.
         from rheplicant.core.contract import RANDOMNESS
 
-        multi = {node: classes for node, classes in operator_table().items()
-                 if len(classes) > 1}
+        multi = {node: classes for node, classes in operator_table().items() if len(classes) > 1}
         assert set(multi) == {"noise", "flagging", "filters"}
         for node, classes in multi.items():
             declared = {RANDOMNESS in cls.requires for cls in classes}
@@ -2859,13 +3157,28 @@ class TestTheStochasticFitTwin:
         """
         from rheplicant.config.sections.runs import _KINDS
 
-        assert frozenset(_KINDS) == frozenset({
-            "condition", "conjugate.gcr", "conjugate.gls", "conjugate.wiener",
-            "benchmark", "compare", "fisher", "forward", "gradient",
-            "identifiability", "mmodes",
-            "npe", "nuts", "optimize", "plan.estimate", "plan.sample",
-            "predict", "score_directions",
-        }), (
+        assert frozenset(_KINDS) == frozenset(
+            {
+                "condition",
+                "conjugate.gcr",
+                "conjugate.gls",
+                "conjugate.wiener",
+                "benchmark",
+                "compare",
+                "fisher",
+                "forward",
+                "gradient",
+                "identifiability",
+                "mmodes",
+                "npe",
+                "nuts",
+                "optimize",
+                "plan.estimate",
+                "plan.sample",
+                "predict",
+                "score_directions",
+            }
+        ), (
             "runs._KINDS has changed. A30 classifies every kind as FITTING "
             "unless it is in _A30_NOT_FITTING, so a new kind silently "
             "inherits the check. Decide whether it builds a ParameterSpace "
@@ -2878,8 +3191,7 @@ class TestTheStochasticFitTwin:
         # §3.2(f): ONE predicate for "does this node's class declare key",
         # bound here and imported by Task 12.  Node IDS, not model keys --
         # which is the whole reason it is worth sharing.
-        document = _model_only({"global_signal": GLOBAL_SIGNAL, "gain": GAIN,
-                                "emi": PY_NOISE})
+        document = _model_only({"global_signal": GLOBAL_SIGNAL, "gain": GAIN, "emi": PY_NOISE})
         assert stochastic_nodes(document) == frozenset({"noise"})
         assert stochastic_nodes(preflight_document()) == frozenset({"noise"})
         assert stochastic_nodes({"model": {"gain": GAIN}}) == frozenset()
@@ -2899,7 +3211,8 @@ class TestTheStochasticFitTwin:
             model=STOCHASTIC_MODEL,
             inference={"twin": None},
             runs=[{"kind": "fisher"}],
-            resources=UNREADABLE_BEAM)
+            resources=UNREADABLE_BEAM,
+        )
         with pytest.raises(ConfigError) as caught:
             load_document(document)
         assert "check A30" in str(caught.value)
@@ -2910,12 +3223,10 @@ class TestTheBandpassAndTheGain:
     """A33 -- two path heads, two latent names and a transform."""
 
     def test_bandpass_and_gain_both_free_is_A33(self):
-        assert "A33" in preflight(_t11_fit(
-            model=BANDPASS_MODEL, **BANDPASS_AND_GAIN)).checks()
+        assert "A33" in preflight(_t11_fit(model=BANDPASS_MODEL, **BANDPASS_AND_GAIN)).checks()
 
     def test_the_message_is_pinned_whole(self):
-        found = only(_t11_fit(model=BANDPASS_MODEL, **BANDPASS_AND_GAIN),
-                     "A33")
+        found = only(_t11_fit(model=BANDPASS_MODEL, **BANDPASS_AND_GAIN), "A33")
         assert found.message == A33_MESSAGE
 
     def test_the_finding_names_the_bandpass_binding_and_not_the_gain_one(self):
@@ -2924,19 +3235,22 @@ class TestTheBandpassAndTheGain:
         # `transform: unit_mean_bandpass` to the GAIN entry gets a refusal
         # from parse_transform's fan check and no idea why.  `where` is the
         # line to edit and it must be the bandpass one.
-        found = only(_t11_fit(model=BANDPASS_MODEL, **BANDPASS_AND_GAIN),
-                     "A33")
+        found = only(_t11_fit(model=BANDPASS_MODEL, **BANDPASS_AND_GAIN), "A33")
         assert found.where == "inference.parameters.b.transform"
 
     def test_the_transform_on_the_bandpass_binding_clears_it(self):
         parameters = {
-            "b": {**BANDPASS_AND_GAIN["parameters"]["b"],
-                  "transform": "unit_mean_bandpass"},
+            "b": {**BANDPASS_AND_GAIN["parameters"]["b"], "transform": "unit_mean_bandpass"},
             "g": BANDPASS_AND_GAIN["parameters"]["g"],
         }
-        assert "A33" not in preflight(_t11_fit(
-            model=BANDPASS_MODEL, parameters=parameters,
-            noise=BANDPASS_AND_GAIN["noise"])).checks()
+        assert (
+            "A33"
+            not in preflight(
+                _t11_fit(
+                    model=BANDPASS_MODEL, parameters=parameters, noise=BANDPASS_AND_GAIN["noise"]
+                )
+            ).checks()
+        )
 
     def test_the_transform_on_the_GAIN_binding_does_not_clear_it(self):
         # Kills: `any(transform == CONVENTION for EVERY binding)`.  The
@@ -2944,15 +3258,18 @@ class TestTheBandpassAndTheGain:
         # constrains nothing and the null direction is still there.
         parameters = {
             "b": BANDPASS_AND_GAIN["parameters"]["b"],
-            "g": {**BANDPASS_AND_GAIN["parameters"]["g"],
-                  "transform": "unit_mean_bandpass"},
+            "g": {**BANDPASS_AND_GAIN["parameters"]["g"], "transform": "unit_mean_bandpass"},
         }
-        assert "A33" in preflight(_t11_fit(
-            model=BANDPASS_MODEL, parameters=parameters,
-            noise=BANDPASS_AND_GAIN["noise"])).checks()
+        assert (
+            "A33"
+            in preflight(
+                _t11_fit(
+                    model=BANDPASS_MODEL, parameters=parameters, noise=BANDPASS_AND_GAIN["noise"]
+                )
+            ).checks()
+        )
 
-    @pytest.mark.parametrize("named",
-                             ["identity", "exp", "log", "sum", "split_rows"])
+    @pytest.mark.parametrize("named", ["identity", "exp", "log", "sum", "split_rows"])
     def test_another_registered_transform_does_not_clear_it(self, named):
         # `exp` and `log` are elementwise and `sum` reduces; none divides out
         # a mean, so none removes the null direction.  Only the registry's own
@@ -2961,27 +3278,43 @@ class TestTheBandpassAndTheGain:
             "b": {**BANDPASS_AND_GAIN["parameters"]["b"], "transform": named},
             "g": BANDPASS_AND_GAIN["parameters"]["g"],
         }
-        assert "A33" in preflight(_t11_fit(
-            model=BANDPASS_MODEL, parameters=parameters,
-            noise=BANDPASS_AND_GAIN["noise"])).checks()
+        assert (
+            "A33"
+            in preflight(
+                _t11_fit(
+                    model=BANDPASS_MODEL, parameters=parameters, noise=BANDPASS_AND_GAIN["noise"]
+                )
+            ).checks()
+        )
 
-    @pytest.mark.parametrize("transform", [
-        {"python": "m:f", "fan": "broadcast"}, {"affine": {"scale": 2.0}},
-        "nope", 7, [],
-    ], ids=["python", "affine", "unregistered", "int", "list"])
+    @pytest.mark.parametrize(
+        "transform",
+        [
+            {"python": "m:f", "fan": "broadcast"},
+            {"affine": {"scale": 2.0}},
+            "nope",
+            7,
+            [],
+        ],
+        ids=["python", "affine", "unregistered", "int", "list"],
+    )
     def test_a_transform_this_pass_cannot_read_stands_it_down(self, transform):
         # A mapping transform is an arbitrary callable or an affine map and
         # TEXT cannot say whether it fixes the scale; an unregistered name is
         # parse_transform's own refusal, in its own words.  Refusing either
         # would tell a reader who declared a transform to declare one.
         parameters = {
-            "b": {**BANDPASS_AND_GAIN["parameters"]["b"],
-                  "transform": transform},
+            "b": {**BANDPASS_AND_GAIN["parameters"]["b"], "transform": transform},
             "g": BANDPASS_AND_GAIN["parameters"]["g"],
         }
-        assert "A33" not in preflight(_t11_fit(
-            model=BANDPASS_MODEL, parameters=parameters,
-            noise=BANDPASS_AND_GAIN["noise"])).checks()
+        assert (
+            "A33"
+            not in preflight(
+                _t11_fit(
+                    model=BANDPASS_MODEL, parameters=parameters, noise=BANDPASS_AND_GAIN["noise"]
+                )
+            ).checks()
+        )
 
     def test_the_bindings_spelling_is_covered_too(self):
         # 2C's shape 4, in the one place this layer has a real twin:
@@ -2989,13 +3322,18 @@ class TestTheBandpassAndTheGain:
         # bindings[i].into (:362-399), and a check reading one leaves the
         # other open.  Same document, second spelling -- and `where` must name
         # the bindings entry by INDEX.
-        found = only(_t11_fit(
-            model=BANDPASS_MODEL,
-            parameters={"b": {"init": {"ones": ["n_freq"]}},
-                        "g": {"init": 1.0}},
-            bindings=[{"latents": ["b"], "into": "bandpass.bandpass"},
-                      {"latents": ["g"], "into": "gain.gain"}],
-            noise=BANDPASS_AND_GAIN["noise"]), "A33")
+        found = only(
+            _t11_fit(
+                model=BANDPASS_MODEL,
+                parameters={"b": {"init": {"ones": ["n_freq"]}}, "g": {"init": 1.0}},
+                bindings=[
+                    {"latents": ["b"], "into": "bandpass.bandpass"},
+                    {"latents": ["g"], "into": "gain.gain"},
+                ],
+                noise=BANDPASS_AND_GAIN["noise"],
+            ),
+            "A33",
+        )
         assert found.where == "inference.bindings[0].transform"
         assert found.message.startswith("inference.bindings[0] is free into ")
 
@@ -3003,26 +3341,43 @@ class TestTheBandpassAndTheGain:
         # The bandpass sugared and the gain in bindings:.  A check that read
         # one list per document rather than both together would find a
         # bandpass with no gain and stand down.
-        assert "A33" in preflight(_t11_fit(
-            model=BANDPASS_MODEL,
-            parameters={"b": BANDPASS_AND_GAIN["parameters"]["b"],
-                        "g": {"init": 1.0}},
-            bindings=[{"latents": ["g"], "into": "gain.gain"}],
-            noise=BANDPASS_AND_GAIN["noise"])).checks()
+        assert (
+            "A33"
+            in preflight(
+                _t11_fit(
+                    model=BANDPASS_MODEL,
+                    parameters={"b": BANDPASS_AND_GAIN["parameters"]["b"], "g": {"init": 1.0}},
+                    bindings=[{"latents": ["g"], "into": "gain.gain"}],
+                    noise=BANDPASS_AND_GAIN["noise"],
+                )
+            ).checks()
+        )
 
     def test_a_bandpass_alone_is_not_refused(self):
         # Kills: the check firing on the bandpass half alone.  A bandpass with
         # no free gain is identifiable and needs no convention.
-        assert "A33" not in preflight(_t11_fit(
-            model=BANDPASS_MODEL,
-            parameters={"b": BANDPASS_AND_GAIN["parameters"]["b"]},
-            noise=BANDPASS_AND_GAIN["noise"])).checks()
+        assert (
+            "A33"
+            not in preflight(
+                _t11_fit(
+                    model=BANDPASS_MODEL,
+                    parameters={"b": BANDPASS_AND_GAIN["parameters"]["b"]},
+                    noise=BANDPASS_AND_GAIN["noise"],
+                )
+            ).checks()
+        )
 
     def test_a_gain_alone_is_not_refused(self):
-        assert "A33" not in preflight(_t11_fit(
-            model=BANDPASS_MODEL,
-            parameters={"g": BANDPASS_AND_GAIN["parameters"]["g"]},
-            noise=BANDPASS_AND_GAIN["noise"])).checks()
+        assert (
+            "A33"
+            not in preflight(
+                _t11_fit(
+                    model=BANDPASS_MODEL,
+                    parameters={"g": BANDPASS_AND_GAIN["parameters"]["g"]},
+                    noise=BANDPASS_AND_GAIN["noise"],
+                )
+            ).checks()
+        )
 
     def test_one_latent_written_into_both_is_no_null_direction(self):
         """The twin a head-only reading opens.
@@ -3033,51 +3388,86 @@ class TestTheBandpassAndTheGain:
         present" refuses it, and the fix it names -- divide out the mean --
         would change what the document computes.
         """
-        assert "A33" not in preflight(_t11_fit(
-            model=BANDPASS_MODEL,
-            parameters={"b": {"init": 1.0,
-                              "into": ["bandpass.bandpass", "gain.gain"]}},
-            noise=BANDPASS_AND_GAIN["noise"])).checks()
-        assert "A33" not in preflight(_t11_fit(
-            model=BANDPASS_MODEL,
-            parameters={"b": {"init": 1.0}},
-            bindings=[{"latents": ["b"], "into": "bandpass.bandpass"},
-                      {"latents": ["b"], "into": "gain.gain"}],
-            noise=BANDPASS_AND_GAIN["noise"])).checks()
+        assert (
+            "A33"
+            not in preflight(
+                _t11_fit(
+                    model=BANDPASS_MODEL,
+                    parameters={"b": {"init": 1.0, "into": ["bandpass.bandpass", "gain.gain"]}},
+                    noise=BANDPASS_AND_GAIN["noise"],
+                )
+            ).checks()
+        )
+        assert (
+            "A33"
+            not in preflight(
+                _t11_fit(
+                    model=BANDPASS_MODEL,
+                    parameters={"b": {"init": 1.0}},
+                    bindings=[
+                        {"latents": ["b"], "into": "bandpass.bandpass"},
+                        {"latents": ["b"], "into": "gain.gain"},
+                    ],
+                    noise=BANDPASS_AND_GAIN["noise"],
+                )
+            ).checks()
+        )
 
     def test_a_second_latent_on_the_gain_beside_a_shared_one_still_fires(self):
         # The other side of the same rule: `b` writes both, and `g` writes the
         # gain as well -- so `g` is free against `b`'s bandpass and the null
         # direction is back.
-        assert "A33" in preflight(_t11_fit(
-            model=BANDPASS_MODEL,
-            parameters={"b": {"init": 1.0,
-                              "into": ["bandpass.bandpass", "gain.gain"]},
-                        "g": {"init": 1.0, "into": "gain.gain"}},
-            noise=BANDPASS_AND_GAIN["noise"])).checks()
+        assert (
+            "A33"
+            in preflight(
+                _t11_fit(
+                    model=BANDPASS_MODEL,
+                    parameters={
+                        "b": {"init": 1.0, "into": ["bandpass.bandpass", "gain.gain"]},
+                        "g": {"init": 1.0, "into": "gain.gain"},
+                    },
+                    noise=BANDPASS_AND_GAIN["noise"],
+                )
+            ).checks()
+        )
 
     def test_a_deeper_path_still_counts_by_its_head(self):
         # Kills: an equality test against the whole path string.  A binding
         # into `bandpass.bandpass[0]` is the same node; parse_path returns
         # ('bandpass', 'bandpass', 0) and only [0] is the node id.
-        assert "A33" in preflight(_t11_fit(
-            model=BANDPASS_MODEL,
-            parameters={"b": {"init": 1.0, "into": "bandpass.bandpass[0]"},
-                        "g": BANDPASS_AND_GAIN["parameters"]["g"]},
-            noise=BANDPASS_AND_GAIN["noise"])).checks()
+        assert (
+            "A33"
+            in preflight(
+                _t11_fit(
+                    model=BANDPASS_MODEL,
+                    parameters={
+                        "b": {"init": 1.0, "into": "bandpass.bandpass[0]"},
+                        "g": BANDPASS_AND_GAIN["parameters"]["g"],
+                    },
+                    noise=BANDPASS_AND_GAIN["noise"],
+                )
+            ).checks()
+        )
 
     def test_an_unparseable_into_is_left_to_the_binding_parser(self):
         # Kills: letting parse_path's ConfigError out.  A check that raises
         # aborts the whole pass and hides every later finding (§2.3), so a
         # user with a typo'd path AND three other errors sees one.
-        assert "A33" not in preflight(_t11_fit(
-            model=BANDPASS_MODEL,
-            parameters={"b": {"init": 1.0, "into": "a..b"},
-                        "g": BANDPASS_AND_GAIN["parameters"]["g"]},
-            noise=BANDPASS_AND_GAIN["noise"])).checks()
+        assert (
+            "A33"
+            not in preflight(
+                _t11_fit(
+                    model=BANDPASS_MODEL,
+                    parameters={
+                        "b": {"init": 1.0, "into": "a..b"},
+                        "g": BANDPASS_AND_GAIN["parameters"]["g"],
+                    },
+                    noise=BANDPASS_AND_GAIN["noise"],
+                )
+            ).checks()
+        )
 
-    def test_a_latent_name_the_path_grammar_cannot_spell_never_kills_the_pass(
-            self):
+    def test_a_latent_name_the_path_grammar_cannot_spell_never_kills_the_pass(self):
         """Task 3's first lesson, on this task's call site.
 
         ``parameters: {b-1: ...}`` loads today -- ``parse_latents`` validates
@@ -3087,11 +3477,17 @@ class TestTheBandpassAndTheGain:
         to the deepest spellable prefix; the FULL path stays in the message,
         which is what the reader is shown.
         """
-        found = only(_t11_fit(
-            model=BANDPASS_MODEL,
-            parameters={"b-1": {"init": 1.0, "into": "bandpass.bandpass"},
-                        "g": BANDPASS_AND_GAIN["parameters"]["g"]},
-            noise=BANDPASS_AND_GAIN["noise"]), "A33")
+        found = only(
+            _t11_fit(
+                model=BANDPASS_MODEL,
+                parameters={
+                    "b-1": {"init": 1.0, "into": "bandpass.bandpass"},
+                    "g": BANDPASS_AND_GAIN["parameters"]["g"],
+                },
+                noise=BANDPASS_AND_GAIN["noise"],
+            ),
+            "A33",
+        )
         assert found.where == "inference.parameters"
         assert found.message.startswith("inference.parameters.b-1 is free ")
 
@@ -3121,18 +3517,24 @@ class TestTheBandpassAndTheGain:
         # refused outright ("stops on ArrayImpl ..., which is not a leaf").
         # Recorded rather than enforced; the full rule needs a resolved shape,
         # which is C17's and Plan 3C's.
-        both = {"b1": {"init": 1.0, "into": "bandpass.bandpass"},
-                "b2": {"init": 1.0, "into": "bandpass.bandpass[0]"},
-                "g": BANDPASS_AND_GAIN["parameters"]["g"]}
-        found = only(_t11_fit(model=BANDPASS_MODEL, parameters=both,
-                              noise=BANDPASS_AND_GAIN["noise"]), "A33")
+        both = {
+            "b1": {"init": 1.0, "into": "bandpass.bandpass"},
+            "b2": {"init": 1.0, "into": "bandpass.bandpass[0]"},
+            "g": BANDPASS_AND_GAIN["parameters"]["g"],
+        }
+        found = only(
+            _t11_fit(model=BANDPASS_MODEL, parameters=both, noise=BANDPASS_AND_GAIN["noise"]), "A33"
+        )
         assert found.where == "inference.parameters.b1.transform"
-        conventional = {**both,
-                        "b2": {**both["b2"],
-                               "transform": _A33_CONVENTION}}
-        assert "A33" not in preflight(_t11_fit(
-            model=BANDPASS_MODEL, parameters=conventional,
-            noise=BANDPASS_AND_GAIN["noise"])).checks()
+        conventional = {**both, "b2": {**both["b2"], "transform": _A33_CONVENTION}}
+        assert (
+            "A33"
+            not in preflight(
+                _t11_fit(
+                    model=BANDPASS_MODEL, parameters=conventional, noise=BANDPASS_AND_GAIN["noise"]
+                )
+            ).checks()
+        )
 
     def test_a_head_the_model_does_not_light_is_left_to_the_path_walker(self):
         """A33 must consult the MODEL, not only the ``into:`` heads.
@@ -3148,16 +3550,15 @@ class TestTheBandpassAndTheGain:
         not light is the same mistake on the other side.
         """
         assert "bandpass" not in _lit(_t11_fit(model=BASE_MODEL))
-        assert "A33" not in preflight(_t11_fit(model=BASE_MODEL,
-                                               **BANDPASS_AND_GAIN)).checks()
+        assert "A33" not in preflight(_t11_fit(model=BASE_MODEL, **BANDPASS_AND_GAIN)).checks()
         # `repatch`, not `doc["inference"] = ...`: a depth-1 write to that key
         # REPLACES the repaired block, which is what
         # `test_config_fixture_contract._rolls_its_own` route B catches -- and
         # it caught this line when it was written that way.
         gainless = repatch(
             _t11_fit(model=BANDPASS_MODEL, **BANDPASS_AND_GAIN),
-            model={"global_signal": GLOBAL_SIGNAL, "bandpass": BANDPASS,
-                   "noise": NOISE_NODE})
+            model={"global_signal": GLOBAL_SIGNAL, "bandpass": BANDPASS, "noise": NOISE_NODE},
+        )
         assert "gain" not in _lit(gainless)
         assert "A33" not in preflight(gainless).checks()
 
@@ -3172,23 +3573,33 @@ class TestTheBandpassAndTheGain:
         "two different parameters" from a value it had just failed to read.
         """
         for bad_index, other in ((0, 1), (1, 0)):
-            entries = [{"latents": ["b"], "into": "bandpass.bandpass"},
-                       {"latents": ["g"], "into": "gain.gain"}]
+            entries = [
+                {"latents": ["b"], "into": "bandpass.bandpass"},
+                {"latents": ["g"], "into": "gain.gain"},
+            ]
             entries[bad_index] = {**entries[bad_index], "latents": 7}
             document = _t11_fit(
                 model=BANDPASS_MODEL,
                 parameters={"b": {"init": 1.0}, "g": {"init": 1.0}},
-                bindings=entries, noise=BANDPASS_AND_GAIN["noise"])
+                bindings=entries,
+                noise=BANDPASS_AND_GAIN["noise"],
+            )
             assert "A33" not in preflight(document).checks(), bad_index
             assert entries[other]["latents"]  # the readable one is untouched
 
     def test_a_latent_with_no_into_binds_nothing(self):
         # `into: null` is a latent with no binding at all
         # (transforms.py::parse_transform) -- it cannot be free into anything.
-        assert "A33" not in preflight(_t11_fit(
-            model=BANDPASS_MODEL,
-            parameters={"b": {"init": 1.0}, "g": {"init": 1.0}},
-            noise=BANDPASS_AND_GAIN["noise"])).checks()
+        assert (
+            "A33"
+            not in preflight(
+                _t11_fit(
+                    model=BANDPASS_MODEL,
+                    parameters={"b": {"init": 1.0}, "g": {"init": 1.0}},
+                    noise=BANDPASS_AND_GAIN["noise"],
+                )
+            ).checks()
+        )
 
 
 class TestTaskElevensChecksInThePass:
@@ -3202,8 +3613,7 @@ class TestTaskElevensChecksInThePass:
         assert CHECKS["A33"] is _bandpass_and_gain
 
     def test_both_checks_reach_the_report_from_one_document(self):
-        document = _t11_fit(model=BANDPASS_MODEL, twin=None,
-                            **BANDPASS_AND_GAIN)
+        document = _t11_fit(model=BANDPASS_MODEL, twin=None, **BANDPASS_AND_GAIN)
         assert T11_CHECKS <= preflight(document).checks()
 
     @pytest.mark.parametrize("check", ["A30", "A33"])
@@ -3213,8 +3623,11 @@ class TestTaskElevensChecksInThePass:
         Both halves: the tail is THERE (a finding citing no check leaves a
         reader with nothing to look up) and it is there ONCE.
         """
-        document = (_t11_fit(twin=None) if check == "A30" else
-                    _t11_fit(model=BANDPASS_MODEL, **BANDPASS_AND_GAIN))
+        document = (
+            _t11_fit(twin=None)
+            if check == "A30"
+            else _t11_fit(model=BANDPASS_MODEL, **BANDPASS_AND_GAIN)
+        )
         message = only(document, check).message
         assert re.search(r"\(check A\d+\)\.$", message)
         assert message.count(f"check {check}") == 1
@@ -3230,20 +3643,16 @@ class TestTaskElevensChecksInThePass:
         is dropped -- that last segment being the key the reader must ADD
         (``...transform`` on a binding that has none).
         """
-        document = _t11_fit(model=BANDPASS_MODEL, twin=None,
-                            **BANDPASS_AND_GAIN)
-        emitted = [*_stochastic_in_fit_twin(document),
-                   *_bandpass_and_gain(document)]
+        document = _t11_fit(model=BANDPASS_MODEL, twin=None, **BANDPASS_AND_GAIN)
+        emitted = [*_stochastic_in_fit_twin(document), *_bandpass_and_gain(document)]
         assert len(emitted) == 2, emitted
         for one in emitted:
             segments = parse_path(one.where)
             assert segments[0] in document, one.where
-            assert (_walks(document, segments)
-                    or _walks(document, segments[:-1])), one.where
+            assert _walks(document, segments) or _walks(document, segments[:-1]), one.where
 
     @pytest.mark.parametrize("section", [["gain"], "gain", 3])
-    def test_neither_check_reads_a_document_that_is_not_a_mapping(self,
-                                                                 section):
+    def test_neither_check_reads_a_document_that_is_not_a_mapping(self, section):
         """``_structural`` guarantees a section is PRESENT, never that it is a
         MAPPING (Task 4's carry-forward), and the same one level in.
 
@@ -3252,15 +3661,13 @@ class TestTaskElevensChecksInThePass:
         reports as "check 'A30' RAISED" and which costs the document every
         other finding.
         """
-        document = repatch(_t11_fit(twin=None), model=section,
-                           inference=section)
+        document = repatch(_t11_fit(twin=None), model=section, inference=section)
         assert not T11_CHECKS & preflight(document).checks()
 
     def test_a_document_with_no_inference_section_reaches_neither_check(self):
         # `_structural` requires runtime, observation, model and runs -- not
         # inference -- so an absent section is a shape both checks see.
-        document = preflight_document(inference=None,
-                                      runs=[{"kind": "fisher"}])
+        document = preflight_document(inference=None, runs=[{"kind": "fisher"}])
         assert "inference" not in document
         assert not T11_CHECKS & preflight(document).checks()
 
@@ -3281,29 +3688,55 @@ class TestTaskElevensChecksInThePass:
         shrunk to one row fails here rather than passing in a tenth of the
         time.
         """
-        twins = (_ABSENT, None, "nope", 7, [], {},
-                 {"without": "noise"}, {"without": ["noise"]},
-                 {"without": [["x"], 7, None]}, {"without": None},
-                 {"replace": "x"}, {"replace": {"noise": None}},
-                 {"replace": {"noise": {"type": 3}}},
-                 {"replace": {7: {"type": "NoiseOperator"}}},
-                 # The one that lands a DECIDED class under a non-string node
-                 # id: the `python:` route answers without consulting the
-                 # node, so an unfiltered key reaches `sorted(placements)`
-                 # beside the string ones and raises there.
-                 {"replace": {7: PY_NOISE}},
-                 {"replace": {"noise": {"python": None}}})
-        specs = (None, 3, {}, NOISE_NODE, {"type": 7}, PY_NOISE,
-                 {"python": "rheplicant.radio:Typo"}, {"from": "gain"},
-                 {"compose": "cascade", "stages": {"a": 1}},
-                 {"compose": "cascade", "stages": [3, None]},
-                 [NOISE_NODE], "noise")
-        intos = (None, "", "a..b", 7, "gain.gain", "bandpass.bandpass",
-                 ["bandpass.bandpass", 7], {}, ["a..b"])
-        transforms = (None, "identity", _A33_CONVENTION, "nope", 7,
-                      {"python": "m:f"}, [])
-        runs = ([{"kind": "fisher"}], [{"kind": "forward"}], [], "x", [7],
-                {"kind": "fisher"})
+        twins = (
+            _ABSENT,
+            None,
+            "nope",
+            7,
+            [],
+            {},
+            {"without": "noise"},
+            {"without": ["noise"]},
+            {"without": [["x"], 7, None]},
+            {"without": None},
+            {"replace": "x"},
+            {"replace": {"noise": None}},
+            {"replace": {"noise": {"type": 3}}},
+            {"replace": {7: {"type": "NoiseOperator"}}},
+            # The one that lands a DECIDED class under a non-string node
+            # id: the `python:` route answers without consulting the
+            # node, so an unfiltered key reaches `sorted(placements)`
+            # beside the string ones and raises there.
+            {"replace": {7: PY_NOISE}},
+            {"replace": {"noise": {"python": None}}},
+        )
+        specs = (
+            None,
+            3,
+            {},
+            NOISE_NODE,
+            {"type": 7},
+            PY_NOISE,
+            {"python": "rheplicant.radio:Typo"},
+            {"from": "gain"},
+            {"compose": "cascade", "stages": {"a": 1}},
+            {"compose": "cascade", "stages": [3, None]},
+            [NOISE_NODE],
+            "noise",
+        )
+        intos = (
+            None,
+            "",
+            "a..b",
+            7,
+            "gain.gain",
+            "bandpass.bandpass",
+            ["bandpass.bandpass", 7],
+            {},
+            ["a..b"],
+        )
+        transforms = (None, "identity", _A33_CONVENTION, "nope", 7, {"python": "m:f"}, [])
+        runs = ([{"kind": "fisher"}], [{"kind": "forward"}], [], "x", [7], {"kind": "fisher"})
         # The base is built ONCE and repatched per cell.  `preflight_document`
         # deep-copies a delegated document (measured at 0.6 ms), which at this
         # many cells is 40 s of fixture around 1 s of subject; `repatch` is
@@ -3316,20 +3749,24 @@ class TestTaskElevensChecksInThePass:
                 for into in intos:
                     for transform in transforms:
                         for run in runs:
-                            latent = {"init": 1.0, "into": into,
-                                      "transform": transform}
+                            latent = {"init": 1.0, "into": into, "transform": transform}
                             block = {
-                                "parameters": {"b": latent,
-                                               "g": {"init": 1.0,
-                                                     "into": "gain.gain"}},
-                                "bindings": [{"latents": ["b"], "into": into,
-                                              "transform": transform}],
+                                "parameters": {
+                                    "b": latent,
+                                    "g": {"init": 1.0, "into": "gain.gain"},
+                                },
+                                "bindings": [
+                                    {"latents": ["b"], "into": into, "transform": transform}
+                                ],
                             }
                             if twin is not _ABSENT:
                                 block["twin"] = twin
                             document = repatch(
-                                base, inference=block, runs=run,
-                                model={**BANDPASS_MODEL, "noise": spec})
+                                base,
+                                inference=block,
+                                runs=run,
+                                model={**BANDPASS_MODEL, "noise": spec},
+                            )
                             tuple(_stochastic_in_fit_twin(document))
                             tuple(_bandpass_and_gain(document))
                             cells += 1
@@ -3355,8 +3792,7 @@ def _respelled(target, name, module):
     by hand is how a test comes to compare two documents that differ in
     something else as well.
     """
-    return target.replace("CalLoadOperator", name).replace(
-        "instrument.calibration", module)
+    return target.replace("CalLoadOperator", name).replace("instrument.calibration", module)
 
 
 class TestOneClassOneAnswer:
@@ -3415,8 +3851,8 @@ class TestOneClassOneAnswer:
                 built = None
             answered = _t5_radio_class({"python": f"{module}:{name}"})
             assert answered is (shipped if built is shipped else None), (
-                f"{module}:{name} -- the build says {built!r} and this pass "
-                f"says {answered!r}")
+                f"{module}:{name} -- the build says {built!r} and this pass says {answered!r}"
+            )
             checked += 1
         # 60 of the 61 exported names: measured, ``PROTECTED_KEY`` is a plain
         # string constant and carries no ``__module__`` at all, so there is no
@@ -3446,19 +3882,20 @@ class TestOneClassOneAnswer:
         from rheplicant.config.preflight.model import _t5_radio_class
 
         before = set(sys.modules)
-        for target in (LOAD_SUBMODULE, "myproject.radio:CalLoadOperator",
-                       "email.parser:CalLoadOperator"):
+        for target in (
+            LOAD_SUBMODULE,
+            "myproject.radio:CalLoadOperator",
+            "email.parser:CalLoadOperator",
+        ):
             _t5_radio_class({"python": target})
         assert set(sys.modules) - before == set()
 
     def test_a_module_this_process_does_not_hold_is_a_decline(self):
         from rheplicant.config.preflight.model import _t5_radio_class
 
-        assert _t5_radio_class(
-            {"python": "myproject.radio:CalLoadOperator"}) is None
+        assert _t5_radio_class({"python": "myproject.radio:CalLoadOperator"}) is None
 
-    def test_a_module_that_binds_the_name_to_something_else_is_a_decline(
-            self, monkeypatch):
+    def test_a_module_that_binds_the_name_to_something_else_is_a_decline(self, monkeypatch):
         """The identity test, killed directly.
 
         A resolver that widened by NAME alone -- "the attribute is one radio
@@ -3475,8 +3912,7 @@ class TestOneClassOneAnswer:
         impostor = types.ModuleType("impostor_pkg")
         impostor.CalLoadOperator = object()
         monkeypatch.setitem(sys.modules, "impostor_pkg", impostor)
-        assert _t5_radio_class(
-            {"python": "impostor_pkg:CalLoadOperator"}) is None
+        assert _t5_radio_class({"python": "impostor_pkg:CalLoadOperator"}) is None
 
     def test_the_widening_did_not_widen_which_classes_can_be_named(self):
         """``rheplicant.core.operator:SnapshotOperator`` is a real class in an
@@ -3490,8 +3926,7 @@ class TestOneClassOneAnswer:
         from rheplicant.config.preflight.model import _t5_radio_class
 
         assert hasattr(operator, "SnapshotOperator")
-        assert _t5_radio_class(
-            {"python": "rheplicant.core.operator:SnapshotOperator"}) is None
+        assert _t5_radio_class({"python": "rheplicant.core.operator:SnapshotOperator"}) is None
 
     @pytest.mark.parametrize("check", ["A5", "A8", "A14", "A15", "A31", "A52"])
     def test_no_check_answers_differently_about_the_two_spellings(self, check):
@@ -3507,41 +3942,67 @@ class TestOneClassOneAnswer:
         :class:`TestTheLoadThePassCouldNotSee`.
         """
         base_observation = preflight_document()["observation"]
-        cycling = {**base_observation,
-                   "switching": {"mode": "cycle",
-                                 "order": ["antenna", "ambient"]}}
+        cycling = {
+            **base_observation,
+            "switching": {"mode": "cycle", "order": ["antenna", "ambient"]},
+        }
         documents = {
             "A5": lambda target: preflight_document(
-                model={**BASE_MODEL, "bandpass": dict(
-                    GAIN, python=_respelled(target, "GainOperator",
-                                            "instrument.gain"))}),
+                model={
+                    **BASE_MODEL,
+                    "bandpass": dict(
+                        GAIN, python=_respelled(target, "GainOperator", "instrument.gain")
+                    ),
+                }
+            ),
             "A8": lambda target: preflight_document(
-                model={**BASE_MODEL, "cw_tone": dict(
-                    TONE, at=["gain"],
-                    python=_respelled(target, "CWCalibrationOperator",
-                                      "instrument.calibration"))}),
+                model={
+                    **BASE_MODEL,
+                    "cw_tone": dict(
+                        TONE,
+                        at=["gain"],
+                        python=_respelled(
+                            target, "CWCalibrationOperator", "instrument.calibration"
+                        ),
+                    ),
+                }
+            ),
             "A14": lambda target: preflight_document(
-                model={**BASE_MODEL, "bandpass": dict(LOAD, python=target)},
-                observation=cycling),
+                model={**BASE_MODEL, "bandpass": dict(LOAD, python=target)}, observation=cycling
+            ),
             "A15": lambda target: preflight_document(
-                model={**BASE_MODEL, "bandpass": {
-                    "python": _respelled(target, "NoiseWaveOperator",
-                                         "instrument.noise_wave"),
-                    "gamma_src_re": {"zeros": [3, 8]},
-                    "gamma_src_im": {"zeros": [3, 8]}}},
-                observation=cycling),
-            "A31": lambda target: _with_data(_model_only(
-                {"gain": GAIN, "emi": dict(SKY, python=_respelled(
-                    target, "SkyOperator", "sky.uniform"))})),
+                model={
+                    **BASE_MODEL,
+                    "bandpass": {
+                        "python": _respelled(target, "NoiseWaveOperator", "instrument.noise_wave"),
+                        "gamma_src_re": {"zeros": [3, 8]},
+                        "gamma_src_im": {"zeros": [3, 8]},
+                    },
+                },
+                observation=cycling,
+            ),
+            "A31": lambda target: _with_data(
+                _model_only(
+                    {
+                        "gain": GAIN,
+                        "emi": dict(SKY, python=_respelled(target, "SkyOperator", "sky.uniform")),
+                    }
+                )
+            ),
             "A52": lambda target: _model_only(
-                {"gain": GAIN, "emi": {"python": _respelled(
-                    target, "SkySourceOperator", "sky.source")}}),
+                {
+                    "gain": GAIN,
+                    "emi": {"python": _respelled(target, "SkySourceOperator", "sky.source")},
+                }
+            ),
         }[check]
 
         def report(target):
-            return [(one.check, one.where, one.message)
-                    for one in preflight(documents(target)).findings
-                    if one.check == check]
+            return [
+                (one.check, one.where, one.message)
+                for one in preflight(documents(target)).findings
+                if one.check == check
+            ]
 
         assert report(LOAD_EXPORTED) == report(LOAD_SUBMODULE)
         if check != "A14":
@@ -3562,16 +4023,25 @@ class TestOneClassOneAnswer:
         assert _t5_placement("noise", foreign) is None
         assert _t5_claims("noise", foreign) == ()
 
-    @pytest.mark.parametrize(("key", "spec"), [
-        ("gian", GAIN),
-        ("gain", None),
-        ("bandpass", {"at": ["gain"]}),
-        ("bandpass", dict(PY_GAIN, at="noise")),
-        ("bandpass", dict(PY_GAIN, at=7)),
-        ("noise", {"python": "rheplicant.radio:AbstractSkyModel"}),
-    ], ids=["not-a-node", "not-a-mapping", "at-with-no-python",
-            "a-string-at-that-does-not-restate-its-key", "a-malformed-at",
-            "a-class-that-declares-no-graph-node"])
+    @pytest.mark.parametrize(
+        ("key", "spec"),
+        [
+            ("gian", GAIN),
+            ("gain", None),
+            ("bandpass", {"at": ["gain"]}),
+            ("bandpass", dict(PY_GAIN, at="noise")),
+            ("bandpass", dict(PY_GAIN, at=7)),
+            ("noise", {"python": "rheplicant.radio:AbstractSkyModel"}),
+        ],
+        ids=[
+            "not-a-node",
+            "not-a-mapping",
+            "at-with-no-python",
+            "a-string-at-that-does-not-restate-its-key",
+            "a-malformed-at",
+            "a-class-that-declares-no-graph-node",
+        ],
+    )
     def test_every_other_empty_answer_stays_empty(self, key, spec):
         """The other polarity, and the one a lazy fix would break.
 
@@ -3614,8 +4084,7 @@ class TestA5AndA8DoNotContradictEachOther:
         """The premise.  Kills a "fix" that resolved the contradiction by
         standing one of the two down -- which would lose a check rather than
         reconcile two."""
-        report = preflight(preflight_document(
-            model={**BASE_MODEL, "cw_tone": TONE_AT_GAIN}))
+        report = preflight(preflight_document(model={**BASE_MODEL, "cw_tone": TONE_AT_GAIN}))
         assert {"A5", "A8"} <= report.checks()
 
     def test_A5_no_longer_advises_what_A8_forbids(self):
@@ -3625,8 +4094,7 @@ class TestA5AndA8DoNotContradictEachOther:
         share the sentence before them, and *"its own node"* appears in A8's
         message too, so ``in`` on either would pass under the defect.
         """
-        found = only(preflight_document(
-            model={**BASE_MODEL, "cw_tone": TONE_AT_GAIN}), "A5")
+        found = only(preflight_document(model={**BASE_MODEL, "cw_tone": TONE_AT_GAIN}), "A5")
         assert found.message == (
             "model.cw_tone: puts a second operator at node 'gain', which "
             "model.gain already fills, and this node accepts a single "
@@ -3634,7 +4102,8 @@ class TestA5AndA8DoNotContradictEachOther:
             "declares must_precede=['bandpass', 'gain'], so it has to come "
             "BEFORE the 'gain' operator and composing the two under 'gain' "
             "puts it inside the stage it is there to track -- check A8, which "
-            "fires on this same node, says what that costs (check A5).")
+            "fires on this same node, says what that costs (check A5)."
+        )
 
     def test_an_ordinary_collision_keeps_the_compose_remedy(self):
         """ANTI-VACUITY, and the direction an over-eager fix loses.
@@ -3644,14 +4113,14 @@ class TestA5AndA8DoNotContradictEachOther:
         leave every ordinary collision without a fix.  Pinned whole for the
         same reason as the row above.
         """
-        found = only(preflight_document(
-            model={**BASE_MODEL, "bandpass": PY_GAIN}), "A5")
+        found = only(preflight_document(model={**BASE_MODEL, "bandpass": PY_GAIN}), "A5")
         assert found.message == (
             "model.bandpass: puts a second operator at node 'gain', which "
             "model.gain already fills, and this node accepts a single "
             "instance. Compose them under one key instead -- compose: cascade "
             "at a transform node, compose: sum at a source node, which is how "
-            "this document spells At(...) (check A5).")
+            "this document spells At(...) (check A5)."
+        )
 
     def test_A5s_old_advice_applied_is_no_longer_a_clean_report(self):
         """The defect itself.  Before the fix this document earned NOTHING.
@@ -3659,10 +4128,15 @@ class TestA5AndA8DoNotContradictEachOther:
         A8 read the composing MAPPING for a ``python:``, which a composing
         mapping never carries, so the tone inside the cascade was invisible.
         """
-        found = only(preflight_document(
-            model={**{key: value for key, value in BASE_MODEL.items()
-                      if key != "gain"},
-                   "gain": COMPOSED_AFTER}), "A8")
+        found = only(
+            preflight_document(
+                model={
+                    **{key: value for key, value in BASE_MODEL.items() if key != "gain"},
+                    "gain": COMPOSED_AFTER,
+                }
+            ),
+            "A8",
+        )
         assert found.where == "model.gain.stages[1]"
         assert found.message == (
             "model.gain.stages[1]: puts CWCalibrationOperator at node 'gain' "
@@ -3675,7 +4149,8 @@ class TestA5AndA8DoNotContradictEachOther:
             "(core/fold.py:271), and check_stage_ordering compares only "
             "stages the document gave a name: to (core/pipeline.py:129). "
             "Make it stage 0 of the cascade, or give it its own node, "
-            "'cw_tone' (check A8).")
+            "'cw_tone' (check A8)."
+        )
 
     def test_the_tone_composed_FIRST_is_not_refused(self):
         """``compose: cascade`` is ``Pipeline(*stages)`` and applies them in
@@ -3687,19 +4162,34 @@ class TestA5AndA8DoNotContradictEachOther:
         the message's own *"Make it stage 0 of the cascade"* advice naming a
         fix the check itself rejects.
         """
-        assert _t5_refused(preflight_document(
-            model={**{key: value for key, value in BASE_MODEL.items()
-                      if key != "gain"},
-                   "gain": COMPOSED_FIRST}), "A8") == []
+        assert (
+            _t5_refused(
+                preflight_document(
+                    model={
+                        **{key: value for key, value in BASE_MODEL.items() if key != "gain"},
+                        "gain": COMPOSED_FIRST,
+                    }
+                ),
+                "A8",
+            )
+            == []
+        )
 
     def test_a_cascade_of_stages_that_declare_no_ordering_is_silent(self):
         """ANTI-VACUITY on the widening: reading composed stages must not
         make every ``compose:`` block a finding."""
-        assert _t5_refused(preflight_document(
-            model={**{key: value for key, value in BASE_MODEL.items()
-                      if key != "gain"},
-                   "gain": {"compose": "cascade",
-                            "stages": [GAIN, PY_GAIN]}}), "A8") == []
+        assert (
+            _t5_refused(
+                preflight_document(
+                    model={
+                        **{key: value for key, value in BASE_MODEL.items() if key != "gain"},
+                        "gain": {"compose": "cascade", "stages": [GAIN, PY_GAIN]},
+                    }
+                ),
+                "A8",
+            )
+            == []
+        )
 
     def test_a_compose_the_build_refuses_outright_stands_A8_down(self):
         """Task 5's rule, on the shape the widening opened.
@@ -3718,9 +4208,10 @@ class TestA5AndA8DoNotContradictEachOther:
         change: it told the reader the tone was "injected after stage 0" of a
         block that has no stage order at all.
         """
-        model = {**{key: value for key, value in BASE_MODEL.items()
-                    if key != "gain"},
-                 "gain": {"compose": "sum", "stages": [GAIN, TONE]}}
+        model = {
+            **{key: value for key, value in BASE_MODEL.items() if key != "gain"},
+            "gain": {"compose": "sum", "stages": [GAIN, TONE]},
+        }
         assert _t5_refused(preflight_document(model=model), "A8") == []
         with pytest.raises(ConfigError, match="use compose: cascade"):
             build_model(dict(model), BARE, switch_order=())
@@ -3728,8 +4219,7 @@ class TestA5AndA8DoNotContradictEachOther:
     def test_the_single_entry_message_is_unchanged(self):
         """§2.3: a MOVED message survives verbatim, and the entry walk this
         commit put under A8 must not reword the leg it already had."""
-        found = only(preflight_document(
-            model={**BASE_MODEL, "cw_tone": TONE_AT_GAIN}), "A8")
+        found = only(preflight_document(model={**BASE_MODEL, "cw_tone": TONE_AT_GAIN}), "A8")
         assert found.where == "model.cw_tone"
         assert found.message == (
             "model.cw_tone: puts CWCalibrationOperator IN the 'gain' slot, so "
@@ -3739,7 +4229,8 @@ class TestA5AndA8DoNotContradictEachOther:
             "say this: it sees one placement, and an absent stage is "
             "deliberately no violation there (core/fold.py:271), while "
             "the document still has the key and the operator apart. Give it "
-            "its own node, 'cw_tone' (check A8).")
+            "its own node, 'cw_tone' (check A8)."
+        )
 
 
 class TestWhichRunsA30IsAbout:
@@ -3760,22 +4251,32 @@ class TestWhichRunsA30IsAbout:
         Kills ``sorted(_kinds(document) - _A30_NOT_FITTING)``, which is what
         shipped.
         """
-        assert "A30" not in preflight(_t11_fit(
-            twin=None,
-            runs=[{"kind": "fisher", "expect": "refuse"}])).checks()
+        assert (
+            "A30"
+            not in preflight(
+                _t11_fit(twin=None, runs=[{"kind": "fisher", "expect": "refuse"}])
+            ).checks()
+        )
 
-    def test_a_sibling_run_of_the_same_kind_that_expects_nothing_still_is(
-            self):
+    def test_a_sibling_run_of_the_same_kind_that_expects_nothing_still_is(self):
         """The gate is per RUN, not per document.
 
         Kills a stand-down written ``any(run.get("expect") == "refuse" ...)``
         over the whole ``runs:`` list, which would lose A30 on a document
         where one fisher run is an assertion and another is a fit.
         """
-        assert "A30" in preflight(_t11_fit(
-            twin=None,
-            runs=[{"name": "asserted", "kind": "fisher", "expect": "refuse"},
-                  {"name": "fitted", "kind": "fisher"}])).checks()
+        assert (
+            "A30"
+            in preflight(
+                _t11_fit(
+                    twin=None,
+                    runs=[
+                        {"name": "asserted", "kind": "fisher", "expect": "refuse"},
+                        {"name": "fitted", "kind": "fisher"},
+                    ],
+                )
+            ).checks()
+        )
 
     def test_a_kind_the_run_grammar_does_not_offer_earns_nothing(self):
         """A30's message claimed *"This document declares kind: banana, and
@@ -3787,15 +4288,34 @@ class TestWhichRunsA30IsAbout:
         ``run_document`` path and nothing names it on ``load_document``'s,
         which makes an invented claim worse rather than harmless.
         """
-        assert "A30" not in preflight(_t11_fit(
-            twin=None, runs=[{"kind": "banana"}])).checks()
+        assert "A30" not in preflight(_t11_fit(twin=None, runs=[{"kind": "banana"}])).checks()
 
-    @pytest.mark.parametrize("kind", sorted(
-        {"forward", "fisher", "optimize", "plan.estimate", "plan.sample",
-         "nuts", "npe", "conjugate.gls", "conjugate.wiener", "conjugate.gcr",
-         "identifiability", "score_directions", "predict", "mmodes",
-         "condition", "gradient", "compare", "benchmark"}
-        - {"forward", "mmodes", "compare", "benchmark"}))
+    @pytest.mark.parametrize(
+        "kind",
+        sorted(
+            {
+                "forward",
+                "fisher",
+                "optimize",
+                "plan.estimate",
+                "plan.sample",
+                "nuts",
+                "npe",
+                "conjugate.gls",
+                "conjugate.wiener",
+                "conjugate.gcr",
+                "identifiability",
+                "score_directions",
+                "predict",
+                "mmodes",
+                "condition",
+                "gradient",
+                "compare",
+                "benchmark",
+            }
+            - {"forward", "mmodes", "compare", "benchmark"}
+        ),
+    )
     def test_every_fitting_kind_the_enum_declares_still_earns_it(self, kind):
         """ANTI-VACUITY on the narrowing: intersecting with ``runs._KINDS``
         must not drop a kind that IS declared.
@@ -3808,8 +4328,7 @@ class TestWhichRunsA30IsAbout:
         from rheplicant.config.sections.runs import _KINDS
 
         assert kind in _KINDS
-        assert "A30" in preflight(_t11_fit(twin=None,
-                                           runs=[{"kind": kind}])).checks()
+        assert "A30" in preflight(_t11_fit(twin=None, runs=[{"kind": kind}])).checks()
 
 
 class TestA33ReadsOnlyDeclaredLatents:
@@ -3823,11 +4342,12 @@ class TestA33ReadsOnlyDeclaredLatents:
     def _document(self, latents):
         return preflight_document(
             model=BANDPASS_MODEL,
-            inference={"parameters": {"g": {"init": 1.0,
-                                            "into": "gain.gain"}},
-                       "bindings": [{"latents": latents,
-                                     "into": "bandpass.bandpass"}],
-                       "noise": BANDPASS_AND_GAIN["noise"]})
+            inference={
+                "parameters": {"g": {"init": 1.0, "into": "gain.gain"}},
+                "bindings": [{"latents": latents, "into": "bandpass.bandpass"}],
+                "noise": BANDPASS_AND_GAIN["noise"],
+            },
+        )
 
     def test_a_binding_naming_no_declared_latent_earns_nothing(self):
         """Measured live: this document earned A33 at
@@ -3850,8 +4370,7 @@ class TestA33ReadsOnlyDeclaredLatents:
         second mistake.
         """
         document = self._document(["ghost", "b"])
-        document["inference"]["parameters"]["b"] = {
-            "init": {"ones": ["n_freq"]}}
+        document["inference"]["parameters"]["b"] = {"init": {"ones": ["n_freq"]}}
         assert "A33" in preflight(document).checks()
 
     def test_the_undeclared_name_is_the_packages_own_refusal(self):

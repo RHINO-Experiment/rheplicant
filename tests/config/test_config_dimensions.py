@@ -204,17 +204,22 @@ def test_same_formulas_cover_outer_resource_and_sequence_roles():
 def test_affine_matrix_basis_and_exp_log_formulas_are_discriminating():
     kelvin = signature("K")
     unitless = signature("dimensionless")
-    assert evaluate_formula(
-        "modifier_affine",
-        {"value": kelvin, "scale": unitless, "offset": kelvin},
-        result=kelvin,
-    ) == kelvin
-    assert evaluate_formula(
-        "matmul", {"design": unitless, "coefficient": kelvin}, result=kelvin
-    ) == kelvin
-    assert evaluate_formula(
-        "basis_expand", {"basis": unitless, "coefficient": kelvin}, result=kelvin
-    ) == kelvin
+    assert (
+        evaluate_formula(
+            "modifier_affine",
+            {"value": kelvin, "scale": unitless, "offset": kelvin},
+            result=kelvin,
+        )
+        == kelvin
+    )
+    assert (
+        evaluate_formula("matmul", {"design": unitless, "coefficient": kelvin}, result=kelvin)
+        == kelvin
+    )
+    assert (
+        evaluate_formula("basis_expand", {"basis": unitless, "coefficient": kelvin}, result=kelvin)
+        == kelvin
+    )
     assert evaluate_formula("exp_log", {"value": unitless}) == unitless
     with pytest.raises(ConfigError, match="role 'scale'"):
         evaluate_formula(
@@ -383,11 +388,7 @@ def test_environment_infers_a_latent_from_its_live_model_binding():
                     "width": {"value": 10.0, "unit": "MHz"},
                 }
             },
-            "inference": {
-                "parameters": {
-                    "depth": {"init": 0.1, "into": "global_signal.depth"}
-                }
-            },
+            "inference": {"parameters": {"depth": {"init": 0.1, "into": "global_signal.depth"}}},
         }
     )
     assert environment.latent_dimensions["depth"] == signature("K")
@@ -410,9 +411,7 @@ def test_environment_applies_parameter_and_longhand_binding_transforms():
                     "log_depth": {"init": 0.0, "into": "global_signal.depth", "transform": "exp"},
                     "depth": {"init": 0.1},
                 },
-                "bindings": [
-                    {"latents": ["depth"], "into": "global_signal.depth"}
-                ],
+                "bindings": [{"latents": ["depth"], "into": "global_signal.depth"}],
             },
         }
     )
@@ -484,12 +483,12 @@ def test_real_resource_dag_binds_fixed_outputs_before_a_dependent_ref():
         context,
     )
     assert built.order == ("resources.bases.design", "resources.arrays.copy")
-    assert context.dimensions.resource_dimensions[
-        "resources.bases.design.time"
-    ] == signature("dimensionless")
-    assert context.dimensions.resource_dimensions[
-        "resources.arrays.copy"
-    ] == signature("dimensionless")
+    assert context.dimensions.resource_dimensions["resources.bases.design.time"] == signature(
+        "dimensionless"
+    )
+    assert context.dimensions.resource_dimensions["resources.arrays.copy"] == signature(
+        "dimensionless"
+    )
 
 
 def test_ref_distinguishes_an_absent_fixed_binding_from_bound_open_unknown():
@@ -507,12 +506,8 @@ def test_ref_distinguishes_an_absent_fixed_binding_from_bound_open_unknown():
     with pytest.raises(ConfigError, match="was not bound"):
         resolve_value({"ref": "resources.bases.b.time"}, fixed)
 
-    open_unknown = dataclasses.replace(
-        production, resources={"resources.arrays.a": 1.0}
-    )
-    bind_resource_dimension(
-        open_unknown.dimensions, "resources.arrays.a", None
-    )
+    open_unknown = dataclasses.replace(production, resources={"resources.arrays.a": 1.0})
+    bind_resource_dimension(open_unknown.dimensions, "resources.arrays.a", None)
     assert resolve_value({"ref": "resources.arrays.a"}, open_unknown).value == 1.0
 
 

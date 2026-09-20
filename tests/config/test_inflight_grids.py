@@ -60,14 +60,26 @@ from tests.config.preflight_helpers import (
 
 # --- the documents ---------------------------------------------------------
 
-BEAM = {"horn": {"format": "npy", "path": "b.npy", "nside": 4,
-                 "normalize": "pixel_sum", "frame": "beam_local"}}
-DRIFT = {"engine": "driftscan", "beam": {"ref": "resources.beams.horn"},
-         "lmax": 8, "uniform_sampling": True,
-         "lat_deg": {"value": 53.2, "unit": "deg"},
-         "az_deg": {"value": 0.0, "unit": "deg"},
-         "el_deg": {"value": 90.0, "unit": "deg"},
-         "normalize_beam": True, "acknowledge_float32_sky": True}
+BEAM = {
+    "horn": {
+        "format": "npy",
+        "path": "b.npy",
+        "nside": 4,
+        "normalize": "pixel_sum",
+        "frame": "beam_local",
+    }
+}
+DRIFT = {
+    "engine": "driftscan",
+    "beam": {"ref": "resources.beams.horn"},
+    "lmax": 8,
+    "uniform_sampling": True,
+    "lat_deg": {"value": 53.2, "unit": "deg"},
+    "az_deg": {"value": 0.0, "unit": "deg"},
+    "el_deg": {"value": 90.0, "unit": "deg"},
+    "normalize_beam": True,
+    "acknowledge_float32_sky": True,
+}
 
 
 def projectors(**over):
@@ -75,9 +87,11 @@ def projectors(**over):
 
 
 def tone(**over):
-    node = {"amplitude": {"value": 5000.0, "unit": "K"},
-            "tone_freq": {"value": 70.0, "unit": "MHz"},
-            "line_width": {"value": 3.6, "unit": "MHz"}}
+    node = {
+        "amplitude": {"value": 5000.0, "unit": "K"},
+        "tone_freq": {"value": 70.0, "unit": "MHz"},
+        "line_width": {"value": 3.6, "unit": "MHz"},
+    }
     node.update(over)
     return preflight_document(model={**BASE_MODEL, "cw_tone": node})
 
@@ -91,32 +105,46 @@ def tone(**over):
 #: 8 Hz, which is 0.099 of a 333 Hz channel, so that grid now earns the "cannot
 #: be checked" refusal and could no longer tell a floor from a ceiling. At 1 MHz
 #: the same 8 Hz is 1e-4 of a channel.
-NARROW_FREQ = {"grid": {"linspace": {"start": 70.0, "stop": 71.0, "num": 4,
-                                     "endpoint": True}, "unit": "MHz"}}
+NARROW_FREQ = {
+    "grid": {"linspace": {"start": 70.0, "stop": 71.0, "num": 4, "endpoint": True}, "unit": "MHz"}
+}
 
 
 def narrow(width_hz, lineshape=None):
-    node = {"amplitude": {"value": 5000.0, "unit": "K"},
-            "tone_freq": {"value": 70.5, "unit": "MHz"},
-            "line_width": width_hz}
+    node = {
+        "amplitude": {"value": 5000.0, "unit": "K"},
+        "tone_freq": {"value": 70.5, "unit": "MHz"},
+        "line_width": width_hz,
+    }
     if lineshape is not None:
         node["lineshape"] = lineshape
-    return preflight_document(observation={"freq": NARROW_FREQ},
-                              model={**BASE_MODEL, "cw_tone": node})
+    return preflight_document(
+        observation={"freq": NARROW_FREQ}, model={**BASE_MODEL, "cw_tone": node}
+    )
 
 
 #: A DESCENDING time grid carrying a tone that drifts.  ``linspace 30 -> 0 s``
 #: is legal and builds; the operator's ``times - times[0]`` makes the run's
 #: first offset -30 s, so the tone was 15 MHz lower when the run started.
 DESCENDING_TIME_TONE = preflight_document(
-    observation={"time": {"grid": {"linspace": {
-        "start": 30.0, "stop": 0.0, "num": 16, "endpoint": True},
-        "unit": "s"}}},
-    model={**BASE_MODEL, "cw_tone": {
-        "amplitude": {"value": 5000.0, "unit": "K"},
-        "tone_freq": {"value": 62.0, "unit": "MHz"},
-        "drift_rate": 5.0e5,
-        "line_width": {"value": 3.6, "unit": "MHz"}}})
+    observation={
+        "time": {
+            "grid": {
+                "linspace": {"start": 30.0, "stop": 0.0, "num": 16, "endpoint": True},
+                "unit": "s",
+            }
+        }
+    },
+    model={
+        **BASE_MODEL,
+        "cw_tone": {
+            "amplitude": {"value": 5000.0, "unit": "K"},
+            "tone_freq": {"value": 62.0, "unit": "MHz"},
+            "drift_rate": 5.0e5,
+            "line_width": {"value": 3.6, "unit": "MHz"},
+        },
+    },
+)
 
 
 def replacing(replace, **patch):
@@ -137,8 +165,7 @@ def replacing(replace, **patch):
 
 
 def sidereal(n_days, **over):
-    return {"type": "SiderealFilter", "n_days": n_days, "mode": "extract",
-            **over}
+    return {"type": "SiderealFilter", "n_days": n_days, "mode": "extract", **over}
 
 
 #: The bare ids this module is about.  Every "earns nothing" assertion is
@@ -184,6 +211,7 @@ _A13_TAIL = (
     "resolved frequency grid and two static floats (check A13)."
 )
 
+
 #: **The channel spacing is not a portable number, and this fixture is where
 #: that bites hardest.** ``NARROW_FREQ`` is 70 to 71 MHz over FOUR channels,
 #: so the true spacing is 333333.33 Hz -- and float32's ulp at 70 MHz is exactly
@@ -208,8 +236,7 @@ def a13_narrow_message(spacing: float, width: str = "300000") -> str:
         f"this 'sinc2' grid can carry (1 x the {spacing:.6g} Hz median channel "
         f"spacing = {spacing:.6g} "
         "Hz). The sampled channels land on the lineshape's own nulls, or overflow "
-        "its exponent, and the normalisation then divides by float noise."
-        + _A13_TAIL
+        "its exponent, and the normalisation then divides by float noise." + _A13_TAIL
     )
 
 
@@ -239,17 +266,18 @@ def assert_a13_just_under_the_floor(message: str, rtol: float) -> None:
     width = f"{spacing * (1.0 - 2.0 * rtol):.6g}"
     assert message == a13_narrow_message(spacing, width)
 
+
 def a13_wide_message(spacing: float) -> str:
     return (
-    "model.cw_tone.line_width: 700000 Hz is wider than a LINE on this band -- "
-    f"the limit is {2 * spacing:.6g} Hz, the larger of 0.25 x the 1e+06 Hz band "
-    f"and 2 x the "
-    f"{spacing:.6g} Hz channel spacing. Note the second term: on a narrow or coarse band "
-    "it is the operative one, and a reading of schema §6's A13 row that stops "
-    "at 0.25 x the band is a different number. Nothing would raise -- the "
-    "weights still normalise -- but what they model is a PEDESTAL over the "
-    "whole band, every channel sits above protect_floor of the peak, and the "
-    "RFI flagger is switched off for the entire run." + _A13_TAIL
+        "model.cw_tone.line_width: 700000 Hz is wider than a LINE on this band -- "
+        f"the limit is {2 * spacing:.6g} Hz, the larger of 0.25 x the 1e+06 Hz band "
+        f"and 2 x the "
+        f"{spacing:.6g} Hz channel spacing. Note the second term: on a narrow or coarse band "
+        "it is the operative one, and a reading of schema §6's A13 row that stops "
+        "at 0.25 x the band is a different number. Nothing would raise -- the "
+        "weights still normalise -- but what they model is a PEDESTAL over the "
+        "whole band, every channel sits above protect_floor of the peak, and the "
+        "RFI flagger is switched off for the entire run." + _A13_TAIL
     )
 
 
@@ -260,6 +288,7 @@ def assert_a13_wide(message: str) -> None:
     found = re.search(r"2 x the ([\d.e+]+) Hz channel spacing", message)
     assert found, f"the wide message no longer quotes a spacing: {message}"
     assert message == a13_wide_message(float(found.group(1)))
+
 
 A13_BAND_MESSAGE = (
     "model.cw_tone.tone_freq: the tone centre spans [2e+08, 2e+08] Hz, "
@@ -384,18 +413,16 @@ class TestC3:
         assert found.where == "resources.projectors.drift"
 
     def test_the_whole_message(self):
-        assert axis_only(preflight_document(resources=projectors()),
-                         "C3").message == C3_MESSAGE
+        assert axis_only(preflight_document(resources=projectors()), "C3").message == C3_MESSAGE
 
     def test_it_stands_down_without_uniform_sampling(self):
         """``uniform_sampling`` is the OPT-IN.  The direct sum has no FFT and
         no Nyquist bin, so ``2*lmax >= n_time`` is not a defect there."""
-        assert "C3" not in ids_of(preflight_document(
-            resources=projectors(uniform_sampling=False)))
-        absent = {key: value for key, value in DRIFT.items()
-                  if key != "uniform_sampling"}
-        assert "C3" not in ids_of(preflight_document(
-            resources={"beams": BEAM, "projectors": {"drift": absent}}))
+        assert "C3" not in ids_of(preflight_document(resources=projectors(uniform_sampling=False)))
+        absent = {key: value for key, value in DRIFT.items() if key != "uniform_sampling"}
+        assert "C3" not in ids_of(
+            preflight_document(resources={"beams": BEAM, "projectors": {"drift": absent}})
+        )
 
     def test_it_stands_down_on_general_pointing(self):
         """The named twin, **and the document WRITES ``uniform_sampling``.**
@@ -414,48 +441,82 @@ class TestC3:
         Nyquist bin -- so the key is a fault of a different kind, and the
         sentence the reader must get is the builder's.
         """
-        spec = {"engine": "general_pointing", "lmax": 8, "nside": 4,
-                "uniform_sampling": True,
-                "beam": {"ref": "resources.beams.horn"},
-                "lat_deg": {"value": 53.2, "unit": "deg"},
-                "normalize_beam": True, "acknowledge_float32_sky": True}
-        assert "C3" not in ids_of(preflight_document(resources={
-            "beams": BEAM, "projectors": {"drift": spec}}))
+        spec = {
+            "engine": "general_pointing",
+            "lmax": 8,
+            "nside": 4,
+            "uniform_sampling": True,
+            "beam": {"ref": "resources.beams.horn"},
+            "lat_deg": {"value": 53.2, "unit": "deg"},
+            "normalize_beam": True,
+            "acknowledge_float32_sky": True,
+        }
+        assert "C3" not in ids_of(
+            preflight_document(resources={"beams": BEAM, "projectors": {"drift": spec}})
+        )
         with pytest.raises(ConfigError) as raised:
-            build_projector("drift", spec,
-                            axis_facts(preflight_document()).context)
+            build_projector("drift", spec, axis_facts(preflight_document()).context)
         assert str(raised.value) == (
             "drift: engine: general_pointing does not take "
             "['uniform_sampling']; it takes ['acknowledge_float32_sky', "
             "'beam', 'beam_alms', 'beam_iterations', 'engine', 'lat_deg', "
-            "'lmax', 'normalize_beam', 'nside'].")
+            "'lmax', 'normalize_beam', 'nside']."
+        )
 
     def test_it_stands_down_on_general_pointing_without_the_key_too(self):
         """The other cell: the same engine with no ``uniform_sampling`` at
         all, which is what a correct document looks like."""
-        assert "C3" not in ids_of(preflight_document(resources={
-            "beams": BEAM,
-            "projectors": {"drift": {
-                "engine": "general_pointing", "lmax": 8, "nside": 4,
-                "beam": {"ref": "resources.beams.horn"},
-                "lat_deg": {"value": 53.2, "unit": "deg"},
-                "normalize_beam": True, "acknowledge_float32_sky": True}}}))
+        assert "C3" not in ids_of(
+            preflight_document(
+                resources={
+                    "beams": BEAM,
+                    "projectors": {
+                        "drift": {
+                            "engine": "general_pointing",
+                            "lmax": 8,
+                            "nside": 4,
+                            "beam": {"ref": "resources.beams.horn"},
+                            "lat_deg": {"value": 53.2, "unit": "deg"},
+                            "normalize_beam": True,
+                            "acknowledge_float32_sky": True,
+                        }
+                    },
+                }
+            )
+        )
 
     def test_it_stands_down_on_a_matrix_projector(self):
-        assert "C3" not in ids_of(preflight_document(resources={
-            "projectors": {"m": {"engine": "matrix", "provenance": {"who": "x"},
-                                 "matrix": {"zeros": [16, 4]}}}}))
+        assert "C3" not in ids_of(
+            preflight_document(
+                resources={
+                    "projectors": {
+                        "m": {
+                            "engine": "matrix",
+                            "provenance": {"who": "x"},
+                            "matrix": {"zeros": [16, 4]},
+                        }
+                    }
+                }
+            )
+        )
 
     def test_extends_is_applied_before_the_arithmetic(self):
         """``resolved_specs`` resolves ``extends:``, so a child inheriting
         ``lmax`` from a parent is covered.  A check reading the raw section
         would find no ``lmax`` on the child and stand down on a document that
         breaks the rule."""
-        found = axis_only(preflight_document(resources={
-            "beams": BEAM,
-            "projectors": {"base": {**DRIFT, "uniform_sampling": False},
-                           "drift": {"extends": "base",
-                                     "uniform_sampling": True}}}), "C3")
+        found = axis_only(
+            preflight_document(
+                resources={
+                    "beams": BEAM,
+                    "projectors": {
+                        "base": {**DRIFT, "uniform_sampling": False},
+                        "drift": {"extends": "base", "uniform_sampling": True},
+                    },
+                }
+            ),
+            "C3",
+        )
         assert found.where == "resources.projectors.drift"
 
     def test_a_malformed_sibling_does_not_abort_the_pass(self):
@@ -464,10 +525,15 @@ class TestC3:
         check that let the ``ConfigError`` out would be wrapped as "in-flight
         check 'C3' RAISED ConfigError" and every finding after it would be
         lost."""
-        found = axis_only(preflight_document(resources={
-            "beams": BEAM,
-            "projectors": {"drift": DRIFT,
-                           "orphan": {"extends": "nobody"}}}), "C3")
+        found = axis_only(
+            preflight_document(
+                resources={
+                    "beams": BEAM,
+                    "projectors": {"drift": DRIFT, "orphan": {"extends": "nobody"}},
+                }
+            ),
+            "C3",
+        )
         assert found.where == "resources.projectors.drift"
 
 
@@ -482,38 +548,49 @@ class TestC3DoesNotPreEmptTheBuilder:
         front of.  ``_require`` runs before ``resolve_reference``, so no file
         is opened here either."""
         spec = {key: value for key, value in DRIFT.items() if key != "lmax"}
-        assert "C3" not in ids_of(preflight_document(
-            resources={"beams": BEAM, "projectors": {"drift": spec}}))
+        assert "C3" not in ids_of(
+            preflight_document(resources={"beams": BEAM, "projectors": {"drift": spec}})
+        )
         with pytest.raises(ConfigError) as raised:
-            build_projector("drift", spec, axis_facts(
-                preflight_document()).context)
+            build_projector("drift", spec, axis_facts(preflight_document()).context)
         assert str(raised.value) == (
-            "drift: engine: driftscan requires lmax: -- the "
-            "spherical-harmonic band limit.")
+            "drift: engine: driftscan requires lmax: -- the spherical-harmonic band limit."
+        )
 
     def test_a_non_integer_lmax_is_left_to_the_builder(self):
-        assert "C3" not in ids_of(preflight_document(
-            resources=projectors(lmax="eight")))
+        assert "C3" not in ids_of(preflight_document(resources=projectors(lmax="eight")))
 
     def test_a_bool_lmax_is_left_to_the_builder(self):
         """``isinstance(True, int)`` is True in Python, and ``lmax: true``
         would otherwise be read as a band limit of 1."""
-        assert "C3" not in ids_of(preflight_document(resources=projectors(
-            lmax=True)))
+        assert "C3" not in ids_of(preflight_document(resources=projectors(lmax=True)))
 
 
 class TestC3sOwnAdviceWorks:
     """S4's second half for C3 -- all three remedies the message names."""
 
-    @pytest.mark.parametrize(("label", "document"), [
-        ("lower lmax", preflight_document(resources=projectors(lmax=7))),
-        ("drop uniform_sampling",
-         preflight_document(resources=projectors(uniform_sampling=False))),
-        ("raise n_time", preflight_document(
-            resources=projectors(),
-            observation={"time": {"grid": {"arange": {
-                "start": 0.0, "step": 2.0, "num": 32}, "unit": "s"}}})),
-    ], ids=["lower-lmax", "drop-uniform-sampling", "raise-n-time"])
+    @pytest.mark.parametrize(
+        ("label", "document"),
+        [
+            ("lower lmax", preflight_document(resources=projectors(lmax=7))),
+            (
+                "drop uniform_sampling",
+                preflight_document(resources=projectors(uniform_sampling=False)),
+            ),
+            (
+                "raise n_time",
+                preflight_document(
+                    resources=projectors(),
+                    observation={
+                        "time": {
+                            "grid": {"arange": {"start": 0.0, "step": 2.0, "num": 32}, "unit": "s"}
+                        }
+                    },
+                ),
+            ),
+        ],
+        ids=["lower-lmax", "drop-uniform-sampling", "raise-n-time"],
+    )
     def test_each_remedy_clears_the_finding(self, label, document):
         assert "C3" not in ids_of(document)
 
@@ -523,10 +600,15 @@ class TestC3sOwnAdviceWorks:
         accepts.  Only one, because this is the expensive kind of test: it
         reads the beam and runs the transform."""
         pytest.importorskip("limtod_jax")
-        assert load_document(
-            preflight_document(resources=projector_sections(
-                tmp_path, uniform_sampling=True, lmax=7)),
-            base_dir=str(tmp_path)) is not None
+        assert (
+            load_document(
+                preflight_document(
+                    resources=projector_sections(tmp_path, uniform_sampling=True, lmax=7)
+                ),
+                base_dir=str(tmp_path),
+            )
+            is not None
+        )
 
 
 class TestA13sWidthLegs:
@@ -547,8 +629,7 @@ class TestA13sWidthLegs:
         derived from the package's own constants rather than written down."""
         facts = axis_facts(narrow(400e3))
         freq = facts.context.freq
-        spacing = float(_median_gap(freq, name="channel_spacing",
-                                    axis_name="frequency"))
+        spacing = float(_median_gap(freq, name="channel_spacing", axis_name="frequency"))
         band = float(freq.max()) - float(freq.min())
         schema_only = MAX_WIDTH_IN_BAND_FRACTION * band
         code = max(schema_only, MIN_CEILING_IN_CHANNELS * spacing)
@@ -563,9 +644,9 @@ class TestA13sWidthLegs:
         line four times narrower than a sinc2 one, and the default is read off
         the class rather than assumed."""
         facts = axis_facts(narrow(400e3))
-        spacing = float(_median_gap(facts.context.freq,
-                                    name="channel_spacing",
-                                    axis_name="frequency"))
+        spacing = float(
+            _median_gap(facts.context.freq, name="channel_spacing", axis_name="frequency")
+        )
         assert MIN_WIDTH_IN_CHANNELS["gaussian"] < MIN_WIDTH_IN_CHANNELS["sinc2"]
         width = 0.5 * spacing
         assert "A13" not in ids_of(narrow(width, "gaussian"))
@@ -579,8 +660,7 @@ class TestA13sWidthLegs:
         assert explicit == defaulted
         assert_a13_narrow(defaulted)
 
-    def test_the_default_is_READ_from_the_class_and_not_spelled_sinc2(self,
-                                                                     monkeypatch):
+    def test_the_default_is_READ_from_the_class_and_not_spelled_sinc2(self, monkeypatch):
         """The test above cannot tell ``_tone_default("lineshape")`` from a
         literal ``"sinc2"``, because the class's default IS ``sinc2`` --
         measured, that mutant survived the whole suite.  Nothing about a
@@ -597,10 +677,14 @@ class TestA13sWidthLegs:
 
         assert _tone_default("lineshape") == CWCalibrationOperator.lineshape
 
-        spacing = float(_median_gap(axis_facts(narrow(400e3)).context.freq,
-                                    name="channel_spacing",
-                                    axis_name="frequency"))
-        half = 0.5 * spacing            # under sinc2's floor, over gaussian's
+        spacing = float(
+            _median_gap(
+                axis_facts(narrow(400e3)).context.freq,
+                name="channel_spacing",
+                axis_name="frequency",
+            )
+        )
+        half = 0.5 * spacing  # under sinc2's floor, over gaussian's
         assert "A13" in ids_of(narrow(half)), "the sinc2 default refuses this"
         monkeypatch.setattr(grids, "_tone_default", lambda field: "gaussian")
         assert silent_here(narrow(half)), (
@@ -618,8 +702,7 @@ class TestA13sWidthLegs:
         ``calibration.py``'s own comparison, which is the one this restates.
         """
         freq = axis_facts(narrow(400e3)).context.freq
-        spacing = float(_median_gap(freq, name="channel_spacing",
-                                    axis_name="frequency"))
+        spacing = float(_median_gap(freq, name="channel_spacing", axis_name="frequency"))
         floor = MIN_WIDTH_IN_CHANNELS["sinc2"] * spacing
         # The grid's own slack (A5-5): 4 channels over 1 MHz at 70 MHz are
         # stored on an 8 Hz float32 grid, 1e-4 of a channel -- above the 1e-5
@@ -638,13 +721,23 @@ class TestA13sWidthLegs:
         float32 rounds each channel by 8 Hz, 0.099 of the 333 Hz spacing,
         above ``WIDTH_FLOOR_RTOL_MAX``."""
         return preflight_document(
-            observation={"freq": {"grid": {"linspace": {
-                "start": 70.0, "stop": 70.001, "num": 4, "endpoint": True},
-                "unit": "MHz"}}},
-            model={**BASE_MODEL, "cw_tone": {
-                "amplitude": {"value": 5000.0, "unit": "K"},
-                "tone_freq": {"value": 70.0005, "unit": "MHz"},
-                "line_width": width}})
+            observation={
+                "freq": {
+                    "grid": {
+                        "linspace": {"start": 70.0, "stop": 70.001, "num": 4, "endpoint": True},
+                        "unit": "MHz",
+                    }
+                }
+            },
+            model={
+                **BASE_MODEL,
+                "cw_tone": {
+                    "amplitude": {"value": 5000.0, "unit": "K"},
+                    "tone_freq": {"value": 70.0005, "unit": "MHz"},
+                    "line_width": width,
+                },
+            },
+        )
 
     @pytest.mark.parametrize("width", [310.0, 333.0, 355.0])
     def test_a_width_the_rounding_decides_is_refused_as_unresolved(self, width):
@@ -655,14 +748,15 @@ class TestA13sWidthLegs:
         message = axis_only(self._on_the_unresolvable_band(width), "A13").message
         assert re.match(
             rf"model\.cw_tone\.line_width cannot be checked: {width:.6g} Hz is "
-            r"within 0\.\d+ of the \d+ Hz floor", message), message
+            r"within 0\.\d+ of the \d+ Hz floor",
+            message,
+        ), message
         assert "float64" in message and "relative" in message
         assert message.endswith(" (check A13).")
 
     def test_a_width_far_below_is_still_narrow(self):
         message = axis_only(self._on_the_unresolvable_band(150.0), "A13").message
-        assert message.startswith(
-            "model.cw_tone.line_width: 150 Hz is narrower than the channel")
+        assert message.startswith("model.cw_tone.line_width: 150 Hz is narrower than the channel")
 
     def test_a_width_clear_above_is_still_judged_by_the_ceiling(self):
         """450 Hz clears the floor band and sits under the 2-channel ceiling;
@@ -731,13 +825,23 @@ class TestA13sWidthLegs:
         1 MHz band = 250 kHz), so an id-only check survived that mutant, on
         this band and on the 1 kHz one before it."""
         descending = preflight_document(
-            observation={"freq": {"grid": {"linspace": {
-                "start": 71.0, "stop": 70.0, "num": 4, "endpoint": True},
-                "unit": "MHz"}}},
-            model={**BASE_MODEL, "cw_tone": {
-                "amplitude": {"value": 5000.0, "unit": "K"},
-                "tone_freq": {"value": 70.5, "unit": "MHz"},
-                "line_width": 300e3}})
+            observation={
+                "freq": {
+                    "grid": {
+                        "linspace": {"start": 71.0, "stop": 70.0, "num": 4, "endpoint": True},
+                        "unit": "MHz",
+                    }
+                }
+            },
+            model={
+                **BASE_MODEL,
+                "cw_tone": {
+                    "amplitude": {"value": 5000.0, "unit": "K"},
+                    "tone_freq": {"value": 70.5, "unit": "MHz"},
+                    "line_width": 300e3,
+                },
+            },
+        )
         assert_a13_narrow(axis_only(descending, "A13").message)
 
     def test_the_worked_bands_own_width_is_accepted(self):
@@ -748,14 +852,15 @@ class TestA13sBandLegs:
     """``tone_freq`` beside ``line_width`` -- the plan's other named twin."""
 
     def test_a_centre_outside_the_band(self):
-        assert axis_only(tone(tone_freq={"value": 200.0, "unit": "MHz"}),
-                         "A13").message == A13_BAND_MESSAGE
+        assert (
+            axis_only(tone(tone_freq={"value": 200.0, "unit": "MHz"}), "A13").message
+            == A13_BAND_MESSAGE
+        )
 
     def test_a_centre_that_starts_in_band_and_DRIFTS_out(self):
         """The case a check at the first sample alone passes: 70 MHz is in
         band and 70 + 1e6 * 30 s is not."""
-        assert axis_only(tone(drift_rate=1.0e6), "A13").message \
-            == A13_DRIFT_MESSAGE
+        assert axis_only(tone(drift_rate=1.0e6), "A13").message == A13_DRIFT_MESSAGE
         assert "A13" not in ids_of(tone())
 
     def test_a_descending_TIME_grid_drifts_the_tone_the_way_the_operator_does(self):
@@ -780,8 +885,7 @@ class TestA13sBandLegs:
         """The anti-vacuity half: 62 MHz drifting to 77 MHz over an ascending
         30 s run stays inside the band, so the test above is about the
         DIRECTION of the axis and not about the tone."""
-        assert silent_here(tone(tone_freq={"value": 62.0, "unit": "MHz"},
-                                drift_rate=5.0e5))
+        assert silent_here(tone(tone_freq={"value": 62.0, "unit": "MHz"}, drift_rate=5.0e5))
 
     def test_a_centre_ON_the_bands_first_channel_is_in_band(self):
         """``low <= min(centres)`` and not ``<``.  The shipped comparison is
@@ -794,8 +898,10 @@ class TestA13sBandLegs:
 
     def test_a_centre_just_OUTSIDE_the_first_channel_is_not(self):
         """The anti-vacuity half of the cell above."""
-        assert axis_only(tone(tone_freq={"value": 59.9, "unit": "MHz"}),
-                         "A13").message == A13_BELOW_THE_BAND_MESSAGE
+        assert (
+            axis_only(tone(tone_freq={"value": 59.9, "unit": "MHz"}), "A13").message
+            == A13_BELOW_THE_BAND_MESSAGE
+        )
 
 
 class TestA13WalksBothRoutesToTheSameOperator:
@@ -804,29 +910,38 @@ class TestA13WalksBothRoutesToTheSameOperator:
     outside ``sections/compose.py::model_nodes``."""
 
     def test_the_replace_route_is_decided_too(self):
-        found = axis_only(replacing({"cw_tone": {"line_width": 1.0}},
-                                    model={**BASE_MODEL, "cw_tone": {
-                                        "amplitude": {"value": 5000.0,
-                                                      "unit": "K"},
-                                        "tone_freq": {"value": 70.0,
-                                                      "unit": "MHz"},
-                                        "line_width": {"value": 3.6,
-                                                       "unit": "MHz"}}}),
-                          "A13")
+        found = axis_only(
+            replacing(
+                {"cw_tone": {"line_width": 1.0}},
+                model={
+                    **BASE_MODEL,
+                    "cw_tone": {
+                        "amplitude": {"value": 5000.0, "unit": "K"},
+                        "tone_freq": {"value": 70.0, "unit": "MHz"},
+                        "line_width": {"value": 3.6, "unit": "MHz"},
+                    },
+                },
+            ),
+            "A13",
+        )
         assert found.where == "inference.twin.replace.cw_tone"
         assert found.message.startswith(
-            "inference.twin.replace.cw_tone.line_width: 1 Hz is narrower")
+            "inference.twin.replace.cw_tone.line_width: 1 Hz is narrower"
+        )
 
     def test_the_python_spelling_resolves_to_the_same_class(self):
         """The class, not the token.  A check keyed on ``type:`` misses the
         ``python:`` spelling, which 3A's tests already exercise."""
         document = tone()
-        document["model"] = {**document["model"], "cw_tone": {
-            "python": "rheplicant.radio.instrument.calibration:"
-                      "CWCalibrationOperator",
-            "amplitude": {"value": 5000.0, "unit": "K"},
-            "tone_freq": {"value": 70.0, "unit": "MHz"},
-            "line_width": 1.0}}
+        document["model"] = {
+            **document["model"],
+            "cw_tone": {
+                "python": "rheplicant.radio.instrument.calibration:CWCalibrationOperator",
+                "amplitude": {"value": 5000.0, "unit": "K"},
+                "tone_freq": {"value": 70.0, "unit": "MHz"},
+                "line_width": 1.0,
+            },
+        }
         assert axis_only(document, "A13").where == "model.cw_tone"
 
     def test_a_DIFFERENT_class_under_the_same_node_is_not_a_tone(self):
@@ -843,9 +958,13 @@ class TestA13WalksBothRoutesToTheSameOperator:
         """
         for name in ("ApplyCalibrationOperator", "CalLoadOperator"):
             document = tone()
-            document["model"] = {**document["model"], "cw_tone": {
-                "python": f"rheplicant.radio.instrument.calibration:{name}",
-                "line_width": 1.0}}
+            document["model"] = {
+                **document["model"],
+                "cw_tone": {
+                    "python": f"rheplicant.radio.instrument.calibration:{name}",
+                    "line_width": 1.0,
+                },
+            }
             assert silent_here(document), name
 
 
@@ -898,8 +1017,8 @@ class TestA13DoesNotPreEmptTheDeliveryLayer:
 
         np.save(tmp_path / "w.npy", np.asarray(3.6e6))
         facts = axis_facts(
-            tone(line_width={"file": {"path": "w.npy", "format": "npy"}}),
-            base_dir=str(tmp_path))
+            tone(line_width={"file": {"path": "w.npy", "format": "npy"}}), base_dir=str(tmp_path)
+        )
         opened = []
         real = builtins.open
 
@@ -921,24 +1040,29 @@ class TestA13DoesNotPreEmptTheDeliveryLayer:
         )
 
     def test_a_single_channel_band_has_no_spacing_to_measure(self):
-        assert "A13" not in ids_of(preflight_document(
-            observation={"freq": {"grid": {"list": [70.0e6], "unit": "Hz"}}},
-            model={**BASE_MODEL, "cw_tone": {
-                "amplitude": {"value": 5000.0, "unit": "K"},
-                "tone_freq": {"value": 70.0, "unit": "MHz"},
-                "line_width": 1.0}}))
+        assert "A13" not in ids_of(
+            preflight_document(
+                observation={"freq": {"grid": {"list": [70.0e6], "unit": "Hz"}}},
+                model={
+                    **BASE_MODEL,
+                    "cw_tone": {
+                        "amplitude": {"value": 5000.0, "unit": "K"},
+                        "tone_freq": {"value": 70.0, "unit": "MHz"},
+                        "line_width": 1.0,
+                    },
+                },
+            )
+        )
 
 
 class TestA13sOwnAdviceWorks:
     """S4's second half for A13."""
 
     def test_widening_a_narrow_line_builds(self):
-        assert load_document(tone(
-            line_width={"value": 5.0, "unit": "MHz"})) is not None
+        assert load_document(tone(line_width={"value": 5.0, "unit": "MHz"})) is not None
 
     def test_moving_the_centre_into_the_band_builds(self):
-        assert load_document(tone(
-            tone_freq={"value": 75.0, "unit": "MHz"})) is not None
+        assert load_document(tone(tone_freq={"value": 75.0, "unit": "MHz"})) is not None
 
 
 class TestC8:
@@ -946,14 +1070,20 @@ class TestC8:
     the operator is actually handed."""
 
     def test_the_chunk_message(self):
-        assert axis_only(preflight_document(model={
-            **BASE_MODEL, "averaging": {"n_chunk": 5}}),
-            "C8").message == C8_CHUNK_MESSAGE
+        assert (
+            axis_only(
+                preflight_document(model={**BASE_MODEL, "averaging": {"n_chunk": 5}}), "C8"
+            ).message
+            == C8_CHUNK_MESSAGE
+        )
 
     def test_the_days_message(self):
-        assert axis_only(preflight_document(model={
-            **BASE_MODEL, "filters": [sidereal(5)]}),
-            "C8").message == C8_DAYS_MESSAGE
+        assert (
+            axis_only(
+                preflight_document(model={**BASE_MODEL, "filters": [sidereal(5)]}), "C8"
+            ).message
+            == C8_DAYS_MESSAGE
+        )
 
     def test_averaging_runs_BEFORE_filters_and_the_message_says_so(self):
         """**The measured trap, and the S2 mutant.**  ``16 % 8 == 0``, so a
@@ -962,10 +1092,15 @@ class TestC8:
         n_days=8"*, because ``averaging`` has already turned 16 samples into
         4."""
         assert 16 % 8 == 0, "the whole point: the naive reading passes"
-        assert axis_only(preflight_document(model={
-            **BASE_MODEL, "averaging": {"n_chunk": 4},
-            "filters": [sidereal(8)]}),
-            "C8").message == C8_DAYS_BEHIND_AVERAGING_MESSAGE
+        assert (
+            axis_only(
+                preflight_document(
+                    model={**BASE_MODEL, "averaging": {"n_chunk": 4}, "filters": [sidereal(8)]}
+                ),
+                "C8",
+            ).message
+            == C8_DAYS_BEHIND_AVERAGING_MESSAGE
+        )
 
     def test_the_count_that_divides_AFTER_averaging_is_accepted(self):
         """The other half of the same discrimination: ``n_days: 4`` does NOT
@@ -973,16 +1108,20 @@ class TestC8:
         implementation refuses it, because 16 % 4 == 0 is also true.  Both
         cells are needed; either alone is passed by one of the two
         implementations."""
-        assert silent_here(preflight_document(model={
-            **BASE_MODEL, "averaging": {"n_chunk": 4},
-            "filters": [sidereal(4)]}))
+        assert silent_here(
+            preflight_document(
+                model={**BASE_MODEL, "averaging": {"n_chunk": 4}, "filters": [sidereal(4)]}
+            )
+        )
 
     def test_n_chunk_of_one_is_legal_and_says_nothing(self):
         """``BackendOperator`` leaves the time axis alone at ``n_chunk: 1``,
         and 1 divides everything, so there is no message to fold it into."""
-        assert silent_here(preflight_document(model={
-            **BASE_MODEL, "averaging": {"n_chunk": 1},
-            "filters": [sidereal(8)]}))
+        assert silent_here(
+            preflight_document(
+                model={**BASE_MODEL, "averaging": {"n_chunk": 1}, "filters": [sidereal(8)]}
+            )
+        )
 
     def test_a_zero_count_is_declined_rather_than_divided_by(self):
         """``_static_int``'s ``value < 1`` clause is not about nonsense
@@ -996,36 +1135,37 @@ class TestC8:
         module's and every other branch's alike.  Both callers are covered
         because both divide.
         """
-        for node in ({"averaging": {"n_chunk": 0}},
-                     {"filters": [sidereal(0)]}):
-            assert silent_here(preflight_document(
-                model={**BASE_MODEL, **node})), node
+        for node in ({"averaging": {"n_chunk": 0}}, {"filters": [sidereal(0)]}):
+            assert silent_here(preflight_document(model={**BASE_MODEL, **node})), node
 
     def test_the_chain_is_walked_and_the_index_is_reported(self):
         """``model.filters`` is a CHAIN.  A check that read the first entry
         would send the reader to the wrong line, and one that read only the
         node would send them to the wrong level."""
-        found = axis_only(preflight_document(model={
-            **BASE_MODEL, "filters": [sidereal(4), sidereal(5),
-                                      sidereal(2)]}), "C8")
+        found = axis_only(
+            preflight_document(
+                model={**BASE_MODEL, "filters": [sidereal(4), sidereal(5), sidereal(2)]}
+            ),
+            "C8",
+        )
         assert found.where == "model.filters[1]"
 
     def test_the_chunk_clause_stands_the_filter_clause_down(self):
         """How many samples a filter is handed depends on what ``n_chunk``
         becomes once it is fixed, so a second sentence computed from a count
         that is about to change is advice that may be wrong."""
-        found = axis_findings(preflight_document(model={
-            **BASE_MODEL, "averaging": {"n_chunk": 5},
-            "filters": [sidereal(8)]}))
-        assert [one.where for one in found
-                if one.check == "C8"] == ["model.averaging"]
+        found = axis_findings(
+            preflight_document(
+                model={**BASE_MODEL, "averaging": {"n_chunk": 5}, "filters": [sidereal(8)]}
+            )
+        )
+        assert [one.where for one in found if one.check == "C8"] == ["model.averaging"]
 
     def test_the_replace_route_is_decided_too(self):
-        document = replacing({"averaging": {"n_chunk": 5}},
-                             model={**BASE_MODEL,
-                                    "averaging": {"n_chunk": 1}})
-        assert axis_only(document, "C8").where == \
-            "inference.twin.replace.averaging"
+        document = replacing(
+            {"averaging": {"n_chunk": 5}}, model={**BASE_MODEL, "averaging": {"n_chunk": 1}}
+        )
+        assert axis_only(document, "C8").where == "inference.twin.replace.averaging"
 
     def test_a_bool_count_is_left_to_the_delivery_layer(self):
         """``isinstance(True, int)`` is True, and ``config/delivery.py``
@@ -1039,46 +1179,57 @@ class TestC8:
         decidable -- the sentence a reader gets is the delivery layer's -- and
         the clause's own reason is written where it lives.
         """
-        document = preflight_document(model={**BASE_MODEL,
-                                             "averaging": {"n_chunk": True}})
+        document = preflight_document(model={**BASE_MODEL, "averaging": {"n_chunk": True}})
         assert "C8" not in ids_of(document)
         with pytest.raises(ConfigError) as raised:
             load_document(document)
-        assert "is a static int and the value is the bool True" in str(
-            raised.value)
+        assert "is a static int and the value is the bool True" in str(raised.value)
 
 
 class TestC8sOwnAdviceWorks:
     """S4's second half for C8: change the count, and the document builds."""
 
     def test_a_chunk_count_that_divides_builds(self):
-        assert load_document(preflight_document(model={
-            **BASE_MODEL, "averaging": {"n_chunk": 4}})) is not None
+        assert (
+            load_document(preflight_document(model={**BASE_MODEL, "averaging": {"n_chunk": 4}}))
+            is not None
+        )
 
     def test_a_day_count_that_divides_what_the_filter_is_handed_builds(self):
-        assert load_document(preflight_document(model={
-            **BASE_MODEL, "averaging": {"n_chunk": 4},
-            "filters": [sidereal(4)]})) is not None
+        assert (
+            load_document(
+                preflight_document(
+                    model={**BASE_MODEL, "averaging": {"n_chunk": 4}, "filters": [sidereal(4)]}
+                )
+            )
+            is not None
+        )
 
 
 class TestThePhaseProperty:
     """§5's box, for this module's three checks: the violation is heard and
     the beam is not read."""
 
-    @pytest.mark.parametrize(("document", "check"), [
-        (preflight_document(model={**BASE_MODEL, "filters": [sidereal(5)]},
-                            resources=UNREADABLE_BEAM),
-         lambda message: _assert_equals(message, C8_DAYS_MESSAGE)),
-        (narrow(700e3), assert_a13_wide),
-    ], ids=["C8", "A13"])
+    @pytest.mark.parametrize(
+        ("document", "check"),
+        [
+            (
+                preflight_document(
+                    model={**BASE_MODEL, "filters": [sidereal(5)]}, resources=UNREADABLE_BEAM
+                ),
+                lambda message: _assert_equals(message, C8_DAYS_MESSAGE),
+            ),
+            (narrow(700e3), assert_a13_wide),
+        ],
+        ids=["C8", "A13"],
+    )
     def test_the_violation_beats_an_unreadable_beam(self, document, check):
         # A CHECKER rather than an expected string: A13's message quotes a
         # channel spacing that float32 cannot pin down on this fixture, so its
         # check rebuilds the message around whatever spacing was quoted. C8's
         # is a fixed string and its checker just compares.
         document = dict(document)
-        document["resources"] = {**(document.get("resources") or {}),
-                                 **UNREADABLE_BEAM}
+        document["resources"] = {**(document.get("resources") or {}), **UNREADABLE_BEAM}
         with pytest.raises(ConfigError) as raised:
             load_document(document)
         check(str(raised.value))
@@ -1097,15 +1248,16 @@ class TestThePhaseProperty:
 class TestOneBindingPerRule:
     """§3.2(h) for THIS module's literals; no shared table (§0.3 C.4)."""
 
-    @pytest.mark.parametrize("literal", [
-        "limtod_jax enforces this itself -- the FFT synthesis weights bin 0",
-        "Both counts are static ints and n_time is len(context.time)",
-        "The bound is CWCalibrationOperator's own and is checked in "
-        "_validate_over_the_run",
-        "so a chain behind an averaging of",
-        "a reading of schema §6's A13 row that stops at 0.25 x the band is a "
-        "different number",
-    ])
+    @pytest.mark.parametrize(
+        "literal",
+        [
+            "limtod_jax enforces this itself -- the FFT synthesis weights bin 0",
+            "Both counts are static ints and n_time is len(context.time)",
+            "The bound is CWCalibrationOperator's own and is checked in _validate_over_the_run",
+            "so a chain behind an averaging of",
+            "a reading of schema §6's A13 row that stops at 0.25 x the band is a different number",
+        ],
+    )
     def test_each_sentence_this_module_invents_is_bound_once(self, literal):
         assert_bound_once(literal)
 
@@ -1134,14 +1286,21 @@ class TestTheCost:
     def test_the_pass_with_every_check_lit_stays_near_its_measured_cost(self):
         document = preflight_document(
             resources=projectors(lmax=7),
-            model={**BASE_MODEL, "averaging": {"n_chunk": 4},
-                   "filters": [sidereal(4)],
-                   "cw_tone": {"amplitude": {"value": 5000.0, "unit": "K"},
-                               "tone_freq": {"value": 70.0, "unit": "MHz"},
-                               "line_width": {"value": 3.6, "unit": "MHz"}}})
+            model={
+                **BASE_MODEL,
+                "averaging": {"n_chunk": 4},
+                "filters": [sidereal(4)],
+                "cw_tone": {
+                    "amplitude": {"value": 5000.0, "unit": "K"},
+                    "tone_freq": {"value": 70.0, "unit": "MHz"},
+                    "line_width": {"value": 3.6, "unit": "MHz"},
+                },
+            },
+        )
         facts = axis_facts(document)
         assert {one.check for one in axes(facts).findings}.isdisjoint(MINE), (
-            "the cost of a CLEAN document")
+            "the cost of a CLEAN document"
+        )
         # 2.5 ms, not 0.9. This is the best of thirty repeats, so the number
         # carries no scheduling noise -- the x86_64 CI runner simply does this
         # work in 1.47 ms where this developer's machine does it in under 0.9,
@@ -1155,8 +1314,8 @@ class TestTheCost:
         """§0.1's contract, on the document that lights every check here."""
         document = preflight_document(
             resources=projectors(lmax=7),
-            model={**BASE_MODEL, "averaging": {"n_chunk": 4},
-                   "filters": [sidereal(4)]})
+            model={**BASE_MODEL, "averaging": {"n_chunk": 4}, "filters": [sidereal(4)]},
+        )
         facts = axis_facts(document)
         axes(facts)  # warm
         started = time.perf_counter()

@@ -179,39 +179,27 @@ class TestTheCalibratorExits:
     ):
         forward, start = forward_and_start
         with pytest.raises(ParameterSpaceError) as excinfo:
-            GradientCalibrator(learning_rate=1e-6, n_steps=10).fit(
-                forward, start, mis_sliced
-            )
+            GradientCalibrator(learning_rate=1e-6, n_steps=10).fit(forward, start, mis_sliced)
         assert_names_which_shape_is_which(str(excinfo.value), mis_sliced)
 
-    def test_the_adam_calibrator_refuses_a_mis_shaped_observed(
-        self, forward_and_start, mis_sliced
-    ):
+    def test_the_adam_calibrator_refuses_a_mis_shaped_observed(self, forward_and_start, mis_sliced):
         forward, start = forward_and_start
         with pytest.raises(ParameterSpaceError) as excinfo:
-            AdamCalibrator(learning_rate=0.05, n_steps=10).fit(
-                forward, start, mis_sliced
-            )
+            AdamCalibrator(learning_rate=0.05, n_steps=10).fit(forward, start, mis_sliced)
         assert_names_which_shape_is_which(str(excinfo.value), mis_sliced)
 
-    def test_the_refusal_precedes_any_optimization(
-        self, forward_and_start, mis_sliced
-    ):
+    def test_the_refusal_precedes_any_optimization(self, forward_and_start, mis_sliced):
         """It raises at entry, not after n_steps of a wrong fit: a 10^6-step
         calibrator must fail as fast as a 10-step one."""
         forward, start = forward_and_start
         with pytest.raises(ParameterSpaceError):
-            AdamCalibrator(learning_rate=0.05, n_steps=1_000_000).fit(
-                forward, start, mis_sliced
-            )
+            AdamCalibrator(learning_rate=0.05, n_steps=1_000_000).fit(forward, start, mis_sliced)
 
 
 class TestTheNumpyroExit:
     """The observation site used to broadcast, and NUTS converged on nonsense."""
 
-    def test_the_model_refuses_a_mis_shaped_observed(
-        self, twin, state, space, mis_sliced
-    ):
+    def test_the_model_refuses_a_mis_shaped_observed(self, twin, state, space, mis_sliced):
         model = to_numpyro_model(twin, state, space, noise_std=SIGMA)
         with pytest.raises(ParameterSpaceError) as excinfo:
             seed(model, jax.random.key(0))(observed=mis_sliced)
@@ -234,9 +222,7 @@ class TestTheNumpyroExit:
         model = to_numpyro_model(twin, state, space, noise_std=SIGMA)
         seed(model, jax.random.key(0))()  # must not raise
 
-    def test_a_correctly_shaped_observed_still_runs(
-        self, twin, state, space, observed
-    ):
+    def test_a_correctly_shaped_observed_still_runs(self, twin, state, space, observed):
         model = to_numpyro_model(twin, state, space, noise_std=SIGMA)
         seed(model, jax.random.key(0))(observed=observed)  # must not raise
 
@@ -244,9 +230,7 @@ class TestTheNumpyroExit:
 class TestTheLinearExit:
     """The guard that was already right — pinned so the shared seam keeps it."""
 
-    def test_wiener_solve_refuses_a_mis_shaped_observed(
-        self, twin, state, mis_sliced
-    ):
+    def test_wiener_solve_refuses_a_mis_shaped_observed(self, twin, state, mis_sliced):
         linear_space = ParameterSpace.direct(
             "gain",
             init=jnp.ones(N_TIME),
@@ -317,9 +301,7 @@ class TestTheFisherExit:
 class TestBroadcastingThatMustKeepWorking:
     """A scalar loss target and a per-channel sigma are not mistakes."""
 
-    def test_a_correctly_shaped_observed_still_fits(
-        self, forward_and_start, observed
-    ):
+    def test_a_correctly_shaped_observed_still_fits(self, forward_and_start, observed):
         forward, start = forward_and_start
         fitted, losses = AdamCalibrator(learning_rate=0.05, n_steps=200).fit(
             forward, start, observed

@@ -76,12 +76,23 @@ def graph():
     g = SignalGraph(
         "editing-graph",
         {
-            "a": NodeSpec(S), "b": NodeSpec(S), "j1": NodeSpec(J), "t1": NodeSpec(T),
-            "c": NodeSpec(S), "j2": NodeSpec(J), "t2": NodeSpec(T), "t3": NodeSpec(T),
+            "a": NodeSpec(S),
+            "b": NodeSpec(S),
+            "j1": NodeSpec(J),
+            "t1": NodeSpec(T),
+            "c": NodeSpec(S),
+            "j2": NodeSpec(J),
+            "t2": NodeSpec(T),
+            "t3": NodeSpec(T),
         },
         [
-            ("a", "j1"), ("b", "j1"), ("j1", "t1"),
-            ("t1", "j2"), ("c", "j2"), ("j2", "t2"), ("t2", "t3"),
+            ("a", "j1"),
+            ("b", "j1"),
+            ("j1", "t1"),
+            ("t1", "j2"),
+            ("c", "j2"),
+            ("j2", "t2"),
+            ("t2", "t3"),
         ],
     )
     register_graph(g)
@@ -103,9 +114,7 @@ def many_graph():
 @pytest.fixture(scope="module")
 def chain_graph():
     """s -> t: the smallest assembly whose has_source can flip."""
-    g = SignalGraph(
-        "editing-chain-graph", {"s": NodeSpec(S), "t": NodeSpec(T)}, [("s", "t")]
-    )
+    g = SignalGraph("editing-chain-graph", {"s": NodeSpec(S), "t": NodeSpec(T)}, [("s", "t")])
     register_graph(g)
     return g
 
@@ -212,9 +221,7 @@ class TestWithoutRegionsAndManyNodes:
         assert region.without("t3").lit == ("a",)
         assert value(region.without("t3"), blank) == 2.0
 
-    def test_every_instance_of_a_many_node_survives_a_drop_elsewhere(
-        self, many_graph, blank
-    ):
+    def test_every_instance_of_a_many_node_survives_a_drop_elsewhere(self, many_graph, blank):
         multi = assemble(
             many_graph,
             At("a", SrcA(value=jnp.array(2.0))),
@@ -263,9 +270,7 @@ class TestWithoutRefusals:
         with pytest.raises(AssemblyError, match="carries no placement record"):
             by_hand.without("s")
 
-    def test_a_drop_that_breaks_the_graph_is_refused_in_assembles_own_words(
-        self, graph
-    ):
+    def test_a_drop_that_breaks_the_graph_is_refused_in_assembles_own_words(self, graph):
         """`t1` is a transform branch into j2; with `a` and `b` gone it has no source."""
         both = assemble(
             graph,

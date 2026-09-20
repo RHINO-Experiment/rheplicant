@@ -76,12 +76,22 @@ ALLOWED: dict[str, frozenset[str]] = {
     "rheplicant.core": frozenset({BOOTSTRAP}),
     "rheplicant.radio": frozenset({"rheplicant.core"}),
     "rheplicant.inference": frozenset({"rheplicant.core"}),
-    "rheplicant.config": frozenset({
-        BOOTSTRAP, "rheplicant.core", "rheplicant.radio", "rheplicant.inference",
-    }),
-    "rheplicant.gui": frozenset({
-        BOOTSTRAP, "rheplicant.core", "rheplicant.config", "rheplicant.radio",
-    }),
+    "rheplicant.config": frozenset(
+        {
+            BOOTSTRAP,
+            "rheplicant.core",
+            "rheplicant.radio",
+            "rheplicant.inference",
+        }
+    ),
+    "rheplicant.gui": frozenset(
+        {
+            BOOTSTRAP,
+            "rheplicant.core",
+            "rheplicant.config",
+            "rheplicant.radio",
+        }
+    ),
 }
 
 #: WHICH bootstrap modules are the command half (A1-2).
@@ -95,15 +105,17 @@ ALLOWED: dict[str, frozenset[str]] = {
 #: The seam is what a module costs AT IMPORT. A foundation module is read
 #: before ``rheplicant`` is importable and must stay that way; a command
 #: module drives the package once it is, and may reach for it at call time.
-BOOTSTRAP_COMMAND: frozenset[str] = frozenset({
-    BOOTSTRAP,
-    f"{BOOTSTRAP}.__main__",
-    f"{BOOTSTRAP}.cli",
-    f"{BOOTSTRAP}.entry",
-    f"{BOOTSTRAP}.execution_environment",
-    f"{BOOTSTRAP}.gui_worker",
-    f"{BOOTSTRAP}.script",
-})
+BOOTSTRAP_COMMAND: frozenset[str] = frozenset(
+    {
+        BOOTSTRAP,
+        f"{BOOTSTRAP}.__main__",
+        f"{BOOTSTRAP}.cli",
+        f"{BOOTSTRAP}.entry",
+        f"{BOOTSTRAP}.execution_environment",
+        f"{BOOTSTRAP}.gui_worker",
+        f"{BOOTSTRAP}.script",
+    }
+)
 
 #: The package root is in the command half by ROLE and not by cost, and it is
 #: the one member a foundation module may import.
@@ -126,11 +138,12 @@ BOOTSTRAP_ROOT_IS_FREE = BOOTSTRAP
 #: being pinned: allowed, singular, and named here so a second one is a red
 #: test rather than a precedent.
 BOOTSTRAP_UPWARD: dict[tuple[str, str], str] = {
-    ("_rheplicant_bootstrap/execution_environment.py",
-     "rheplicant.config.orchestration"):
-        "establish_runtime() hands back the orchestration module the command "
-        "half then drives; importing it at module scope would put JAX behind "
-        "`rheplicant --help`, which tests/config/test_entry_order.py forbids",
+    (
+        "_rheplicant_bootstrap/execution_environment.py",
+        "rheplicant.config.orchestration",
+    ): "establish_runtime() hands back the orchestration module the command "
+    "half then drives; importing it at module scope would put JAX behind "
+    "`rheplicant --help`, which tests/config/test_entry_order.py forbids",
 }
 
 #: The one cycle this project accepts, from the inversion above.
@@ -138,14 +151,18 @@ PINNED_CYCLE = (BOOTSTRAP, "rheplicant.config")
 
 #: Edges that are allowed and carry a cost worth stating at the edge itself.
 NOTED = {
-    ("rheplicant.core", BOOTSTRAP):
-        "core.errors and core.capability re-export from the bootstrap so the "
-        "layers above import them the ordinary way; two edges, and DESIGN.md's "
-        "'core graduates by moving one directory' means moving these two with it",
-    ("rheplicant.gui", "rheplicant.radio"):
-        "the GUI server loads JAX through this edge (A1-10). It is allowed and "
-        "it is not free: a form that needs operator vocabulary pays for the "
-        "array library to answer it",
+    (
+        "rheplicant.core",
+        BOOTSTRAP,
+    ): "core.errors and core.capability re-export from the bootstrap so the "
+    "layers above import them the ordinary way; two edges, and DESIGN.md's "
+    "'core graduates by moving one directory' means moving these two with it",
+    (
+        "rheplicant.gui",
+        "rheplicant.radio",
+    ): "the GUI server loads JAX through this edge (A1-10). It is allowed and "
+    "it is not free: a form that needs operator vocabulary pays for the "
+    "array library to answer it",
 }
 
 
@@ -197,8 +214,13 @@ def _dynamic_targets(node: ast.AST) -> list[str]:
     if not isinstance(node, ast.Call):
         return []
     function = node.func
-    name = (function.attr if isinstance(function, ast.Attribute)
-            else function.id if isinstance(function, ast.Name) else "")
+    name = (
+        function.attr
+        if isinstance(function, ast.Attribute)
+        else function.id
+        if isinstance(function, ast.Name)
+        else ""
+    )
     if name not in {"import_module", "__import__"} or not node.args:
         return []
     first = node.args[0]
@@ -294,10 +316,12 @@ def test_no_two_packages_import_each_other():
     """
     live = _edges()
     cycles = sorted(
-        {tuple(sorted((here, there)))
-         for here, reached in live.items()
-         for there in reached
-         if here in live.get(there, frozenset())}
+        {
+            tuple(sorted((here, there)))
+            for here, reached in live.items()
+            for there in reached
+            if here in live.get(there, frozenset())
+        }
     )
     assert cycles == [PINNED_CYCLE], (
         f"the package cycles are {cycles}; the only one this project accepts "
@@ -393,9 +417,7 @@ def _module_scope_imports(path: pathlib.Path) -> set[str]:
                 continue
             if isinstance(child, ast.ImportFrom) and child.module and not child.level:
                 targets.add(child.module)
-                targets.update(
-                    f"{child.module}.{alias.name}" for alias in child.names
-                )
+                targets.update(f"{child.module}.{alias.name}" for alias in child.names)
             elif isinstance(child, ast.Import):
                 targets.update(alias.name for alias in child.names)
             walk(child)
@@ -414,9 +436,7 @@ def test_the_command_half_is_named_and_covers_the_package():
     JAX-free level vocabulary the GUI reads) and it is foundation.
     """
     live = set(_bootstrap_modules())
-    assert BOOTSTRAP_COMMAND <= live, {
-        "named and gone": sorted(BOOTSTRAP_COMMAND - live)
-    }
+    assert BOOTSTRAP_COMMAND <= live, {"named and gone": sorted(BOOTSTRAP_COMMAND - live)}
     foundation = live - BOOTSTRAP_COMMAND
     assert foundation, "the whole package cannot be the command half"
     assert len(BOOTSTRAP_COMMAND) == 7 and len(foundation) == 37, (
@@ -511,9 +531,7 @@ def test_no_document_section_set_is_spelled_twice():
                 continue
             for name, (expected, home) in owners.items():
                 if relative != home and frozenset(members) == expected:
-                    offenders.setdefault(name, []).append(
-                        f"{relative}:{node.lineno}"
-                    )
+                    offenders.setdefault(name, []).append(f"{relative}:{node.lineno}")
     assert not offenders, (
         f"these modules write out a section set instead of importing it: "
         f"{offenders}. Import the constant -- two copies of one rule is how a "

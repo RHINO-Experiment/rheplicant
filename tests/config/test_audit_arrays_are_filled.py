@@ -56,9 +56,7 @@ def test_provenance_records_every_declared_variant(published_with_a_variant):
     target, declared = published_with_a_variant
     provenance = json.loads((target / "provenance.json").read_bytes())
 
-    encodings = [
-        row for row in provenance["path_encodings"] if row["kind"] == "variant"
-    ]
+    encodings = [row for row in provenance["path_encodings"] if row["kind"] == "variant"]
     assert len(encodings) == len(declared)
     assert len(provenance["artefacts"]["resolved_variants"]) == len(declared)
 
@@ -96,9 +94,7 @@ def test_a_document_without_variants_records_none(tmp_path):
 
     target = tmp_path / "result"
     config = tmp_path / "config.yaml"
-    config.write_bytes(
-        yaml.safe_dump(document(output=target), sort_keys=False).encode()
-    )
+    config.write_bytes(yaml.safe_dump(document(output=target), sort_keys=False).encode())
     assert main(["run", str(config)]) == 0
     provenance = json.loads((target / "provenance.json").read_bytes())
     assert provenance["variants"] == []
@@ -135,8 +131,7 @@ def test_deferred_validations_are_the_parsed_runs_deferred_checks():
     )
     rows = build_diagnostics(trace.snapshot(), status="ok")["deferred_validations"]
     assert [row["descriptor"]["name"] for row in rows] == ["against"], (
-        "a run with no deferred checks has nothing to defer and must not "
-        f"produce a row: {rows}"
+        f"a run with no deferred checks has nothing to defer and must not produce a row: {rows}"
     )
     assert rows[0]["checks"] == (
         "compare.left_available",
@@ -171,9 +166,7 @@ def test_no_audit_recorder_is_without_a_caller():
     assert recorders
 
     sources = [
-        path.read_text(encoding="utf-8")
-        for path in root.rglob("*.py")
-        if path.name != "trace.py"
+        path.read_text(encoding="utf-8") for path in root.rglob("*.py") if path.name != "trace.py"
     ]
     uncalled = sorted(
         name for name in recorders if not any(f".{name}(" in text for text in sources)

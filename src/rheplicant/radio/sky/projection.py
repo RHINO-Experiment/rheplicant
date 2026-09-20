@@ -85,6 +85,7 @@ class MatrixProjector(AbstractSkyProjector):
         matrix: ``(n_time, n_pix)`` shared across frequency (achromatic beam),
             or ``(n_freq, n_time, n_pix)`` for a chromatic beam.
     """
+
     maturity: ClassVar[Maturity] = Maturity.MAINTAINED
 
     matrix: jax.Array

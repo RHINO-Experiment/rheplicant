@@ -283,6 +283,7 @@ def test_what_a_mixture_of_key_types_actually_does(name, bad_first):
 # "Operator names must be strings." -- one site, three callers
 # ---------------------------------------------------------------------------
 
+
 class _Source(AbstractOperator):
     """Distinct value per instance, so a composite's members stay tellable apart."""
 

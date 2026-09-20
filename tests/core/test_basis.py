@@ -82,9 +82,7 @@ class TestBasisMatrix:
 
     def test_legendre_is_the_legendre_vandermonde_on_a_symmetric_grid(self):
         design = np.asarray(basis_matrix("legendre", n=N_TIME, n_basis=N_K))
-        expected = np.polynomial.legendre.legvander(
-            np.linspace(-1.0, 1.0, N_TIME), N_K - 1
-        )
+        expected = np.polynomial.legendre.legvander(np.linspace(-1.0, 1.0, N_TIME), N_K - 1)
         assert np.allclose(design, expected, atol=1e-6)
 
     def test_polynomial_column_k_is_x_to_the_k_on_the_same_grid(self):
@@ -198,9 +196,7 @@ class TestSeparableBasis:
         assert expanded.shape == (N_TIME, N_FREQ)
         assert jnp.allclose(expanded, basis.time @ coeff @ basis.freq.T)
 
-    def test_expand_always_returns_2D_which_is_the_unambiguous_temperature_shape(
-        self, basis
-    ):
+    def test_expand_always_returns_2D_which_is_the_unambiguous_temperature_shape(self, basis):
         """:mod:`rheplicant.radio.instrument.noise_wave` accepts ``()``,
         ``(n_freq,)``, ``(n_time, 1)`` and ``(n_time, n_freq)``, and states that
         it cannot tell a bare ``(n,)`` per-time vector from a spectrum when
@@ -221,9 +217,7 @@ class TestSeparableBasis:
         recovered = basis.fit(basis.expand(coeff))
         assert jnp.allclose(recovered, coeff, rtol=1e-4, atol=1e-3), recovered
 
-    def test_fit_of_a_field_OUTSIDE_the_span_is_the_least_squares_projection(
-        self, basis
-    ):
+    def test_fit_of_a_field_OUTSIDE_the_span_is_the_least_squares_projection(self, basis):
         """Not an error, and not the field: ``fit`` answers "the closest thing
         this basis can say", which is what makes it usable for a starting
         value. The residual is orthogonal to the span, which is the check that
@@ -268,9 +262,7 @@ class TestSeparableBasis:
         """The whole reason this fixture is non-square. Swapping the two design
         matrices is refused rather than transposing the answer."""
         with pytest.raises(StateValidationError):
-            SeparableBasis(time=basis.freq, freq=basis.time).expand(
-                jnp.zeros((N_K, N_J))
-            )
+            SeparableBasis(time=basis.freq, freq=basis.time).expand(jnp.zeros((N_K, N_J)))
 
     def test_expand_refuses_a_coefficient_of_the_wrong_shape(self, basis):
         with pytest.raises(StateValidationError) as caught:
@@ -330,9 +322,7 @@ class TestTheBindPattern:
         )
         space = ParameterSpace(
             latents=[Latent("t_coeff", init=jnp.zeros((N_K, N_J)), linear=True)],
-            bindings=[
-                Bind("t_coeff", into=lambda p: p["t_ant"].temperature, fn=basis.expand)
-            ],
+            bindings=[Bind("t_coeff", into=lambda p: p["t_ant"].temperature, fn=basis.expand)],
         )
         forward, _ = space.forward_fn(pipeline, _state())
         coeff = jnp.asarray([[2800.0, -120.0], [90.0, 17.0], [-30.0, 6.0]])
@@ -377,25 +367,19 @@ class TestTheBindPattern:
         )
         space = ParameterSpace(
             latents=[Latent("t_coeff", init=jnp.ones((N_K, N_J)), linear=True)],
-            bindings=[
-                Bind("t_coeff", into=lambda p: p["t_ant"].temperature, fn=basis.expand)
-            ],
+            bindings=[Bind("t_coeff", into=lambda p: p["t_ant"].temperature, fn=basis.expand)],
         )
         errors = check_linearity(space, pipeline, _state(), "t_coeff")
         assert max(errors.values()) < 1e-4, errors
 
-    def test_the_coefficients_of_a_lone_smooth_temperature_are_all_identified(
-        self, basis
-    ):
+    def test_the_coefficients_of_a_lone_smooth_temperature_are_all_identified(self, basis):
         pipeline = Pipeline(
             _FullGridTemperature(temperature=jnp.zeros((N_TIME, N_FREQ))),
             names=("t_ant",),
         )
         space = ParameterSpace(
             latents=[Latent("t_coeff", init=jnp.ones((N_K, N_J)), linear=True)],
-            bindings=[
-                Bind("t_coeff", into=lambda p: p["t_ant"].temperature, fn=basis.expand)
-            ],
+            bindings=[Bind("t_coeff", into=lambda p: p["t_ant"].temperature, fn=basis.expand)],
         )
         report = identifiability(space, pipeline, _state())
         assert report.n_par == N_K * N_J

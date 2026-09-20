@@ -97,8 +97,9 @@ Registry = dict[str, Check]
 SLOT = re.compile(r"[ABC][1-9][0-9]*(\.[a-z_]+)?")
 
 
-def binder(registry: Registry, *checks: str, label: str,
-           decorator: str) -> Callable[[Check], Check]:
+def binder(
+    registry: Registry, *checks: str, label: str, decorator: str
+) -> Callable[[Check], Check]:
     """Bind one or more check ids to one function, in ``registry``.
 
     Plan 3A's ``preflight.register``, with the registry and the two words as
@@ -183,8 +184,7 @@ def binder(registry: Registry, *checks: str, label: str,
     return bind
 
 
-def sweep(registry: Registry, payload: Any, *, label: str,
-          sections: tuple[str, ...]) -> Report:
+def sweep(registry: Registry, payload: Any, *, label: str, sections: tuple[str, ...]) -> Report:
     """Run every check in ``registry`` over ``payload``, once each, and collect.
 
     Plan 3A's ``preflight`` body below ``_structural``, with the registry, the
@@ -238,8 +238,7 @@ def sweep(registry: Registry, payload: Any, *, label: str,
     return Report(findings=tuple(findings))
 
 
-def check_where(label: str, check: str, finding: Finding,
-                sections: tuple[str, ...]) -> None:
+def check_where(label: str, check: str, finding: Finding, sections: tuple[str, ...]) -> None:
     """``Finding.where`` is a path into the USER'S document, never into ``src/``.
 
     Plan 3A's ``preflight._check_where``, with the label and the section names

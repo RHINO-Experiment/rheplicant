@@ -134,9 +134,7 @@ def _complete_report_boundary(
     """
     cumulative = Report(findings=previous.findings + current.findings)
     if trace is not None:
-        trace.record_findings(
-            stage, layer, tuple(audit_record(row) for row in current.findings)
-        )
+        trace.record_findings(stage, layer, tuple(audit_record(row) for row in current.findings))
         trace.boundary_completed(stage, layer)
     return cumulative
 

@@ -101,8 +101,9 @@ CLEAN = [{"names": ["d", "a"], "engine": "gradient"}, {"names": ["w"]}]
 #: `fn.__module__` would follow a check that moved modules, and following it
 #: is exactly what must not happen silently.
 #: :func:`test_the_scope_set_is_this_module_s_own` re-measures it.
-MINE = frozenset({"A16", "A17", "A18", "A19", "A20", "A21", "A23", "A24",
-                  "A25", "A27", "A28", "A29"})
+MINE = frozenset(
+    {"A16", "A17", "A18", "A19", "A20", "A21", "A23", "A24", "A25", "A27", "A28", "A29"}
+)
 
 
 def _plan(blocks, kind="plan.estimate", **options):
@@ -111,16 +112,19 @@ def _plan(blocks, kind="plan.estimate", **options):
 
 def _doc(blocks, parameters=None, **run):
     return preflight_document(
-        inference={"parameters": parameters or THREE},
-        runs=[_plan(blocks, **run)])
+        inference={"parameters": parameters or THREE}, runs=[_plan(blocks, **run)]
+    )
 
 
 def _warm(blocks, warm_blocks, **warm):
     """A ``plan.sample`` whose ``warm_start`` declares its own partition."""
-    return _doc(blocks, kind="plan.sample", n_sweeps=4,
-                seed={"from": "runtime.seeds.sample"},
-                warm_start={"kind": "plan.estimate", "blocks": warm_blocks,
-                            "move": ["d"], **warm})
+    return _doc(
+        blocks,
+        kind="plan.sample",
+        n_sweeps=4,
+        seed={"from": "runtime.seeds.sample"},
+        warm_start={"kind": "plan.estimate", "blocks": warm_blocks, "move": ["d"], **warm},
+    )
 
 
 def _found(document):
@@ -211,8 +215,7 @@ class TestBlocks:
         # ...and the DERIVED clauses stay suppressed on the same document:
         # A17/A18/A19 all read what a name resolves to, and this partition
         # says the names are wrong.
-        assert not any("mixes" in f.message or "check A17" in f.message
-                       for f in found)
+        assert not any("mixes" in f.message or "check A17" in f.message for f in found)
 
     def test_steps_on_a_conjugate_engine_block_is_refused(self):
         # The derived-conjugate case: no `engine:` at all, both members
@@ -220,17 +223,14 @@ class TestBlocks:
         # `engine: conjugate` is WRITTEN -- measured, the package refuses this
         # document at P3 with "Block('d', 'a') is solved by the conjugate
         # engine, which has no inner steps".
-        found = _found(_doc([{"names": ["d", "a"], "steps": 5},
-                             {"names": ["w"]}]))
+        found = _found(_doc([{"names": ["d", "a"], "steps": 5}, {"names": ["w"]}]))
         assert [f.check for f in found] == ["A17"]
         assert "steps: 5" in found[0].message
         assert found[0].where == "runs[0].blocks[0]"
         assert "engine: gradient" in found[0].message
 
-    @pytest.mark.parametrize("steps", [0, True, "5", 1.5],
-                             ids=["zero", "bool", "string", "float"])
-    def test_a_steps_the_package_refuses_outright_still_fires_but_says_so(
-            self, steps):
+    @pytest.mark.parametrize("steps", [0, True, "5", 1.5], ids=["zero", "bool", "string", "float"])
+    def test_a_steps_the_package_refuses_outright_still_fires_but_says_so(self, steps):
         """The guard is ``steps is not None`` -- ``plan.py::Block``'s own -- and
         the message is not the same message.
 
@@ -246,8 +246,7 @@ class TestBlocks:
         leaving the run refused for a second reason, which is the defect
         class Task 6 shipped eight of.
         """
-        found = _found(_doc([{"names": ["d", "a"], "steps": steps},
-                             {"names": ["w"]}]))
+        found = _found(_doc([{"names": ["d", "a"], "steps": steps}, {"names": ["w"]}]))
         assert [f.check for f in found] == ["A17"]
         assert f"steps: {steps!r}" in found[0].message
         assert "silently ignored" not in found[0].message
@@ -262,8 +261,12 @@ class TestBlocks:
         # that implementation refuses this document, and the package
         # ACCEPTS it -- measured, `SamplingPlan(('d','a'):gradient,
         # ('w'):gradient)`.  A refusal here would refuse a document that runs.
-        assert _found(_doc([{"names": ["d", "a"], "engine": "gradient",
-                             "steps": 5}, {"names": ["w"]}])) == []
+        assert (
+            _found(
+                _doc([{"names": ["d", "a"], "engine": "gradient", "steps": 5}, {"names": ["w"]}])
+            )
+            == []
+        )
 
     def test_a_mixed_block_with_no_engine_is_refused_naming_both_sides(self):
         # Kills a message that says "cannot be derived" without saying which
@@ -277,12 +280,10 @@ class TestBlocks:
         # the reader is told `['w']` is the declared-linear one and `['d']` is
         # not -- the exact inverse of the document, with both fragments still
         # present.  `d` is the linear latent here and `w` is not.
-        assert ("declared-linear latents ['d'] with non-linear ones ['w']"
-                in found[0].message)
+        assert "declared-linear latents ['d'] with non-linear ones ['w']" in found[0].message
 
     def test_engine_conjugate_over_a_non_linear_member_is_refused(self):
-        found = _found(_doc([{"names": ["w"], "engine": "conjugate"},
-                             {"names": ["d", "a"]}]))
+        found = _found(_doc([{"names": ["w"], "engine": "conjugate"}, {"names": ["d", "a"]}]))
         assert [f.check for f in found] == ["A19"]
         assert "['w']" in found[0].message
 
@@ -292,8 +293,9 @@ class TestBlocks:
         # that collects both: two findings about one block is one error
         # described twice, and the second one names a fix (drop steps:) that
         # would leave the document still refused.
-        found = _found(_doc([{"names": ["d", "w"], "engine": "conjugate",
-                              "steps": 3}, {"names": ["a"]}]))
+        found = _found(
+            _doc([{"names": ["d", "w"], "engine": "conjugate", "steps": 3}, {"names": ["a"]}])
+        )
         assert [f.check for f in found] == ["A19"]
 
     def test_an_unknown_engine_is_refused_here_and_names_them_all(self):
@@ -302,14 +304,12 @@ class TestBlocks:
         # `plan.py` -- measured.  Kills deleting the enum clause:
         # without it `_engine_of` returns "banana", `engine == CONJUGATE` is
         # False, and this pass accepts a document the run refuses.
-        found = _found(_doc([{"names": ["d", "a"], "engine": "banana"},
-                             {"names": ["w"]}]))
+        found = _found(_doc([{"names": ["d", "a"], "engine": "banana"}, {"names": ["w"]}]))
         assert [f.check for f in found] == ["A19"]
         assert "'banana'" in found[0].message
         assert "['conjugate', 'gradient', 'log_conjugate']" in found[0].message
 
-    def test_an_engine_that_is_not_even_a_string_is_refused_by_the_same_clause(
-            self):
+    def test_an_engine_that_is_not_even_a_string_is_refused_by_the_same_clause(self):
         # Kills `declared not in _ENGINES` narrowed to `isinstance(declared,
         # str) and declared not in _ENGINES`: `engine: 5` then falls through
         # to `_engine_of`, which returns "" for a non-string override, and the
@@ -318,8 +318,7 @@ class TestBlocks:
         # mixed at all.  `Block._check` calls this one by name, measured:
         # "asks for engine=5; the engines are ['conjugate', 'log_conjugate',
         # 'gradient']".
-        found = _found(_doc([{"names": ["d", "a"], "engine": 5},
-                             {"names": ["w"]}]))
+        found = _found(_doc([{"names": ["d", "a"], "engine": 5}, {"names": ["w"]}]))
         assert [f.check for f in found] == ["A19"]
         assert "5" in found[0].message
         assert "mixes" not in found[0].message
@@ -376,35 +375,39 @@ class TestBlocks:
         import subprocess
         import sys
 
-        script = ("import sys, rheplicant.config.preflight;"
-                  "print('rheplicant.inference' in sys.modules)")
+        script = (
+            "import sys, rheplicant.config.preflight;print('rheplicant.inference' in sys.modules)"
+        )
         env = {"PATH": "/usr/bin:/bin"}
         if os.environ.get("PYTHONPATH"):
             env["PYTHONPATH"] = os.environ["PYTHONPATH"]
-        done = subprocess.run([sys.executable, "-c", script], env=env,
-                              capture_output=True, text=True, check=True)
+        done = subprocess.run(
+            [sys.executable, "-c", script], env=env, capture_output=True, text=True, check=True
+        )
         assert done.stdout.strip() == "False", done.stdout
 
     @pytest.mark.parametrize(
         "label, blocks",
-        [("all-linear, no engine", [("d", "a"), ("w",)]),
-         ("conjugate + steps", [("d", "a", "steps=5"), ("w",)]),
-         ("gradient + steps, all linear",
-          [("d", "a", "engine=gradient", "steps=5"), ("w",)]),
-         ("mixed, no engine", [("d", "w"), ("a",)]),
-         ("conjugate over non-linear", [("w", "engine=conjugate"), ("d", "a")]),
-         ("mixed + conjugate + steps",
-          [("d", "w", "engine=conjugate", "steps=3"), ("a",)]),
-         ("undeclared name", [("d", "a", "zzz"), ("w",)]),
-         ("doubled", [("d", "a"), ("d",), ("w",)]),
-         ("uncovered", [("d", "a")]),
-         ("unknown engine", [("d", "a", "engine=banana"), ("w",)]),
-         ("one name twice in one block", [("d", "d", "a"), ("w",)]),
-         ("steps zero", [("d", "a", "steps=0"), ("w",)]),
-         ("gradient over the non-linear one alone",
-          [("w", "engine=gradient", "steps=3"), ("d", "a")])])
-    def test_the_pass_agrees_with_the_package_on_every_case(self, label,
-                                                            blocks):
+        [
+            ("all-linear, no engine", [("d", "a"), ("w",)]),
+            ("conjugate + steps", [("d", "a", "steps=5"), ("w",)]),
+            ("gradient + steps, all linear", [("d", "a", "engine=gradient", "steps=5"), ("w",)]),
+            ("mixed, no engine", [("d", "w"), ("a",)]),
+            ("conjugate over non-linear", [("w", "engine=conjugate"), ("d", "a")]),
+            ("mixed + conjugate + steps", [("d", "w", "engine=conjugate", "steps=3"), ("a",)]),
+            ("undeclared name", [("d", "a", "zzz"), ("w",)]),
+            ("doubled", [("d", "a"), ("d",), ("w",)]),
+            ("uncovered", [("d", "a")]),
+            ("unknown engine", [("d", "a", "engine=banana"), ("w",)]),
+            ("one name twice in one block", [("d", "d", "a"), ("w",)]),
+            ("steps zero", [("d", "a", "steps=0"), ("w",)]),
+            (
+                "gradient over the non-linear one alone",
+                [("w", "engine=gradient", "steps=3"), ("d", "a")],
+            ),
+        ],
+    )
+    def test_the_pass_agrees_with_the_package_on_every_case(self, label, blocks):
         """The differential that catches mirroring drift.
 
         `_engine_of` mirrors `plan.py::split_rhat` and `_a16_partition` mirrors
@@ -461,24 +464,37 @@ class TestBlocks:
         )
 
         space = ParameterSpace.raw(
-            [Latent("d", init=0.5, linear=True),
-             Latent("a", init=10.0, linear=True),
-             Latent("w", init=5.0)],
-            lambda pipeline, values: pipeline)
+            [
+                Latent("d", init=0.5, linear=True),
+                Latent("a", init=10.0, linear=True),
+                Latent("w", init=5.0),
+            ],
+            lambda pipeline, values: pipeline,
+        )
         document = []
         for spec in blocks:
             names = [part for part in spec if "=" not in part]
             knobs = dict(part.split("=", 1) for part in spec if "=" in part)
-            document.append({"names": names, **{
-                key: (int(value) if key == "steps" else value)
-                for key, value in knobs.items()}})
+            document.append(
+                {
+                    "names": names,
+                    **{
+                        key: (int(value) if key == "steps" else value)
+                        for key, value in knobs.items()
+                    },
+                }
+            )
         try:
             package = [
-                Block(*[part for part in spec if "=" not in part], **{
-                    key: (int(value) if key == "steps" else value)
-                    for key, value in (part.split("=", 1) for part in spec
-                                       if "=" in part)})
-                for spec in blocks]
+                Block(
+                    *[part for part in spec if "=" not in part],
+                    **{
+                        key: (int(value) if key == "steps" else value)
+                        for key, value in (part.split("=", 1) for part in spec if "=" in part)
+                    },
+                )
+                for spec in blocks
+            ]
             SamplingPlan(space, *package)
             package_refuses = False
         except ParameterSpaceError:
@@ -520,8 +536,7 @@ class TestBlocks:
         # This pass says nothing about any of the three -- stated as an
         # assertion so "recorded, not implemented" is a fact rather than a
         # promise.
-        assert _found(_doc([{"names": ["d", "a"], "learning_rate": 0.1},
-                            {"names": ["w"]}])) == []
+        assert _found(_doc([{"names": ["d", "a"], "learning_rate": 0.1}, {"names": ["w"]}])) == []
 
     def test_the_space_names_are_the_declared_parameter_keys(self):
         """The assumption A16 rests on, pinned against a BUILT document.
@@ -540,11 +555,9 @@ class TestBlocks:
         from rheplicant.config.document import load_document
         from tests.config.exit_helpers import TWO_LATENTS, conjugate_document
 
-        document = conjugate_document({"kind": "forward"},
-                                      inference=dict(TWO_LATENTS))
+        document = conjugate_document({"kind": "forward"}, inference=dict(TWO_LATENTS))
         built = load_document(document)
-        assert (tuple(document["inference"]["parameters"])
-                == tuple(built.inference.space.names))
+        assert tuple(document["inference"]["parameters"]) == tuple(built.inference.space.names)
 
     def test_only_plan_runs_are_read(self):
         # `blocks:` is a `plan.*` key.  Kills a loop over every run: a
@@ -553,12 +566,14 @@ class TestBlocks:
         # user two refusals for one typo.
         document = preflight_document(
             inference={"parameters": THREE},
-            runs=[{"name": "f", "kind": "fisher", "blocks": [{"names": ["d"]}]}])
+            runs=[{"name": "f", "kind": "fisher", "blocks": [{"names": ["d"]}]}],
+        )
         assert _found(document) == []
         assert _kinds(document) == frozenset({"fisher"})
 
-    @pytest.mark.parametrize("kind", ["plan", "explain", "planner", "PLAN."],
-                             ids=["plan", "explain", "planner", "upper"])
+    @pytest.mark.parametrize(
+        "kind", ["plan", "explain", "planner", "PLAN."], ids=["plan", "explain", "planner", "upper"]
+    )
     def test_the_prefix_is_plan_DOT_and_nothing_looser(self, kind):
         # Kills `startswith("plan")` and `"plan" in kind`, both of which
         # survive a suite whose only negative case is `fisher`.  `kind: plan`
@@ -567,8 +582,8 @@ class TestBlocks:
         # fault that is in `kind:`.
         document = preflight_document(
             inference={"parameters": THREE},
-            runs=[{"name": "x", "kind": kind,
-                   "blocks": [{"names": ["d"]}]}])
+            runs=[{"name": "x", "kind": kind, "blocks": [{"names": ["d"]}]}],
+        )
         assert _found(document) == []
 
     def test_the_scope_set_is_this_module_s_own(self):
@@ -589,8 +604,10 @@ class TestBlocks:
         moved it.
         """
         registered = frozenset(
-            slot for slot, fn in CHECKS.items()
-            if fn.__module__ == "rheplicant.config.preflight.fitting")
+            slot
+            for slot, fn in CHECKS.items()
+            if fn.__module__ == "rheplicant.config.preflight.fitting"
+        )
         assert MINE == registered, (
             f"MINE claims {sorted(MINE - registered)} that preflight/fitting.py "
             f"does not register, and omits {sorted(registered - MINE)} that it "
@@ -626,7 +643,8 @@ class TestBlocks:
         document = preflight_document(
             inference={"parameters": THREE},
             runs=[_plan([{"names": ["d", "a"]}])],
-            resources=UNREADABLE_BEAM)
+            resources=UNREADABLE_BEAM,
+        )
         with pytest.raises(ConfigError) as caught:
             load_document(document)
         assert "check A16" in str(caught.value)
@@ -638,8 +656,7 @@ class TestBlocks:
         # has actually looked.  Kills every inverted trigger at once -- an
         # implementation that refuses a COVERED partition passes each "is
         # refused" test above and fails here.
-        assert not ({"A16", "A17", "A18", "A19"}
-                    & preflight(preflight_document()).checks())
+        assert not ({"A16", "A17", "A18", "A19"} & preflight(preflight_document()).checks())
 
     def test_the_three_readers_survive_a_document_that_declares_neither(self):
         # `_latents`/`_runs`/`_kinds` are imported by Tasks 8-11 and are the
@@ -648,10 +665,11 @@ class TestBlocks:
         assert _latents({}) == {}
         assert _runs({}) == ()
         assert _kinds({}) == frozenset()
-        assert _runs({"runs": {"kind": "forward"}}) == (
-            {"kind": "forward", "name": "forward"},)
+        assert _runs({"runs": {"kind": "forward"}}) == ({"kind": "forward", "name": "forward"},)
         assert _runs({"runs": [7, {"kind": "fisher", "name": "f"}]}) == (
-            {}, {"kind": "fisher", "name": "f"})
+            {},
+            {"kind": "fisher", "name": "f"},
+        )
 
     def test_a_malformed_latent_KEEPS_ITS_NAME(self):
         # `_latents` normalises a non-Mapping spec to `{}` and KEEPS the key.
@@ -661,12 +679,19 @@ class TestBlocks:
         # refused for naming something `inference.parameters` "does not
         # declare".  Nothing else here declares a malformed latent, so the
         # mutation survives the whole module.
-        assert _latents({"inference": {"parameters": {"d": LINEAR_D,
-                                                      "a": "oops"}}}) == {
-            "d": LINEAR_D, "a": {}}
-        assert _found(_doc([{"names": ["d"]}, {"names": ["a", "w"]}],
-                           parameters={"d": LINEAR_D, "a": "oops",
-                                       "w": NONLINEAR_W})) == []
+        assert _latents({"inference": {"parameters": {"d": LINEAR_D, "a": "oops"}}}) == {
+            "d": LINEAR_D,
+            "a": {},
+        }
+        assert (
+            _found(
+                _doc(
+                    [{"names": ["d"]}, {"names": ["a", "w"]}],
+                    parameters={"d": LINEAR_D, "a": "oops", "w": NONLINEAR_W},
+                )
+            )
+            == []
+        )
 
     def test_runs_does_not_mutate_the_callers_document(self):
         # `_runs` FILLS `name` the way runs.py::_one does, and it must do it on
@@ -677,8 +702,7 @@ class TestBlocks:
         # on to `build_*`.  Every other test here reads the return value and
         # never looks at the input again.
         document = {"runs": [{"kind": "forward"}, {"kind": "fisher"}]}
-        assert [run["name"] for run in _runs(document)] == ["forward",
-                                                            "fisher"]
+        assert [run["name"] for run in _runs(document)] == ["forward", "fisher"]
         assert document["runs"] == [{"kind": "forward"}, {"kind": "fisher"}]
 
     def test_linear_is_the_BOOL_True_and_not_a_truthy_value(self):
@@ -711,10 +735,15 @@ class TestTheMessagesNameWhoMustEdit:
         # Kills a hard-coded `runs[0]` and a `list(...)[0]`: the first run
         # here is a clean forward exit, so an implementation that reported
         # index 0 would send the reader to a run with no blocks at all.
-        found = _found(preflight_document(
-            inference={"parameters": THREE},
-            runs=[{"name": "fwd", "kind": "forward"},
-                  _plan([{"names": ["d", "a"]}], name="second")]))
+        found = _found(
+            preflight_document(
+                inference={"parameters": THREE},
+                runs=[
+                    {"name": "fwd", "kind": "forward"},
+                    _plan([{"names": ["d", "a"]}], name="second"),
+                ],
+            )
+        )
         assert [f.where for f in found] == ["runs[1].blocks"]
         assert "runs['second']" in found[0].message
 
@@ -724,9 +753,12 @@ class TestTheMessagesNameWhoMustEdit:
         # (runs.py::_one) and to every refusal this layer writes.  Kills
         # `run.get("name", "")` and `run["name"] or "?"` -- both give a
         # message prefix no other refusal in this package uses.
-        found = _found(preflight_document(
-            inference={"parameters": THREE},
-            runs=[{"kind": "plan.estimate", "blocks": [{"names": ["d", "a"]}]}]))
+        found = _found(
+            preflight_document(
+                inference={"parameters": THREE},
+                runs=[{"kind": "plan.estimate", "blocks": [{"names": ["d", "a"]}]}],
+            )
+        )
         assert "runs['plan.estimate']:" in found[0].message
 
     def test_a_single_run_mapping_is_still_run_zero(self):
@@ -734,9 +766,12 @@ class TestTheMessagesNameWhoMustEdit:
         # written `document.get("runs") or []` -- under which a mapping is
         # iterated as its KEYS and every entry reads as malformed, so this
         # document earns nothing at all.
-        found = _found(preflight_document(
-            inference={"parameters": THREE},
-            runs={"kind": "plan.estimate", "blocks": [{"names": ["d", "a"]}]}))
+        found = _found(
+            preflight_document(
+                inference={"parameters": THREE},
+                runs={"kind": "plan.estimate", "blocks": [{"names": ["d", "a"]}]},
+            )
+        )
         assert [f.where for f in found] == ["runs[0].blocks"]
 
     def test_both_offending_blocks_are_reported_and_not_only_the_first(self):
@@ -745,10 +780,13 @@ class TestTheMessagesNameWhoMustEdit:
         # `return`s on the first leaves the second to be discovered on the
         # next round trip, which is what the collect-rather-than-raise design
         # exists to prevent.
-        found = _found(_doc([{"names": ["d", "a"], "steps": 5},
-                             {"names": ["w"], "engine": "conjugate"}]))
+        found = _found(
+            _doc([{"names": ["d", "a"], "steps": 5}, {"names": ["w"], "engine": "conjugate"}])
+        )
         assert [(f.check, f.where) for f in found] == [
-            ("A17", "runs[0].blocks[0]"), ("A19", "runs[0].blocks[1]")]
+            ("A17", "runs[0].blocks[0]"),
+            ("A19", "runs[0].blocks[1]"),
+        ]
 
     def test_every_message_ends_with_its_own_check_tag(self):
         # Enforced from Task 3 on.  Kills a clause that forgets the tail, or
@@ -758,25 +796,22 @@ class TestTheMessagesNameWhoMustEdit:
         # finding with no id, so asserting its own tag is what stops a later
         # edit giving it A17's or none.
         documents = [
-            _doc([{"names": ["d", "a"]}]),                       # A16
-            _doc([{"names": ["d", "a", "w", "zzz"]}]),           # A16
-            _doc([{"names": ["d", "d", "a", "w"]}]),             # A16
+            _doc([{"names": ["d", "a"]}]),  # A16
+            _doc([{"names": ["d", "a", "w", "zzz"]}]),  # A16
+            _doc([{"names": ["d", "d", "a", "w"]}]),  # A16
             _doc([{"names": ["d", "a", "w"]}, {"names": ["d"]}]),  # A16
             _doc([{"names": ["d", "a"], "steps": 5}, {"names": ["w"]}]),
             _doc([{"names": ["d", "a"], "steps": 0}, {"names": ["w"]}]),
-            _doc([{"names": ["d", "w"]}, {"names": ["a"]}]),     # A18
-            _doc([{"names": ["w"], "engine": "conjugate"},
-                  {"names": ["d", "a"]}]),                       # A19
+            _doc([{"names": ["d", "w"]}, {"names": ["a"]}]),  # A18
+            _doc([{"names": ["w"], "engine": "conjugate"}, {"names": ["d", "a"]}]),  # A19
         ]
         seen = set()
         for document in documents:
             for finding in _found(document):
                 seen.add(finding.check)
-                assert finding.message.endswith(
-                    f"(check {finding.check})."), finding.message
+                assert finding.message.endswith(f"(check {finding.check})."), finding.message
         assert seen == {"A16", "A17", "A18", "A19"}
-        [enum] = _found(_doc([{"names": ["d", "a"], "engine": "banana"},
-                              {"names": ["w"]}]))
+        [enum] = _found(_doc([{"names": ["d", "a"], "engine": "banana"}, {"names": ["w"]}]))
         assert enum.check == "A19"
         assert enum.message.endswith("(check A19).")
 
@@ -792,32 +827,39 @@ class TestTheWarmStartIsTheSamePartition:
     """
 
     def test_a_warm_starts_uncovered_latent_is_refused_too(self):
-        found = _found(_warm([{"names": ["d", "a"], "engine": "gradient"},
-                              {"names": ["w"]}],
-                             [{"names": ["d", "a"]}]))
+        found = _found(
+            _warm(
+                [{"names": ["d", "a"], "engine": "gradient"}, {"names": ["w"]}],
+                [{"names": ["d", "a"]}],
+            )
+        )
         assert [f.check for f in found] == ["A16"]
         assert found[0].where == "runs[0].warm_start.blocks"
         assert "['w']" in found[0].message
 
-    def test_the_warm_start_refusal_does_not_claim_the_whole_run_is_frozen(
-            self):
+    def test_the_warm_start_refusal_does_not_claim_the_whole_run_is_frozen(self):
         # The message TEXT, which is where Task 6's mutants lived.  A16's
         # main-route sentence is "silently frozen at its declared init for
         # the whole run"; on a warm start that is false -- the main blocks
         # still update it, and what the warm estimate freezes is its own
         # phase.  Kills reusing one message for both sites, which is what
         # sharing the formatter without sharing the reasoning gives you.
-        [found] = _found(_warm([{"names": ["d", "a"], "engine": "gradient"},
-                                {"names": ["w"]}],
-                               [{"names": ["d", "a"]}]))
+        [found] = _found(
+            _warm(
+                [{"names": ["d", "a"], "engine": "gradient"}, {"names": ["w"]}],
+                [{"names": ["d", "a"]}],
+            )
+        )
         assert "for the whole run" not in found.message
         assert "warm_start" in found.message
 
     def test_a_warm_starts_engine_rules_are_read_too(self):
-        found = _found(_warm([{"names": ["d", "a"], "engine": "gradient"},
-                              {"names": ["w"]}],
-                             [{"names": ["d", "a"], "steps": 5},
-                              {"names": ["w"]}]))
+        found = _found(
+            _warm(
+                [{"names": ["d", "a"], "engine": "gradient"}, {"names": ["w"]}],
+                [{"names": ["d", "a"], "steps": 5}, {"names": ["w"]}],
+            )
+        )
         assert [f.check for f in found] == ["A17"]
         assert found[0].where == "runs[0].warm_start.blocks[0]"
         assert "warm_start.blocks[0]" in found[0].message
@@ -831,10 +873,17 @@ class TestTheWarmStartIsTheSamePartition:
         # refusal that names the real fault.
         document = preflight_document(
             inference={"parameters": THREE},
-            runs=[_plan([{"names": ["d", "a"], "engine": "gradient"},
-                         {"names": ["w"]}],
-                        warm_start={"kind": "plan.estimate", "move": ["d"],
-                                    "blocks": [{"names": ["d"]}]})])
+            runs=[
+                _plan(
+                    [{"names": ["d", "a"], "engine": "gradient"}, {"names": ["w"]}],
+                    warm_start={
+                        "kind": "plan.estimate",
+                        "move": ["d"],
+                        "blocks": [{"names": ["d"]}],
+                    },
+                )
+            ],
+        )
         assert _found(document) == []
         assert "A1" in preflight(document).checks()
 
@@ -842,9 +891,17 @@ class TestTheWarmStartIsTheSamePartition:
         """A ``plan.sample`` whose MAIN blocks earn nothing, patched by ``run``."""
         return preflight_document(
             inference={"parameters": THREE},
-            runs=[{"name": "s", "kind": "plan.sample", "blocks": CLEAN,
-                   "n_sweeps": 4, "seed": {"from": "runtime.seeds.sample"},
-                   **run}])
+            runs=[
+                {
+                    "name": "s",
+                    "kind": "plan.sample",
+                    "blocks": CLEAN,
+                    "n_sweeps": 4,
+                    "seed": {"from": "runtime.seeds.sample"},
+                    **run,
+                }
+            ],
+        )
 
     #: Every ``warm_start`` shape whose ``blocks:`` the executor never READS,
     #: each paired with the refusal the package gives instead.  Measured by
@@ -865,10 +922,10 @@ class TestTheWarmStartIsTheSamePartition:
         ("move-not-all-strings", {"move": ["d", 7]}),
     ]
 
-    @pytest.mark.parametrize("patch", [row[1] for row in UNREACHED],
-                             ids=[row[0] for row in UNREACHED])
-    def test_a_warm_start_the_executor_never_reaches_is_left_alone(self,
-                                                                   patch):
+    @pytest.mark.parametrize(
+        "patch", [row[1] for row in UNREACHED], ids=[row[0] for row in UNREACHED]
+    )
+    def test_a_warm_start_the_executor_never_reaches_is_left_alone(self, patch):
         """THE live defect the first draft shipped, as ten documents.
 
         `_t7_sites` read the warm site whenever `warm_start` was a mapping,
@@ -885,9 +942,11 @@ class TestTheWarmStartIsTheSamePartition:
         warm partition below is broken on purpose, so every row of this table
         emits an A16 under that implementation.
         """
-        warm = {"kind": patch.get("warm_kind", "plan.estimate"),
-                "move": patch.get("move", ["d"]),
-                "blocks": [{"names": ["d"]}]}       # covers 'd' and nothing else
+        warm = {
+            "kind": patch.get("warm_kind", "plan.estimate"),
+            "move": patch.get("move", ["d"]),
+            "blocks": [{"names": ["d"]}],
+        }  # covers 'd' and nothing else
         if "warm_kind" in patch and patch["warm_kind"] is None:
             warm.pop("kind")
         if "move" in patch and patch["move"] is None:
@@ -903,16 +962,14 @@ class TestTheWarmStartIsTheSamePartition:
         # partition and nothing else wrong, the refusal still arrives.  Kills
         # `_t7_warm_start` returning None unconditionally, which passes every
         # one of the ten rows.
-        document = self._sample(warm_start={"kind": "plan.estimate",
-                                            "move": ["d"],
-                                            "blocks": [{"names": ["d"]}]})
+        document = self._sample(
+            warm_start={"kind": "plan.estimate", "move": ["d"], "blocks": [{"names": ["d"]}]}
+        )
         found = _found(document)
-        assert [(f.check, f.where) for f in found] == [
-            ("A16", "runs[0].warm_start.blocks")]
+        assert [(f.check, f.where) for f in found] == [("A16", "runs[0].warm_start.blocks")]
 
     @pytest.mark.parametrize("dropped", ["n_sweeps", "seed"])
-    def test_n_sweeps_and_the_seed_are_NOT_gates_and_that_is_the_line(
-            self, dropped):
+    def test_n_sweeps_and_the_seed_are_NOT_gates_and_that_is_the_line(self, dropped):
         """The other side of the gate, and why it is where it is.
 
         `_run_plan` also refuses a missing `n_sweeps` (`exits.py::_SAMPLE_KEYS`) and
@@ -927,17 +984,21 @@ class TestTheWarmStartIsTheSamePartition:
         Kills widening `_t7_warm_start` to "everything `_run_plan` checks
         first", which is the obvious over-correction and looks strictly safer.
         """
-        run = {"warm_start": {"kind": "plan.estimate", "move": ["d"],
-                              "blocks": [{"names": ["d"]}]}}
+        run = {"warm_start": {"kind": "plan.estimate", "move": ["d"], "blocks": [{"names": ["d"]}]}}
         document = self._sample(**run)
         del document["runs"][0][dropped]
         assert [f.check for f in _found(document)] == ["A16"]
 
     def test_a_clean_warm_start_earns_nothing(self):
-        assert _found(_warm([{"names": ["d", "a"], "engine": "gradient"},
-                             {"names": ["w"]}],
-                            [{"names": ["d", "a"], "engine": "gradient"},
-                             {"names": ["w"]}])) == []
+        assert (
+            _found(
+                _warm(
+                    [{"names": ["d", "a"], "engine": "gradient"}, {"names": ["w"]}],
+                    [{"names": ["d", "a"], "engine": "gradient"}, {"names": ["w"]}],
+                )
+            )
+            == []
+        )
 
 
 class TestWhatThisCheckStandsDownOn:
@@ -963,18 +1024,38 @@ class TestWhatThisCheckStandsDownOn:
         # ...and `expect: ok` is not a licence, which is the other half.
         assert len(_found(_doc([{"names": ["d", "a"]}], expect="ok"))) == 1
 
-    @pytest.mark.parametrize("blocks", [
-        "nope", {"names": ["d"]}, [], [5], [{"names": "d"}], [{"names": []}],
-        [{"names": ["d", 7]}], [{"names": None}], [{}],
-        [{"names": ["d", "a", "w"]}, "nope"],
-        [{"names": ["d"], "step": 5}],
-        [{"names": ["d", "a", "w"]}, {"names": ["d"], "learning_Rate": 1.0}],
-    ], ids=["a-string", "a-mapping", "empty", "not-a-mapping", "names-a-string",
-            "names-empty", "names-not-all-strings", "names-none", "no-names",
-            "a-second-entry-that-is-not-a-mapping", "a-key-a-block-does-not-take",
-            "a-key-a-block-does-not-take-on-the-SECOND-entry"])
-    def test_a_blocks_list_the_grammar_refuses_by_shape_is_left_alone(
-            self, blocks):
+    @pytest.mark.parametrize(
+        "blocks",
+        [
+            "nope",
+            {"names": ["d"]},
+            [],
+            [5],
+            [{"names": "d"}],
+            [{"names": []}],
+            [{"names": ["d", 7]}],
+            [{"names": None}],
+            [{}],
+            [{"names": ["d", "a", "w"]}, "nope"],
+            [{"names": ["d"], "step": 5}],
+            [{"names": ["d", "a", "w"]}, {"names": ["d"], "learning_Rate": 1.0}],
+        ],
+        ids=[
+            "a-string",
+            "a-mapping",
+            "empty",
+            "not-a-mapping",
+            "names-a-string",
+            "names-empty",
+            "names-not-all-strings",
+            "names-none",
+            "no-names",
+            "a-second-entry-that-is-not-a-mapping",
+            "a-key-a-block-does-not-take",
+            "a-key-a-block-does-not-take-on-the-SECOND-entry",
+        ],
+    )
+    def test_a_blocks_list_the_grammar_refuses_by_shape_is_left_alone(self, blocks):
         """`exits._blocks` (`exits.py::_parse_optimize`) refuses each of these in its
         own words -- *"blocks: is a non-empty list of block mappings"*,
         *"blocks[0] is a mapping"*, *"blocks[0].names is a non-empty list of
@@ -999,8 +1080,7 @@ class TestWhatThisCheckStandsDownOn:
         key on a LATER entry, which kills a gate written to look at
         `entries[0]` alone.
         """
-        document = preflight_document(inference={"parameters": THREE},
-                                      runs=[_plan(blocks)])
+        document = preflight_document(inference={"parameters": THREE}, runs=[_plan(blocks)])
         assert _found(document) == []
 
     def test_a_names_that_cannot_be_iterated_does_not_abort_the_pass(self):
@@ -1009,8 +1089,7 @@ class TestWhatThisCheckStandsDownOn:
         # brief's own spelling and it raises `TypeError: 'int' object is not
         # iterable` on this document -- inside the pass that becomes "check
         # A16 RAISED" and DISCARDS every other finding in the report.
-        document = preflight_document(inference={"parameters": THREE},
-                                      runs=[_plan([{"names": 5}])])
+        document = preflight_document(inference={"parameters": THREE}, runs=[_plan([{"names": 5}])])
         assert _found(document) == []
         # `& MINE` and not a bare `== frozenset()`: a check that RAISES is
         # reported under its own id, so intersecting with this module's ids
@@ -1050,21 +1129,45 @@ class TestNoHostileDocumentCanAbortThePass:
         {"runs": [{"kind": "plan.estimate", "blocks": {"names": ["d"]}}]},
         {"runs": [{"kind": "plan.estimate", "blocks": [{"names": 5}]}]},
         {"runs": [{"kind": "plan.estimate", "blocks": [{"names": {"d": 1}}]}]},
-        {"runs": [{"kind": "plan.estimate",
-                   "blocks": [{"names": ["d"], "engine": ["conjugate"]}]}]},
-        {"runs": [{"kind": "plan.estimate",
-                   "blocks": [{"names": ["d"], "steps": {"a": 1}}]}]},
-        {"runs": [{"kind": "plan.estimate", "name": 7,
-                   "blocks": [{"names": ["d", "a", "w"]}]}]},
-        {"runs": [{"kind": "plan.sample", "warm_start": "nope",
-                   "blocks": [{"names": ["d", "a", "w"]}]}]},
-        {"runs": [{"kind": "plan.sample", "warm_start": {"blocks": 7},
-                   "blocks": [{"names": ["d", "a", "w"]}]}]},
-        {"runs": [{"kind": "plan.sample",
-                   "warm_start": {"blocks": [{"names": ["zzz"]}]},
-                   "blocks": [{"names": ["d", "a", "w"]}]}]},
-        {"runs": [{"kind": "plan.estimate", "expect": ["refuse"],
-                   "blocks": [{"names": ["d", "a"]}]}]},
+        {
+            "runs": [
+                {"kind": "plan.estimate", "blocks": [{"names": ["d"], "engine": ["conjugate"]}]}
+            ]
+        },
+        {"runs": [{"kind": "plan.estimate", "blocks": [{"names": ["d"], "steps": {"a": 1}}]}]},
+        {"runs": [{"kind": "plan.estimate", "name": 7, "blocks": [{"names": ["d", "a", "w"]}]}]},
+        {
+            "runs": [
+                {
+                    "kind": "plan.sample",
+                    "warm_start": "nope",
+                    "blocks": [{"names": ["d", "a", "w"]}],
+                }
+            ]
+        },
+        {
+            "runs": [
+                {
+                    "kind": "plan.sample",
+                    "warm_start": {"blocks": 7},
+                    "blocks": [{"names": ["d", "a", "w"]}],
+                }
+            ]
+        },
+        {
+            "runs": [
+                {
+                    "kind": "plan.sample",
+                    "warm_start": {"blocks": [{"names": ["zzz"]}]},
+                    "blocks": [{"names": ["d", "a", "w"]}],
+                }
+            ]
+        },
+        {
+            "runs": [
+                {"kind": "plan.estimate", "expect": ["refuse"], "blocks": [{"names": ["d", "a"]}]}
+            ]
+        },
     ]
 
     #: The one shape the pass no longer survives: a non-string mapping key,
@@ -1078,17 +1181,15 @@ class TestNoHostileDocumentCanAbortThePass:
         {"inference": {"parameters": {7: {"linear": True}}}},
     ]
 
-    @pytest.mark.parametrize("patch", HOSTILE + _FROZEN,
-                             ids=[str(index) for index in
-                                  range(len(HOSTILE) + len(_FROZEN))])
+    @pytest.mark.parametrize(
+        "patch", HOSTILE + _FROZEN, ids=[str(index) for index in range(len(HOSTILE) + len(_FROZEN))]
+    )
     def test_the_check_returns_findings_and_raises_nothing(self, patch):
         document = _hostile_document(patch)
         for finding in _found(document):
             assert finding.check in ("A16", "A17", "A18", "A19", "")
 
-    @pytest.mark.parametrize("patch", HOSTILE,
-                             ids=[str(index) for index in
-                                  range(len(HOSTILE))])
+    @pytest.mark.parametrize("patch", HOSTILE, ids=[str(index) for index in range(len(HOSTILE))])
     def test_the_whole_pass_survives_each_of_them(self, patch):
         # The pass, not the function: `_check_where` runs OUTSIDE the
         # per-check `try`, so a `where` this module computes from a hostile
@@ -1107,8 +1208,8 @@ class TestNoHostileDocumentCanAbortThePass:
         with pytest.raises(ConfigError) as caught:
             preflight(_hostile_document(patch))
         assert str(caught.value) == (
-            "initial_merge document: unsupported evidence mapping key type "
-            "int.")
+            "initial_merge document: unsupported evidence mapping key type int."
+        )
 
 
 # --- Task 8: the prior gates and the seed asymmetry -------------------------
@@ -1116,6 +1217,7 @@ class TestNoHostileDocumentCanAbortThePass:
 # `LINEAR_D`/`LINEAR_A`/`NONLINEAR_W`/`THREE` above are Task 7's and are reused
 # rather than re-declared: a second three-latent constant in one module is the
 # shape §3.1 pins names against, one file in.
+
 
 class TestTheReadersTasksEightToElevenImport:
     """`_engine_of` and `_kinds` DIRECTLY, on input `_blocks` never hands them.
@@ -1134,11 +1236,11 @@ class TestTheReadersTasksEightToElevenImport:
         # `frozenset(run["kind"] for run in _runs(...))` written without the
         # `isinstance(run.get("kind"), str)` guard raises KeyError here.
         assert _kinds({"runs": [7, {"kind": "fisher"}]}) == frozenset({"fisher"})
-        assert _kinds({"runs": [{}, {"kind": "forward"}]}) == frozenset(
-            {"forward"})
+        assert _kinds({"runs": [{}, {"kind": "forward"}]}) == frozenset({"forward"})
 
-    @pytest.mark.parametrize("kind", [["plan.estimate"], {"a": 1}, {"x"}],
-                             ids=["list", "mapping", "set"])
+    @pytest.mark.parametrize(
+        "kind", [["plan.estimate"], {"a": 1}, {"x"}], ids=["list", "mapping", "set"]
+    )
     def test_kinds_survives_an_UNHASHABLE_kind(self, kind):
         # `run.get("kind")` reaching a `frozenset(...)` comprehension over an
         # unhashable value raises `TypeError: unhashable type`. The guard is
@@ -1150,23 +1252,23 @@ class TestTheReadersTasksEightToElevenImport:
         assert _kinds({"runs": {"kind": "forward"}}) == frozenset({"forward"})
         assert _kinds({"runs": [{"kind": 7}, {"kind": None}]}) == frozenset()
 
-    @pytest.mark.parametrize("declared", [["conjugate"], 5, {"a": 1}, True],
-                             ids=["list", "int", "mapping", "bool"])
-    def test_engine_of_answers_a_NON_STRING_override_with_the_empty_string(
-            self, declared):
+    @pytest.mark.parametrize(
+        "declared", [["conjugate"], 5, {"a": 1}, True], ids=["list", "int", "mapping", "bool"]
+    )
+    def test_engine_of_answers_a_NON_STRING_override_with_the_empty_string(self, declared):
         # Kills `return declared` (the `isinstance` dropped): `_engine_of` is
         # exported, and a Task 8-11 caller writing `engine in _ENGINES` on the
         # returned list gets `TypeError: unhashable type: 'list'`.  `""` is
         # the module's own "cannot be derived" answer and every caller in it
         # already tests for that.
-        assert _engine_of({"names": ["d"], "engine": declared},
-                          {"d": LINEAR_D}) == ""
+        assert _engine_of({"names": ["d"], "engine": declared}, {"d": LINEAR_D}) == ""
 
-    @pytest.mark.parametrize("names", [5, "d", {"d": 1}, None, [], ["d", 7]],
-                             ids=["int", "a-string", "mapping", "none",
-                                  "empty", "not-all-strings"])
-    def test_engine_of_reads_names_through_the_grammar_and_never_iterates_it(
-            self, names):
+    @pytest.mark.parametrize(
+        "names",
+        [5, "d", {"d": 1}, None, [], ["d", 7]],
+        ids=["int", "a-string", "mapping", "none", "empty", "not-all-strings"],
+    )
+    def test_engine_of_reads_names_through_the_grammar_and_never_iterates_it(self, names):
         # THE spelling `_t7_names` exists to stop, on the one function that
         # still reaches it from outside: `names = block.get("names") or ()`
         # raises TypeError on `names: 5` and iterates `names: "d"` into the
@@ -1182,10 +1284,8 @@ class TestTheReadersTasksEightToElevenImport:
         # unconditionally would pass every one of them.
         assert _engine_of({"names": ["d"]}, {"d": LINEAR_D}) == "conjugate"
         assert _engine_of({"names": ["w"]}, {"w": NONLINEAR_W}) == "gradient"
-        assert _engine_of({"names": ["d", "w"]},
-                          {"d": LINEAR_D, "w": NONLINEAR_W}) == ""
-        assert _engine_of({"names": ["d"], "engine": "gradient"},
-                          {"d": LINEAR_D}) == "gradient"
+        assert _engine_of({"names": ["d", "w"]}, {"d": LINEAR_D, "w": NONLINEAR_W}) == ""
+        assert _engine_of({"names": ["d"], "engine": "gradient"}, {"d": LINEAR_D}) == "gradient"
 
     def test_the_block_key_set_is_the_packages_own(self):
         # `_T7_BLOCK_KEYS` is a COPY of `exits._BLOCK_KEYS`, for the reason
@@ -1217,8 +1317,7 @@ class TestTheReadersTasksEightToElevenImport:
         from rheplicant.config.preflight.fitting import _runs
 
         mapping = {"runs": {"kind": "plan.sample", "n_sweeps": 2}}
-        assert _runs(mapping) == ({"kind": "plan.sample", "n_sweeps": 2,
-                                   "name": "plan.sample"},)
+        assert _runs(mapping) == ({"kind": "plan.sample", "n_sweeps": 2, "name": "plan.sample"},)
         # ...and the LIST form is index-preserving, which is the half of the
         # sentence that was always true.
         listed = {"runs": [7, {"kind": "forward"}, {"kind": "npe"}]}
@@ -1238,108 +1337,141 @@ class TestTheReadersTasksEightToElevenImport:
 #: validation layer the message IS the product, so it is pinned the way
 #: `test_config_preflight.py` pins `_structural`'s five: by equality.
 _VERBATIM = [
-    ('a16-one-name-twice-in-one-block',
-     _doc([{"names": ["d", "d", "a", "w"]}]),
-     'A16', 'runs[0].blocks[0]',
-     "runs['fit']: blocks[0].names lists 'd' twice, and two copies of one "
-     "latent in a block are exactly degenerate with each other -- the "
-     "block's normal operator is singular in a direction that says "
-     "nothing about the model, and the answer has one entry per name, so "
-     "one copy's result silently overwrites the other's (check A16)."),
-    ('a16-a-name-nobody-declared',
-     _doc([{"names": ["d", "a", "w", "zzz"]}]),
-     'A16', 'runs[0].blocks[0]',
-     "runs['fit']: blocks[0] names 'zzz', which inference.parameters does "
-     "not declare; it declares ['d', 'a', 'w']. A block over a name "
-     "nobody declared updates nothing and leaves the latent it was meant "
-     "to cover sitting at its declared init (check A16)."),
-    ('a16-one-latent-in-two-blocks',
-     _doc([{"names": ["d", "a", "w"]}, {"names": ["d"]}]),
-     'A16', 'runs[0].blocks[1]',
-     "runs['fit']: 'd' is in blocks[0] and in blocks[1]. A Gibbs sweep "
-     "updates each block against the conditional that holds when it runs, "
-     "so the second update solves a conditional the first one just "
-     "invalidated -- and every diagnostic reports the second's answer as "
-     "if the first had never happened. Put each latent in exactly one "
-     "block; to update two together, put them in ONE block (check A16)."),
-    ('a16-a-latent-nobody-covers',
-     _doc([{"names": ["d", "a"]}]),
-     'A16', 'runs[0].blocks',
-     "runs['fit']: blocks: does not cover ['w']; every latent "
-     "inference.parameters declares must be in exactly one block. An "
-     "omitted latent is silently frozen at its declared init for the "
-     "whole run -- the sweep converges, the joint chi-squared settles, "
-     "and nothing anywhere reports that a parameter you declared was "
-     "never inferred. Add it to a block, or drop it from "
-     "inference.parameters (check A16)."),
-    ('a16-a-latent-the-WARM-start-does-not-cover',
-     _warm(CLEAN, [{"names": ["d", "a"]}]),
-     'A16', 'runs[0].warm_start.blocks',
-     "runs['fit']: warm_start.blocks: does not cover ['w']; every latent "
-     "inference.parameters declares must be in exactly one block. "
-     "warm_start builds a SamplingPlan of its own over the same space "
-     "(exits.py:287), so an omitted latent sits at its declared init "
-     "for the whole warm estimate, and warm_start.move: can only carry "
-     "over a value that estimate produced. Add it to a block, or drop it "
-     "from inference.parameters (check A16)."),
-    ('the-engine-enum',
-     _doc([{"names": ["d", "a"], "engine": "banana"}, {"names": ["w"]}]),
-     'A19', 'runs[0].blocks[0]',
-     "runs['fit']: blocks[0] asks for engine: 'banana'; the engines are "
-     "['conjugate', 'gradient', 'log_conjugate']. Leave engine: out and it is "
-     "derived from "
-     "linear: true on each member, which is the normal case -- an "
-     "explicit engine is an override (check A19)."),
-    ('a18-a-mixed-block',
-     _doc([{"names": ["d", "w"]}, {"names": ["a"]}]),
-     'A18', 'runs[0].blocks[0]',
-     "runs['fit']: blocks[0] mixes declared-linear latents ['d'] with "
-     "non-linear ones ['w'], so which engine it takes cannot be derived. "
-     "A conjugate solve needs the whole block affine; a gradient step "
-     "does not exploit the linear members' structure at all, which for a "
-     "high-dimensional linear block is the difference between tractable "
-     "and hopeless. Split them into separate blocks, or declare engine: "
-     "gradient to step the whole block by gradient deliberately (check "
-     "A18)."),
-    ('a19-conjugate-over-a-non-linear-member',
-     _doc([{"names": ["w"], "engine": "conjugate"}, {"names": ["d", "a"]}]),
-     'A19', 'runs[0].blocks[0]',
-     "runs['fit']: blocks[0] asks for engine: conjugate, but ['w'] do not "
-     "declare linear: true. The conjugate machinery solves (A^T N^-1 A + "
-     "S^-1)x = b, which is the posterior only if the prediction really is "
-     "affine in the block -- and that claim belongs in the latent's "
-     "declaration, where check_linearity verifies it, not in a run that "
-     "asserts it. Declare linear: true and the claim will be checked; "
-     "leave it out and this block is stepped by gradient (check A19)."),
-    ('a17-a-step-count-the-package-would-have-taken',
-     _doc([{"names": ["d", "a"], "steps": 5}, {"names": ["w"]}]),
-     'A17', 'runs[0].blocks[0]',
-     "runs['fit']: blocks[0] is solved by the conjugate engine, which has "
-     "no inner steps, so steps: 5 would be silently ignored. A conjugate "
-     "block's estimate is one Wiener solve and its draw is one exact "
-     "constrained realization -- there is no step count to tune, which is "
-     "the whole advantage. Drop steps:, or declare engine: gradient if a "
-     "gradient step was what you meant (check A17)."),
-    ('a17-a-step-count-the-package-refuses-outright',
-     _doc([{"names": ["d", "a"], "steps": 0}, {"names": ["w"]}]),
-     'A17', 'runs[0].blocks[0]',
-     "runs['fit']: blocks[0] is solved by the conjugate engine, which has "
-     "no inner steps, so steps: 0 is not a knob it has. A conjugate "
-     "block's estimate is one Wiener solve and its draw is one exact "
-     "constrained realization -- there is no step count to tune, which is "
-     "the whole advantage. Drop steps:. Moving to engine: gradient would "
-     "not rescue 0 either -- inner steps are a positive int on every "
-     "engine (plan.py:360), so the block would be refused a second "
-     "time (check A17)."),
-    ('a17-on-the-WARM-start',
-     _warm(CLEAN, [{"names": ["d", "a"], "steps": 5}, {"names": ["w"]}]),
-     'A17', 'runs[0].warm_start.blocks[0]',
-     "runs['fit']: warm_start.blocks[0] is solved by the conjugate "
-     "engine, which has no inner steps, so steps: 5 would be silently "
-     "ignored. A conjugate block's estimate is one Wiener solve and its "
-     "draw is one exact constrained realization -- there is no step count "
-     "to tune, which is the whole advantage. Drop steps:, or declare "
-     "engine: gradient if a gradient step was what you meant (check A17)."),
+    (
+        "a16-one-name-twice-in-one-block",
+        _doc([{"names": ["d", "d", "a", "w"]}]),
+        "A16",
+        "runs[0].blocks[0]",
+        "runs['fit']: blocks[0].names lists 'd' twice, and two copies of one "
+        "latent in a block are exactly degenerate with each other -- the "
+        "block's normal operator is singular in a direction that says "
+        "nothing about the model, and the answer has one entry per name, so "
+        "one copy's result silently overwrites the other's (check A16).",
+    ),
+    (
+        "a16-a-name-nobody-declared",
+        _doc([{"names": ["d", "a", "w", "zzz"]}]),
+        "A16",
+        "runs[0].blocks[0]",
+        "runs['fit']: blocks[0] names 'zzz', which inference.parameters does "
+        "not declare; it declares ['d', 'a', 'w']. A block over a name "
+        "nobody declared updates nothing and leaves the latent it was meant "
+        "to cover sitting at its declared init (check A16).",
+    ),
+    (
+        "a16-one-latent-in-two-blocks",
+        _doc([{"names": ["d", "a", "w"]}, {"names": ["d"]}]),
+        "A16",
+        "runs[0].blocks[1]",
+        "runs['fit']: 'd' is in blocks[0] and in blocks[1]. A Gibbs sweep "
+        "updates each block against the conditional that holds when it runs, "
+        "so the second update solves a conditional the first one just "
+        "invalidated -- and every diagnostic reports the second's answer as "
+        "if the first had never happened. Put each latent in exactly one "
+        "block; to update two together, put them in ONE block (check A16).",
+    ),
+    (
+        "a16-a-latent-nobody-covers",
+        _doc([{"names": ["d", "a"]}]),
+        "A16",
+        "runs[0].blocks",
+        "runs['fit']: blocks: does not cover ['w']; every latent "
+        "inference.parameters declares must be in exactly one block. An "
+        "omitted latent is silently frozen at its declared init for the "
+        "whole run -- the sweep converges, the joint chi-squared settles, "
+        "and nothing anywhere reports that a parameter you declared was "
+        "never inferred. Add it to a block, or drop it from "
+        "inference.parameters (check A16).",
+    ),
+    (
+        "a16-a-latent-the-WARM-start-does-not-cover",
+        _warm(CLEAN, [{"names": ["d", "a"]}]),
+        "A16",
+        "runs[0].warm_start.blocks",
+        "runs['fit']: warm_start.blocks: does not cover ['w']; every latent "
+        "inference.parameters declares must be in exactly one block. "
+        "warm_start builds a SamplingPlan of its own over the same space "
+        "(exits.py:287), so an omitted latent sits at its declared init "
+        "for the whole warm estimate, and warm_start.move: can only carry "
+        "over a value that estimate produced. Add it to a block, or drop it "
+        "from inference.parameters (check A16).",
+    ),
+    (
+        "the-engine-enum",
+        _doc([{"names": ["d", "a"], "engine": "banana"}, {"names": ["w"]}]),
+        "A19",
+        "runs[0].blocks[0]",
+        "runs['fit']: blocks[0] asks for engine: 'banana'; the engines are "
+        "['conjugate', 'gradient', 'log_conjugate']. Leave engine: out and it is "
+        "derived from "
+        "linear: true on each member, which is the normal case -- an "
+        "explicit engine is an override (check A19).",
+    ),
+    (
+        "a18-a-mixed-block",
+        _doc([{"names": ["d", "w"]}, {"names": ["a"]}]),
+        "A18",
+        "runs[0].blocks[0]",
+        "runs['fit']: blocks[0] mixes declared-linear latents ['d'] with "
+        "non-linear ones ['w'], so which engine it takes cannot be derived. "
+        "A conjugate solve needs the whole block affine; a gradient step "
+        "does not exploit the linear members' structure at all, which for a "
+        "high-dimensional linear block is the difference between tractable "
+        "and hopeless. Split them into separate blocks, or declare engine: "
+        "gradient to step the whole block by gradient deliberately (check "
+        "A18).",
+    ),
+    (
+        "a19-conjugate-over-a-non-linear-member",
+        _doc([{"names": ["w"], "engine": "conjugate"}, {"names": ["d", "a"]}]),
+        "A19",
+        "runs[0].blocks[0]",
+        "runs['fit']: blocks[0] asks for engine: conjugate, but ['w'] do not "
+        "declare linear: true. The conjugate machinery solves (A^T N^-1 A + "
+        "S^-1)x = b, which is the posterior only if the prediction really is "
+        "affine in the block -- and that claim belongs in the latent's "
+        "declaration, where check_linearity verifies it, not in a run that "
+        "asserts it. Declare linear: true and the claim will be checked; "
+        "leave it out and this block is stepped by gradient (check A19).",
+    ),
+    (
+        "a17-a-step-count-the-package-would-have-taken",
+        _doc([{"names": ["d", "a"], "steps": 5}, {"names": ["w"]}]),
+        "A17",
+        "runs[0].blocks[0]",
+        "runs['fit']: blocks[0] is solved by the conjugate engine, which has "
+        "no inner steps, so steps: 5 would be silently ignored. A conjugate "
+        "block's estimate is one Wiener solve and its draw is one exact "
+        "constrained realization -- there is no step count to tune, which is "
+        "the whole advantage. Drop steps:, or declare engine: gradient if a "
+        "gradient step was what you meant (check A17).",
+    ),
+    (
+        "a17-a-step-count-the-package-refuses-outright",
+        _doc([{"names": ["d", "a"], "steps": 0}, {"names": ["w"]}]),
+        "A17",
+        "runs[0].blocks[0]",
+        "runs['fit']: blocks[0] is solved by the conjugate engine, which has "
+        "no inner steps, so steps: 0 is not a knob it has. A conjugate "
+        "block's estimate is one Wiener solve and its draw is one exact "
+        "constrained realization -- there is no step count to tune, which is "
+        "the whole advantage. Drop steps:. Moving to engine: gradient would "
+        "not rescue 0 either -- inner steps are a positive int on every "
+        "engine (plan.py:360), so the block would be refused a second "
+        "time (check A17).",
+    ),
+    (
+        "a17-on-the-WARM-start",
+        _warm(CLEAN, [{"names": ["d", "a"], "steps": 5}, {"names": ["w"]}]),
+        "A17",
+        "runs[0].warm_start.blocks[0]",
+        "runs['fit']: warm_start.blocks[0] is solved by the conjugate "
+        "engine, which has no inner steps, so steps: 5 would be silently "
+        "ignored. A conjugate block's estimate is one Wiener solve and its "
+        "draw is one exact constrained realization -- there is no step count "
+        "to tune, which is the whole advantage. Drop steps:, or declare "
+        "engine: gradient if a gradient step was what you meant (check A17).",
+    ),
 ]
 
 
@@ -1348,9 +1480,10 @@ class TestTheRefusalsAreThePRODUCT:
 
     @pytest.mark.parametrize(
         "document, check, where, message",
-        [row[1:] for row in _VERBATIM], ids=[row[0] for row in _VERBATIM])
-    def test_the_message_is_exactly_this(self, document, check, where,
-                                         message):
+        [row[1:] for row in _VERBATIM],
+        ids=[row[0] for row in _VERBATIM],
+    )
+    def test_the_message_is_exactly_this(self, document, check, where, message):
         [found] = _found(document)
         assert found.check == check
         assert found.where == where
@@ -1395,10 +1528,12 @@ class TestPriorGates:
         # implementation gated on the partition SPLITTING the joint prior:
         # `_refuse_split_joint_prior` is unconditional (`plan.py::split_rhat`
         # chooses only the wording) and the un-split case is the silent one.
-        found = _gates(preflight_document(
-            inference={"parameters": COVERED, "joint_prior": JOINT},
-            runs=[{"name": "fit", "kind": "plan.estimate",
-                   "blocks": [{"names": ["d", "a"]}]}]))
+        found = _gates(
+            preflight_document(
+                inference={"parameters": COVERED, "joint_prior": JOINT},
+                runs=[{"name": "fit", "kind": "plan.estimate", "blocks": [{"names": ["d", "a"]}]}],
+            )
+        )
         assert [f.check for f in found] == ["A20"]
         assert "['d', 'a']" in found[0].message
 
@@ -1407,10 +1542,12 @@ class TestPriorGates:
         # Measured: the same ParameterSpaceError on `plan.estimate` and on a
         # seeded `plan.sample`.
         for kind in ("plan.estimate", "plan.sample"):
-            found = _gates(preflight_document(
-                inference={"parameters": COVERED, "joint_prior": JOINT},
-                runs=[{"name": "fit", "kind": kind,
-                       "blocks": [{"names": ["d", "a"]}]}]))
+            found = _gates(
+                preflight_document(
+                    inference={"parameters": COVERED, "joint_prior": JOINT},
+                    runs=[{"name": "fit", "kind": kind, "blocks": [{"names": ["d", "a"]}]}],
+                )
+            )
             assert [f.check for f in found] == ["A20"], kind
 
     def test_a_joint_prior_beside_fisher_space_true_is_refused(self):
@@ -1421,9 +1558,12 @@ class TestPriorGates:
         # space:) and that its latents declare no prior (declare one) -- two
         # refusals naming two different edits, the second contradicting the
         # first.  The `== ["A21"]` is what says so; `"A21" in` would not.
-        found = _gates(preflight_document(
-            inference={"parameters": COVERED, "joint_prior": JOINT},
-            runs=[{"name": "f", "kind": "fisher", "space": True}]))
+        found = _gates(
+            preflight_document(
+                inference={"parameters": COVERED, "joint_prior": JOINT},
+                runs=[{"name": "f", "kind": "fisher", "space": True}],
+            )
+        )
         assert [f.check for f in found] == ["A21"]
 
     def test_fisher_WITHOUT_space_true_is_not_refused(self):
@@ -1432,11 +1572,18 @@ class TestPriorGates:
         # `space=` leg alone (`uncertainty.py::_declared_gaussian_priors`).  Kills a gate on
         # `kind == "fisher"` by itself, which would refuse a document that
         # runs.
-        for run in ({"name": "f", "kind": "fisher"},
-                    {"name": "f", "kind": "fisher", "space": False}):
-            assert _gates(preflight_document(
-                inference={"parameters": COVERED, "joint_prior": JOINT},
-                runs=[run])) == []
+        for run in (
+            {"name": "f", "kind": "fisher"},
+            {"name": "f", "kind": "fisher", "space": False},
+        ):
+            assert (
+                _gates(
+                    preflight_document(
+                        inference={"parameters": COVERED, "joint_prior": JOINT}, runs=[run]
+                    )
+                )
+                == []
+            )
 
     def test_the_joint_prior_reader_reads_WHAT_THE_PACKAGE_READS(self):
         """``_a20_joint_over`` mirrors ``tuple(body["over"])``, and the five
@@ -1464,8 +1611,7 @@ class TestPriorGates:
         from rheplicant.config.preflight.fitting import _a20_joint_over
 
         def over(value):
-            return _a20_joint_over(
-                {"inference": {"joint_prior": {"jeffreys": {"over": value}}}})
+            return _a20_joint_over({"inference": {"joint_prior": {"jeffreys": {"over": value}}}})
 
         # the five shapes the package builds a real prior from
         assert over("da") == ("d", "a")
@@ -1478,14 +1624,15 @@ class TestPriorGates:
         for bad in (7, 3.5, None, True, ["d", 7], [["x"]]):
             assert over(bad) == (), bad
         # A `over: da` document beside a plan run is now refused HERE.
-        [one] = _gates(preflight_document(
-            inference={"parameters": COVERED,
-                       "joint_prior": {"jeffreys": {"over": "da"}}},
-            runs=[{"name": "fit", "kind": "plan.estimate"}]))
+        [one] = _gates(
+            preflight_document(
+                inference={"parameters": COVERED, "joint_prior": {"jeffreys": {"over": "da"}}},
+                runs=[{"name": "fit", "kind": "plan.estimate"}],
+            )
+        )
         assert "covers ['d', 'a']" in one.message
 
-    def test_a_joint_prior_the_PACKAGE_would_refuse_stands_this_check_down(
-            self):
+    def test_a_joint_prior_the_PACKAGE_would_refuse_stands_this_check_down(self):
         """A20 must not pre-empt the two refusals about the joint prior
         itself, because neither of them is fixed by what A20 advises.
 
@@ -1502,30 +1649,54 @@ class TestPriorGates:
         were -- the pattern Tasks 5 and 6 each paid for.  Kills the gate
         written as ``if covered:`` alone.
         """
-        assert _gates(preflight_document(
-            inference={"parameters": COVERED,
-                       "joint_prior": {"jeffreys": {"over": ["zzz"]}}},
-            runs=[{"name": "fit", "kind": "plan.estimate"}])) == []
-        assert _gates(preflight_document(
-            inference={"parameters": {"d": {**LINEAR_D, "prior": PRIOR}},
-                       "joint_prior": {"jeffreys": {"over": ["d"]}}},
-            runs=[{"name": "fit", "kind": "plan.estimate"}])) == []
+        assert (
+            _gates(
+                preflight_document(
+                    inference={
+                        "parameters": COVERED,
+                        "joint_prior": {"jeffreys": {"over": ["zzz"]}},
+                    },
+                    runs=[{"name": "fit", "kind": "plan.estimate"}],
+                )
+            )
+            == []
+        )
+        assert (
+            _gates(
+                preflight_document(
+                    inference={
+                        "parameters": {"d": {**LINEAR_D, "prior": PRIOR}},
+                        "joint_prior": {"jeffreys": {"over": ["d"]}},
+                    },
+                    runs=[{"name": "fit", "kind": "plan.estimate"}],
+                )
+            )
+            == []
+        )
         # ...and A21 is stood down by the same gate, while A23 -- which is
         # about the LATENTS rather than about the joint prior -- still
         # speaks, and speaks in the no-coverage voice, because a coverage the
         # package refuses covers nothing.  Kills a gate written as an early
         # `return`, which would take A23 with it.
-        [one] = _gates(preflight_document(
-            inference={"parameters": COVERED,
-                       "joint_prior": {"jeffreys": {"over": ["zzz"]}}},
-            runs=[{"name": "f", "kind": "fisher", "space": True}]))
+        [one] = _gates(
+            preflight_document(
+                inference={"parameters": COVERED, "joint_prior": {"jeffreys": {"over": ["zzz"]}}},
+                runs=[{"name": "f", "kind": "fisher", "space": True}],
+            )
+        )
         assert one.check == "A23"
         assert "no prior: and space: true asks for" in one.message
         # ...while a joint prior the package DOES accept still fires, which
         # is what stops the gate being written as `covered = ()`.
-        assert [f.check for f in _gates(preflight_document(
-            inference={"parameters": COVERED, "joint_prior": JOINT},
-            runs=[{"name": "fit", "kind": "plan.estimate"}]))] == ["A20"]
+        assert [
+            f.check
+            for f in _gates(
+                preflight_document(
+                    inference={"parameters": COVERED, "joint_prior": JOINT},
+                    runs=[{"name": "fit", "kind": "plan.estimate"}],
+                )
+            )
+        ] == ["A20"]
 
     def test_a_MALFORMED_latent_body_is_left_to_the_grammar(self):
         """``_latents`` keeps the NAME of a latent whose body is not a mapping
@@ -1541,18 +1712,32 @@ class TestPriorGates:
         with, and which every other test in this module survives.
         """
         for body in (7, ["x"], "oops", {}):
-            for kind, run in (("nuts", {"name": "chain", "kind": "nuts"}),
-                              ("npe", {"name": "a", "kind": "npe"})):
-                assert _gates(preflight_document(
-                    inference={"parameters": {
-                        "d": {**LINEAR_D, "prior": PRIOR}, "w": body}},
-                    runs=[run])) == [], (body, kind)
+            for kind, run in (
+                ("nuts", {"name": "chain", "kind": "nuts"}),
+                ("npe", {"name": "a", "kind": "npe"}),
+            ):
+                assert (
+                    _gates(
+                        preflight_document(
+                            inference={
+                                "parameters": {"d": {**LINEAR_D, "prior": PRIOR}, "w": body}
+                            },
+                            runs=[run],
+                        )
+                    )
+                    == []
+                ), (body, kind)
         # ...and a WELL-FORMED prior-free neighbour still fires, so the fix
         # is a filter rather than a switch that turns A23 off.
-        assert [f.check for f in _gates(preflight_document(
-            inference={"parameters": {"d": {**LINEAR_D, "prior": PRIOR},
-                                      "w": NONLINEAR_W}},
-            runs=[{"name": "chain", "kind": "nuts"}]))] == ["A23"]
+        assert [
+            f.check
+            for f in _gates(
+                preflight_document(
+                    inference={"parameters": {"d": {**LINEAR_D, "prior": PRIOR}, "w": NONLINEAR_W}},
+                    runs=[{"name": "chain", "kind": "nuts"}],
+                )
+            )
+        ] == ["A23"]
 
     def test_only_a_GRADIENT_block_is_read_and_not_the_complement(self):
         """``== _T7_GRADIENT``, never ``!= _T7_CONJUGATE``.
@@ -1569,22 +1754,29 @@ class TestPriorGates:
         # Every list below is a COMPLETE partition of {d, w}, so A16 has
         # nothing to say and the only checks left are the ones that own the
         # engine.
-        for blocks in ([{"names": ["d", "w"]}],
-                       [{"names": ["w"], "engine": "banana"},
-                        {"names": ["d"]}],
-                       [{"names": ["w"], "engine": 5}, {"names": ["d"]}]):
+        for blocks in (
+            [{"names": ["d", "w"]}],
+            [{"names": ["w"], "engine": "banana"}, {"names": ["d"]}],
+            [{"names": ["w"], "engine": 5}, {"names": ["d"]}],
+        ):
             document = preflight_document(
                 inference={"parameters": {"d": LINEAR_D, "w": NONLINEAR_W}},
-                runs=[{"name": "fit", "kind": "plan.sample", "n_sweeps": 8,
-                       "seed": {"from": "runtime.seeds.s"},
-                       "blocks": blocks}])
+                runs=[
+                    {
+                        "name": "fit",
+                        "kind": "plan.sample",
+                        "n_sweeps": 8,
+                        "seed": {"from": "runtime.seeds.s"},
+                        "blocks": blocks,
+                    }
+                ],
+            )
             assert _gates(document) == [], blocks
             # ...and the block IS reported, by the check that owns it: A18
             # for the mixed one, A19's enum clause for the other two.
             assert {f.check for f in _found(document)} <= {"A18", "A19"}, blocks
 
-    def test_a_space_that_is_not_a_BOOL_is_left_to_the_executors_own_check(
-            self):
+    def test_a_space_that_is_not_a_BOOL_is_left_to_the_executors_own_check(self):
         # `_run_fisher` (`exits.py`) refuses a non-bool `space:` by
         # name -- "space: is a bool; got 'true'" -- and that is the fault the
         # reader has.  Kills `run.get("space") is True` weakened to
@@ -1593,22 +1785,38 @@ class TestPriorGates:
         # fault is a string where a bool goes.  Nothing else in this module
         # writes a truthy non-bool there, so the mutation survives it all.
         for value in ("true", 1, ["true"]):
-            assert _gates(preflight_document(
-                inference={"parameters": COVERED, "joint_prior": JOINT},
-                runs=[{"name": "f", "kind": "fisher",
-                       "space": value}])) == [], value
-            assert _gates(preflight_document(
-                inference={"parameters": {"w": NONLINEAR_W}},
-                runs=[{"name": "f", "kind": "fisher",
-                       "space": value}])) == [], value
+            assert (
+                _gates(
+                    preflight_document(
+                        inference={"parameters": COVERED, "joint_prior": JOINT},
+                        runs=[{"name": "f", "kind": "fisher", "space": value}],
+                    )
+                )
+                == []
+            ), value
+            assert (
+                _gates(
+                    preflight_document(
+                        inference={"parameters": {"w": NONLINEAR_W}},
+                        runs=[{"name": "f", "kind": "fisher", "space": value}],
+                    )
+                )
+                == []
+            ), value
 
     def test_a_joint_prior_with_no_fitting_run_is_not_refused(self):
         # A20 and A21 are about a PAIR.  Kills a check that reads
         # `inference:` alone -- which is what every function in this layer did
         # before this plan, and is the plan's finding 2.
-        assert _gates(preflight_document(
-            inference={"parameters": COVERED, "joint_prior": JOINT},
-            runs=[{"kind": "forward"}])) == []
+        assert (
+            _gates(
+                preflight_document(
+                    inference={"parameters": COVERED, "joint_prior": JOINT},
+                    runs=[{"kind": "forward"}],
+                )
+            )
+            == []
+        )
 
     def test_A20_fires_and_A23_does_not_on_one_document(self):
         # §2.6 item 4, as an assertion.  This document trips A20 AND would
@@ -1617,11 +1825,20 @@ class TestPriorGates:
         # user their latents "declare no prior", which contradicts A20's
         # refusal of the same document -- and A20's fix (drop joint_prior)
         # and A23's (declare a prior) are different edits.
-        found = _gates(preflight_document(
-            inference={"parameters": COVERED, "joint_prior": JOINT},
-            runs=[{"name": "fit", "kind": "plan.sample", "n_sweeps": 8,
-                   "seed": {"from": "runtime.seeds.s"},
-                   "blocks": [{"names": ["d", "a"], "engine": "gradient"}]}]))
+        found = _gates(
+            preflight_document(
+                inference={"parameters": COVERED, "joint_prior": JOINT},
+                runs=[
+                    {
+                        "name": "fit",
+                        "kind": "plan.sample",
+                        "n_sweeps": 8,
+                        "seed": {"from": "runtime.seeds.s"},
+                        "blocks": [{"names": ["d", "a"], "engine": "gradient"}],
+                    }
+                ],
+            )
+        )
         assert [f.check for f in found] == ["A20"]
 
     # `test_A21_fires_and_A23_does_not_on_one_document` USED to sit here and
@@ -1650,9 +1867,11 @@ class TestPriorGates:
         # (`joint_prior_document`) that runs one and refuses the other.
         document = preflight_document(
             inference={"parameters": COVERED, "joint_prior": JOINT},
-            runs=[{"name": "chain", "kind": "nuts",
-                   "seed": {"from": "runtime.seeds.chain"}},
-                  {"name": "amortized", "kind": "npe"}])
+            runs=[
+                {"name": "chain", "kind": "nuts", "seed": {"from": "runtime.seeds.chain"}},
+                {"name": "amortized", "kind": "npe"},
+            ],
+        )
         found = _gates(document)
         assert [f.check for f in found] == ["A23"]
         # ...and the SECOND run is blamed, in `where` and in the message.
@@ -1668,18 +1887,25 @@ class TestPriorGates:
         # passes and the reader is told the wrong reason.
         assert "consulting inference.joint_prior not at all" in found[0].message
 
-    def test_a_gradient_block_of_plan_sample_needs_a_prior_on_every_member(
-            self):
+    def test_a_gradient_block_of_plan_sample_needs_a_prior_on_every_member(self):
         # Measured at P3: ParameterSpaceError from `engines.py::_conjugate_transition`,
         # "Block ... is stepped by the gradient engine, and sampling it needs
         # a prior on every member".  Kills a whole-space reading: only the
         # GRADIENT block's members need one.
-        found = _gates(preflight_document(
-            inference={"parameters": {"d": {**LINEAR_D, "prior": PRIOR},
-                                      "w": NONLINEAR_W}},
-            runs=[{"name": "fit", "kind": "plan.sample", "n_sweeps": 8,
-                   "seed": {"from": "runtime.seeds.s"},
-                   "blocks": [{"names": ["d"]}, {"names": ["w"]}]}]))
+        found = _gates(
+            preflight_document(
+                inference={"parameters": {"d": {**LINEAR_D, "prior": PRIOR}, "w": NONLINEAR_W}},
+                runs=[
+                    {
+                        "name": "fit",
+                        "kind": "plan.sample",
+                        "n_sweeps": 8,
+                        "seed": {"from": "runtime.seeds.s"},
+                        "blocks": [{"names": ["d"]}, {"names": ["w"]}],
+                    }
+                ],
+            )
+        )
         assert [f.check for f in found] == ["A23"]
         assert "['w']" in found[0].message and "'d'" not in found[0].message
         assert "stepped by the gradient engine" in found[0].message
@@ -1688,20 +1914,43 @@ class TestPriorGates:
         # `require_priors` is called only for GRADIENT blocks
         # (`plan.py::SamplingPlan._partition`).  Kills "every latent of a plan.sample needs a
         # prior", which would refuse a document the package runs.
-        assert _gates(preflight_document(
-            inference={"parameters": {"d": LINEAR_D, "a": LINEAR_A}},
-            runs=[{"name": "fit", "kind": "plan.sample", "n_sweeps": 8,
-                   "seed": {"from": "runtime.seeds.s"},
-                   "blocks": [{"names": ["d", "a"]}]}])) == []
+        assert (
+            _gates(
+                preflight_document(
+                    inference={"parameters": {"d": LINEAR_D, "a": LINEAR_A}},
+                    runs=[
+                        {
+                            "name": "fit",
+                            "kind": "plan.sample",
+                            "n_sweeps": 8,
+                            "seed": {"from": "runtime.seeds.s"},
+                            "blocks": [{"names": ["d", "a"]}],
+                        }
+                    ],
+                )
+            )
+            == []
+        )
 
     def test_plan_estimate_needs_no_prior_at_all(self):
         # `require_priors` lives in `sample()`, not `estimate()` -- the
         # asymmetry the package's own message names ("fine for
         # plan.estimate(), meaningless in a draw").
-        assert _gates(preflight_document(
-            inference={"parameters": {"w": NONLINEAR_W}},
-            runs=[{"name": "fit", "kind": "plan.estimate",
-                   "blocks": [{"names": ["w"], "engine": "gradient"}]}])) == []
+        assert (
+            _gates(
+                preflight_document(
+                    inference={"parameters": {"w": NONLINEAR_W}},
+                    runs=[
+                        {
+                            "name": "fit",
+                            "kind": "plan.estimate",
+                            "blocks": [{"names": ["w"], "engine": "gradient"}],
+                        }
+                    ],
+                )
+            )
+            == []
+        )
 
     def test_the_warm_start_of_a_plan_sample_needs_no_prior_either(self):
         # THE TWIN, measured and standing DOWN rather than guarded.  Task 7's
@@ -1713,26 +1962,40 @@ class TestPriorGates:
         # plus `exits.py::_WARM_KEYS` allow no `kind:` there but `plan.estimate`.
         # Kills copying Task 7's `_t7_sites` walk into this check: that
         # refuses a document the package runs.
-        assert _gates(preflight_document(
-            inference={"parameters": {"d": {**LINEAR_D, "prior": PRIOR},
-                                      "w": NONLINEAR_W}},
-            runs=[{"name": "fit", "kind": "plan.sample", "n_sweeps": 8,
-                   "seed": {"from": "runtime.seeds.s"},
-                   "blocks": [{"names": ["d"]},
-                              {"names": ["w"], "engine": "conjugate"}],
-                   "warm_start": {"kind": "plan.estimate", "move": ["d"],
-                                  "blocks": [{"names": ["d", "w"],
-                                              "engine": "gradient"}]}}])) == []
+        assert (
+            _gates(
+                preflight_document(
+                    inference={"parameters": {"d": {**LINEAR_D, "prior": PRIOR}, "w": NONLINEAR_W}},
+                    runs=[
+                        {
+                            "name": "fit",
+                            "kind": "plan.sample",
+                            "n_sweeps": 8,
+                            "seed": {"from": "runtime.seeds.s"},
+                            "blocks": [{"names": ["d"]}, {"names": ["w"], "engine": "conjugate"}],
+                            "warm_start": {
+                                "kind": "plan.estimate",
+                                "move": ["d"],
+                                "blocks": [{"names": ["d", "w"], "engine": "gradient"}],
+                            },
+                        }
+                    ],
+                )
+            )
+            == []
+        )
 
     def test_fisher_space_true_needs_a_prior_on_every_latent(self):
         # Measured at P3: `uncertainty.py::_declared_gaussian_priors`
         # (`inference/`, not `config/sections/`), "latent 'w' declares no
         # prior, so what it returns would be a posterior precision for every
         # latent but that one".
-        found = _gates(preflight_document(
-            inference={"parameters": {"d": {**LINEAR_D, "prior": PRIOR},
-                                      "w": NONLINEAR_W}},
-            runs=[{"name": "f", "kind": "fisher", "space": True}]))
+        found = _gates(
+            preflight_document(
+                inference={"parameters": {"d": {**LINEAR_D, "prior": PRIOR}, "w": NONLINEAR_W}},
+                runs=[{"name": "f", "kind": "fisher", "space": True}],
+            )
+        )
         assert [f.check for f in found] == ["A23"]
         assert "['w']" in found[0].message
         assert "space: true asks for a posterior precision" in found[0].message
@@ -1769,15 +2032,34 @@ class TestPriorGates:
         Recorded for §6's ledger; this test is what makes a later closure a
         deliberate act.
         """
-        assert _gates(preflight_document(
-            inference={"parameters": COVERED, "joint_prior": JOINT},
-            runs=[{"name": "w", "kind": "conjugate.wiener",
-                   "names": ["d", "a"], "width": "fisher",
-                   "prior_std": {"d": 1.0, "a": 5.0}}])) == []
-        assert _gates(preflight_document(
-            inference={"parameters": {"w": NONLINEAR_W}},
-            runs=[{"name": "w", "kind": "conjugate.wiener",
-                   "names": ["w"], "width": "fisher"}])) == []
+        assert (
+            _gates(
+                preflight_document(
+                    inference={"parameters": COVERED, "joint_prior": JOINT},
+                    runs=[
+                        {
+                            "name": "w",
+                            "kind": "conjugate.wiener",
+                            "names": ["d", "a"],
+                            "width": "fisher",
+                            "prior_std": {"d": 1.0, "a": 5.0},
+                        }
+                    ],
+                )
+            )
+            == []
+        )
+        assert (
+            _gates(
+                preflight_document(
+                    inference={"parameters": {"w": NONLINEAR_W}},
+                    runs=[
+                        {"name": "w", "kind": "conjugate.wiener", "names": ["w"], "width": "fisher"}
+                    ],
+                )
+            )
+            == []
+        )
 
     def test_a_declared_but_MALFORMED_prior_is_still_a_declared_prior(self):
         # `_parse_prior` (`sections/parameters.py::_require_numpyro`) returns None for an ABSENT
@@ -1789,18 +2071,30 @@ class TestPriorGates:
         # sentence about the one they wrote.  Nothing else here writes a
         # falsy prior, so the mutation survives the rest of the module.
         for prior in ({}, "", 0, []):
-            assert _gates(preflight_document(
-                inference={"parameters": {"w": {**NONLINEAR_W,
-                                                "prior": prior}}},
-                runs=[{"name": "chain", "kind": "nuts"}])) == [], prior
+            assert (
+                _gates(
+                    preflight_document(
+                        inference={"parameters": {"w": {**NONLINEAR_W, "prior": prior}}},
+                        runs=[{"name": "chain", "kind": "nuts"}],
+                    )
+                )
+                == []
+            ), prior
 
     def test_a_fully_priored_document_trips_nothing(self):
-        assert _gates(preflight_document(
-            inference={"parameters": PRIORED},
-            runs=[{"name": "chain", "kind": "nuts",
-                   "seed": {"from": "runtime.seeds.chain"}},
-                  {"name": "amortized", "kind": "npe"},
-                  {"name": "f", "kind": "fisher", "space": True}])) == []
+        assert (
+            _gates(
+                preflight_document(
+                    inference={"parameters": PRIORED},
+                    runs=[
+                        {"name": "chain", "kind": "nuts", "seed": {"from": "runtime.seeds.chain"}},
+                        {"name": "amortized", "kind": "npe"},
+                        {"name": "f", "kind": "fisher", "space": True},
+                    ],
+                )
+            )
+            == []
+        )
 
     def test_a_run_that_EXPECTS_a_refusal_is_left_alone(self):
         """``expect: refuse`` is an assertion ABOUT the refusal, and A23 as
@@ -1820,19 +2114,31 @@ class TestPriorGates:
         """
         from tests.config.posterior_helpers import joint_prior_document
 
-        assert _gates(preflight_document(
-            inference={"parameters": COVERED, "joint_prior": JOINT},
-            runs=[{"name": "amortized", "kind": "npe",
-                   "expect": "refuse"}])) == []
+        assert (
+            _gates(
+                preflight_document(
+                    inference={"parameters": COVERED, "joint_prior": JOINT},
+                    runs=[{"name": "amortized", "kind": "npe", "expect": "refuse"}],
+                )
+            )
+            == []
+        )
         # ...and on the shipped document itself, whose nuts run is still read:
         # the guard is per RUN, not per document.  Kills "if any run expects a
         # refusal, return".
         assert _gates(joint_prior_document()) == []
         # `expect: ok` is not a licence, which is the other half.
-        assert len(_gates(preflight_document(
-            inference={"parameters": COVERED, "joint_prior": JOINT},
-            runs=[{"name": "amortized", "kind": "npe",
-                   "expect": "ok"}]))) == 1
+        assert (
+            len(
+                _gates(
+                    preflight_document(
+                        inference={"parameters": COVERED, "joint_prior": JOINT},
+                        runs=[{"name": "amortized", "kind": "npe", "expect": "ok"}],
+                    )
+                )
+            )
+            == 1
+        )
 
     def test_a_block_naming_an_undeclared_latent_is_left_to_A16(self):
         # `_a23_prior_free` reads `latents.get(name, {}).get("prior")`, so an
@@ -1843,9 +2149,16 @@ class TestPriorGates:
         # `names:` to `_a23_prior_free`.
         document = preflight_document(
             inference={"parameters": {"d": {**LINEAR_D, "prior": PRIOR}}},
-            runs=[{"name": "fit", "kind": "plan.sample", "n_sweeps": 8,
-                   "seed": {"from": "runtime.seeds.s"},
-                   "blocks": [{"names": ["d", "zzz"], "engine": "gradient"}]}])
+            runs=[
+                {
+                    "name": "fit",
+                    "kind": "plan.sample",
+                    "n_sweeps": 8,
+                    "seed": {"from": "runtime.seeds.s"},
+                    "blocks": [{"names": ["d", "zzz"], "engine": "gradient"}],
+                }
+            ],
+        )
         assert _gates(document) == []
         assert [f.check for f in _found(document)] == ["A16"]
 
@@ -1859,18 +2172,18 @@ class TestPriorGates:
 
         for check in ("A20", "A21", "A23"):
             assert CHECKS[check] is _prior_gates
-        report = preflight(preflight_document(
-            inference={"parameters": COVERED, "joint_prior": JOINT},
-            runs=[{"name": "fit", "kind": "plan.estimate",
-                   "blocks": [{"names": ["d", "a"]}]}]))
-        assert [f.check for f in report.refusals()
-                if f.check == "A20"] == ["A20"]
+        report = preflight(
+            preflight_document(
+                inference={"parameters": COVERED, "joint_prior": JOINT},
+                runs=[{"name": "fit", "kind": "plan.estimate", "blocks": [{"names": ["d", "a"]}]}],
+            )
+        )
+        assert [f.check for f in report.refusals() if f.check == "A20"] == ["A20"]
 
     def test_the_base_document_earns_none_of_the_three(self):
         # The fixture's own contract: a check that finds nothing on the base
         # has actually looked.  Kills every inverted trigger at once.
-        assert not ({"A20", "A21", "A23"}
-                    & preflight(preflight_document()).checks())
+        assert not ({"A20", "A21", "A23"} & preflight(preflight_document()).checks())
 
     def test_every_prior_gate_message_ends_with_its_own_check_tag(self):
         # Enforced from Task 3 on.  Kills a clause that forgets the tail or
@@ -1879,32 +2192,41 @@ class TestPriorGates:
         documents = [
             preflight_document(
                 inference={"parameters": COVERED, "joint_prior": JOINT},
-                runs=[{"name": "fit", "kind": "plan.estimate"}]),
+                runs=[{"name": "fit", "kind": "plan.estimate"}],
+            ),
             preflight_document(
                 inference={"parameters": COVERED, "joint_prior": JOINT},
-                runs=[{"name": "f", "kind": "fisher", "space": True}]),
+                runs=[{"name": "f", "kind": "fisher", "space": True}],
+            ),
+            preflight_document(
+                inference={"parameters": COVERED}, runs=[{"name": "chain", "kind": "nuts"}]
+            ),
+            preflight_document(
+                inference={"parameters": COVERED}, runs=[{"name": "amortized", "kind": "npe"}]
+            ),
             preflight_document(
                 inference={"parameters": COVERED},
-                runs=[{"name": "chain", "kind": "nuts"}]),
-            preflight_document(
-                inference={"parameters": COVERED},
-                runs=[{"name": "amortized", "kind": "npe"}]),
-            preflight_document(
-                inference={"parameters": COVERED},
-                runs=[{"name": "f", "kind": "fisher", "space": True}]),
+                runs=[{"name": "f", "kind": "fisher", "space": True}],
+            ),
             preflight_document(
                 inference={"parameters": {"w": NONLINEAR_W}},
-                runs=[{"name": "fit", "kind": "plan.sample", "n_sweeps": 8,
-                       "seed": {"from": "runtime.seeds.s"},
-                       "blocks": [{"names": ["w"]}]}]),
+                runs=[
+                    {
+                        "name": "fit",
+                        "kind": "plan.sample",
+                        "n_sweeps": 8,
+                        "seed": {"from": "runtime.seeds.s"},
+                        "blocks": [{"names": ["w"]}],
+                    }
+                ],
+            ),
         ]
         seen = set()
         for document in documents:
             for finding in _gates(document):
                 seen.add(finding.check)
                 assert finding.severity == REFUSE
-                assert finding.message.endswith(
-                    f"(check {finding.check})."), finding.message
+                assert finding.message.endswith(f"(check {finding.check})."), finding.message
         assert seen == {"A20", "A21", "A23"}
 
 
@@ -1932,116 +2254,156 @@ JOINT_W = {"jeffreys": {"over": ["w"]}}
 #: string here is not a cosmetic change -- it is a change to what a user
 #: reads, and the test says so by failing.
 _T8_MESSAGES = [
-    ("A20", dict(inference={"parameters": COVERED, "joint_prior": JOINT},
-                 runs=[{"name": "fit", "kind": "plan.sample"}]),
-     "runs['fit']: inference.joint_prior covers ['d', 'a'], and kind: "
-     "plan.sample does not evaluate a joint prior -- each block's conditional "
-     "is built from the latent's OWN prior:, and a covered latent declares "
-     "none, so the density contributes exactly zero. The sweep would run, "
-     "settle, and report a converged chi-squared computed entirely from "
-     "blocks that never saw the prior. kind: nuts is the exit that evaluates "
-     "it; use that, or drop inference.joint_prior (check A20)."),
-    ("A20-at-another-coverage",
-     dict(inference={"parameters": ONLY_W, "joint_prior": JOINT_W},
-          runs=[{"name": "fit", "kind": "plan.estimate"}]),
-     "runs['fit']: inference.joint_prior covers ['w'], and kind: "
-     "plan.estimate does not evaluate a joint prior -- each block's "
-     "conditional is built from the latent's OWN prior:, and a covered latent "
-     "declares none, so the density contributes exactly zero. The sweep would "
-     "run, settle, and report a converged chi-squared computed entirely from "
-     "blocks that never saw the prior. kind: nuts is the exit that evaluates "
-     "it; use that, or drop inference.joint_prior (check A20)."),
-    ("A21", dict(inference={"parameters": COVERED, "joint_prior": JOINT},
-                 runs=[{"name": "f", "kind": "fisher", "space": True}]),
-     "runs['f']: inference.joint_prior covers ['d', 'a'], and space: true "
-     "means 'add the declared priors' curvature to this matrix'. A Jeffreys "
-     "prior is DEFINED as sqrt(det of that matrix), so adding it would put it "
-     "inside its own definition: what comes back is not the posterior "
-     "precision it would be labelled as, and it is finite, symmetric and "
-     "positive definite, so nothing downstream would say otherwise. Drop "
-     "space: true -- the likelihood Fisher is what the prior is built from -- "
-     "or read the posterior with kind: nuts (check A21)."),
-    ("A21-at-another-coverage",
-     dict(inference={"parameters": ONLY_W, "joint_prior": JOINT_W},
-          runs=[{"name": "f", "kind": "fisher", "space": True}]),
-     "runs['f']: inference.joint_prior covers ['w'], and space: true means "
-     "'add the declared priors' curvature to this matrix'. A Jeffreys prior "
-     "is DEFINED as sqrt(det of that matrix), so adding it would put it "
-     "inside its own definition: what comes back is not the posterior "
-     "precision it would be labelled as, and it is finite, symmetric and "
-     "positive definite, so nothing downstream would say otherwise. Drop "
-     "space: true -- the likelihood Fisher is what the prior is built from -- "
-     "or read the posterior with kind: nuts (check A21)."),
-    ("A23-nuts-no-joint-prior",
-     dict(inference={"parameters": ONLY_W},
-          runs=[{"name": "chain", "kind": "nuts"}]),
-     "runs['chain']: kind: nuts draws a POSTERIOR, and inference.parameters "
-     "declares ['w'] with no prior: and no inference.joint_prior covers them. "
-     "A prior-free latent is a free parameter, which the calibrator exits "
-     "(kind: optimize, kind: plan.estimate) fit and a posterior cannot. Give "
-     "each one a prior:, or run one of those (check A23)."),
-    ("A23-nuts-covering-somebody-else",
-     dict(inference={"parameters": {**COVERED, "w": NONLINEAR_W},
-                     "joint_prior": JOINT},
-          runs=[{"name": "chain", "kind": "nuts"}]),
-     "runs['chain']: kind: nuts draws a POSTERIOR, and inference.parameters "
-     "declares ['w'] with no prior: and the inference.joint_prior this "
-     "document declares covers ['d', 'a'] and not them. A prior-free latent "
-     "is a free parameter, which a posterior cannot fit. Give each one a "
-     "prior:, or add it to inference.joint_prior.over, which already covers "
-     "['d', 'a']. Not kind: plan.estimate or kind: plan.sample -- A20 refuses "
-     "both beside a joint prior, so switching would trade this refusal for "
-     "that one (check A23)."),
-    ("A23-npe-no-joint-prior",
-     dict(inference={"parameters": ONLY_W},
-          runs=[{"name": "amortized", "kind": "npe"}]),
-     "runs['amortized']: kind: npe draws a POSTERIOR, and inference.parameters "
-     "declares ['w'] with no prior: and kind: npe SIMULATES a bank from each "
-     "latent's OWN prior, consulting inference.joint_prior not at all. A "
-     "prior-free latent is a free parameter, which the calibrator exits "
-     "(kind: optimize, kind: plan.estimate) fit and a posterior cannot. Give "
-     "each one a prior:, or run one of those (check A23)."),
-    ("A23-npe-covering-the-named-latents",
-     dict(inference={"parameters": COVERED, "joint_prior": JOINT},
-          runs=[{"name": "amortized", "kind": "npe"}]),
-     "runs['amortized']: kind: npe draws a POSTERIOR, and inference.parameters "
-     "declares ['d', 'a'] with no prior: and kind: npe SIMULATES a bank from "
-     "each latent's OWN prior, consulting inference.joint_prior not at all. A "
-     "prior-free latent is a free parameter, which a posterior cannot fit. "
-     "inference.joint_prior already covers ['d', 'a'], and a latent may not "
-     "be covered AND declare a prior: of its own (check A22), so declaring "
-     "one is not the fix here: run kind: nuts, which reads joint-prior "
-     "coverage as a prior, or drop inference.joint_prior and give every "
-     "latent a prior: of its own. Not kind: plan.estimate or kind: "
-     "plan.sample -- A20 refuses both beside a joint prior (check A23)."),
-    ("A23-fisher",
-     dict(inference={"parameters": ONLY_W},
-          runs=[{"name": "f", "kind": "fisher", "space": True}]),
-     "runs['f']: kind: fisher computes a POSTERIOR precision, and "
-     "inference.parameters declares ['w'] with no prior: and space: true asks "
-     "for a posterior precision, which a prior-free latent has no row of -- "
-     "drop space: and what comes back is the likelihood Fisher, which is that "
-     "same matrix without the priors in it. A prior-free latent is a free "
-     "parameter, which the calibrator exits (kind: optimize, kind: "
-     "plan.estimate) fit and a posterior cannot. Give each one a prior:, or "
-     "run one of those AND drop ['space'] with the kind -- neither exit takes "
-     "it, so changing kind: alone trades this refusal for check A1's "
-     "(check A23)."),
-    ("A23-plan-sample-gradient-block",
-     dict(inference={"parameters": ONLY_W},
-          runs=[{"name": "fit", "kind": "plan.sample", "n_sweeps": 8,
-                 "seed": {"from": "runtime.seeds.s"},
-                 "blocks": [{"names": ["w"]}]}]),
-     "runs['fit']: kind: plan.sample draws a POSTERIOR, and "
-     "inference.parameters declares ['w'] with no prior: and a block stepped "
-     "by the gradient engine needs a prior on every member -- the potential "
-     "is flat in a prior-free latent and the chain wanders without any "
-     "diagnostic saying so. A prior-free latent is a free parameter, which "
-     "the calibrator exits (kind: optimize, kind: plan.estimate) fit and a "
-     "posterior cannot. Give each one a prior:, or run one of those AND drop "
-     "['n_sweeps', 'seed'] with the kind -- neither exit takes them, so "
-     "changing kind: alone trades this refusal for check A1's, and check "
-     "A29's on seed: (check A23)."),
+    (
+        "A20",
+        dict(
+            inference={"parameters": COVERED, "joint_prior": JOINT},
+            runs=[{"name": "fit", "kind": "plan.sample"}],
+        ),
+        "runs['fit']: inference.joint_prior covers ['d', 'a'], and kind: "
+        "plan.sample does not evaluate a joint prior -- each block's conditional "
+        "is built from the latent's OWN prior:, and a covered latent declares "
+        "none, so the density contributes exactly zero. The sweep would run, "
+        "settle, and report a converged chi-squared computed entirely from "
+        "blocks that never saw the prior. kind: nuts is the exit that evaluates "
+        "it; use that, or drop inference.joint_prior (check A20).",
+    ),
+    (
+        "A20-at-another-coverage",
+        dict(
+            inference={"parameters": ONLY_W, "joint_prior": JOINT_W},
+            runs=[{"name": "fit", "kind": "plan.estimate"}],
+        ),
+        "runs['fit']: inference.joint_prior covers ['w'], and kind: "
+        "plan.estimate does not evaluate a joint prior -- each block's "
+        "conditional is built from the latent's OWN prior:, and a covered latent "
+        "declares none, so the density contributes exactly zero. The sweep would "
+        "run, settle, and report a converged chi-squared computed entirely from "
+        "blocks that never saw the prior. kind: nuts is the exit that evaluates "
+        "it; use that, or drop inference.joint_prior (check A20).",
+    ),
+    (
+        "A21",
+        dict(
+            inference={"parameters": COVERED, "joint_prior": JOINT},
+            runs=[{"name": "f", "kind": "fisher", "space": True}],
+        ),
+        "runs['f']: inference.joint_prior covers ['d', 'a'], and space: true "
+        "means 'add the declared priors' curvature to this matrix'. A Jeffreys "
+        "prior is DEFINED as sqrt(det of that matrix), so adding it would put it "
+        "inside its own definition: what comes back is not the posterior "
+        "precision it would be labelled as, and it is finite, symmetric and "
+        "positive definite, so nothing downstream would say otherwise. Drop "
+        "space: true -- the likelihood Fisher is what the prior is built from -- "
+        "or read the posterior with kind: nuts (check A21).",
+    ),
+    (
+        "A21-at-another-coverage",
+        dict(
+            inference={"parameters": ONLY_W, "joint_prior": JOINT_W},
+            runs=[{"name": "f", "kind": "fisher", "space": True}],
+        ),
+        "runs['f']: inference.joint_prior covers ['w'], and space: true means "
+        "'add the declared priors' curvature to this matrix'. A Jeffreys prior "
+        "is DEFINED as sqrt(det of that matrix), so adding it would put it "
+        "inside its own definition: what comes back is not the posterior "
+        "precision it would be labelled as, and it is finite, symmetric and "
+        "positive definite, so nothing downstream would say otherwise. Drop "
+        "space: true -- the likelihood Fisher is what the prior is built from -- "
+        "or read the posterior with kind: nuts (check A21).",
+    ),
+    (
+        "A23-nuts-no-joint-prior",
+        dict(inference={"parameters": ONLY_W}, runs=[{"name": "chain", "kind": "nuts"}]),
+        "runs['chain']: kind: nuts draws a POSTERIOR, and inference.parameters "
+        "declares ['w'] with no prior: and no inference.joint_prior covers them. "
+        "A prior-free latent is a free parameter, which the calibrator exits "
+        "(kind: optimize, kind: plan.estimate) fit and a posterior cannot. Give "
+        "each one a prior:, or run one of those (check A23).",
+    ),
+    (
+        "A23-nuts-covering-somebody-else",
+        dict(
+            inference={"parameters": {**COVERED, "w": NONLINEAR_W}, "joint_prior": JOINT},
+            runs=[{"name": "chain", "kind": "nuts"}],
+        ),
+        "runs['chain']: kind: nuts draws a POSTERIOR, and inference.parameters "
+        "declares ['w'] with no prior: and the inference.joint_prior this "
+        "document declares covers ['d', 'a'] and not them. A prior-free latent "
+        "is a free parameter, which a posterior cannot fit. Give each one a "
+        "prior:, or add it to inference.joint_prior.over, which already covers "
+        "['d', 'a']. Not kind: plan.estimate or kind: plan.sample -- A20 refuses "
+        "both beside a joint prior, so switching would trade this refusal for "
+        "that one (check A23).",
+    ),
+    (
+        "A23-npe-no-joint-prior",
+        dict(inference={"parameters": ONLY_W}, runs=[{"name": "amortized", "kind": "npe"}]),
+        "runs['amortized']: kind: npe draws a POSTERIOR, and inference.parameters "
+        "declares ['w'] with no prior: and kind: npe SIMULATES a bank from each "
+        "latent's OWN prior, consulting inference.joint_prior not at all. A "
+        "prior-free latent is a free parameter, which the calibrator exits "
+        "(kind: optimize, kind: plan.estimate) fit and a posterior cannot. Give "
+        "each one a prior:, or run one of those (check A23).",
+    ),
+    (
+        "A23-npe-covering-the-named-latents",
+        dict(
+            inference={"parameters": COVERED, "joint_prior": JOINT},
+            runs=[{"name": "amortized", "kind": "npe"}],
+        ),
+        "runs['amortized']: kind: npe draws a POSTERIOR, and inference.parameters "
+        "declares ['d', 'a'] with no prior: and kind: npe SIMULATES a bank from "
+        "each latent's OWN prior, consulting inference.joint_prior not at all. A "
+        "prior-free latent is a free parameter, which a posterior cannot fit. "
+        "inference.joint_prior already covers ['d', 'a'], and a latent may not "
+        "be covered AND declare a prior: of its own (check A22), so declaring "
+        "one is not the fix here: run kind: nuts, which reads joint-prior "
+        "coverage as a prior, or drop inference.joint_prior and give every "
+        "latent a prior: of its own. Not kind: plan.estimate or kind: "
+        "plan.sample -- A20 refuses both beside a joint prior (check A23).",
+    ),
+    (
+        "A23-fisher",
+        dict(
+            inference={"parameters": ONLY_W}, runs=[{"name": "f", "kind": "fisher", "space": True}]
+        ),
+        "runs['f']: kind: fisher computes a POSTERIOR precision, and "
+        "inference.parameters declares ['w'] with no prior: and space: true asks "
+        "for a posterior precision, which a prior-free latent has no row of -- "
+        "drop space: and what comes back is the likelihood Fisher, which is that "
+        "same matrix without the priors in it. A prior-free latent is a free "
+        "parameter, which the calibrator exits (kind: optimize, kind: "
+        "plan.estimate) fit and a posterior cannot. Give each one a prior:, or "
+        "run one of those AND drop ['space'] with the kind -- neither exit takes "
+        "it, so changing kind: alone trades this refusal for check A1's "
+        "(check A23).",
+    ),
+    (
+        "A23-plan-sample-gradient-block",
+        dict(
+            inference={"parameters": ONLY_W},
+            runs=[
+                {
+                    "name": "fit",
+                    "kind": "plan.sample",
+                    "n_sweeps": 8,
+                    "seed": {"from": "runtime.seeds.s"},
+                    "blocks": [{"names": ["w"]}],
+                }
+            ],
+        ),
+        "runs['fit']: kind: plan.sample draws a POSTERIOR, and "
+        "inference.parameters declares ['w'] with no prior: and a block stepped "
+        "by the gradient engine needs a prior on every member -- the potential "
+        "is flat in a prior-free latent and the chain wanders without any "
+        "diagnostic saying so. A prior-free latent is a free parameter, which "
+        "the calibrator exits (kind: optimize, kind: plan.estimate) fit and a "
+        "posterior cannot. Give each one a prior:, or run one of those AND drop "
+        "['n_sweeps', 'seed'] with the kind -- neither exit takes them, so "
+        "changing kind: alone trades this refusal for check A1's, and check "
+        "A29's on seed: (check A23).",
+    ),
 ]
 
 
@@ -2058,8 +2420,9 @@ class TestThePriorGateMessagesAreExactlyThese:
     away from a green suite under fragment assertions and dead under these.
     """
 
-    @pytest.mark.parametrize("label, patch, expected", _T8_MESSAGES,
-                             ids=[row[0] for row in _T8_MESSAGES])
+    @pytest.mark.parametrize(
+        "label, patch, expected", _T8_MESSAGES, ids=[row[0] for row in _T8_MESSAGES]
+    )
     def test_the_message_is_this_one(self, label, patch, expected):
         [one] = _gates(preflight_document(**patch))
         assert one.message == expected, label
@@ -2077,19 +2440,25 @@ class TestThePriorGateMessagesAreExactlyThese:
         joint prior may offer a ``plan.*`` exit as a fix.
         """
         for patch in (
-                dict(inference={"parameters": COVERED, "joint_prior": JOINT},
-                     runs=[{"name": "amortized", "kind": "npe"}]),
-                dict(inference={"parameters": {**COVERED, "w": NONLINEAR_W},
-                                "joint_prior": JOINT},
-                     runs=[{"name": "chain", "kind": "nuts"}])):
+            dict(
+                inference={"parameters": COVERED, "joint_prior": JOINT},
+                runs=[{"name": "amortized", "kind": "npe"}],
+            ),
+            dict(
+                inference={"parameters": {**COVERED, "w": NONLINEAR_W}, "joint_prior": JOINT},
+                runs=[{"name": "chain", "kind": "nuts"}],
+            ),
+        ):
             [one] = _gates(preflight_document(**patch))
             assert "or run one of those" not in one.message
             assert "A20 refuses both beside a joint prior" in one.message
         # ...and on a document with NO joint prior the calibrator exits are
         # the right advice and must still be there.
-        [bare] = _gates(preflight_document(
-            inference={"parameters": ONLY_W},
-            runs=[{"name": "amortized", "kind": "npe"}]))
+        [bare] = _gates(
+            preflight_document(
+                inference={"parameters": ONLY_W}, runs=[{"name": "amortized", "kind": "npe"}]
+            )
+        )
         assert "(kind: optimize, kind: plan.estimate)" in bare.message
         assert "or run one of those" in bare.message
 
@@ -2111,13 +2480,19 @@ class TestA23AndA29AreNotAClosedLoop:
 
     #: The run at the top of the loop: a gradient block over a prior-free
     #: latent, carrying every ``plan.sample`` key that traps the advice.
-    _SAMPLE = {"name": "fit", "kind": "plan.sample", "n_sweeps": 8,
-               "warmup": 2, "seed": {"from": "runtime.seeds.s"},
-               "blocks": [{"names": ["w"]}]}
+    _SAMPLE = {
+        "name": "fit",
+        "kind": "plan.sample",
+        "n_sweeps": 8,
+        "warmup": 2,
+        "seed": {"from": "runtime.seeds.s"},
+        "blocks": [{"names": ["w"]}],
+    }
 
     def _document(self, run=None):
-        return preflight_document(inference={"parameters": ONLY_W},
-                                  runs=[dict(run or self._SAMPLE)])
+        return preflight_document(
+            inference={"parameters": ONLY_W}, runs=[dict(run or self._SAMPLE)]
+        )
 
     def test_the_loop_closed_before_the_fix(self):
         """The measurement itself, kept as a test: the two documents the two
@@ -2129,8 +2504,9 @@ class TestA23AndA29AreNotAClosedLoop:
         other's remedy.
         """
         step0 = self._document()
-        estimate = {key: value for key, value in self._SAMPLE.items()
-                    if key not in ("n_sweeps", "warmup")}
+        estimate = {
+            key: value for key, value in self._SAMPLE.items() if key not in ("n_sweeps", "warmup")
+        }
         step1 = {**step0, "runs": [{**estimate, "kind": "plan.estimate"}]}
         step2 = {**step1, "runs": [dict(self._SAMPLE)]}
         assert "A23" in preflight(step0).checks()
@@ -2149,23 +2525,26 @@ class TestA23AndA29AreNotAClosedLoop:
             "Give each one a prior:, or run one of those AND drop "
             "['n_sweeps', 'seed', 'warmup'] with the kind -- neither exit "
             "takes them, so changing kind: alone trades this refusal for "
-            "check A1's, and check A29's on seed: (check A23).")
+            "check A1's, and check A29's on seed: (check A23)."
+        )
 
     def test_following_the_whole_remedy_clears_every_check(self):
         """The loop, exited.  Kills a clause that names the coupled edit and
         gets the key list wrong -- ``blocks:`` is an ``_ESTIMATE_KEYS`` member
         and must NOT be in it, and a list that named it would leave the reader
         deleting the partition."""
-        followed = {key: value for key, value in self._SAMPLE.items()
-                    if key not in ("n_sweeps", "warmup", "seed")}
+        followed = {
+            key: value
+            for key, value in self._SAMPLE.items()
+            if key not in ("n_sweeps", "warmup", "seed")
+        }
         followed["kind"] = "plan.estimate"
         # `A1` is named beside :data:`MINE` because the remedy this test
         # follows is a COUPLED edit and A23's own sentence says so: changing
         # `kind:` alone "trades this refusal for check A1's, and check A29's
         # on seed:".  A scope that dropped A1 would leave the half-followed
         # remedy passing, which is the exact loop the test exists to close.
-        assert preflight(self._document(followed)).checks() & (
-            MINE | {"A1"}) == frozenset()
+        assert preflight(self._document(followed)).checks() & (MINE | {"A1"}) == frozenset()
 
     def test_the_first_listed_remedy_still_terminates_too(self):
         """The one that always worked, kept as the anti-vacuity partner: a
@@ -2173,7 +2552,8 @@ class TestA23AndA29AreNotAClosedLoop:
         every assertion above."""
         priored = preflight_document(
             inference={"parameters": {"w": {**NONLINEAR_W, "prior": PRIOR}}},
-            runs=[dict(self._SAMPLE)])
+            runs=[dict(self._SAMPLE)],
+        )
         assert "A23" not in preflight(priored).checks()
 
     def test_a_run_carrying_no_trapped_key_keeps_the_bare_alternative(self):
@@ -2183,11 +2563,12 @@ class TestA23AndA29AreNotAClosedLoop:
         with a one-word edit, so naming an empty key list there would be a
         refusal telling a reader to delete nothing.
         """
-        [found] = _gates(preflight_document(
-            inference={"parameters": ONLY_W},
-            runs=[{"name": "amortized", "kind": "npe"}]))
-        assert found.message.endswith(
-            "Give each one a prior:, or run one of those (check A23).")
+        [found] = _gates(
+            preflight_document(
+                inference={"parameters": ONLY_W}, runs=[{"name": "amortized", "kind": "npe"}]
+            )
+        )
+        assert found.message.endswith("Give each one a prior:, or run one of those (check A23).")
         assert "AND drop" not in found.message
 
     def test_a_run_whose_only_trapped_key_is_the_seed_names_A29_alone(self):
@@ -2198,14 +2579,17 @@ class TestA23AndA29AreNotAClosedLoop:
         clause naming A1 alone would send the reader to a check that says
         nothing about the only key they carry.
         """
-        [found] = _gates(preflight_document(
-            inference={"parameters": ONLY_W},
-            runs=[{"name": "chain", "kind": "nuts",
-                   "seed": {"from": "runtime.seeds.s"}}]))
+        [found] = _gates(
+            preflight_document(
+                inference={"parameters": ONLY_W},
+                runs=[{"name": "chain", "kind": "nuts", "seed": {"from": "runtime.seeds.s"}}],
+            )
+        )
         assert found.message.endswith(
             "Give each one a prior:, or run one of those AND drop ['seed'] "
             "with the kind -- neither exit takes it, so changing kind: alone "
-            "trades this refusal for check A29's (check A23).")
+            "trades this refusal for check A29's (check A23)."
+        )
 
     def test_the_traded_keys_are_read_off_the_executors_own_sets(self):
         """Kills a hand-written list of ``plan.sample`` keys.
@@ -2222,16 +2606,20 @@ class TestA23AndA29AreNotAClosedLoop:
             _OPTIMIZE_KEYS,
         )
 
-        run = {"name": "fit", "kind": "plan.sample", "blocks": [],
-               "check_identifiability": "once", "learning_rate": 0.1,
-               "n_sweeps": 8, "seed": {"from": "runtime.seeds.s"}}
+        run = {
+            "name": "fit",
+            "kind": "plan.sample",
+            "blocks": [],
+            "check_identifiability": "once",
+            "learning_rate": 0.1,
+            "n_sweeps": 8,
+            "seed": {"from": "runtime.seeds.s"},
+        }
         assert _t8_traded_keys(run) == ["n_sweeps", "seed"]
-        assert not (set(_t8_traded_keys(run))
-                    & (_ESTIMATE_KEYS | _OPTIMIZE_KEYS))
+        assert not (set(_t8_traded_keys(run)) & (_ESTIMATE_KEYS | _OPTIMIZE_KEYS))
         # ...and a RUN key is never traded: `name:` and `kind:` travel on
         # every run and are not options at all.
-        assert _t8_traded_keys({"name": "x", "kind": "npe",
-                                "expect": "refuse"}) == []
+        assert _t8_traded_keys({"name": "x", "kind": "npe", "expect": "refuse"}) == []
 
 
 class TestA23AgreesWithTheGATEItRunsInFrontOf:
@@ -2267,13 +2655,15 @@ class TestA23AgreesWithTheGATEItRunsInFrontOf:
         return {
             "priored": dict(TWO_LATENTS),
             "prior-free": {**TWO_LATENTS, "parameters": PRIOR_FREE_TWO},
-            "covered": {**TWO_LATENTS, "parameters": PRIOR_FREE_TWO,
-                        "joint_prior": {"jeffreys": {"over": ["d", "a"]}}},
+            "covered": {
+                **TWO_LATENTS,
+                "parameters": PRIOR_FREE_TWO,
+                "joint_prior": {"jeffreys": {"over": ["d", "a"]}},
+            },
         }
 
     @pytest.mark.parametrize("route", ["nuts", "npe"])
-    def test_the_text_rule_and_the_built_rule_refuse_the_same_documents(
-            self, route):
+    def test_the_text_rule_and_the_built_rule_refuse_the_same_documents(self, route):
         from rheplicant.config.errors import ConfigError
         from rheplicant.config.sections.posterior_support import _sampled_space
         from tests.config.exit_helpers import conjugate_built, spec
@@ -2285,10 +2675,12 @@ class TestA23AgreesWithTheGATEItRunsInFrontOf:
                 package_refuses = False
             except ConfigError:
                 package_refuses = True
-            found = _gates(preflight_document(
-                inference=block,
-                runs=[{"name": "r", "kind": route,
-                       "seed": {"from": "runtime.seeds.s"}}]))
+            found = _gates(
+                preflight_document(
+                    inference=block,
+                    runs=[{"name": "r", "kind": route, "seed": {"from": "runtime.seeds.s"}}],
+                )
+            )
             assert bool(found) is package_refuses, (route, label)
             if found:
                 assert [f.check for f in found] == ["A23"], (route, label)
@@ -2301,8 +2693,9 @@ def _seedings(document):
 
 
 SEED = {"from": "runtime.seeds.s"}
-NPE_SEEDS = {sub: {"seed": {"from": f"runtime.seeds.{sub}"}}
-             for sub in ("bank", "create", "train", "sample")}
+NPE_SEEDS = {
+    sub: {"seed": {"from": f"runtime.seeds.{sub}"}} for sub in ("bank", "create", "train", "sample")
+}
 
 #: The three refusals Task 8 lifted to module level in the sections that own
 #: them, as ``(id, run, body)``.  The ``runs['<name>']: `` prefix is applied
@@ -2310,28 +2703,38 @@ NPE_SEEDS = {sub: {"seed": {"from": f"runtime.seeds.{sub}"}}
 #: and the section function's own raise -- without the literal being compared
 #: against the function that produced it.
 _T8_A29_LIFTED = [
-    ("plan.estimate", {"name": "fit", "kind": "plan.estimate", "seed": SEED},
-     "plan.estimate refuses a seed -- the asymmetry is the package's own "
-     "(sample takes key=, estimate has no key parameter; check A29). Drop "
-     "it, or make this run plan.sample."),
-    ("conjugate.gcr", {"name": "g", "kind": "conjugate.gcr", "n_draws": 4},
-     "conjugate.gcr draws from the posterior, so seed: is required and has "
-     "no default -- gcr_sample's key= has none either (check A29). The "
-     "deterministic conjugate exits, conjugate.wiener and conjugate.gls, "
-     "refuse one instead."),
-    ("npe", {"name": "a", "kind": "npe", "seed": SEED},
-     "kind: npe needs FOUR seeds -- the bank draws theta from the priors, "
-     "create initialises the network's weights, train shuffles the "
-     "minibatches and sample draws -- so they are declared per subsection in "
-     "inference.npe: as seed: {from: runtime.seeds.<name>}, not once on the "
-     "run (check A29). A run carries one seed and this exit draws four "
-     "times."),
+    (
+        "plan.estimate",
+        {"name": "fit", "kind": "plan.estimate", "seed": SEED},
+        "plan.estimate refuses a seed -- the asymmetry is the package's own "
+        "(sample takes key=, estimate has no key parameter; check A29). Drop "
+        "it, or make this run plan.sample.",
+    ),
+    (
+        "conjugate.gcr",
+        {"name": "g", "kind": "conjugate.gcr", "n_draws": 4},
+        "conjugate.gcr draws from the posterior, so seed: is required and has "
+        "no default -- gcr_sample's key= has none either (check A29). The "
+        "deterministic conjugate exits, conjugate.wiener and conjugate.gls, "
+        "refuse one instead.",
+    ),
+    (
+        "npe",
+        {"name": "a", "kind": "npe", "seed": SEED},
+        "kind: npe needs FOUR seeds -- the bank draws theta from the priors, "
+        "create initialises the network's weights, train shuffles the "
+        "minibatches and sample draws -- so they are declared per subsection in "
+        "inference.npe: as seed: {from: runtime.seeds.<name>}, not once on the "
+        "run (check A29). A run carries one seed and this exit draws four "
+        "times.",
+    ),
 ]
 
 
 class TestSeeds:
-    @pytest.mark.parametrize("run, body", [row[1:] for row in _T8_A29_LIFTED],
-                             ids=[row[0] for row in _T8_A29_LIFTED])
+    @pytest.mark.parametrize(
+        "run, body", [row[1:] for row in _T8_A29_LIFTED], ids=[row[0] for row in _T8_A29_LIFTED]
+    )
     def test_the_three_lifted_refusals_say_exactly_this(self, run, body):
         """The move, as a byte-for-byte claim -- against a LITERAL.
 
@@ -2358,8 +2761,7 @@ class TestSeeds:
         seed mistake now reads -- the pass reaches them before the executor
         does on every document route.
         """
-        found = _seedings(preflight_document(
-            inference={"parameters": PRIORED}, runs=[run]))
+        found = _seedings(preflight_document(inference={"parameters": PRIORED}, runs=[run]))
         assert [f.check for f in found] == ["A29"]
         assert found[0].message == f"runs[{run['name']!r}]: {body}"
 
@@ -2374,20 +2776,30 @@ class TestSeeds:
         from rheplicant.config.sections.exits import _a29_estimate_takes_no_seed
         from rheplicant.config.sections.npe import _a29_npe_takes_no_run_seed
 
-        gates = ((_a29_estimate_takes_no_seed, {"seed": SEED}),
-                 (_a29_gcr_needs_a_seed, {}),
-                 (_a29_npe_takes_no_run_seed, {"seed": SEED}))
-        for (gate, options), (_, _, body) in zip(gates, _T8_A29_LIFTED,
-                                                 strict=True):
+        gates = (
+            (_a29_estimate_takes_no_seed, {"seed": SEED}),
+            (_a29_gcr_needs_a_seed, {}),
+            (_a29_npe_takes_no_run_seed, {"seed": SEED}),
+        )
+        for (gate, options), (_, _, body) in zip(gates, _T8_A29_LIFTED, strict=True):
             with pytest.raises(ConfigError) as caught:
                 gate("runs['x']", options)
             assert str(caught.value) == f"runs['x']: {body}"
 
     def test_plan_sample_requires_one(self):
-        found = _seedings(preflight_document(
-            inference={"parameters": THREE},
-            runs=[{"name": "fit", "kind": "plan.sample", "n_sweeps": 8,
-                   "blocks": [{"names": ["d", "a", "w"]}]}]))
+        found = _seedings(
+            preflight_document(
+                inference={"parameters": THREE},
+                runs=[
+                    {
+                        "name": "fit",
+                        "kind": "plan.sample",
+                        "n_sweeps": 8,
+                        "blocks": [{"names": ["d", "a", "w"]}],
+                    }
+                ],
+            )
+        )
         assert [f.check for f in found] == ["A29"]
         assert "'seed' is required and has no default" in found[0].message
 
@@ -2397,10 +2809,12 @@ class TestSeeds:
         # "conjugate.wiener".  Kills dropping either from the moved message:
         # that test drives `run_document`, which after Task 2's hook reaches
         # THIS refusal first.
-        found = _seedings(preflight_document(
-            inference={"parameters": THREE},
-            runs=[{"name": "conjugate.gcr", "kind": "conjugate.gcr",
-                   "n_draws": 4}]))
+        found = _seedings(
+            preflight_document(
+                inference={"parameters": THREE},
+                runs=[{"name": "conjugate.gcr", "kind": "conjugate.gcr", "n_draws": 4}],
+            )
+        )
         assert [f.check for f in found] == ["A29"]
         assert found[0].message.startswith("runs['conjugate.gcr']: ")
         assert "seed: is required and has no default" in found[0].message
@@ -2420,9 +2834,11 @@ class TestSeeds:
         # a tautology; an honest one would be flaky, because another test in
         # the session may already have imported numpyro.  A test name that
         # claims more than its assertions is the shape this plan is about.
-        found = _seedings(preflight_document(
-            inference={"parameters": PRIORED},
-            runs=[{"name": "chain", "kind": "nuts"}]))
+        found = _seedings(
+            preflight_document(
+                inference={"parameters": PRIORED}, runs=[{"name": "chain", "kind": "nuts"}]
+            )
+        )
         assert [f.check for f in found] == ["A29"]
         assert found[0].message.startswith("runs['chain']: ")
         assert "'seed' is required and has no default" in found[0].message
@@ -2431,10 +2847,12 @@ class TestSeeds:
         # Both halves in ONE test, so a message appended to the run-level
         # branch that contradicts the per-subsection one is caught -- 2D's
         # `test_the_advice_the_gate_gives_depends_on_the_document` shape.
-        found = _seedings(preflight_document(
-            inference={"parameters": PRIORED,
-                       "npe": {**NPE_SEEDS, "train": {}}},
-            runs=[{"name": "amortized", "kind": "npe", "seed": SEED}]))
+        found = _seedings(
+            preflight_document(
+                inference={"parameters": PRIORED, "npe": {**NPE_SEEDS, "train": {}}},
+                runs=[{"name": "amortized", "kind": "npe", "seed": SEED}],
+            )
+        )
         assert [f.check for f in found] == ["A29", "A29"]
         assert "needs FOUR seeds" in found[0].message
         assert found[0].where == "runs[0]"
@@ -2452,19 +2870,25 @@ class TestSeeds:
         # one carrying all four faults, because a `return` after the first
         # finding passes every single-fault document.
         for subsection in ("bank", "create", "train", "sample"):
-            found = _seedings(preflight_document(
-                inference={"parameters": PRIORED,
-                           "npe": {**NPE_SEEDS, subsection: {}}},
-                runs=[{"name": "amortized", "kind": "npe"}]))
-            assert [f.where for f in found] == [
-                f"inference.npe.{subsection}"], subsection
-        found = _seedings(preflight_document(
-            inference={"parameters": PRIORED,
-                       "npe": {sub: {} for sub in NPE_SEEDS}},
-            runs=[{"name": "amortized", "kind": "npe"}]))
+            found = _seedings(
+                preflight_document(
+                    inference={"parameters": PRIORED, "npe": {**NPE_SEEDS, subsection: {}}},
+                    runs=[{"name": "amortized", "kind": "npe"}],
+                )
+            )
+            assert [f.where for f in found] == [f"inference.npe.{subsection}"], subsection
+        found = _seedings(
+            preflight_document(
+                inference={"parameters": PRIORED, "npe": {sub: {} for sub in NPE_SEEDS}},
+                runs=[{"name": "amortized", "kind": "npe"}],
+            )
+        )
         assert [f.where for f in found] == [
-            "inference.npe.bank", "inference.npe.create",
-            "inference.npe.train", "inference.npe.sample"]
+            "inference.npe.bank",
+            "inference.npe.create",
+            "inference.npe.train",
+            "inference.npe.sample",
+        ]
 
     def test_the_npe_subsections_are_read_without_a_npe_run_declared(self):
         """The gate that used to be here, and the false premise it rested on.
@@ -2490,19 +2914,28 @@ class TestSeeds:
         refusing everything.
         """
         seedless = {name: dict(body) for name, body in NPE_SECTION.items()}
-        seedless["train"] = {key: value
-                             for key, value in seedless["train"].items()
-                             if key != "seed"}
-        found = _seedings(preflight_document(
-            inference={"parameters": PRIORED, "npe": seedless},
-            runs=[{"kind": "forward"}]))
+        seedless["train"] = {
+            key: value for key, value in seedless["train"].items() if key != "seed"
+        }
+        found = _seedings(
+            preflight_document(
+                inference={"parameters": PRIORED, "npe": seedless}, runs=[{"kind": "forward"}]
+            )
+        )
         assert [f.where for f in found] == ["inference.npe.train"]
         assert "'seed' is required" in found[0].message
-        assert _seedings(preflight_document(
-            inference={"parameters": PRIORED,
-                       "npe": {name: dict(body)
-                               for name, body in NPE_SECTION.items()}},
-            runs=[{"kind": "forward"}])) == []
+        assert (
+            _seedings(
+                preflight_document(
+                    inference={
+                        "parameters": PRIORED,
+                        "npe": {name: dict(body) for name, body in NPE_SECTION.items()},
+                    },
+                    runs=[{"kind": "forward"}],
+                )
+            )
+            == []
+        )
 
     def test_a_seedless_npe_subsection_wins_against_an_unreadable_beam(self):
         # The phase assertion the gate made impossible.  Measured with the
@@ -2515,12 +2948,14 @@ class TestSeeds:
         from rheplicant.config.errors import ConfigError
 
         seedless = {name: dict(body) for name, body in NPE_SECTION.items()}
-        seedless["train"] = {key: value
-                             for key, value in seedless["train"].items()
-                             if key != "seed"}
+        seedless["train"] = {
+            key: value for key, value in seedless["train"].items() if key != "seed"
+        }
         document = preflight_document(
             inference={"parameters": PRIORED, "npe": seedless},
-            runs=[{"kind": "forward"}], resources=UNREADABLE_BEAM)
+            runs=[{"kind": "forward"}],
+            resources=UNREADABLE_BEAM,
+        )
         with pytest.raises(ConfigError) as caught:
             load_document(document)
         assert "inference.npe.train" in str(caught.value)
@@ -2536,14 +2971,20 @@ class TestSeeds:
         # keys instead of `_A29_NPE_SUBSECTIONS`: that refuses a document the
         # package runs, telling the reader a seed is missing from a
         # subsection that takes none.
-        assert _seedings(preflight_document(
-            inference={"parameters": PRIORED,
-                       "npe": {**NPE_SEEDS,
-                               "embed": {"python": "mod:fn"}}},
-            runs=[{"name": "a", "kind": "npe"}])) == []
+        assert (
+            _seedings(
+                preflight_document(
+                    inference={
+                        "parameters": PRIORED,
+                        "npe": {**NPE_SEEDS, "embed": {"python": "mod:fn"}},
+                    },
+                    runs=[{"name": "a", "kind": "npe"}],
+                )
+            )
+            == []
+        )
 
-    def test_a_missing_npe_subsection_is_left_to_the_section_that_owns_it(
-            self):
+    def test_a_missing_npe_subsection_is_left_to_the_section_that_owns_it(self):
         # Stand down: `npe._subsection` (`:230-243`) already refuses an absent
         # subsection, and its sentence is about the SUBSECTION being required
         # rather than about the seed -- "there is no subsection this section
@@ -2551,10 +2992,15 @@ class TestSeeds:
         # has not reached yet.  Kills `_seed_name({}, where)` on an absent
         # body, which would tell them a seed is missing from a block they
         # have not written.
-        assert _seedings(preflight_document(
-            inference={"parameters": PRIORED, "npe": {"train": NPE_SEEDS[
-                "train"]}},
-            runs=[{"name": "amortized", "kind": "npe"}])) == []
+        assert (
+            _seedings(
+                preflight_document(
+                    inference={"parameters": PRIORED, "npe": {"train": NPE_SEEDS["train"]}},
+                    runs=[{"name": "amortized", "kind": "npe"}],
+                )
+            )
+            == []
+        )
 
     def test_condition_is_OUTSIDE_a29(self):
         # `_CONDITION_KEYS` (`conjugate.py`) carries `seed`, and
@@ -2565,19 +3011,34 @@ class TestSeeds:
         # needs one": that would refuse a
         # `kind: condition` run the package runs, and the survey's own table
         # calls this out as correctly excluded.
-        assert _seedings(preflight_document(
-            inference={"parameters": THREE},
-            runs=[{"name": "c", "kind": "condition"}])) == []
+        assert (
+            _seedings(
+                preflight_document(
+                    inference={"parameters": THREE}, runs=[{"name": "c", "kind": "condition"}]
+                )
+            )
+            == []
+        )
 
     def test_a_LITERAL_seed_goes_through_the_same_binding(self):
         # Measured: `seed: 3` on a plan.sample is refused with "seed must NAME
         # an entry of runtime.seeds -- {from: runtime.seeds.<name>} -- and got
         # 3".  Kills a presence-only check (`"seed" in options`), which passes
         # on this document and lets the run reach `draws.py::_seed_name` at P3.
-        found = _seedings(preflight_document(
-            inference={"parameters": THREE},
-            runs=[{"name": "fit", "kind": "plan.sample", "n_sweeps": 8,
-                   "seed": 3, "blocks": [{"names": ["d", "a", "w"]}]}]))
+        found = _seedings(
+            preflight_document(
+                inference={"parameters": THREE},
+                runs=[
+                    {
+                        "name": "fit",
+                        "kind": "plan.sample",
+                        "n_sweeps": 8,
+                        "seed": 3,
+                        "blocks": [{"names": ["d", "a", "w"]}],
+                    }
+                ],
+            )
+        )
         assert [f.check for f in found] == ["A29"]
         assert "must NAME an entry of runtime.seeds" in found[0].message
 
@@ -2588,10 +3049,19 @@ class TestSeeds:
         # `_seed_name` whenever a gate exists for this kind", under which a
         # `seed: {from: nowhere.x}` on a gcr run passes P-1 and dies at
         # `draws.py::_seed_name`, behind the beam.
-        found = _seedings(preflight_document(
-            inference={"parameters": THREE},
-            runs=[{"name": "g", "kind": "conjugate.gcr", "n_draws": 4,
-                   "seed": {"from": "nowhere.x"}}]))
+        found = _seedings(
+            preflight_document(
+                inference={"parameters": THREE},
+                runs=[
+                    {
+                        "name": "g",
+                        "kind": "conjugate.gcr",
+                        "n_draws": 4,
+                        "seed": {"from": "nowhere.x"},
+                    }
+                ],
+            )
+        )
         assert [f.check for f in found] == ["A29"]
         assert "it must be under runtime.seeds." in found[0].message
 
@@ -2608,16 +3078,30 @@ class TestSeeds:
         # agreeing about which keys are the RUN's rather than the exit's.
         from rheplicant.config.sections.runs import _RUN_KEYS
 
-        assert set(_RUN_KEYS) == {"expect", "kind", "name", "on", "reuse",
-                                  "variant"}
+        assert set(_RUN_KEYS) == {"expect", "kind", "name", "on", "reuse", "variant"}
         # ...and every one of them may sit beside a good seed without
         # disturbing it.
-        assert _seedings(preflight_document(
-            inference={"parameters": THREE},
-            runs=[{"name": "fit", "kind": "plan.sample", "n_sweeps": 8,
-                   "on": "primary", "reuse": None, "variant": None,
-                   "expect": "ok", "seed": SEED,
-                   "blocks": [{"names": ["d", "a", "w"]}]}])) == []
+        assert (
+            _seedings(
+                preflight_document(
+                    inference={"parameters": THREE},
+                    runs=[
+                        {
+                            "name": "fit",
+                            "kind": "plan.sample",
+                            "n_sweeps": 8,
+                            "on": "primary",
+                            "reuse": None,
+                            "variant": None,
+                            "expect": "ok",
+                            "seed": SEED,
+                            "blocks": [{"names": ["d", "a", "w"]}],
+                        }
+                    ],
+                )
+            )
+            == []
+        )
 
     def test_the_SECOND_run_is_blamed_and_not_the_first(self):
         # Task 3's carry-forward rule 3, on this task's own loop: a suite
@@ -2626,10 +3110,12 @@ class TestSeeds:
         # two unguarded.  Measured: without this, `where = "runs[0]"` is a
         # mutant the whole module survives.  The first run here is a clean
         # forward exit and the second is a `nuts` with no seed.
-        found = _seedings(preflight_document(
-            inference={"parameters": PRIORED},
-            runs=[{"name": "fwd", "kind": "forward"},
-                  {"name": "chain", "kind": "nuts"}]))
+        found = _seedings(
+            preflight_document(
+                inference={"parameters": PRIORED},
+                runs=[{"name": "fwd", "kind": "forward"}, {"name": "chain", "kind": "nuts"}],
+            )
+        )
         assert [f.where for f in found] == ["runs[1]"]
         assert found[0].message.startswith("runs['chain']: ")
 
@@ -2638,9 +3124,12 @@ class TestSeeds:
         # without `gated` one missing key is described twice -- once by
         # `_a29_gcr_needs_a_seed` and once by `_seed_name`, in two voices,
         # naming two different fixes.  Kills the fall-through.
-        found = _seedings(preflight_document(
-            inference={"parameters": THREE},
-            runs=[{"name": "g", "kind": "conjugate.gcr", "n_draws": 4}]))
+        found = _seedings(
+            preflight_document(
+                inference={"parameters": THREE},
+                runs=[{"name": "g", "kind": "conjugate.gcr", "n_draws": 4}],
+            )
+        )
         assert len(found) == 1
 
     def test_a_run_that_EXPECTS_a_refusal_is_left_alone(self):
@@ -2649,16 +3138,42 @@ class TestSeeds:
         # is an assertion about what `execute_run` CAPTURES -- could never be
         # made.  Not in the brief.  Kills reading every run: that takes
         # `expect: refuse` away from every seed-shaped document in the repo.
-        assert _seedings(preflight_document(
-            inference={"parameters": THREE},
-            runs=[{"name": "fit", "kind": "plan.estimate", "seed": SEED,
-                   "expect": "refuse",
-                   "blocks": [{"names": ["d", "a", "w"]}]}])) == []
-        assert len(_seedings(preflight_document(
-            inference={"parameters": THREE},
-            runs=[{"name": "fit", "kind": "plan.estimate", "seed": SEED,
-                   "expect": "ok",
-                   "blocks": [{"names": ["d", "a", "w"]}]}]))) == 1
+        assert (
+            _seedings(
+                preflight_document(
+                    inference={"parameters": THREE},
+                    runs=[
+                        {
+                            "name": "fit",
+                            "kind": "plan.estimate",
+                            "seed": SEED,
+                            "expect": "refuse",
+                            "blocks": [{"names": ["d", "a", "w"]}],
+                        }
+                    ],
+                )
+            )
+            == []
+        )
+        assert (
+            len(
+                _seedings(
+                    preflight_document(
+                        inference={"parameters": THREE},
+                        runs=[
+                            {
+                                "name": "fit",
+                                "kind": "plan.estimate",
+                                "seed": SEED,
+                                "expect": "ok",
+                                "blocks": [{"names": ["d", "a", "w"]}],
+                            }
+                        ],
+                    )
+                )
+            )
+            == 1
+        )
 
     def test_a_warm_starts_seed_is_left_to_the_key_sweep(self):
         # THE TWIN of `plan.estimate refuses a seed`: `exits.py::_ESTIMATE_DEFAULTS`
@@ -2672,17 +3187,31 @@ class TestSeeds:
         # gate to `warm_start`, which would tell the reader about an
         # asymmetry between two exit kinds when the fault is a key that does
         # not exist.
-        assert _seedings(preflight_document(
-            inference={"parameters": THREE},
-            runs=[{"name": "fit", "kind": "plan.sample", "n_sweeps": 8,
-                   "seed": SEED, "blocks": [{"names": ["d", "a", "w"]}],
-                   "warm_start": {"kind": "plan.estimate", "move": ["d"],
-                                  "seed": SEED,
-                                  "blocks": [{"names": ["d", "a", "w"]}]}}])
-        ) == []
+        assert (
+            _seedings(
+                preflight_document(
+                    inference={"parameters": THREE},
+                    runs=[
+                        {
+                            "name": "fit",
+                            "kind": "plan.sample",
+                            "n_sweeps": 8,
+                            "seed": SEED,
+                            "blocks": [{"names": ["d", "a", "w"]}],
+                            "warm_start": {
+                                "kind": "plan.estimate",
+                                "move": ["d"],
+                                "seed": SEED,
+                                "blocks": [{"names": ["d", "a", "w"]}],
+                            },
+                        }
+                    ],
+                )
+            )
+            == []
+        )
 
-    def test_every_A29_message_carries_its_tag_and_the_moved_ones_keep_theirs(
-            self):
+    def test_every_A29_message_carries_its_tag_and_the_moved_ones_keep_theirs(self):
         """A29 is the one check in this plan whose messages do NOT all END
         with ``(check A29).``, and that is §3.2(c) rather than an oversight.
 
@@ -2700,14 +3229,14 @@ class TestSeeds:
         gated = [
             preflight_document(
                 inference={"parameters": THREE},
-                runs=[{"name": "fit", "kind": "plan.estimate",
-                       "seed": SEED}]),
+                runs=[{"name": "fit", "kind": "plan.estimate", "seed": SEED}],
+            ),
             preflight_document(
-                inference={"parameters": THREE},
-                runs=[{"name": "g", "kind": "conjugate.gcr"}]),
+                inference={"parameters": THREE}, runs=[{"name": "g", "kind": "conjugate.gcr"}]
+            ),
             preflight_document(
-                inference={"parameters": PRIORED},
-                runs=[{"name": "a", "kind": "npe", "seed": SEED}]),
+                inference={"parameters": PRIORED}, runs=[{"name": "a", "kind": "npe", "seed": SEED}]
+            ),
         ]
         for document in gated:
             [one] = _seedings(document)
@@ -2715,15 +3244,15 @@ class TestSeeds:
             assert not one.message.endswith("(check A29)."), one.message
         derived = [
             preflight_document(
-                inference={"parameters": THREE},
-                runs=[{"name": "fit", "kind": "plan.sample"}]),
+                inference={"parameters": THREE}, runs=[{"name": "fit", "kind": "plan.sample"}]
+            ),
             preflight_document(
-                inference={"parameters": PRIORED},
-                runs=[{"name": "chain", "kind": "nuts"}]),
+                inference={"parameters": PRIORED}, runs=[{"name": "chain", "kind": "nuts"}]
+            ),
             preflight_document(
-                inference={"parameters": PRIORED,
-                           "npe": {**NPE_SEEDS, "train": {}}},
-                runs=[{"name": "a", "kind": "npe"}]),
+                inference={"parameters": PRIORED, "npe": {**NPE_SEEDS, "train": {}}},
+                runs=[{"name": "a", "kind": "npe"}],
+            ),
         ]
         for document in derived:
             [one] = _seedings(document)
@@ -2759,7 +3288,8 @@ class TestSeeds:
         document = preflight_document(
             inference={"parameters": THREE},
             runs=[{"name": "g", "kind": "conjugate.gcr", "n_draws": 4}],
-            resources=UNREADABLE_BEAM)
+            resources=UNREADABLE_BEAM,
+        )
         with pytest.raises(ConfigError) as caught:
             load_document(document)
         assert str(caught.value).startswith("runs['g']: ")
@@ -2785,8 +3315,9 @@ class TestTheSectionsStillCallTheirOwnRefusal:
     def _spec(self, kind, options, name=None):
         from rheplicant.config.sections.runs import RunSpec
 
-        return RunSpec(name=name or kind, kind=kind, variant=None,
-                       on="primary", expect="ok", options=options)
+        return RunSpec(
+            name=name or kind, kind=kind, variant=None, on="primary", expect="ok", options=options
+        )
 
     def test_run_plan_still_refuses_an_estimate_seed(self):
         from rheplicant.config.errors import ConfigError
@@ -2800,16 +3331,14 @@ class TestTheSectionsStillCallTheirOwnRefusal:
         from rheplicant.config.sections.conjugate import _gcr_plan
 
         with pytest.raises(ConfigError, match="A29"):
-            _gcr_plan(self._spec("conjugate.gcr", {"n_draws": 4}),
-                      where="runs['conjugate.gcr']")
+            _gcr_plan(self._spec("conjugate.gcr", {"n_draws": 4}), where="runs['conjugate.gcr']")
 
     def test_run_npe_still_refuses_a_run_level_seed(self):
         from rheplicant.config.errors import ConfigError
         from rheplicant.config.sections.npe import _run_npe
 
         with pytest.raises(ConfigError, match="needs FOUR seeds"):
-            _run_npe(self._spec("npe", {"seed": SEED}, name="amortized"),
-                     None)
+            _run_npe(self._spec("npe", {"seed": SEED}, name="amortized"), None)
 
 
 class TestNoHostileDocumentCanAbortTheTaskEightChecks:
@@ -2850,25 +3379,19 @@ class TestNoHostileDocumentCanAbortTheTaskEightChecks:
         {"runs": [{"kind": "plan.sample", "blocks": "nope"}]},
         {"runs": [{"kind": "plan.sample", "blocks": [{"names": 5}]}]},
         {"runs": [{"kind": "plan.sample", "blocks": [{"names": {"d": 1}}]}]},
-        {"runs": [{"kind": "plan.sample",
-                   "blocks": [{"names": ["d"], "engine": ["gradient"]}]}]},
-        {"runs": [{"kind": "plan.estimate", "expect": ["refuse"],
-                   "seed": SEED}]},
+        {"runs": [{"kind": "plan.sample", "blocks": [{"names": ["d"], "engine": ["gradient"]}]}]},
+        {"runs": [{"kind": "plan.estimate", "expect": ["refuse"], "seed": SEED}]},
         {"runs": [{"kind": "conjugate.gcr", "seed": {"from": "runtime.x"}}]},
         {"runs": {"kind": "nuts"}},
     ]
 
-    @pytest.mark.parametrize("patch", HOSTILE,
-                             ids=[str(index) for index in
-                                  range(len(HOSTILE))])
+    @pytest.mark.parametrize("patch", HOSTILE, ids=[str(index) for index in range(len(HOSTILE))])
     def test_neither_check_raises(self, patch):
         document = _hostile_document(patch)
         for finding in (*_gates(document), *_seedings(document)):
             assert finding.check in ("A20", "A21", "A23", "A29")
 
-    @pytest.mark.parametrize("patch", HOSTILE,
-                             ids=[str(index) for index in
-                                  range(len(HOSTILE))])
+    @pytest.mark.parametrize("patch", HOSTILE, ids=[str(index) for index in range(len(HOSTILE))])
     def test_the_whole_pass_survives_each_of_them(self, patch):
         # `_check_where` runs OUTSIDE the per-check `try`, so a `where` built
         # from user text could kill the pass even when the check returns
@@ -2889,16 +3412,25 @@ def _counted(document):
 def _sample(**options):
     return preflight_document(
         inference={"parameters": PRIORED},
-        runs=[{"name": "fit", "kind": "plan.sample", "seed": SEED,
-               "blocks": [{"names": ["d", "a"], "engine": "gradient"}],
-               **options}])
+        runs=[
+            {
+                "name": "fit",
+                "kind": "plan.sample",
+                "seed": SEED,
+                "blocks": [{"names": ["d", "a"], "engine": "gradient"}],
+                **options,
+            }
+        ],
+    )
 
 
 def _estimate(**options):
     return preflight_document(
         inference={"parameters": PRIORED},
-        runs=[{"name": "fit", "kind": "plan.estimate",
-               "blocks": [{"names": ["d", "a"]}], **options}])
+        runs=[
+            {"name": "fit", "kind": "plan.estimate", "blocks": [{"names": ["d", "a"]}], **options}
+        ],
+    )
 
 
 def _warmed(**warm):
@@ -2911,17 +3443,31 @@ def _warmed(**warm):
     ``exits.py::_WARM_KEYS`` refuses the run outright when any of them is not and
     the passthrough at ``exits.py::_ESTIMATE_DEFAULTS`` is then never reached.
     """
-    return _sample(n_sweeps=12,
-                   warm_start={"kind": "plan.estimate", "move": ["d"],
-                               "blocks": [{"names": ["d", "a"]}], **warm})
+    return _sample(
+        n_sweeps=12,
+        warm_start={
+            "kind": "plan.estimate",
+            "move": ["d"],
+            "blocks": [{"names": ["d", "a"]}],
+            **warm,
+        },
+    )
 
 
 def _chain(**options):
     return preflight_document(
         inference={"parameters": PRIORED},
-        runs=[{"name": "chain", "kind": "nuts", "num_warmup": 2,
-               "num_samples": 2, "seed": {"from": "runtime.seeds.chain"},
-               **options}])
+        runs=[
+            {
+                "name": "chain",
+                "kind": "nuts",
+                "num_warmup": 2,
+                "num_samples": 2,
+                "seed": {"from": "runtime.seeds.chain"},
+                **options,
+            }
+        ],
+    )
 
 
 class TestCounts:
@@ -2961,8 +3507,7 @@ class TestCounts:
         from rheplicant.config.sections.exit_support import _number
 
         with pytest.raises(ConfigError) as caught:
-            _number(type("R", (), {"name": "fit"})(), "max_iter", 2.5,
-                    kind=int, minimum=1)
+            _number(type("R", (), {"name": "fit"})(), "max_iter", 2.5, kind=int, minimum=1)
         found = _counted(_estimate(max_iter=2.5))
         assert found[0].message == f"{caught.value} (check A25)."
 
@@ -2993,11 +3538,9 @@ class TestCounts:
         # At 3 rather than 2 since T-002: a cap below the earliest verdict
         # (sweep 3) is refused by its own clause, which would hide this one.
         assert _counted(_estimate(min_sweeps=3, max_iter=3)) == []
-        assert [f.check for f in
-                _counted(_estimate(min_sweeps=4, max_iter=3))] == ["A25"]
+        assert [f.check for f in _counted(_estimate(min_sweeps=4, max_iter=3))] == ["A25"]
 
-    def test_a_cap_below_the_earliest_verdict_is_refused_only_when_tol_is_live(
-            self):
+    def test_a_cap_below_the_earliest_verdict_is_refused_only_when_tol_is_live(self):
         # `SamplingPlan.estimate` needs two consecutive sweep-to-sweep changes
         # within tol, the first being sweep 2 against sweep 1, so no run with
         # a tol can converge before `EARLIEST_CONVERGED_SWEEP` (T-002 A5-1).
@@ -3011,19 +3554,16 @@ class TestCounts:
             assert [f.check for f in found] == ["A25"], (floor, found)
             message = found[0].message
             assert f"max_iter: {below} is below {EARLIEST_CONVERGED_SWEEP}" in message
-            assert ("the earliest sweep at which a verdict can come"
-                    in message), message
+            assert "the earliest sweep at which a verdict can come" in message, message
             assert f"at least {EARLIEST_CONVERGED_SWEEP}" in message
         # THE BOUNDARY: a cap AT the earliest verdict is legal. Kills the
         # clause written `cap <= earliest`.
-        assert _counted(_estimate(min_sweeps=1,
-                                  max_iter=EARLIEST_CONVERGED_SWEEP)) == []
+        assert _counted(_estimate(min_sweeps=1, max_iter=EARLIEST_CONVERGED_SWEEP)) == []
         # ...and gated on `tol` like the pair: with no convergence test
         # there is no verdict to be early for, and the package runs it.
         assert _counted(_estimate(min_sweeps=1, max_iter=below, tol=None)) == []
         # ...on the warm start as well, read off the warm site's own `tol`.
-        assert [f.check for f in _counted(
-            _warmed(min_sweeps=1, max_iter=below))] == ["A25"]
+        assert [f.check for f in _counted(_warmed(min_sweeps=1, max_iter=below))] == ["A25"]
         assert _counted(_warmed(min_sweeps=1, max_iter=below, tol=None)) == []
 
     def test_both_clauses_give_ONE_finding_that_names_both(self):
@@ -3039,16 +3579,15 @@ class TestCounts:
         assert f"is below {EARLIEST_CONVERGED_SWEEP}" in found[0].message
         assert "Raise max_iter to at least 9" in found[0].message
 
-    @pytest.mark.parametrize("options, said", [
-        ({"max_iter": 1}, "min_sweeps, which defaults to 3, is above "
-                          "max_iter: 1"),
-        ({"max_iter": 2}, "min_sweeps, which defaults to 3, is above "
-                          "max_iter: 2"),
-        ({"min_sweeps": 101}, "min_sweeps: 101 is above max_iter, which "
-                              "defaults to 100"),
-    ])
-    def test_the_pair_uses_the_packages_defaults_when_a_half_is_absent(
-            self, options, said):
+    @pytest.mark.parametrize(
+        "options, said",
+        [
+            ({"max_iter": 1}, "min_sweeps, which defaults to 3, is above max_iter: 1"),
+            ({"max_iter": 2}, "min_sweeps, which defaults to 3, is above max_iter: 2"),
+            ({"min_sweeps": 101}, "min_sweeps: 101 is above max_iter, which defaults to 100"),
+        ],
+    )
+    def test_the_pair_uses_the_packages_defaults_when_a_half_is_absent(self, options, said):
         # `plan.py::Estimate.names` compares against MIN_SWEEPS and DEFAULT_MAX_ITER,
         # so `max_iter: 1` with no `min_sweeps` IS refused there -- and a
         # clause that fired only when both keys were written, which is what
@@ -3076,10 +3615,8 @@ class TestCounts:
         # what it does not.
         from rheplicant.inference.plan import DEFAULT_MAX_ITER, MIN_SWEEPS
 
-        assert f"defaults to {MIN_SWEEPS}" in _counted(
-            _estimate(max_iter=1))[0].message
-        assert f"defaults to {DEFAULT_MAX_ITER}" in _counted(
-            _estimate(min_sweeps=101))[0].message
+        assert f"defaults to {MIN_SWEEPS}" in _counted(_estimate(max_iter=1))[0].message
+        assert f"defaults to {DEFAULT_MAX_ITER}" in _counted(_estimate(min_sweeps=101))[0].message
         # ...and the boundary on each defaulted side, so a `>=` here is
         # caught the way the both-written boundary already is.
         assert _counted(_estimate(max_iter=MIN_SWEEPS)) == []
@@ -3097,8 +3634,7 @@ class TestCounts:
         # ...and with the warm `tol` live, both fire, so the gate cannot be
         # widened into "never check the warm start".
         assert [f.check for f in _counted(_warmed(min_sweeps=0))] == ["A25"]
-        assert [f.check for f in
-                _counted(_warmed(min_sweeps=9, max_iter=2))] == ["A25"]
+        assert [f.check for f in _counted(_warmed(min_sweeps=9, max_iter=2))] == ["A25"]
 
     def test_a_null_tol_stands_down_the_min_sweeps_clause_and_NOTHING_else(self):
         # `plan.py::Estimate.names` gates only the `min_sweeps` clause; `max_iter` is
@@ -3114,8 +3650,7 @@ class TestCounts:
         found = _counted(_estimate(max_iter=2.5, tol=None))
         assert [f.check for f in found] == ["A25"]
         assert "is a whole number" in found[0].message
-        assert [f.check for f in
-                _counted(_estimate(solve_tol=-1.0, tol=None))] == ["A25"]
+        assert [f.check for f in _counted(_estimate(solve_tol=-1.0, tol=None))] == ["A25"]
 
     def test_the_tol_gate_is_the_one_row_and_is_pinned_where_it_is_written(self):
         # The constant behind the behaviour above, asserted on its own so
@@ -3131,10 +3666,18 @@ class TestCounts:
         # verbatim (§2.3) -- a sentence about a nested mapping when the run
         # itself is wrong.  No other test in this module puts a fault at both
         # sites of one run.
-        found = _counted(_sample(
-            n_sweeps=12, rhat_max=-1.0,
-            warm_start={"kind": "plan.estimate", "move": ["d"],
-                        "blocks": [{"names": ["d", "a"]}], "max_iter": 2.5}))
+        found = _counted(
+            _sample(
+                n_sweeps=12,
+                rhat_max=-1.0,
+                warm_start={
+                    "kind": "plan.estimate",
+                    "move": ["d"],
+                    "blocks": [{"names": ["d", "a"]}],
+                    "max_iter": 2.5,
+                },
+            )
+        )
         assert [f.where for f in found] == ["runs[0]", "runs[0].warm_start"]
 
     def test_an_unselected_variant_is_not_walked(self):
@@ -3146,12 +3689,17 @@ class TestCounts:
         # `document["variants"]` -- which would refuse a document that runs.
         document = preflight_document(
             inference={"parameters": PRIORED},
-            runs=[{"name": "fit", "kind": "plan.sample", "seed": SEED,
-                   "blocks": [{"names": ["d", "a"], "engine": "gradient"}],
-                   "n_sweeps": 12}],
-            variants={"greedy": {"runs": [{"name": "fit",
-                                           "kind": "plan.sample",
-                                           "n_sweeps": 2}]}})
+            runs=[
+                {
+                    "name": "fit",
+                    "kind": "plan.sample",
+                    "seed": SEED,
+                    "blocks": [{"names": ["d", "a"], "engine": "gradient"}],
+                    "n_sweeps": 12,
+                }
+            ],
+            variants={"greedy": {"runs": [{"name": "fit", "kind": "plan.sample", "n_sweeps": 2}]}},
+        )
         assert _counted(document) == []
 
     def test_the_min_sweeps_ROW_is_gated_on_tol_as_well_as_the_pair(self):
@@ -3167,8 +3715,7 @@ class TestCounts:
         # ...and with `tol` live the same two values ARE refused, so the
         # gate cannot be widened into "never check min_sweeps".
         assert [f.check for f in _counted(_estimate(min_sweeps=0))] == ["A25"]
-        assert "is a whole number" in _counted(
-            _estimate(min_sweeps=2.5))[0].message
+        assert "is a whole number" in _counted(_estimate(min_sweeps=2.5))[0].message
 
     def test_warmup_below_zero_is_refused_and_a_fractional_one_by_type(self):
         # `plan.py::SamplingPlan._partition` tests `not isinstance(warmup, int) or warmup <
@@ -3182,10 +3729,8 @@ class TestCounts:
         assert [f.check for f in fractional] == ["A25"]
         assert "is a whole number" in fractional[0].message
 
-    @pytest.mark.parametrize("sweeps, kept, refused",
-                             [(5, 3, True), (6, 3, True), (7, 4, False)])
-    def test_the_default_warmup_boundary_is_exactly_MIN_DRAWS(self, sweeps,
-                                                              kept, refused):
+    @pytest.mark.parametrize("sweeps, kept, refused", [(5, 3, True), (6, 3, True), (7, 4, False)])
+    def test_the_default_warmup_boundary_is_exactly_MIN_DRAWS(self, sweeps, kept, refused):
         # Boundary-validated on BOTH sides rather than at one point:
         # `plan.py::SamplingPlan._partition` is `n_sweeps // 2 if warmup is None`, and `:1055` is
         # `n_draw < MIN_DRAWS`, so 6 keeps 3 and refuses, 7 keeps 4 and runs.
@@ -3205,11 +3750,12 @@ class TestCounts:
             # every message assertion here passes with.
             assert found[0].where == "runs[0]"
 
-    @pytest.mark.parametrize("sweeps, warmup, refused",
-                             [(8, 4, False), (8, 5, True), (12, 8, False),
-                              (12, 9, True)])
+    @pytest.mark.parametrize(
+        "sweeps, warmup, refused", [(8, 4, False), (8, 5, True), (12, 8, False), (12, 9, True)]
+    )
     def test_an_explicit_warmup_replaces_the_default_at_the_same_boundary(
-            self, sweeps, warmup, refused):
+        self, sweeps, warmup, refused
+    ):
         # All four cells against `plan.py::SamplingPlan._partition`'s `if warmup is None` arm.
         # Kills an implementation that always uses `n_sweeps // 2`: at
         # (12, 9) that reads 6 kept and accepts a document the package
@@ -3238,13 +3784,23 @@ class TestCounts:
         # skips.
         document = preflight_document(
             inference={"parameters": PRIORED},
-            runs=[{"name": "warm", "kind": "plan.estimate",
-                   "blocks": [{"names": ["d", "a"]}], "max_iter": 2.5},
-                  {"name": "middle", "kind": "forward"},
-                  {"name": "chain", "kind": "plan.sample", "seed": SEED,
-                   "blocks": [{"names": ["d", "a"],
-                               "engine": "gradient"}],
-                   "n_sweeps": 6}])
+            runs=[
+                {
+                    "name": "warm",
+                    "kind": "plan.estimate",
+                    "blocks": [{"names": ["d", "a"]}],
+                    "max_iter": 2.5,
+                },
+                {"name": "middle", "kind": "forward"},
+                {
+                    "name": "chain",
+                    "kind": "plan.sample",
+                    "seed": SEED,
+                    "blocks": [{"names": ["d", "a"], "engine": "gradient"}],
+                    "n_sweeps": 6,
+                },
+            ],
+        )
         found = _counted(document)
         assert [f.check for f in found] == ["A25", "A24"]
         assert found[0].where == "runs[0]"
@@ -3355,7 +3911,8 @@ class TestCounts:
 
         tree = ast.parse(inspect.getsource(fitting))
         offenders = sorted(
-            node.module for node in ast.walk(tree)
+            node.module
+            for node in ast.walk(tree)
             if isinstance(node, ast.ImportFrom)
             and (node.module or "").startswith("rheplicant.inference")
         )
@@ -3378,13 +3935,16 @@ class TestCounts:
         import subprocess
         import sys
 
-        script = ("import sys, rheplicant.config.preflight.fitting;"
-                  "print('rheplicant.inference' in sys.modules)")
+        script = (
+            "import sys, rheplicant.config.preflight.fitting;"
+            "print('rheplicant.inference' in sys.modules)"
+        )
         env = {"PATH": "/usr/bin:/bin"}
         if os.environ.get("PYTHONPATH"):
             env["PYTHONPATH"] = os.environ["PYTHONPATH"]
-        done = subprocess.run([sys.executable, "-c", script], env=env,
-                              capture_output=True, text=True, check=True)
+        done = subprocess.run(
+            [sys.executable, "-c", script], env=env, capture_output=True, text=True, check=True
+        )
         assert done.stdout.strip() == "False", done.stdout
 
     def test_the_restated_default_is_still_the_packages_own(self):
@@ -3396,9 +3956,11 @@ class TestCounts:
         from rheplicant.inference import SamplingPlan
 
         source = inspect.getsource(SamplingPlan.sample)
-        lines = [line for line in source.splitlines()
-                 if "n_sweeps // 2" in line
-                 and not line.lstrip().startswith("#")]
+        lines = [
+            line
+            for line in source.splitlines()
+            if "n_sweeps // 2" in line and not line.lstrip().startswith("#")
+        ]
         assert len(lines) == 1, lines
         assert "warmup is None" in lines[0]
 
@@ -3447,17 +4009,19 @@ class TestCounts:
         assert _counted(_estimate(tol=None)) == []
         assert _counted(_sample(n_sweeps=12, warmup=None)) == []
 
-    @pytest.mark.parametrize("document, key", [
-        (_estimate(max_iter=None), "max_iter"),
-        (_estimate(min_sweeps=None), "min_sweeps"),
-        (_estimate(solve_tol=None), "solve_tol"),
-        (_sample(n_sweeps=None), "n_sweeps"),
-        (_sample(n_sweeps=12, rhat_max=None), "rhat_max"),
-        (_chain(num_samples=None), "num_samples"),
-        (_chain(num_warmup=None), "num_warmup"),
-    ])
-    def test_a_null_is_refused_off_the_packages_own_three_off_switches(
-            self, document, key):
+    @pytest.mark.parametrize(
+        "document, key",
+        [
+            (_estimate(max_iter=None), "max_iter"),
+            (_estimate(min_sweeps=None), "min_sweeps"),
+            (_estimate(solve_tol=None), "solve_tol"),
+            (_sample(n_sweeps=None), "n_sweeps"),
+            (_sample(n_sweeps=12, rhat_max=None), "rhat_max"),
+            (_chain(num_samples=None), "num_samples"),
+            (_chain(num_warmup=None), "num_warmup"),
+        ],
+    )
+    def test_a_null_is_refused_off_the_packages_own_three_off_switches(self, document, key):
         # The residue this task first RECORDED and now closes.  Its earlier
         # justification -- "on the rest it is a typo the package refuses in
         # its own voice" -- is false of two of these seven, and those two are
@@ -3476,8 +4040,9 @@ class TestCounts:
         # would refuse a document the package RUNS.  `tol: null` runs a fixed
         # number of sweeps, `solve_guard: null` skips the condition-number
         # estimate, `warmup: null` takes `n_sweeps // 2`.
-        document = (_sample(n_sweeps=12, warmup=None) if key == "warmup"
-                    else _estimate(**{key: None}))
+        document = (
+            _sample(n_sweeps=12, warmup=None) if key == "warmup" else _estimate(**{key: None})
+        )
         assert _counted(document) == []
 
     def test_the_nullable_rows_are_the_packages_own_optional_parameters(self):
@@ -3501,23 +4066,23 @@ class TestCounts:
             for name, param in inspect.signature(method).parameters.items():
                 if type(None) in typing.get_args(param.annotation):
                     optional.add(name)
-        rows = {key for entries in _A25_KNOBS.values()
-                for key, _, _ in entries}
+        rows = {key for entries in _A25_KNOBS.values() for key, _, _ in entries}
         assert _A25_NULLABLE == optional & rows
         assert _A25_NULLABLE == {"tol", "solve_guard", "warmup"}
 
-    @pytest.mark.parametrize("value", [float("inf"), float("-inf"),
-                                       float("nan")])
-    @pytest.mark.parametrize("document_of, key", [
-        (lambda v: _sample(n_sweeps=v), "n_sweeps"),
-        (lambda v: _sample(n_sweeps=12, warmup=v), "warmup"),
-        (lambda v: _estimate(max_iter=v), "max_iter"),
-        (lambda v: _estimate(min_sweeps=v), "min_sweeps"),
-        (lambda v: _chain(num_samples=v), "num_samples"),
-        (lambda v: _warmed(max_iter=v), "max_iter"),
-    ])
-    def test_a_non_finite_count_is_refused_and_does_not_RAISE(
-            self, document_of, key, value):
+    @pytest.mark.parametrize("value", [float("inf"), float("-inf"), float("nan")])
+    @pytest.mark.parametrize(
+        "document_of, key",
+        [
+            (lambda v: _sample(n_sweeps=v), "n_sweeps"),
+            (lambda v: _sample(n_sweeps=12, warmup=v), "warmup"),
+            (lambda v: _estimate(max_iter=v), "max_iter"),
+            (lambda v: _estimate(min_sweeps=v), "min_sweeps"),
+            (lambda v: _chain(num_samples=v), "num_samples"),
+            (lambda v: _warmed(max_iter=v), "max_iter"),
+        ],
+    )
+    def test_a_non_finite_count_is_refused_and_does_not_RAISE(self, document_of, key, value):
         # `_number`'s whole-number refusal formats `kind(value)`
         # (`exit_support.py::ParsedRun`) to show what the count rounds to, and
         # `int(float('inf'))` raises OverflowError while `int(float('nan'))`
@@ -3538,18 +4103,23 @@ class TestCounts:
         def _document(sweeps):
             return preflight_document(
                 inference={"parameters": THREE},
-                runs=[{"name": "fit", "kind": "plan.sample", "seed": SEED,
-                       "n_sweeps": sweeps,
-                       "blocks": [{"names": ["d", "d"]}]}])
+                runs=[
+                    {
+                        "name": "fit",
+                        "kind": "plan.sample",
+                        "seed": SEED,
+                        "n_sweeps": sweeps,
+                        "blocks": [{"names": ["d", "d"]}],
+                    }
+                ],
+            )
 
         finite = [f.check for f in preflight(_document(6)).findings]
         assert finite.count("A16") == 2 and "A24" in finite
-        infinite = [f.check for f in preflight(_document(float("inf")))
-                    .findings]
+        infinite = [f.check for f in preflight(_document(float("inf"))).findings]
         assert infinite.count("A16") == 2
         assert "A25" in infinite
-        assert not any("RAISED" in f.message
-                       for f in preflight(_document(float("inf"))).findings)
+        assert not any("RAISED" in f.message for f in preflight(_document(float("inf"))).findings)
 
     def test_a_float_row_takes_infinity_and_that_is_RECORDED(self):
         # The residue beside `rhat_max: 0.0`, same class and same reason: a
@@ -3561,8 +4131,7 @@ class TestCounts:
         assert _counted(_estimate(tol=float("inf"))) == []
         assert _counted(_estimate(solve_guard=float("inf"))) == []
 
-    def test_check_identifiability_is_a_closed_enum_read_from_the_package(
-            self):
+    def test_check_identifiability_is_a_closed_enum_read_from_the_package(self):
         # Kills a hand-written set: `plan.py::Block` accepts exactly False,
         # 'once' and 'each_sweep', and a fourth mode shipping there would be
         # refused here while the package ran it.
@@ -3580,8 +4149,7 @@ class TestCounts:
         # (`:177-178`), so a clause gated on `plan.estimate` alone would
         # leave `plan.sample`'s open -- and every other assertion in this
         # class drives an estimate, so nothing else could see it.
-        on_sample = _counted(_sample(n_sweeps=12,
-                                     check_identifiability="banana"))
+        on_sample = _counted(_sample(n_sweeps=12, check_identifiability="banana"))
         assert [f.check for f in on_sample] == ["A25"]
 
     def test_the_package_guard_this_enum_mirrors_is_still_that_guard(self):
@@ -3596,10 +4164,14 @@ class TestCounts:
         from rheplicant.inference.plan import SamplingPlan
 
         source = inspect.getsource(SamplingPlan._prepare)
-        lines = [line.strip() for line in source.splitlines()
-                 if "check not in" in line and not line.lstrip().startswith("#")]
-        assert lines == ["if check is not False and check not in "
-                         "(CHECK_ONCE, CHECK_EACH_SWEEP):"], lines
+        lines = [
+            line.strip()
+            for line in source.splitlines()
+            if "check not in" in line and not line.lstrip().startswith("#")
+        ]
+        assert lines == [
+            "if check is not False and check not in (CHECK_ONCE, CHECK_EACH_SWEEP):"
+        ], lines
 
     def test_a_check_identifiability_the_package_refuses_by_IDENTITY(self):
         # `plan.py::Block` reads `check is not False`, an IDENTITY test, so
@@ -3655,11 +4227,15 @@ class TestCounts:
 
         with pytest.raises(ConfigError) as caught:
             _whole("inference.npe.bank.n_simulations", 0, 1)
-        found = _counted(preflight_document(
-            inference={"parameters": PRIORED,
-                       "npe": {"bank": {"n_simulations": 0},
-                               "sample": {"n_draws": 2.5}}},
-            runs=[{"name": "amortized", "kind": "npe"}]))
+        found = _counted(
+            preflight_document(
+                inference={
+                    "parameters": PRIORED,
+                    "npe": {"bank": {"n_simulations": 0}, "sample": {"n_draws": 2.5}},
+                },
+                runs=[{"name": "amortized", "kind": "npe"}],
+            )
+        )
         assert [f.check for f in found] == ["A25", "A25"]
         assert found[0].message == f"{caught.value} (check A25)."
         assert found[0].where == "inference.npe.bank.n_simulations"
@@ -3673,10 +4249,12 @@ class TestCounts:
         # None` -- unconditional on `runs:` -- so the count IS read, at P2,
         # and `build_inference` (`config/document.py::_attach`) runs AFTER
         # `build_resources` (`:75`).  Kills restoring the gate.
-        found = _counted(preflight_document(
-            inference={"parameters": PRIORED,
-                       "npe": {"bank": {"n_simulations": 0}}},
-            runs=[{"kind": "forward"}]))
+        found = _counted(
+            preflight_document(
+                inference={"parameters": PRIORED, "npe": {"bank": {"n_simulations": 0}}},
+                runs=[{"kind": "forward"}],
+            )
+        )
         assert [f.check for f in found] == ["A25"]
         assert found[0].where == "inference.npe.bank.n_simulations"
 
@@ -3694,12 +4272,16 @@ class TestCounts:
         from rheplicant.config.document import load_document
         from rheplicant.config.errors import ConfigError
 
-        document = {**preflight_document(
-            inference={"parameters": PRIORED,
-                       "npe": {"bank": {"n_simulations": 0,
-                                        "seed": {"from":
-                                                 "runtime.seeds.bank"}}}},
-            runs=[{"kind": "forward"}]), "resources": UNREADABLE_BEAM}
+        document = {
+            **preflight_document(
+                inference={
+                    "parameters": PRIORED,
+                    "npe": {"bank": {"n_simulations": 0, "seed": {"from": "runtime.seeds.bank"}}},
+                },
+                runs=[{"kind": "forward"}],
+            ),
+            "resources": UNREADABLE_BEAM,
+        }
         with pytest.raises(ConfigError) as caught:
             load_document(document)
         assert "check A25" in str(caught.value)
@@ -3713,13 +4295,23 @@ class TestCounts:
         # `train.n_steps` or `create.width` is the correct-implementation
         # mutant, and without this it passes the whole module.  The other
         # five are optional and are Plan 3B's row.
-        assert _counted(preflight_document(
-            inference={"parameters": PRIORED,
-                       "npe": {"bank": {"n_simulations": 4},
-                               "sample": {"n_draws": 4},
-                               "train": {"n_steps": 0, "batch_size": 0},
-                               "create": {"width": 0}}},
-            runs=[{"name": "amortized", "kind": "npe"}])) == []
+        assert (
+            _counted(
+                preflight_document(
+                    inference={
+                        "parameters": PRIORED,
+                        "npe": {
+                            "bank": {"n_simulations": 4},
+                            "sample": {"n_draws": 4},
+                            "train": {"n_steps": 0, "batch_size": 0},
+                            "create": {"width": 0},
+                        },
+                    },
+                    runs=[{"name": "amortized", "kind": "npe"}],
+                )
+            )
+            == []
+        )
 
     def test_plan_estimate_gets_no_A24_and_nuts_gets_no_A24(self):
         # A24 is `sample()`'s (`plan.py::SamplingPlan._partition`); `estimate()` keeps every
@@ -3747,8 +4339,7 @@ class TestCounts:
         assert [f.check for f in found] == ["A25"]
         assert f"{key}: must be >= 1" in found[0].message
 
-    def test_a_run_declaring_expect_refuse_is_still_refused_for_its_counts(
-            self):
+    def test_a_run_declaring_expect_refuse_is_still_refused_for_its_counts(self):
         # NOT the stand-down `_blocks` and `_prior_gates` carry, and the
         # difference is measured rather than stylistic.  Those two stand down
         # because a REAL document loses the assertion it exists to make
@@ -3788,16 +4379,23 @@ class TestTheWarmStartIsTheSameEstimateOneCallAlong:
 
         assert set(_ESTIMATE_PASSTHROUGH) <= _WARM_KEYS
         assert set(_ESTIMATE_PASSTHROUGH) == {
-            "max_iter", "tol", "min_sweeps", "check_identifiability",
-            "solve_tol", "solve_guard"}
+            "max_iter",
+            "tol",
+            "min_sweeps",
+            "check_identifiability",
+            "solve_tol",
+            "solve_guard",
+        }
 
-    @pytest.mark.parametrize("key, value, fragment", [
-        ("max_iter", 2.5, "warm_start.max_iter: is a whole number"),
-        ("solve_tol", -1.0, "warm_start.solve_tol: must be >= 0"),
-        ("tol", "banana", "warm_start.tol: is a number"),
-    ])
-    def test_a_warm_knob_is_refused_where_it_is_written(self, key, value,
-                                                        fragment):
+    @pytest.mark.parametrize(
+        "key, value, fragment",
+        [
+            ("max_iter", 2.5, "warm_start.max_iter: is a whole number"),
+            ("solve_tol", -1.0, "warm_start.solve_tol: must be >= 0"),
+            ("tol", "banana", "warm_start.tol: is a number"),
+        ],
+    )
+    def test_a_warm_knob_is_refused_where_it_is_written(self, key, value, fragment):
         found = _counted(_warmed(**{key: value}))
         assert [f.check for f in found] == ["A25"]
         assert fragment in found[0].message
@@ -3811,8 +4409,7 @@ class TestTheWarmStartIsTheSameEstimateOneCallAlong:
     def test_the_warm_pair_and_the_warm_enum_travel_with_the_knobs(self):
         pair = _counted(_warmed(min_sweeps=9, max_iter=2))
         assert [f.check for f in pair] == ["A25"]
-        assert "warm_start.min_sweeps: 9 is above warm_start.max_iter: 2" \
-            in pair[0].message
+        assert "warm_start.min_sweeps: 9 is above warm_start.max_iter: 2" in pair[0].message
         mode = _counted(_warmed(check_identifiability="banana"))
         assert [f.check for f in mode] == ["A25"]
         assert "warm_start.check_identifiability:" in mode[0].message
@@ -3831,20 +4428,28 @@ class TestTheWarmStartIsTheSameEstimateOneCallAlong:
         # that was never read.  `_t7_warm_start` is the binding that decides
         # this and it is IMPORTED rather than re-derived (carry-forward's
         # rule 1).  Kills reading `run["warm_start"]` directly.
-        assert _counted(_sample(
-            n_sweeps=12,
-            warm_start={"kind": "plan.sample", "move": ["d"],
-                        "max_iter": 2.5})) == []
-        assert _counted(_sample(
-            n_sweeps=12,
-            warm_start={"kind": "plan.estimate", "max_iter": 2.5})) == []
+        assert (
+            _counted(
+                _sample(
+                    n_sweeps=12, warm_start={"kind": "plan.sample", "move": ["d"], "max_iter": 2.5}
+                )
+            )
+            == []
+        )
+        assert (
+            _counted(_sample(n_sweeps=12, warm_start={"kind": "plan.estimate", "max_iter": 2.5}))
+            == []
+        )
         assert _counted(_sample(n_sweeps=12, warm_start="nope")) == []
         # ...and a warm start on a `plan.estimate` run is not a warm start at
         # all: `_ESTIMATE_KEYS` does not take the key, so Task 3's `A1.runs`
         # owns it.
-        assert _counted(_estimate(
-            warm_start={"kind": "plan.estimate", "move": ["d"],
-                        "max_iter": 2.5})) == []
+        assert (
+            _counted(
+                _estimate(warm_start={"kind": "plan.estimate", "move": ["d"], "max_iter": 2.5})
+            )
+            == []
+        )
 
 
 #: The three messages this task WRITES rather than borrows, pinned WHOLE --
@@ -3859,86 +4464,126 @@ class TestTheWarmStartIsTheSameEstimateOneCallAlong:
 #: sentence state the opposite of the truth.  For a validation layer the
 #: message IS the product.
 _COUNT_VERBATIM = [
-    ('a24-the-default-warmup',
-     _sample(n_sweeps=6), 'A24', 'runs[0]',
-     "runs['fit']: this run would keep 3 draw(s) (6 sweeps minus 3 warmup, "
-     "the default n_sweeps // 2), and a split-r_hat needs at least 4 -- two "
-     "halves of two. Below that the mixing diagnostic is not weak, it is "
-     "undefined, and a run whose only convergence evidence is undefined is "
-     "the silent answer this exit exists to refuse. Raise n_sweeps or lower "
-     "warmup (check A24)."),
-    ('a24-an-explicit-warmup',
-     _sample(n_sweeps=8, warmup=5), 'A24', 'runs[0]',
-     "runs['fit']: this run would keep 3 draw(s) (8 sweeps minus 5 warmup), "
-     "and a split-r_hat needs at least 4 -- two halves of two. Below that "
-     "the mixing diagnostic is not weak, it is undefined, and a run whose "
-     "only convergence evidence is undefined is the silent answer this exit "
-     "exists to refuse. Raise n_sweeps or lower warmup (check A24)."),
-    ('a25-the-min-sweeps-pair',
-     _estimate(min_sweeps=9, max_iter=2), 'A25', 'runs[0]',
-     "runs['fit']: min_sweeps: 9 is above max_iter: 2, so the convergence "
-     "test is never consulted; and max_iter: 2 is below 3, the earliest sweep "
-     "at which a verdict can come: the test needs two consecutive "
-     "sweep-to-sweep changes within tol, and the first is sweep 2 against "
-     "sweep 1 -- the run always exhausts max_iter and always refuses, "
-     "including on a model that had already settled. Raise max_iter to at "
-     "least 9, or declare tol: null to run a fixed number of sweeps with no "
-     "verdict (check A25)."),
-    ('a25-the-min-sweeps-pair-with-a-DEFAULTED-floor',
-     _estimate(max_iter=1), 'A25', 'runs[0]',
-     "runs['fit']: min_sweeps, which defaults to 3, is above max_iter: 1, so "
-     "the convergence test is never consulted; and max_iter: 1 is below 3, "
-     "the earliest sweep at which a verdict can come: the test needs two "
-     "consecutive sweep-to-sweep changes within tol, and the first is sweep 2 "
-     "against sweep 1 -- the run always exhausts max_iter and always refuses, "
-     "including on a model that had already settled. Raise max_iter to at "
-     "least 3, or declare tol: null to run a fixed number of sweeps with no "
-     "verdict (check A25)."),
-    ('a25-the-min-sweeps-pair-with-a-DEFAULTED-cap',
-     _estimate(min_sweeps=101), 'A25', 'runs[0]',
-     "runs['fit']: min_sweeps: 101 is above max_iter, which defaults to 100, "
-     "so the convergence test is never consulted -- the run always exhausts "
-     "max_iter and always refuses, including on a model that had already "
-     "settled. Declare a lower min_sweeps, raise max_iter, or declare tol: "
-     "null to run a fixed number of sweeps with no verdict (check A25)."),
-    ('a25-the-min-sweeps-pair-on-the-warm-start',
-     _warmed(min_sweeps=9, max_iter=2), 'A25', 'runs[0].warm_start',
-     "runs['fit']: warm_start.min_sweeps: 9 is above warm_start.max_iter: 2, "
-     "so the convergence test is never consulted; and warm_start.max_iter: 2 "
-     "is below 3, the earliest sweep at which a verdict can come: the test "
-     "needs two consecutive sweep-to-sweep changes within tol, and the first "
-     "is sweep 2 against sweep 1 -- the run always exhausts max_iter and "
-     "always refuses, including on a model that had already settled. Raise "
-     "max_iter to at least 9, or declare warm_start.tol: null to run a fixed "
-     "number of sweeps with no verdict (check A25)."),
-    ('a25-the-cap-below-the-earliest-verdict',
-     _estimate(min_sweeps=1, max_iter=2), 'A25', 'runs[0]',
-     "runs['fit']: max_iter: 2 is below 3, the earliest sweep at which a "
-     "verdict can come: the test needs two consecutive sweep-to-sweep changes "
-     "within tol, and the first is sweep 2 against sweep 1 -- the run always "
-     "exhausts max_iter and always refuses, including on a model that had "
-     "already settled. Raise max_iter to at least 3, or declare tol: null to "
-     "run a fixed number of sweeps with no verdict (check A25)."),
-    ('a25-a-count-with-no-integer-to-round-to',
-     _sample(n_sweeps=float("inf")), 'A25', 'runs[0]',
-     "runs['fit']: n_sweeps: is a whole number; got inf, and there is no "
-     "integer inf rounds to. It reaches this document from ordinary YAML and "
-     "JSON -- .inf, -.inf and .nan are resolved values and 1e400 parses to "
-     "infinity (check A25)."),
-    ('a25-the-check-identifiability-enum',
-     _estimate(check_identifiability="banana"), 'A25', 'runs[0]',
-     "runs['fit']: check_identifiability: is false, 'once' (before the first "
-     "sweep) or 'each_sweep' (at every parameter tuple visited); got "
-     "'banana'. There is no size heuristic here on purpose: the cost is a "
-     "dense Jacobian and an SVD, so which of the three a run wants is a "
-     "decision the document makes (check A25)."),
-    ('a25-the-check-identifiability-enum-on-the-warm-start',
-     _warmed(check_identifiability="banana"), 'A25', 'runs[0].warm_start',
-     "runs['fit']: warm_start.check_identifiability: is false, 'once' "
-     "(before the first sweep) or 'each_sweep' (at every parameter tuple "
-     "visited); got 'banana'. There is no size heuristic here on purpose: "
-     "the cost is a dense Jacobian and an SVD, so which of the three a run "
-     "wants is a decision the document makes (check A25)."),
+    (
+        "a24-the-default-warmup",
+        _sample(n_sweeps=6),
+        "A24",
+        "runs[0]",
+        "runs['fit']: this run would keep 3 draw(s) (6 sweeps minus 3 warmup, "
+        "the default n_sweeps // 2), and a split-r_hat needs at least 4 -- two "
+        "halves of two. Below that the mixing diagnostic is not weak, it is "
+        "undefined, and a run whose only convergence evidence is undefined is "
+        "the silent answer this exit exists to refuse. Raise n_sweeps or lower "
+        "warmup (check A24).",
+    ),
+    (
+        "a24-an-explicit-warmup",
+        _sample(n_sweeps=8, warmup=5),
+        "A24",
+        "runs[0]",
+        "runs['fit']: this run would keep 3 draw(s) (8 sweeps minus 5 warmup), "
+        "and a split-r_hat needs at least 4 -- two halves of two. Below that "
+        "the mixing diagnostic is not weak, it is undefined, and a run whose "
+        "only convergence evidence is undefined is the silent answer this exit "
+        "exists to refuse. Raise n_sweeps or lower warmup (check A24).",
+    ),
+    (
+        "a25-the-min-sweeps-pair",
+        _estimate(min_sweeps=9, max_iter=2),
+        "A25",
+        "runs[0]",
+        "runs['fit']: min_sweeps: 9 is above max_iter: 2, so the convergence "
+        "test is never consulted; and max_iter: 2 is below 3, the earliest sweep "
+        "at which a verdict can come: the test needs two consecutive "
+        "sweep-to-sweep changes within tol, and the first is sweep 2 against "
+        "sweep 1 -- the run always exhausts max_iter and always refuses, "
+        "including on a model that had already settled. Raise max_iter to at "
+        "least 9, or declare tol: null to run a fixed number of sweeps with no "
+        "verdict (check A25).",
+    ),
+    (
+        "a25-the-min-sweeps-pair-with-a-DEFAULTED-floor",
+        _estimate(max_iter=1),
+        "A25",
+        "runs[0]",
+        "runs['fit']: min_sweeps, which defaults to 3, is above max_iter: 1, so "
+        "the convergence test is never consulted; and max_iter: 1 is below 3, "
+        "the earliest sweep at which a verdict can come: the test needs two "
+        "consecutive sweep-to-sweep changes within tol, and the first is sweep 2 "
+        "against sweep 1 -- the run always exhausts max_iter and always refuses, "
+        "including on a model that had already settled. Raise max_iter to at "
+        "least 3, or declare tol: null to run a fixed number of sweeps with no "
+        "verdict (check A25).",
+    ),
+    (
+        "a25-the-min-sweeps-pair-with-a-DEFAULTED-cap",
+        _estimate(min_sweeps=101),
+        "A25",
+        "runs[0]",
+        "runs['fit']: min_sweeps: 101 is above max_iter, which defaults to 100, "
+        "so the convergence test is never consulted -- the run always exhausts "
+        "max_iter and always refuses, including on a model that had already "
+        "settled. Declare a lower min_sweeps, raise max_iter, or declare tol: "
+        "null to run a fixed number of sweeps with no verdict (check A25).",
+    ),
+    (
+        "a25-the-min-sweeps-pair-on-the-warm-start",
+        _warmed(min_sweeps=9, max_iter=2),
+        "A25",
+        "runs[0].warm_start",
+        "runs['fit']: warm_start.min_sweeps: 9 is above warm_start.max_iter: 2, "
+        "so the convergence test is never consulted; and warm_start.max_iter: 2 "
+        "is below 3, the earliest sweep at which a verdict can come: the test "
+        "needs two consecutive sweep-to-sweep changes within tol, and the first "
+        "is sweep 2 against sweep 1 -- the run always exhausts max_iter and "
+        "always refuses, including on a model that had already settled. Raise "
+        "max_iter to at least 9, or declare warm_start.tol: null to run a fixed "
+        "number of sweeps with no verdict (check A25).",
+    ),
+    (
+        "a25-the-cap-below-the-earliest-verdict",
+        _estimate(min_sweeps=1, max_iter=2),
+        "A25",
+        "runs[0]",
+        "runs['fit']: max_iter: 2 is below 3, the earliest sweep at which a "
+        "verdict can come: the test needs two consecutive sweep-to-sweep changes "
+        "within tol, and the first is sweep 2 against sweep 1 -- the run always "
+        "exhausts max_iter and always refuses, including on a model that had "
+        "already settled. Raise max_iter to at least 3, or declare tol: null to "
+        "run a fixed number of sweeps with no verdict (check A25).",
+    ),
+    (
+        "a25-a-count-with-no-integer-to-round-to",
+        _sample(n_sweeps=float("inf")),
+        "A25",
+        "runs[0]",
+        "runs['fit']: n_sweeps: is a whole number; got inf, and there is no "
+        "integer inf rounds to. It reaches this document from ordinary YAML and "
+        "JSON -- .inf, -.inf and .nan are resolved values and 1e400 parses to "
+        "infinity (check A25).",
+    ),
+    (
+        "a25-the-check-identifiability-enum",
+        _estimate(check_identifiability="banana"),
+        "A25",
+        "runs[0]",
+        "runs['fit']: check_identifiability: is false, 'once' (before the first "
+        "sweep) or 'each_sweep' (at every parameter tuple visited); got "
+        "'banana'. There is no size heuristic here on purpose: the cost is a "
+        "dense Jacobian and an SVD, so which of the three a run wants is a "
+        "decision the document makes (check A25).",
+    ),
+    (
+        "a25-the-check-identifiability-enum-on-the-warm-start",
+        _warmed(check_identifiability="banana"),
+        "A25",
+        "runs[0].warm_start",
+        "runs['fit']: warm_start.check_identifiability: is false, 'once' "
+        "(before the first sweep) or 'each_sweep' (at every parameter tuple "
+        "visited); got 'banana'. There is no size heuristic here on purpose: "
+        "the cost is a dense Jacobian and an SVD, so which of the three a run "
+        "wants is a decision the document makes (check A25).",
+    ),
 ]
 
 
@@ -3948,9 +4593,9 @@ class TestTheCountRefusalsAreThePRODUCT:
     @pytest.mark.parametrize(
         "document, check, where, message",
         [row[1:] for row in _COUNT_VERBATIM],
-        ids=[row[0] for row in _COUNT_VERBATIM])
-    def test_the_message_is_exactly_this(self, document, check, where,
-                                         message):
+        ids=[row[0] for row in _COUNT_VERBATIM],
+    )
+    def test_the_message_is_exactly_this(self, document, check, where, message):
         [found] = _counted(document)
         assert found.check == check
         assert found.where == where
@@ -3964,8 +4609,7 @@ class TestTheCountRefusalsAreThePRODUCT:
         since T-002 added A25's cap-below-the-earliest-verdict clause alone.
         """
         assert {row[2] for row in _COUNT_VERBATIM} == {"A24", "A25"}
-        assert {row[3] for row in _COUNT_VERBATIM} == {"runs[0]",
-                                                       "runs[0].warm_start"}
+        assert {row[3] for row in _COUNT_VERBATIM} == {"runs[0]", "runs[0].warm_start"}
         assert len(_COUNT_VERBATIM) == 10
 
     def test_every_count_finding_carries_its_own_tag(self):
@@ -3974,18 +4618,21 @@ class TestTheCountRefusalsAreThePRODUCT:
         # `_number`'s and `_whole`'s both end in a period of their own, so
         # `f"{refusal} (check A25)"` reads "... got 0. (check A25)" and stops
         # mid-sentence.
-        documents = [_estimate(max_iter=2.5), _sample(n_sweeps=6),
-                     _estimate(min_sweeps=9, max_iter=2),
-                     _estimate(max_iter=1),
-                     _sample(n_sweeps=float("inf")),
-                     _estimate(check_identifiability="banana"),
-                     _warmed(solve_tol=-1.0), _chain(num_samples=0),
-                     preflight_document(
-                         inference={"parameters": PRIORED,
-                                    "npe": {"bank": {"n_simulations": 0}}},
-                         runs=[{"name": "a", "kind": "npe"}])]
-        found = [one for document in documents
-                 for one in _counted(document)]
+        documents = [
+            _estimate(max_iter=2.5),
+            _sample(n_sweeps=6),
+            _estimate(min_sweeps=9, max_iter=2),
+            _estimate(max_iter=1),
+            _sample(n_sweeps=float("inf")),
+            _estimate(check_identifiability="banana"),
+            _warmed(solve_tol=-1.0),
+            _chain(num_samples=0),
+            preflight_document(
+                inference={"parameters": PRIORED, "npe": {"bank": {"n_simulations": 0}}},
+                runs=[{"name": "a", "kind": "npe"}],
+            ),
+        ]
+        found = [one for document in documents for one in _counted(document)]
         assert len(found) == 9
         for one in found:
             assert one.message.endswith(f"(check {one.check})."), one.message
@@ -4008,8 +4655,7 @@ class TestTheCountsAreRegisteredAndReachTheUser:
         # across every registered check and is a function of how many tasks
         # have landed (§3.2(b)).
         report = preflight(_sample(n_sweeps=6, rhat_max=-1.0))
-        mine = [f.check for f in report.refusals()
-                if f.check in ("A24", "A25")]
+        mine = [f.check for f in report.refusals() if f.check in ("A24", "A25")]
         assert mine == ["A25", "A24"]
         assert {"A24", "A25"} <= report.checks()
 
@@ -4076,46 +4722,55 @@ class TestNoHostileDocumentCanAbortTheCounts:
         {"runs": [{"kind": "plan.sample", "n_sweeps": float("inf")}]},
         {"runs": [{"kind": "plan.sample", "n_sweeps": float("-inf")}]},
         {"runs": [{"kind": "plan.sample", "n_sweeps": float("nan")}]},
-        {"runs": [{"kind": "plan.sample", "n_sweeps": 12,
-                   "warmup": float("inf")}]},
-        {"runs": [{"kind": "plan.sample", "n_sweeps": 12,
-                   "rhat_max": float("nan")}]},
+        {"runs": [{"kind": "plan.sample", "n_sweeps": 12, "warmup": float("inf")}]},
+        {"runs": [{"kind": "plan.sample", "n_sweeps": 12, "rhat_max": float("nan")}]},
         {"runs": [{"kind": "plan.estimate", "max_iter": float("nan")}]},
-        {"runs": [{"kind": "plan.estimate", "min_sweeps": float("inf"),
-                   "max_iter": float("inf")}]},
+        {"runs": [{"kind": "plan.estimate", "min_sweeps": float("inf"), "max_iter": float("inf")}]},
         {"runs": [{"kind": "nuts", "num_samples": float("inf")}]},
-        {"runs": [{"kind": "plan.sample", "n_sweeps": 12,
-                   "warm_start": {"kind": "plan.estimate", "move": ["d"],
-                                  "max_iter": float("nan")}}]},
+        {
+            "runs": [
+                {
+                    "kind": "plan.sample",
+                    "n_sweeps": 12,
+                    "warm_start": {
+                        "kind": "plan.estimate",
+                        "move": ["d"],
+                        "max_iter": float("nan"),
+                    },
+                }
+            ]
+        },
         {"inference": {"npe": {"bank": {"n_simulations": float("inf")}}}},
         {"runs": [{"kind": "plan.sample", "n_sweeps": 6, "warmup": True}]},
         {"runs": [{"kind": "plan.sample", "n_sweeps": 6, "warmup": "two"}]},
-        {"runs": [{"kind": "plan.sample", "n_sweeps": 6,
-                   "rhat_max": {"a": 1}}]},
-        {"runs": [{"kind": "plan.estimate", "min_sweeps": "nine",
-                   "max_iter": 2}]},
-        {"runs": [{"kind": "plan.estimate", "min_sweeps": 9,
-                   "max_iter": "two"}]},
-        {"runs": [{"kind": "plan.estimate", "min_sweeps": True,
-                   "max_iter": True}]},
-        {"runs": [{"kind": "plan.estimate", "min_sweeps": [9],
-                   "max_iter": [2]}]},
-        {"runs": [{"kind": "plan.estimate", "tol": {"a": 1},
-                   "min_sweeps": 9, "max_iter": 2}]},
-        {"runs": [{"kind": "plan.estimate",
-                   "check_identifiability": ["once"]}]},
-        {"runs": [{"kind": "plan.estimate",
-                   "check_identifiability": {"once": 1}}]},
+        {"runs": [{"kind": "plan.sample", "n_sweeps": 6, "rhat_max": {"a": 1}}]},
+        {"runs": [{"kind": "plan.estimate", "min_sweeps": "nine", "max_iter": 2}]},
+        {"runs": [{"kind": "plan.estimate", "min_sweeps": 9, "max_iter": "two"}]},
+        {"runs": [{"kind": "plan.estimate", "min_sweeps": True, "max_iter": True}]},
+        {"runs": [{"kind": "plan.estimate", "min_sweeps": [9], "max_iter": [2]}]},
+        {"runs": [{"kind": "plan.estimate", "tol": {"a": 1}, "min_sweeps": 9, "max_iter": 2}]},
+        {"runs": [{"kind": "plan.estimate", "check_identifiability": ["once"]}]},
+        {"runs": [{"kind": "plan.estimate", "check_identifiability": {"once": 1}}]},
         {"runs": [{"kind": "plan.estimate", "check_identifiability": 0}]},
         {"runs": [{"kind": "nuts", "num_samples": ["2"]}]},
         {"runs": [{"kind": "plan.sample", "warm_start": "nope"}]},
         {"runs": [{"kind": "plan.sample", "warm_start": 7}]},
-        {"runs": [{"kind": "plan.sample",
-                   "warm_start": {"kind": "plan.estimate", "move": ["d"],
-                                  "max_iter": ["2"]}}]},
-        {"runs": [{"kind": "plan.sample",
-                   "warm_start": {"kind": "plan.estimate", "move": "d",
-                                  "max_iter": 2.5}}]},
+        {
+            "runs": [
+                {
+                    "kind": "plan.sample",
+                    "warm_start": {"kind": "plan.estimate", "move": ["d"], "max_iter": ["2"]},
+                }
+            ]
+        },
+        {
+            "runs": [
+                {
+                    "kind": "plan.sample",
+                    "warm_start": {"kind": "plan.estimate", "move": "d", "max_iter": 2.5},
+                }
+            ]
+        },
         {"runs": [{"kind": "plan.sample", "name": 7, "n_sweeps": 6}]},
         {"runs": {"kind": "plan.sample", "n_sweeps": 6}},
     ]
@@ -4127,20 +4782,17 @@ class TestNoHostileDocumentCanAbortTheCounts:
     #: and never see the freeze -- and is pinned refusing, whole-string, in
     #: ``test_the_evidence_freeze_refuses_it_first``.
     _FROZEN = [
-        {"runs": [{"kind": "plan.estimate",
-                   "max_iter": decimal.Decimal("2.5")}]},
+        {"runs": [{"kind": "plan.estimate", "max_iter": decimal.Decimal("2.5")}]},
     ]
 
-    @pytest.mark.parametrize("patch", HOSTILE + _FROZEN,
-                             ids=[str(index) for index in
-                                  range(len(HOSTILE) + len(_FROZEN))])
+    @pytest.mark.parametrize(
+        "patch", HOSTILE + _FROZEN, ids=[str(index) for index in range(len(HOSTILE) + len(_FROZEN))]
+    )
     def test_the_check_returns_findings_and_raises_nothing(self, patch):
         for finding in _counted(_hostile_document(patch)):
             assert finding.check in ("A24", "A25")
 
-    @pytest.mark.parametrize("patch", HOSTILE,
-                             ids=[str(index) for index in
-                                  range(len(HOSTILE))])
+    @pytest.mark.parametrize("patch", HOSTILE, ids=[str(index) for index in range(len(HOSTILE))])
     def test_the_whole_pass_survives_each_of_them(self, patch):
         # `_check_where` runs OUTSIDE the per-check `try`, so a `where` built
         # from user text could kill the pass even when the check returns
@@ -4157,8 +4809,8 @@ class TestNoHostileDocumentCanAbortTheCounts:
         with pytest.raises(ConfigError) as caught:
             preflight(_hostile_document(patch))
         assert str(caught.value) == (
-            "initial_merge document: unsupported evidence leaf type "
-            "Decimal.")
+            "initial_merge document: unsupported evidence leaf type Decimal."
+        )
 
 
 # --- Task 10: the (kind, noise.kind) table ---------------------------------
@@ -4171,11 +4823,14 @@ class TestNoHostileDocumentCanAbortTheCounts:
 #: twice, which is what makes an "and nothing else" assertion stop meaning
 #: anything.
 _T10_RUN = {
-    "conjugate.wiener": {"kind": "conjugate.wiener", "width": "none",
-                         "names": ["g"]},
+    "conjugate.wiener": {"kind": "conjugate.wiener", "width": "none", "names": ["g"]},
     "condition": {"kind": "condition", "names": ["g"]},
-    "conjugate.gcr": {"kind": "conjugate.gcr", "names": ["g"], "n_draws": 4,
-                      "seed": {"from": "runtime.seeds.draws"}},
+    "conjugate.gcr": {
+        "kind": "conjugate.gcr",
+        "names": ["g"],
+        "n_draws": 4,
+        "seed": {"from": "runtime.seeds.draws"},
+    },
     "conjugate.gls": {"name": "gls", "kind": "conjugate.gls", "names": ["g"]},
     "npe": {"name": "amortized", "kind": "npe"},
     "forward": {"kind": "forward"},
@@ -4198,14 +4853,13 @@ def _t10_document(noise, *runs, **sections):
     below is single-run.
     """
     inference = {"noise": noise}
-    if any(isinstance(one, dict) and one.get("kind") == "npe"
-           for one in runs):
-        inference["npe"] = {name: dict(body)
-                            for name, body in NPE_SECTION.items()}
+    if any(isinstance(one, dict) and one.get("kind") == "npe" for one in runs):
+        inference["npe"] = {name: dict(body) for name, body in NPE_SECTION.items()}
     return preflight_document(
         inference=inference,
         runs=[dict(one) if isinstance(one, dict) else one for one in runs],
-        **sections)
+        **sections,
+    )
 
 
 def _t10_call_graph() -> dict[str, set[str]]:
@@ -4238,8 +4892,7 @@ def _t10_call_graph() -> dict[str, set[str]]:
 
 def _t10_callers_of(callee: str) -> set[str]:
     """The functions that call ``callee`` directly."""
-    return {name for name, named in _t10_call_graph().items()
-            if callee in named and name != callee}
+    return {name for name, named in _t10_call_graph().items() if callee in named and name != callee}
 
 
 def _t10_reaching(callee: str) -> set[str]:
@@ -4247,8 +4900,7 @@ def _t10_reaching(callee: str) -> set[str]:
     calls = _t10_call_graph()
     found = {callee}
     while True:
-        grown = found | {name for name, named in calls.items()
-                         if named & found}
+        grown = found | {name for name, named in calls.items() if named & found}
         if grown == found:
             return found
         found = grown
@@ -4287,8 +4939,7 @@ class TestTheDecidedTable:
         # a four-run document's author to the one line that is shared by all
         # four, which is exactly the attribution failure 2C paid for seven
         # times.  The message must still name the noise, so both are pinned.
-        [found] = _t10_decided(
-            _t10_document(RADIOMETER, _T10_RUN["conjugate.wiener"]))
+        [found] = _t10_decided(_t10_document(RADIOMETER, _T10_RUN["conjugate.wiener"]))
         assert found.check == "A27"
         assert found.severity == REFUSE
         assert found.where == "runs[0].kind"
@@ -4305,8 +4956,7 @@ class TestTheDecidedTable:
         # test_config_conjugate_shared.py::test_condition_is_the_other_kind_that_decides_its_sigma_here)  # noqa: E501
         # records what a missing
         # condition costs at P3: a package TypeError instead of the refusal.
-        [found] = _t10_decided(
-            _t10_document(RADIOMETER, _T10_RUN["condition"]))
+        [found] = _t10_decided(_t10_document(RADIOMETER, _T10_RUN["condition"]))
         assert found.check == "A27"
         assert "kind: condition takes a DECIDED sigma" in found.message
 
@@ -4318,46 +4968,44 @@ class TestTheDecidedTable:
         # matches on exactly it.  A gcr user sent
         # to `kind: conjugate.gls` is being told to change exits when one key
         # would do.
-        [found] = _t10_decided(
-            _t10_document(RADIOMETER, _T10_RUN["conjugate.gcr"]))
+        [found] = _t10_decided(_t10_document(RADIOMETER, _T10_RUN["conjugate.gcr"]))
         assert found.check == "A27"
         assert "noise_from: gls" in found.message
         assert "radiometer_frozen" in found.message
         assert "conjugate.gls" not in found.message
 
-    def test_gcr_declaring_noise_from_gls_is_the_document_the_route_serves(
-            self):
+    def test_gcr_declaring_noise_from_gls_is_the_document_the_route_serves(self):
         # Kills: the check firing on gcr unconditionally.  Measured, that
         # document RUNS today -- test_gls_closes_the_radiometer_dead_end
         # (test_config_exits_gcr.py::TestGcrGrammar.test_noise_from_is_declared_or_gls) pins its
         # numbers -- so an
         # unconditional gcr branch is a regression on a passing suite, and a
         # test that only asserted the positive case would not see it.
-        assert _t10_decided(_t10_document(
-            RADIOMETER,
-            {**_T10_RUN["conjugate.gcr"], "noise_from": "gls"})) == []
+        assert (
+            _t10_decided(
+                _t10_document(RADIOMETER, {**_T10_RUN["conjugate.gcr"], "noise_from": "gls"})
+            )
+            == []
+        )
 
-    def test_gcr_declaring_noise_from_declared_is_the_same_as_omitting_it(
-            self):
+    def test_gcr_declaring_noise_from_declared_is_the_same_as_omitting_it(self):
         # The other half of the branch, and the one an implementation reading
         # `entry.get("noise_from") != "gls"` gets right by accident: the
         # package's default is the WORD `declared` (conjugate.py::_wiener_plan), so a
         # document that writes it out must be refused exactly as one that
         # leaves it out is.  Kills `if "noise_from" in entry`.
-        [found] = _t10_decided(_t10_document(
-            RADIOMETER,
-            {**_T10_RUN["conjugate.gcr"], "noise_from": "declared"}))
+        [found] = _t10_decided(
+            _t10_document(RADIOMETER, {**_T10_RUN["conjugate.gcr"], "noise_from": "declared"})
+        )
         assert "noise_from: gls" in found.message
 
-    def test_gls_on_a_frozen_sigma_is_A28_naming_the_conjugate_alternative(
-            self):
+    def test_gls_on_a_frozen_sigma_is_A28_naming_the_conjugate_alternative(self):
         # Kills: A28 keyed on `radiometer` rather than `radiometer_frozen` --
         # the two words differ by a suffix and the mirror is easy to write
         # backwards.  Under `radiometer` this exact document is the one gls
         # exists for, so the swap turns a working document into a refusal and
         # a broken one into a run.
-        [found] = _t10_decided(
-            _t10_document(FROZEN, _T10_RUN["conjugate.gls"]))
+        [found] = _t10_decided(_t10_document(FROZEN, _T10_RUN["conjugate.gls"]))
         assert found.check == "A28"
         assert found.message.startswith("runs['gls']: ")
         assert "radiometer_frozen" in found.message
@@ -4387,8 +5035,7 @@ class TestTheDecidedTable:
         # its DECLARED route, which is the one that takes the array; the gls
         # route is the test below.
         for kind in ("conjugate.wiener", "condition", "conjugate.gcr"):
-            assert _t10_decided(_t10_document(FROZEN, _T10_RUN[kind])) == [], (
-                kind)
+            assert _t10_decided(_t10_document(FROZEN, _T10_RUN[kind])) == [], kind
 
     def test_gcr_on_the_gls_route_is_the_THIRD_reader_of_the_rule(self):
         """The route this plan's own §6 table missed, found by measurement.
@@ -4406,8 +5053,9 @@ class TestTheDecidedTable:
         firing on the DECLARED route as well, which would refuse the working
         document the test above pins.
         """
-        [found] = _t10_decided(_t10_document(
-            FROZEN, {**_T10_RUN["conjugate.gcr"], "noise_from": "gls"}))
+        [found] = _t10_decided(
+            _t10_document(FROZEN, {**_T10_RUN["conjugate.gcr"], "noise_from": "gls"})
+        )
         assert found.check == "A28"
         assert found.where == "runs[0].kind"
         assert "Drop noise_from: gls" in found.message
@@ -4436,8 +5084,9 @@ class TestTheDecidedTable:
         and none can reach a frozen sigma under ``noise_from: gls`` -- and
         this test is what turns that from luck into a checked property.
         """
-        [found] = _t10_decided(_t10_document(
-            FROZEN, {**_T10_RUN["conjugate.gcr"], "noise_from": "gls"}))
+        [found] = _t10_decided(
+            _t10_document(FROZEN, {**_T10_RUN["conjugate.gcr"], "noise_from": "gls"})
+        )
         assert "check A27" in found.message
         assert found.check == "A28"
         assert found.message.endswith("(check A28).")
@@ -4449,24 +5098,20 @@ class TestTheDecidedTable:
             assert one.check == "A27"
             assert "check A28" not in one.message
 
-    def test_a_radiometer_under_the_two_rule_readers_is_what_they_are_for(
-            self):
+    def test_a_radiometer_under_the_two_rule_readers_is_what_they_are_for(self):
         # The mirror, and it is not decoration: `gls_document()`'s own
         # default noise is RADIOMETER under `kind: conjugate.gls` (measured),
         # so an A27 that walked runs without consulting _T10_DECIDES_SIGMA
         # would refuse a document five modules of this suite run today.
         for kind in ("conjugate.gls", "npe"):
-            assert _t10_decided(_t10_document(RADIOMETER,
-                                              _T10_RUN[kind])) == [], kind
+            assert _t10_decided(_t10_document(RADIOMETER, _T10_RUN[kind])) == [], kind
 
     def test_a_homoscedastic_document_is_refused_by_neither(self):
         # Kills: `decided` mis-filed as `iterated`, which would refuse every
         # conjugate document this suite already runs -- loud, but only if
         # something asserts the negative.
-        for kind in ("conjugate.wiener", "condition", "conjugate.gcr",
-                     "conjugate.gls", "npe"):
-            assert _t10_decided(_t10_document(HOMOSCEDASTIC,
-                                              _T10_RUN[kind])) == [], kind
+        for kind in ("conjugate.wiener", "condition", "conjugate.gcr", "conjugate.gls", "npe"):
+            assert _t10_decided(_t10_document(HOMOSCEDASTIC, _T10_RUN[kind])) == [], kind
 
     def test_kind_none_is_left_to_the_shared_refusal(self):
         # Kills: `absent` falling into A28's branch, which would tell a
@@ -4477,8 +5122,7 @@ class TestTheDecidedTable:
         # exists to prevent, one phase
         # earlier.  Both ids, because `absent` is adjacent to both rows.
         for kind in ("conjugate.wiener", "conjugate.gls", "npe"):
-            assert _t10_decided(_t10_document({"kind": "none"},
-                                              _T10_RUN[kind])) == [], kind
+            assert _t10_decided(_t10_document({"kind": "none"}, _T10_RUN[kind])) == [], kind
 
     def test_an_unknown_noise_kind_is_left_to_build_noise(self):
         # Kills: `_T10_NOISE_SHAPE[kind]` unguarded.  A check that RAISES
@@ -4486,8 +5130,7 @@ class TestTheDecidedTable:
         # and a KeyError is not even a refusal a user can read.  `build_noise`
         # (sections/noise.py::_a26_sigma_axis_problem) names the vocabulary; this stands down for
         # it.
-        assert _t10_decided(_t10_document(
-            {"kind": "banana"}, _T10_RUN["conjugate.wiener"])) == []
+        assert _t10_decided(_t10_document({"kind": "banana"}, _T10_RUN["conjugate.wiener"])) == []
 
     def test_a_noise_wrong_in_its_GRAMMAR_too_still_hears_A27(self):
         """The one ordering this hoist REVERSES, pinned so the docstring that
@@ -4521,13 +5164,12 @@ class TestTheDecidedTable:
         in another module cannot change what it sees.  The paragraph above is
         the only thing Plan 3B had to bring up to date.
         """
-        broken = {key: value for key, value in RADIOMETER.items()
-                  if key != "include_logdet"}
-        [found] = _t10_decided(
-            _t10_document(broken, _T10_RUN["conjugate.wiener"]))
+        broken = {key: value for key, value in RADIOMETER.items() if key != "include_logdet"}
+        [found] = _t10_decided(_t10_document(broken, _T10_RUN["conjugate.wiener"]))
         assert found.check == "A27"
-        [stray] = _t10_decided(_t10_document({**RADIOMETER, "banana": 1},
-                                             _T10_RUN["conjugate.wiener"]))
+        [stray] = _t10_decided(
+            _t10_document({**RADIOMETER, "banana": 1}, _T10_RUN["conjugate.wiener"])
+        )
         assert stray.check == "A27"
 
     def test_an_absent_or_malformed_noise_section_decides_nothing(self):
@@ -4535,8 +5177,7 @@ class TestTheDecidedTable:
         # MAPPING (Task 4's measurement), and `inference.noise` is one level
         # further in than that guarantee reaches.
         for noise in (None, "nope", {}, {"kind": None}):
-            assert _t10_decided(_t10_document(
-                noise, _T10_RUN["conjugate.wiener"])) == [], noise
+            assert _t10_decided(_t10_document(noise, _T10_RUN["conjugate.wiener"])) == [], noise
 
     def test_the_run_name_is_the_one_the_executors_use(self):
         # Kills: the index form, and kills re-deriving the name here rather
@@ -4546,11 +5187,11 @@ class TestTheDecidedTable:
         # asserts the
         # executor's prefix literally -- a pass that wrote runs[0] would put
         # two different spellings of the same run in front of one user.
-        [unnamed] = _t10_decided(
-            _t10_document(RADIOMETER, _T10_RUN["conjugate.wiener"]))
+        [unnamed] = _t10_decided(_t10_document(RADIOMETER, _T10_RUN["conjugate.wiener"]))
         assert unnamed.message.startswith("runs['conjugate.wiener']: ")
-        [named] = _t10_decided(_t10_document(
-            RADIOMETER, {**_T10_RUN["conjugate.wiener"], "name": "fit"}))
+        [named] = _t10_decided(
+            _t10_document(RADIOMETER, {**_T10_RUN["conjugate.wiener"], "name": "fit"})
+        )
         assert named.message.startswith("runs['fit']: ")
 
     def test_a_kind_that_reads_neither_shape_is_refused_by_neither(self):
@@ -4558,17 +5199,16 @@ class TestTheDecidedTable:
         # neither `_T10_DECIDES_SIGMA` nor `_T10_ITERATES`, so a radiometer
         # beside it decides nothing -- and a check that walked runs without
         # consulting either set would refuse it.
-        assert _t10_decided(_t10_document(RADIOMETER,
-                                          _T10_RUN["forward"])) == []
+        assert _t10_decided(_t10_document(RADIOMETER, _T10_RUN["forward"])) == []
 
     def test_each_run_is_blamed_by_its_own_index_and_its_own_name(self):
         # Attribution, per index.  Hard-coding an index or reading
         # `_runs(document)[0]` survives every single-run document above; this
         # is the loop test Task 3's carry-forward asks of every task that
         # writes one.  The two runs earn DIFFERENT ids, so a swap is visible.
-        found = _t10_decided(_t10_document(
-            FROZEN, _T10_RUN["forward"], _T10_RUN["conjugate.gls"],
-            _T10_RUN["npe"]))
+        found = _t10_decided(
+            _t10_document(FROZEN, _T10_RUN["forward"], _T10_RUN["conjugate.gls"], _T10_RUN["npe"])
+        )
         assert [one.where for one in found] == ["runs[1].kind", "runs[2].kind"]
         assert [one.check for one in found] == ["A28", "A28"]
         assert found[0].message.startswith("runs['gls']: ")
@@ -4576,12 +5216,10 @@ class TestTheDecidedTable:
 
     @pytest.mark.parametrize(
         "malformed",
-        [None, "conjugate.wiener", {"name": "draft"}, {"kind": 7},
-         {"kind": ["conjugate.wiener"]}],
-        ids=["null", "a-bare-string", "no-kind", "an-int-kind",
-             "an-unhashable-kind"])
-    def test_a_malformed_FIRST_run_does_not_silence_the_ones_after_it(
-            self, malformed):
+        [None, "conjugate.wiener", {"name": "draft"}, {"kind": 7}, {"kind": ["conjugate.wiener"]}],
+        ids=["null", "a-bare-string", "no-kind", "an-int-kind", "an-unhashable-kind"],
+    )
+    def test_a_malformed_FIRST_run_does_not_silence_the_ones_after_it(self, malformed):
         """The loop guard's control flow, which nothing else here can see.
 
         ``continue`` -> ``break`` on ``if not isinstance(exit_kind, str)``
@@ -4597,8 +5235,7 @@ class TestTheDecidedTable:
         per-index test; this is the half of that ask a well-formed loop
         cannot discharge.
         """
-        [found] = _t10_decided(_t10_document(
-            RADIOMETER, malformed, _T10_RUN["conjugate.wiener"]))
+        [found] = _t10_decided(_t10_document(RADIOMETER, malformed, _T10_RUN["conjugate.wiener"]))
         assert found.check == "A27"
         assert found.where == "runs[1].kind"
         assert found.message.startswith("runs['conjugate.wiener']: ")
@@ -4624,8 +5261,9 @@ class TestTheDecidedTable:
         than being captured is CORRECT, because ``expect: refuse`` is for a
         run that fails when it RUNS.
         """
-        [found] = _t10_decided(_t10_document(
-            FROZEN, {**_T10_RUN["conjugate.gls"], "expect": "refuse"}))
+        [found] = _t10_decided(
+            _t10_document(FROZEN, {**_T10_RUN["conjugate.gls"], "expect": "refuse"})
+        )
         assert found.check == "A28"
 
     def test_the_noise_kinds_are_the_ones_build_noise_accepts(self):
@@ -4673,10 +5311,8 @@ class TestTheDecidedTable:
         )
 
         flags = jnp.zeros((2, 2), dtype=bool)
-        constant = FlaggedNoise(HomoscedasticNoise(sigma=jnp.asarray(0.05)),
-                                flags)
-        iterated = FlaggedNoise(
-            RadiometerNoise(channel_width=1.0e6, integration_time=2.0), flags)
+        constant = FlaggedNoise(HomoscedasticNoise(sigma=jnp.asarray(0.05)), flags)
+        iterated = FlaggedNoise(RadiometerNoise(channel_width=1.0e6, integration_time=2.0), flags)
         assert constant.depends_on_prediction is False
         assert iterated.depends_on_prediction is True
 
@@ -4716,8 +5352,15 @@ class TestTheDecidedTable:
         the decision point: does `_T10_ITERATES` need another member?
         """
         assert _t10_reaching("_decided_model") == {
-            "_decided_model", "_draw_sigma", "_gcr_product", "_gls_result",
-            "_run_conjugate", "_run_gls", "_run_npe", "_simulate_bank"}
+            "_decided_model",
+            "_draw_sigma",
+            "_gcr_product",
+            "_gls_result",
+            "_run_conjugate",
+            "_run_gls",
+            "_run_npe",
+            "_simulate_bank",
+        }
         # The two functions that hold the call sites, and their own callers:
         # this is the edge the module-stem form cannot see.
         assert _t10_callers_of("_gls_result") == {"_draw_sigma", "_run_gls"}
@@ -4731,15 +5374,13 @@ class TestTheDecidedTable:
         # Task 3 shipped the equivalent over its five checks and the
         # carry-forward asks every later task for its own.  Kills a tail
         # appended to three branches of four.
-        documents = [_t10_document(RADIOMETER, _T10_RUN[kind])
-                     for kind in ("conjugate.wiener", "condition",
-                                  "conjugate.gcr")]
-        documents += [_t10_document(FROZEN, _T10_RUN[kind])
-                      for kind in ("conjugate.gls", "npe")]
-        documents.append(_t10_document(
-            FROZEN, {**_T10_RUN["conjugate.gcr"], "noise_from": "gls"}))
-        found = [one for document in documents
-                 for one in _t10_decided(document)]
+        documents = [
+            _t10_document(RADIOMETER, _T10_RUN[kind])
+            for kind in ("conjugate.wiener", "condition", "conjugate.gcr")
+        ]
+        documents += [_t10_document(FROZEN, _T10_RUN[kind]) for kind in ("conjugate.gls", "npe")]
+        documents.append(_t10_document(FROZEN, {**_T10_RUN["conjugate.gcr"], "noise_from": "gls"}))
+        found = [one for document in documents for one in _t10_decided(document)]
         assert len(found) == 6
         for one in found:
             assert one.check in ("A27", "A28")
@@ -4754,73 +5395,102 @@ class TestTheDecidedTable:
 #: layer the message IS the product, and this task's whole subject is a
 #: message that was fluent, plausible and false.
 _DECIDED_VERBATIM = [
-    ('a27-wiener',
-     RADIOMETER, _T10_RUN["conjugate.wiener"], 'A27', 'runs[0].kind',
-     "runs['conjugate.wiener']: kind: conjugate.wiener takes a DECIDED sigma "
-     "array, and inference.noise.kind: radiometer makes sigma a function of "
-     "the prediction -- which a conjugate solve has not got, because the "
-     "prediction is what it solves for (linear.py:1031). Two routes run this "
-     "noise: kind: conjugate.gls iterates the covariance it implies, or "
-     "inference.noise.kind: radiometer_frozen decides the sigma once and "
-     "keeps this exit (check A27)."),
-    ('a27-condition',
-     RADIOMETER, _T10_RUN["condition"], 'A27', 'runs[0].kind',
-     "runs['condition']: kind: condition takes a DECIDED sigma array, and "
-     "inference.noise.kind: radiometer makes sigma a function of the "
-     "prediction -- which a conjugate solve has not got, because the "
-     "prediction is what it solves for (linear.py:1031). Two routes run this "
-     "noise: kind: conjugate.gls iterates the covariance it implies, or "
-     "inference.noise.kind: radiometer_frozen decides the sigma once and "
-     "keeps this exit (check A27)."),
-    ('a27-gcr',
-     RADIOMETER, _T10_RUN["conjugate.gcr"], 'A27', 'runs[0].kind',
-     "runs['conjugate.gcr']: inference.noise.kind: radiometer has a sigma "
-     "that depends on the prediction, and a conjugate draw has no prediction "
-     "to evaluate it at -- the prediction is what it draws. Declare "
-     "noise_from: gls, which runs iterative_gls first and draws at the "
-     "covariance it converges to, or inference.noise.kind: radiometer_frozen, "
-     "which decides one sigma array up front (check A27)."),
-    ('a28-gls',
-     FROZEN, _T10_RUN["conjugate.gls"], 'A28', 'runs[0].kind',
-     # `be2027b`'s words: *"as a model"* and *"has no fixed point to
-     # iterate"*.  A MOVED check keeps its message (plan §2.3) and this is
-     # not one of A39's four designated corrections; the `npe` row below is
-     # the one §1 licenses, and it is the only A28 row whose words changed.
-     "runs['gls']: kind: conjugate.gls solves for the covariance a "
-     "PREDICTION-DEPENDENT sigma implies, so it reads inference.noise as a "
-     "model; inference.noise.kind: radiometer_frozen decides its sigma into "
-     "an array before any run sees it, and a decided array has no fixed "
-     "point to iterate. "
-     "Declare inference.noise.kind: radiometer to iterate the rule, or run "
-     "kind: conjugate.wiener, which is what a decided sigma wants "
-     "(check A28)."),
-    ('a28-gcr-on-the-gls-route',
-     FROZEN, {**_T10_RUN["conjugate.gcr"], "noise_from": "gls"},
-     'A28', 'runs[0].kind',
-     # The same two fragments as the gls row, and for the same reason: this
-     # route INHERITED that whole sentence at `be2027b`, so its shared middle
-     # is a move.  What Task 10 changed here is the two advice clauses, which
-     # is the sibling-loop fix `e247b38` sanctions.
-     "runs['conjugate.gcr']: kind: conjugate.gcr under noise_from: gls runs "
-     "iterative_gls first and draws at the covariance it converges to, so it "
-     "reads inference.noise as a model; inference.noise.kind: "
-     "radiometer_frozen decides its sigma into an array before any run sees "
-     "it, and a decided array has no fixed point to iterate. Drop "
-     "noise_from: gls: the "
-     "declared route draws at that array directly, which is what a frozen "
-     "sigma is for -- and noise_from: gls is check A27's answer for "
-     "inference.noise.kind: radiometer, so declaring both asks a reweighting "
-     "to find a fixed point in a number that is already fixed (check A28)."),
-    ('a28-npe',
-     FROZEN, _T10_RUN["npe"], 'A28', 'runs[0].kind',
-     "runs['amortized']: kind: npe SIMULATES a bank of (theta, data) pairs "
-     "and draws the noise for each one, so it reads inference.noise as a "
-     "RULE; inference.noise.kind: radiometer_frozen decides its sigma into an "
-     "array before any run sees it, and a decided array is not a rule. "
-     "Declare inference.noise.kind: radiometer or homoscedastic -- either is "
-     "a rule simulate_pairs can draw from. There is no amortized-posterior "
-     "exit that takes a decided array, so the sigma is what has to change "
-     "(check A28)."),
+    (
+        "a27-wiener",
+        RADIOMETER,
+        _T10_RUN["conjugate.wiener"],
+        "A27",
+        "runs[0].kind",
+        "runs['conjugate.wiener']: kind: conjugate.wiener takes a DECIDED sigma "
+        "array, and inference.noise.kind: radiometer makes sigma a function of "
+        "the prediction -- which a conjugate solve has not got, because the "
+        "prediction is what it solves for (linear.py:1031). Two routes run this "
+        "noise: kind: conjugate.gls iterates the covariance it implies, or "
+        "inference.noise.kind: radiometer_frozen decides the sigma once and "
+        "keeps this exit (check A27).",
+    ),
+    (
+        "a27-condition",
+        RADIOMETER,
+        _T10_RUN["condition"],
+        "A27",
+        "runs[0].kind",
+        "runs['condition']: kind: condition takes a DECIDED sigma array, and "
+        "inference.noise.kind: radiometer makes sigma a function of the "
+        "prediction -- which a conjugate solve has not got, because the "
+        "prediction is what it solves for (linear.py:1031). Two routes run this "
+        "noise: kind: conjugate.gls iterates the covariance it implies, or "
+        "inference.noise.kind: radiometer_frozen decides the sigma once and "
+        "keeps this exit (check A27).",
+    ),
+    (
+        "a27-gcr",
+        RADIOMETER,
+        _T10_RUN["conjugate.gcr"],
+        "A27",
+        "runs[0].kind",
+        "runs['conjugate.gcr']: inference.noise.kind: radiometer has a sigma "
+        "that depends on the prediction, and a conjugate draw has no prediction "
+        "to evaluate it at -- the prediction is what it draws. Declare "
+        "noise_from: gls, which runs iterative_gls first and draws at the "
+        "covariance it converges to, or inference.noise.kind: radiometer_frozen, "
+        "which decides one sigma array up front (check A27).",
+    ),
+    (
+        "a28-gls",
+        FROZEN,
+        _T10_RUN["conjugate.gls"],
+        "A28",
+        "runs[0].kind",
+        # `be2027b`'s words: *"as a model"* and *"has no fixed point to
+        # iterate"*.  A MOVED check keeps its message (plan §2.3) and this is
+        # not one of A39's four designated corrections; the `npe` row below is
+        # the one §1 licenses, and it is the only A28 row whose words changed.
+        "runs['gls']: kind: conjugate.gls solves for the covariance a "
+        "PREDICTION-DEPENDENT sigma implies, so it reads inference.noise as a "
+        "model; inference.noise.kind: radiometer_frozen decides its sigma into "
+        "an array before any run sees it, and a decided array has no fixed "
+        "point to iterate. "
+        "Declare inference.noise.kind: radiometer to iterate the rule, or run "
+        "kind: conjugate.wiener, which is what a decided sigma wants "
+        "(check A28).",
+    ),
+    (
+        "a28-gcr-on-the-gls-route",
+        FROZEN,
+        {**_T10_RUN["conjugate.gcr"], "noise_from": "gls"},
+        "A28",
+        "runs[0].kind",
+        # The same two fragments as the gls row, and for the same reason: this
+        # route INHERITED that whole sentence at `be2027b`, so its shared middle
+        # is a move.  What Task 10 changed here is the two advice clauses, which
+        # is the sibling-loop fix `e247b38` sanctions.
+        "runs['conjugate.gcr']: kind: conjugate.gcr under noise_from: gls runs "
+        "iterative_gls first and draws at the covariance it converges to, so it "
+        "reads inference.noise as a model; inference.noise.kind: "
+        "radiometer_frozen decides its sigma into an array before any run sees "
+        "it, and a decided array has no fixed point to iterate. Drop "
+        "noise_from: gls: the "
+        "declared route draws at that array directly, which is what a frozen "
+        "sigma is for -- and noise_from: gls is check A27's answer for "
+        "inference.noise.kind: radiometer, so declaring both asks a reweighting "
+        "to find a fixed point in a number that is already fixed (check A28).",
+    ),
+    (
+        "a28-npe",
+        FROZEN,
+        _T10_RUN["npe"],
+        "A28",
+        "runs[0].kind",
+        "runs['amortized']: kind: npe SIMULATES a bank of (theta, data) pairs "
+        "and draws the noise for each one, so it reads inference.noise as a "
+        "RULE; inference.noise.kind: radiometer_frozen decides its sigma into an "
+        "array before any run sees it, and a decided array is not a rule. "
+        "Declare inference.noise.kind: radiometer or homoscedastic -- either is "
+        "a rule simulate_pairs can draw from. There is no amortized-posterior "
+        "exit that takes a decided array, so the sigma is what has to change "
+        "(check A28).",
+    ),
 ]
 
 
@@ -4830,9 +5500,9 @@ class TestTheDecidedRefusalsAreThePRODUCT:
     @pytest.mark.parametrize(
         "noise, run, check, where, message",
         [row[1:] for row in _DECIDED_VERBATIM],
-        ids=[row[0] for row in _DECIDED_VERBATIM])
-    def test_the_message_is_exactly_this(self, noise, run, check, where,
-                                         message):
+        ids=[row[0] for row in _DECIDED_VERBATIM],
+    )
+    def test_the_message_is_exactly_this(self, noise, run, check, where, message):
         [found] = _t10_decided(_t10_document(noise, run))
         assert found.check == check
         assert found.where == where
@@ -4850,10 +5520,12 @@ class TestTheDecidedRefusalsAreThePRODUCT:
         """
         assert {row[3] for row in _DECIDED_VERBATIM} == {"A27", "A28"}
         assert len({row[5] for row in _DECIDED_VERBATIM}) == 6
-        assert {row[2]["kind"] for row in _DECIDED_VERBATIM} == (
-            _T10_DECIDES_SIGMA | _T10_ITERATES)
-        assert {row[2].get("noise_from") for row in _DECIDED_VERBATIM
-                if row[2]["kind"] == "conjugate.gcr"} == {None, "gls"}
+        assert {row[2]["kind"] for row in _DECIDED_VERBATIM} == (_T10_DECIDES_SIGMA | _T10_ITERATES)
+        assert {
+            row[2].get("noise_from")
+            for row in _DECIDED_VERBATIM
+            if row[2]["kind"] == "conjugate.gcr"
+        } == {None, "gls"}
 
 
 class TestTheDecidedTableAgreesWithTheACCESSORSItRunsInFrontOf:
@@ -4882,13 +5554,23 @@ class TestTheDecidedTableAgreesWithTheACCESSORSItRunsInFrontOf:
     """
 
     NOISES = ("none", "homoscedastic", "radiometer", "radiometer_frozen")
-    ROUTES = ("conjugate.wiener", "condition", "conjugate.gcr/declared",
-              "conjugate.gcr/gls", "conjugate.gls", "npe")
+    ROUTES = (
+        "conjugate.wiener",
+        "condition",
+        "conjugate.gcr/declared",
+        "conjugate.gcr/gls",
+        "conjugate.gls",
+        "npe",
+    )
 
     @staticmethod
     def _noise(label):
-        return {"none": {"kind": "none"}, "homoscedastic": HOMOSCEDASTIC,
-                "radiometer": RADIOMETER, "radiometer_frozen": FROZEN}[label]
+        return {
+            "none": {"kind": "none"},
+            "homoscedastic": HOMOSCEDASTIC,
+            "radiometer": RADIOMETER,
+            "radiometer_frozen": FROZEN,
+        }[label]
 
     @staticmethod
     def _p3(route, built):
@@ -4925,22 +5607,26 @@ class TestTheDecidedTableAgreesWithTheACCESSORSItRunsInFrontOf:
             if route in ("conjugate.wiener", "condition"):
                 _decided_sigma(spec(kind=route), built)
             elif route.startswith("conjugate.gcr"):
-                _draw_sigma(spec(kind="conjugate.gcr"), built, block=None,
-                            observed=None, prior={}, solve={},
-                            noise_from=route.split("/")[1],
-                            where="runs['conjugate.gcr']")
+                _draw_sigma(
+                    spec(kind="conjugate.gcr"),
+                    built,
+                    block=None,
+                    observed=None,
+                    prior={},
+                    solve={},
+                    noise_from=route.split("/")[1],
+                    where="runs['conjugate.gcr']",
+                )
             elif route == "conjugate.gls":
-                _decided_model(spec(kind="conjugate.gls"), built,
-                               **_A28_GLS_CLAUSES)
+                _decided_model(spec(kind="conjugate.gls"), built, **_A28_GLS_CLAUSES)
             else:
                 _decided_model(spec(kind="npe"), built, **_A28_NPE_CLAUSES)
         except ConfigError as refusal:
             text = str(refusal)
             # A refusal that is NEITHER is `kind: none`'s shared "legal only
             # for forward and optimize", which both sides leave to `_noise`.
-            return ("A28" if "check A28" in text
-                    else "A27" if "check A27" in text else "")
-        except Exception:                                      # noqa: BLE001
+            return "A28" if "check A28" in text else "A27" if "check A27" in text else ""
+        except Exception:  # noqa: BLE001
             # The dummies reaching the package -- see the class docstring.
             return ""
         return ""
@@ -4952,8 +5638,7 @@ class TestTheDecidedTableAgreesWithTheACCESSORSItRunsInFrontOf:
         return run
 
     @pytest.mark.parametrize("label", NOISES)
-    def test_the_text_rule_and_the_built_rule_decide_the_same_documents(
-            self, label):
+    def test_the_text_rule_and_the_built_rule_decide_the_same_documents(self, label):
         from tests.config.exit_helpers import conjugate_built
 
         noise = self._noise(label)
@@ -4974,8 +5659,11 @@ class TestTheDecidedTableAgreesWithTheACCESSORSItRunsInFrontOf:
         """
         from tests.config.exit_helpers import conjugate_built
 
-        verdicts = [self._p3(route, conjugate_built(noise=self._noise(label)))
-                    for label in self.NOISES for route in self.ROUTES]
+        verdicts = [
+            self._p3(route, conjugate_built(noise=self._noise(label)))
+            for label in self.NOISES
+            for route in self.ROUTES
+        ]
         assert len(verdicts) == 24
         assert {one for one in verdicts if one} == {"A27", "A28"}
         assert len([one for one in verdicts if one]) == 6
@@ -4994,10 +5682,8 @@ class TestTheDecidedTableIsRegisteredAndReachesTheUser:
         # FILTERED, never `report.refusals()` whole: that list is ordered
         # across every registered check and is a function of how many tasks
         # have landed (§3.2(b)).
-        report = preflight(_t10_document(
-            FROZEN, _T10_RUN["conjugate.gls"], _T10_RUN["npe"]))
-        mine = [one.check for one in report.refusals()
-                if one.check in ("A27", "A28")]
+        report = preflight(_t10_document(FROZEN, _T10_RUN["conjugate.gls"], _T10_RUN["npe"]))
+        mine = [one.check for one in report.refusals() if one.check in ("A27", "A28")]
         assert mine == ["A28", "A28"]
         assert {"A28"} <= report.checks()
 
@@ -5014,8 +5700,9 @@ class TestTheDecidedTableIsRegisteredAndReachesTheUser:
         from rheplicant.config.document import load_document
         from rheplicant.config.errors import ConfigError
 
-        document = _t10_document(RADIOMETER, _T10_RUN["conjugate.wiener"],
-                                 resources=UNREADABLE_BEAM)
+        document = _t10_document(
+            RADIOMETER, _T10_RUN["conjugate.wiener"], resources=UNREADABLE_BEAM
+        )
         with pytest.raises(ConfigError) as caught:
             load_document(document)
         assert "check A27" in str(caught.value)
@@ -5067,16 +5754,12 @@ class TestNoHostileDocumentCanAbortTheDecidedTable:
         sections.update(patch)
         return preflight_document(**sections)
 
-    @pytest.mark.parametrize("patch", HOSTILE,
-                             ids=[str(index) for index in
-                                  range(len(HOSTILE))])
+    @pytest.mark.parametrize("patch", HOSTILE, ids=[str(index) for index in range(len(HOSTILE))])
     def test_the_check_returns_findings_and_raises_nothing(self, patch):
         for finding in _t10_decided(self._document(patch)):
             assert finding.check in ("A27", "A28")
 
-    @pytest.mark.parametrize("patch", HOSTILE,
-                             ids=[str(index) for index in
-                                  range(len(HOSTILE))])
+    @pytest.mark.parametrize("patch", HOSTILE, ids=[str(index) for index in range(len(HOSTILE))])
     def test_the_whole_pass_survives_each_of_them(self, patch):
         # `_check_where` runs OUTSIDE the per-check `try`, so a `where` built
         # from user text could kill the pass even when the check returns
@@ -5141,7 +5824,8 @@ class TestTheDecidedModelAccessor:
             "inference.noise.kind: radiometer or homoscedastic -- either is a "
             "rule simulate_pairs can draw from. There is no "
             "amortized-posterior exit that takes a decided array, so the "
-            "sigma is what has to change.")
+            "sigma is what has to change."
+        )
 
     def test_the_gcr_gls_route_supplies_its_own_and_it_is_exactly_this(self):
         """The third caller's own sentence, WHOLE, through its own route.
@@ -5164,9 +5848,16 @@ class TestTheDecidedModelAccessor:
 
         built = conjugate_built(noise=FROZEN)
         with pytest.raises(ConfigError) as caught:
-            _draw_sigma(spec(kind="conjugate.gcr"), built, block=None,
-                        observed=None, prior={}, solve={}, noise_from="gls",
-                        where="runs['conjugate.gcr']")
+            _draw_sigma(
+                spec(kind="conjugate.gcr"),
+                built,
+                block=None,
+                observed=None,
+                prior={},
+                solve={},
+                noise_from="gls",
+                where="runs['conjugate.gcr']",
+            )
         assert str(caught.value) == (
             "runs['conjugate.gcr']: kind: conjugate.gcr under noise_from: "
             "gls runs iterative_gls first and draws at the covariance it "
@@ -5179,7 +5870,8 @@ class TestTheDecidedModelAccessor:
             "for -- and noise_from: gls is check A27's answer for "
             "inference.noise.kind: radiometer, so declaring both asks a "
             "reweighting to find a fixed point in a number that is already "
-            "fixed.")
+            "fixed."
+        )
 
     def test_gls_result_cannot_be_called_without_saying_what_it_wants(self):
         # The SECOND place a default would let a route inherit a clause, and
@@ -5192,9 +5884,15 @@ class TestTheDecidedModelAccessor:
 
         built = conjugate_built(noise=FROZEN)
         with pytest.raises(TypeError):
-            _gls_result(spec(kind="conjugate.gcr"), built, block=None,
-                        observed=None, prior={}, solve={},
-                        where="runs['conjugate.gcr']")
+            _gls_result(
+                spec(kind="conjugate.gcr"),
+                built,
+                block=None,
+                observed=None,
+                prior={},
+                solve={},
+                where="runs['conjugate.gcr']",
+            )
 
     def test_every_clause_of_the_sentence_belongs_to_its_caller(self):
         # Kills: two call sites passing the same strings, which compiles,
@@ -5226,8 +5924,11 @@ class TestTheDecidedModelAccessor:
         # fragments are conjugate prose, gcr inherited the sentence they came
         # from, and npe iterates nothing.
         assert _A28_GLS_CLAUSES["reads"] == _A28_GCR_CLAUSES["reads"] == "a model"
-        assert (_A28_GLS_CLAUSES["because"] == _A28_GCR_CLAUSES["because"]
-                == "has no fixed point to iterate")
+        assert (
+            _A28_GLS_CLAUSES["because"]
+            == _A28_GCR_CLAUSES["because"]
+            == "has no fixed point to iterate"
+        )
         assert _A28_NPE_CLAUSES["reads"] != _A28_GLS_CLAUSES["reads"]
         assert _A28_NPE_CLAUSES["because"] != _A28_GLS_CLAUSES["because"]
         # ...and the one clause that was false on two routes out of three is
@@ -5238,8 +5939,7 @@ class TestTheDecidedModelAccessor:
         assert "solves for the covariance" not in _A28_NPE_CLAUSES["wants"]
         assert "solves for the covariance" not in _A28_GCR_CLAUSES["wants"]
 
-    @pytest.mark.parametrize("family", ["conjugate.gls", "conjugate.gcr",
-                                        "npe"])
+    @pytest.mark.parametrize("family", ["conjugate.gls", "conjugate.gcr", "npe"])
     def test_the_pass_writes_the_clause_its_caller_supplies(self, family):
         # DRIFT is the one defect neither message's own test can see: the
         # pass writes its sentence out and the caller writes its clauses out,
@@ -5258,9 +5958,11 @@ class TestTheDecidedModelAccessor:
         )
         from rheplicant.config.sections.npe import _A28_NPE_CLAUSES
 
-        clauses = {"conjugate.gls": _A28_GLS_CLAUSES,
-                   "conjugate.gcr": _A28_GCR_CLAUSES,
-                   "npe": _A28_NPE_CLAUSES}[family]
+        clauses = {
+            "conjugate.gls": _A28_GLS_CLAUSES,
+            "conjugate.gcr": _A28_GCR_CLAUSES,
+            "npe": _A28_NPE_CLAUSES,
+        }[family]
         run = _T10_RUN[family]
         if family == "conjugate.gcr":
             run = {**run, "noise_from": "gls"}

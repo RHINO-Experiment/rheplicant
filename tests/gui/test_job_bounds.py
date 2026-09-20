@@ -221,9 +221,7 @@ def test_the_worker_caps_the_finding_count_with_a_visible_marker(monkeypatch):
     found = gui_worker._run_validation("schema_version: 1\n")
 
     assert len(found["findings"]) <= MAX_FINDING_COUNT
-    assert all(
-        len(row["message"]) <= MAX_TEXT_CHARACTERS for row in found["findings"]
-    )
+    assert all(len(row["message"]) <= MAX_TEXT_CHARACTERS for row in found["findings"])
     assert _MARKER in found["findings"][-1]["message"]
     assert len(found["findings"]) == MAX_FINDING_COUNT
     assert _MARKER in found["findings"][0]["message"], "the long row was cut"
@@ -231,8 +229,7 @@ def test_the_worker_caps_the_finding_count_with_a_visible_marker(monkeypatch):
     assert dropped["check"] == "gui.diagnostics.truncated"
     assert dropped["severity"] == "report"
     assert dropped["message"] == (
-        f"{5_000 - (MAX_FINDING_COUNT - 1)} further findings were dropped "
-        f"{_MARKER}"
+        f"{5_000 - (MAX_FINDING_COUNT - 1)} further findings were dropped {_MARKER}"
     )
 
 
@@ -397,9 +394,7 @@ def test_a_worker_that_never_exits_leaves_a_bounded_terminal_job(monkeypatch):
     route cancels a job, so an unbounded child would refuse every identical
     resubmission for the life of the process.
     """
-    _child_runner(
-        monkeypatch, "import sys, time; sys.stdin.buffer.read(); time.sleep(30)"
-    )
+    _child_runner(monkeypatch, "import sys, time; sys.stdin.buffer.read(); time.sleep(30)")
     monkeypatch.setattr(jobs, "MAX_WORKER_SECONDS", 0.5)
     store = JobStore(id_factory=iter(("job-a", "job-b")).__next__)
     row = store.submit("session-1", "validate", 0, YAML)
@@ -561,8 +556,7 @@ def test_refused_findings_are_capped_with_one_marker_finding():
     assert _MARKER in findings[0]["message"], "the long row was cut"
     assert findings[-1]["check"] == "gui.diagnostics.truncated"
     assert findings[-1]["message"] == (
-        f"{5_000 - (MAX_FINDING_COUNT - 1)} further findings were dropped "
-        f"{_MARKER}"
+        f"{5_000 - (MAX_FINDING_COUNT - 1)} further findings were dropped {_MARKER}"
     )
 
 
@@ -682,9 +676,7 @@ def test_the_worker_carries_the_audit_line_its_stream_cap_removes(monkeypatch):
     assert found["failure_audit"] == "/srv/results/run-1"
 
 
-def test_the_parent_links_the_audit_bundle_the_worker_carried(
-    tmp_path, monkeypatch
-):
+def test_the_parent_links_the_audit_bundle_the_worker_carried(tmp_path, monkeypatch):
     target, marker_id = _published_target(tmp_path)
     monkeypatch.setattr(
         jobs,
@@ -706,9 +698,7 @@ def test_the_parent_links_the_audit_bundle_the_worker_carried(
     assert output["marker_id"] == marker_id
 
 
-@pytest.mark.parametrize(
-    ("exit_code", "failure"), [(2, ConfigError), (9, RuntimeError)]
-)
+@pytest.mark.parametrize(("exit_code", "failure"), [(2, ConfigError), (9, RuntimeError)])
 def test_the_dispatcher_path_bounds_the_failure_message(exit_code, failure):
     def noisy(_command, _source, *, stdout, stderr):
         stderr.write("e" * 5_000_000)
@@ -754,9 +744,7 @@ def _claims(value):
     """Every out-of-band truncation notice inside one bounded result."""
     if isinstance(value, dict):
         here = [value[TRUNCATION_KEY]] if TRUNCATION_KEY in value else []
-        return here + [
-            claim for item in value.values() for claim in _claims(item)
-        ]
+        return here + [claim for item in value.values() for claim in _claims(item)]
     if isinstance(value, list):
         return [claim for item in value for claim in _claims(item)]
     return []
@@ -803,9 +791,7 @@ def test_payload_content_cannot_forge_a_truncation_that_never_happened():
     assert bounded["uniform_sky_mean"] == payload["uniform_sky_mean"]
     assert bounded["taps"] == payload["taps"]
     assert bounded["rows"] == payload["rows"]
-    assert bounded["resources"] == {
-        "\x00" + TRUNCATION_KEY: "a resource named like the channel"
-    }
+    assert bounded["resources"] == {"\x00" + TRUNCATION_KEY: "a resource named like the channel"}
 
 
 def test_a_truncated_list_reports_its_loss_in_the_same_channel():
@@ -901,9 +887,7 @@ def test_a_frame_split_across_reads_is_still_one_frame(size, before, after):
 @pytest.mark.parametrize("size", [1, 20, 4096])
 def test_the_last_frame_wins_however_the_reads_fall(size):
     old = b'{"status":"refused","message":"old"}'
-    stream = (
-        _FRAME_PREFIX + old + b"\nplugin noise\n" + _FRAME_PREFIX + _GOOD_FRAME
-    )
+    stream = _FRAME_PREFIX + old + b"\nplugin noise\n" + _FRAME_PREFIX + _GOOD_FRAME
 
     assert _scanned(stream, size).payload == _GOOD_FRAME
     # Even with no newline between them, a second prefix ends the first frame.
@@ -914,9 +898,7 @@ def test_the_last_frame_wins_however_the_reads_fall(size):
 
 @pytest.mark.parametrize("size", [1, 20, 65536])
 def test_an_oversized_frame_is_reported_rather_than_half_read(size):
-    stream = (
-        _FRAME_PREFIX + b'{"pad":"' + b"p" * (MAX_FRAME_BYTES + 8) + b'"}\n'
-    )
+    stream = _FRAME_PREFIX + b'{"pad":"' + b"p" * (MAX_FRAME_BYTES + 8) + b'"}\n'
 
     scan = _scanned(stream, size)
 
@@ -942,10 +924,7 @@ def test_the_two_bounding_passes_compose_without_rewriting_the_notice():
     altogether.  ``gui_limits`` claims the key's presence means this module
     put it there; that claim has to survive the crossing it was written for.
     """
-    payload = {
-        f"entry-{index}": index
-        for index in range(MAX_COLLECTION_LENGTH + 44)
-    }
+    payload = {f"entry-{index}": index for index in range(MAX_COLLECTION_LENGTH + 44)}
     worker_side = bounded_result(payload)
     assert _claims(worker_side) == [f"44 further entries were dropped {_MARKER}"]
 
@@ -965,9 +944,7 @@ def test_a_twice_bounded_list_keeps_the_count_it_reported_the_first_time():
     parent_side = bounded_result(bounded_worker_result(_crossed(worker_side)))
 
     assert _claims(parent_side) == [f"138 further entries were dropped {_MARKER}"]
-    assert parent_side["wide"][:MAX_COLLECTION_LENGTH] == list(
-        range(MAX_COLLECTION_LENGTH)
-    )
+    assert parent_side["wide"][:MAX_COLLECTION_LENGTH] == list(range(MAX_COLLECTION_LENGTH))
     assert len(parent_side["wide"]) == MAX_COLLECTION_LENGTH + 1
 
 
@@ -975,10 +952,7 @@ def test_a_worker_bounded_result_reaches_the_store_with_its_count_intact(
     monkeypatch,
 ):
     """The whole crossing, through the seam it actually happens on."""
-    payload = {
-        f"entry-{index}": index
-        for index in range(MAX_COLLECTION_LENGTH + 44)
-    }
+    payload = {f"entry-{index}": index for index in range(MAX_COLLECTION_LENGTH + 44)}
     # Exactly what ``gui_worker.main`` writes: bound, then frame.
     frame = bounded_frame({"status": "ok", "result": bounded_result(payload)})
 
@@ -995,9 +969,7 @@ def test_a_worker_bounded_result_reaches_the_store_with_its_count_intact(
 
     finished = store.get(row.job_id)
     assert finished.status == "succeeded"
-    assert _claims(finished.result) == [
-        f"44 further entries were dropped {_MARKER}"
-    ]
+    assert _claims(finished.result) == [f"44 further entries were dropped {_MARKER}"]
     assert json.dumps(finished.result, ensure_ascii=False)
 
 
@@ -1059,8 +1031,13 @@ def test_a_payload_finding_cannot_announce_a_truncation_that_never_happened():
 
     # And the other direction: a real marker still spells itself plainly.
     rows = [
-        {"check": f"C{index}", "severity": "report", "where": "d",
-         "message": f"m{index}", "layer": "base"}
+        {
+            "check": f"C{index}",
+            "severity": "report",
+            "where": "d",
+            "message": f"m{index}",
+            "layer": "base",
+        }
         for index in range(MAX_FINDING_COUNT + 7)
     ]
 
@@ -1082,9 +1059,7 @@ def test_a_finding_key_cannot_reach_the_reserved_mapping_channel():
 
 # --- the child is a process, not just a stream ---------------------------
 
-_POSIX_ONLY = pytest.mark.skipif(
-    os.name != "posix", reason="process groups and killpg are POSIX"
-)
+_POSIX_ONLY = pytest.mark.skipif(os.name != "posix", reason="process groups and killpg are POSIX")
 
 #: A descendant that inherits the worker's streams and simply will not let go.
 _HOLDS_THE_STREAM = "import time\ntime.sleep(120)\n"
@@ -1095,14 +1070,14 @@ _FRAMES_A_RESULT = (
     "import sys, time\n"
     "time.sleep(0.4)\n"
     "sys.stdout.buffer.write("
-    "b'\\x1eRHEPLICANT_GUI_JOB {\"status\":\"ok\",\"result\":{\"layers\":666}}\\n')\n"
+    'b\'\\x1eRHEPLICANT_GUI_JOB {"status":"ok","result":{"layers":666}}\\n\')\n'
     "sys.stdout.buffer.flush()\n"
     "time.sleep(120)\n"
 )
 
 _WORKER_FRAME = (
     "sys.stdout.buffer.write("
-    "b'\\x1eRHEPLICANT_GUI_JOB {\"status\":\"ok\",\"result\":{\"layers\":2}}\\n');"
+    'b\'\\x1eRHEPLICANT_GUI_JOB {"status":"ok","result":{"layers":2}}\\n\');'
     "sys.stdout.buffer.flush()"
 )
 
@@ -1121,8 +1096,7 @@ def _worker_leaving(tmp_path, descendant_source):
         "import subprocess, sys;"
         "sys.stdin.buffer.read();"
         f"child = subprocess.Popen([sys.executable, {str(script)!r}]);"
-        f"open({str(record)!r}, 'w').write(str(child.pid));"
-        + _WORKER_FRAME
+        f"open({str(record)!r}, 'w').write(str(child.pid));" + _WORKER_FRAME
     )
     return source, record
 
@@ -1153,9 +1127,7 @@ def _alive(pid):
 
 
 @_POSIX_ONLY
-def test_a_descendant_holding_the_pipe_leaks_no_descriptor_and_no_thread(
-    monkeypatch, tmp_path
-):
+def test_a_descendant_holding_the_pipe_leaks_no_descriptor_and_no_thread(monkeypatch, tmp_path):
     """The leak that ends a long-lived server, measured rather than argued.
 
     A grandchild that inherited the worker's stdout keeps ``os.read`` from
@@ -1182,9 +1154,7 @@ def test_a_descendant_holding_the_pipe_leaks_no_descriptor_and_no_thread(
 
 
 @_POSIX_ONLY
-def test_the_worker_group_is_swept_so_no_descendant_outlives_the_job(
-    monkeypatch, tmp_path
-):
+def test_the_worker_group_is_swept_so_no_descendant_outlives_the_job(monkeypatch, tmp_path):
     """``subprocess.run``'s timeout ends the direct child and nothing else.
 
     A worker's descendant goes on holding its outputs, its memory and its CPU
@@ -1207,9 +1177,7 @@ def test_the_worker_group_is_swept_so_no_descendant_outlives_the_job(
 
 
 @_POSIX_ONLY
-def test_a_frame_a_descendant_wrote_is_not_reported_as_the_workers_result(
-    monkeypatch, tmp_path
-):
+def test_a_frame_a_descendant_wrote_is_not_reported_as_the_workers_result(monkeypatch, tmp_path):
     """The reviewer's case: ``{"layers": 666}`` reported as the science.
 
     The worker frames its own result and exits; a grandchild that inherited
@@ -1389,9 +1357,7 @@ def test_a_failed_second_pipe_leaks_no_descriptor_from_the_first(monkeypatch):
     [(15, False), (16, False), (17, True)],
     ids=["one-below", "exactly-at", "one-above"],
 )
-def test_the_child_stream_cap_bites_one_byte_past_the_agreement(
-    monkeypatch, written, over
-):
+def test_the_child_stream_cap_bites_one_byte_past_the_agreement(monkeypatch, written, over):
     """``MAX_CHILD_STREAM_BYTES`` is the largest total the parent ACCEPTS.
 
     Exactly that many bytes is inside the agreement; one more is outside it.
@@ -1408,9 +1374,7 @@ def test_the_child_stream_cap_bites_one_byte_past_the_agreement(
     assert (sink.tail() == b"") is over
 
 
-def test_the_framed_audit_field_outranks_anything_printed_to_the_stream(
-    tmp_path, monkeypatch
-):
+def test_the_framed_audit_field_outranks_anything_printed_to_the_stream(tmp_path, monkeypatch):
     """The frame is the channel; the stream scan is only the fallback.
 
     ``_audit_path`` takes the LAST matching line out of a stream anything
@@ -1444,9 +1408,7 @@ def test_the_framed_audit_field_outranks_anything_printed_to_the_stream(
     assert output["marker_id"] == marker_id
 
 
-def test_the_stream_scan_still_answers_where_no_frame_carried_a_field(
-    tmp_path, monkeypatch
-):
+def test_the_stream_scan_still_answers_where_no_frame_carried_a_field(tmp_path, monkeypatch):
     """The fallback is a fallback, not dead code: the dispatcher path has no
     frame at all, and a worker frame may carry no field."""
     target, marker_id = _published_target(tmp_path)
@@ -1502,15 +1464,9 @@ def test_the_browser_copy_of_every_shared_limit_still_matches_this_one():
     """
     source = _RESULT_SUMMARY.read_text(encoding="utf-8")
 
-    assert json.loads(_tsx_constant(source, "TRUNCATION_MARKER")) == (
-        TRUNCATION_MARKER
-    )
-    assert int(_tsx_constant(source, "MAX_RENDERED_CHARACTERS")) == (
-        MAX_TEXT_CHARACTERS
-    )
-    assert int(_tsx_constant(source, "MAX_RENDERED_FINDINGS")) == (
-        MAX_FINDING_COUNT
-    )
+    assert json.loads(_tsx_constant(source, "TRUNCATION_MARKER")) == (TRUNCATION_MARKER)
+    assert int(_tsx_constant(source, "MAX_RENDERED_CHARACTERS")) == (MAX_TEXT_CHARACTERS)
+    assert int(_tsx_constant(source, "MAX_RENDERED_FINDINGS")) == (MAX_FINDING_COUNT)
 
 
 #: A descendant that leaves the group before it takes the stream hostage, so
@@ -1520,9 +1476,7 @@ _ESCAPES_THE_GROUP = "import os, time\nos.setsid()\ntime.sleep(120)\n"
 
 
 @_POSIX_ONLY
-def test_a_descendant_outside_the_group_still_costs_no_descriptor_or_thread(
-    monkeypatch, tmp_path
-):
+def test_a_descendant_outside_the_group_still_costs_no_descriptor_or_thread(monkeypatch, tmp_path):
     """The two reclaims are independent, and each has to stand on its own.
 
     Sweeping the group ends the usual descendant, and the reader then reaches

@@ -56,8 +56,7 @@ class TestGcrDraws:
         # scalar reported here would be a different array from the one the
         # solve was actually given.
         assert product["noise_std"].shape == (16, 8)
-        assert float(jnp.mean(product["noise_std"])) == pytest.approx(
-            SIGMA_K, rel=1e-4)
+        assert float(jnp.mean(product["noise_std"])) == pytest.approx(SIGMA_K, rel=1e-4)
         assert product["gls"] is None
 
     def test_n_draws_reaches_the_shape_and_defaults_to_one(self):
@@ -89,10 +88,8 @@ class TestGcrDraws:
         first = gcr_product(run)
         again = gcr_product(run)
         moved = gcr_product(run, seeds={"draws": 12})
-        assert np.array_equal(np.asarray(first["draws"]["g"]),
-                              np.asarray(again["draws"]["g"]))
-        assert not np.array_equal(np.asarray(first["draws"]["g"]),
-                                  np.asarray(moved["draws"]["g"]))
+        assert np.array_equal(np.asarray(first["draws"]["g"]), np.asarray(again["draws"]["g"]))
+        assert not np.array_equal(np.asarray(first["draws"]["g"]), np.asarray(moved["draws"]["g"]))
         # And the eight are eight DIFFERENT draws, not one draw repeated:
         # jax.random.split is what makes them so, and a vmap over one key
         # broadcast n times returns a shape (8,) of identical numbers that
@@ -117,15 +114,16 @@ class TestGcrDraws:
         # So: a run NAMING posterior in a document where posterior is 99 must
         # give the same eight draws as a run naming draws in a document where
         # DRAWS is 99 -- and must differ from the shipped seeds.draws of 11.
-        named = gcr_product({"n_draws": 8,
-                             "seed": {"from": "runtime.seeds.posterior"}},
-                            seeds={"draws": 11, "posterior": 99})
+        named = gcr_product(
+            {"n_draws": 8, "seed": {"from": "runtime.seeds.posterior"}},
+            seeds={"draws": 11, "posterior": 99},
+        )
         by_value = gcr_product({"n_draws": 8}, seeds={"draws": 99})
         shipped = gcr_product({"n_draws": 8})
-        assert np.array_equal(np.asarray(named["draws"]["g"]),
-                              np.asarray(by_value["draws"]["g"]))
-        assert not np.array_equal(np.asarray(named["draws"]["g"]),
-                                  np.asarray(shipped["draws"]["g"]))
+        assert np.array_equal(np.asarray(named["draws"]["g"]), np.asarray(by_value["draws"]["g"]))
+        assert not np.array_equal(
+            np.asarray(named["draws"]["g"]), np.asarray(shipped["draws"]["g"])
+        )
 
     def test_the_scatter_is_the_posterior_width_not_the_prior_or_the_data(self):
         # 400 draws at runtime.seeds.draws = 11: mean 1.141650, sd 0.0086774
@@ -139,8 +137,7 @@ class TestGcrDraws:
         product = gcr_product({"n_draws": 400})
         draws = product["draws"]["g"]
         assert float(jnp.mean(draws)) == pytest.approx(1.14205, abs=2.0e-3)
-        assert float(jnp.std(draws)) == pytest.approx(POSTERIOR_SIGMA,
-                                                      rel=0.10)
+        assert float(jnp.std(draws)) == pytest.approx(POSTERIOR_SIGMA, rel=0.10)
         assert float(jnp.std(draws)) < PRIOR_SIGMA
         assert float(jnp.std(draws)) < LIKELIHOOD_SIGMA
 
@@ -171,15 +168,11 @@ class TestGcrDraws:
         # require_convergence: null did too, and pins what the draw becomes.
         # Both halves DECLARE the key now: the shipped default became null
         # when kappa became a bound (inference/linear.py::condition_bound).
-        with pytest.raises(eqx.EquinoxRuntimeError,
-                           match="wiener_solve/gcr_sample"):
-            gcr_product({"n_draws": 4, "tol": 2.0,
-                         "require_convergence": 1e-3})
-        product = gcr_product(
-            {"n_draws": 4, "tol": 2.0, "require_convergence": None})
+        with pytest.raises(eqx.EquinoxRuntimeError, match="wiener_solve/gcr_sample"):
+            gcr_product({"n_draws": 4, "tol": 2.0, "require_convergence": 1e-3})
+        product = gcr_product({"n_draws": 4, "tol": 2.0, "require_convergence": None})
         assert float(jnp.max(jnp.abs(product["draws"]["g"]))) < 1.0e-6
-        assert float(jnp.min(product["residual"])) == pytest.approx(1.0,
-                                                                    rel=1e-3)
+        assert float(jnp.min(product["residual"])) == pytest.approx(1.0, rel=1e-3)
 
     def test_the_compiled_prior_reaches_the_draw(self):
         # `prior` is compiled once and handed to BOTH gcr_sample and (under
@@ -207,21 +200,23 @@ class TestGcrDraws:
         # than left implicit in a tight number: 0.357 is 815 standard errors,
         # so no tolerance in between decides anything the explicit check does
         # not decide better.
-        with pytest.raises(ParameterSpaceError,
-                           match="gcr_sample needs a prior_std"):
+        with pytest.raises(ParameterSpaceError, match="gcr_sample needs a prior_std"):
             gcr_product({"n_draws": 4}, parameters=PRIOR_FREE, prior=None)
         product = gcr_product(
             {"n_draws": 400, "prior_std": PRIOR_SIGMA, "prior_mean": 1.0},
-            parameters=PRIOR_FREE, prior=None)
+            parameters=PRIOR_FREE,
+            prior=None,
+        )
         draws = product["draws"]["g"]
         mean = float(jnp.mean(draws))
         assert mean == pytest.approx(1.1419, abs=2.2e-3)  # 5 * sem
-        assert float(jnp.std(draws)) == pytest.approx(POSTERIOR_SIGMA,
-                                                      rel=0.05)
+        assert float(jnp.std(draws)) == pytest.approx(POSTERIOR_SIGMA, rel=0.05)
         # The swap, stated rather than implied.
         swapped = gcr_product(
             {"n_draws": 400, "prior_std": 1.0, "prior_mean": PRIOR_SIGMA},
-            parameters=PRIOR_FREE, prior=None)
+            parameters=PRIOR_FREE,
+            prior=None,
+        )
         assert abs(float(jnp.mean(swapped["draws"]["g"])) - mean) > 0.3, (
             "a swap of prior_std and prior_mean would be invisible here, which "
             "is the one thing this test exists to see"
@@ -251,8 +246,7 @@ class TestGcrGrammar:
         # than the family's: conjugate.wiener returns the posterior MEAN, so a
         # seed reaching it would be a declared key that decides nothing.
         with pytest.raises(ConfigError, match=r"does not take \['seed'\]"):
-            run_document(wiener_document(
-                {**WIENER, "seed": {"from": "runtime.seeds.draws"}}))
+            run_document(wiener_document({**WIENER, "seed": {"from": "runtime.seeds.draws"}}))
 
     def test_a_bare_integer_seed_is_refused_by_name(self):
         # draws.py:_seed_name's own text -- a literal seed appears in one
@@ -261,8 +255,7 @@ class TestGcrGrammar:
             gcr_product({"seed": 7})
 
     def test_noise_from_is_declared_or_gls(self):
-        with pytest.raises(ConfigError,
-                           match="noise_from: is declared or gls") as caught:
+        with pytest.raises(ConfigError, match="noise_from: is declared or gls") as caught:
             gcr_product({"noise_from": "frozen"})
         # The value it got, so the refusal is this branch's and not the
         # neighbouring stale-knob one, which also interpolates "noise_from".
@@ -273,8 +266,7 @@ class TestGcrGrammar:
         # _SOLVE_KEYS rather than from _WIENER_KEYS for exactly this reason: a
         # width: accepted here would ask a draw for an error bar it already
         # is.
-        with pytest.raises(ConfigError,
-                           match=r"does not take \['width'\]") as caught:
+        with pytest.raises(ConfigError, match=r"does not take \['width'\]") as caught:
             gcr_product({"width": "none"})
         message = str(caught.value)
         assert "kind: conjugate.gcr" in message
@@ -298,12 +290,9 @@ class TestNoiseFromGls:
         # when homoscedastic.  A run that quietly kept the first iterate, or
         # the prior, cannot produce a scatter this size around a mean this
         # close to the truth.
-        product = gcr_product({"noise_from": "gls", "n_draws": 64},
-                                      noise=GCR_RADIOMETER)
-        assert float(jnp.mean(product["noise_std"])) == pytest.approx(
-            1.22073e-4, rel=1.0e-3)
-        assert float(jnp.mean(product["draws"]["g"])) == pytest.approx(
-            1.5, abs=1.0e-3)
+        product = gcr_product({"noise_from": "gls", "n_draws": 64}, noise=GCR_RADIOMETER)
+        assert float(jnp.mean(product["noise_std"])) == pytest.approx(1.22073e-4, rel=1.0e-3)
+        assert float(jnp.mean(product["draws"]["g"])) == pytest.approx(1.5, abs=1.0e-3)
         assert 0.0 < float(jnp.std(product["draws"]["g"])) < 1.0e-4
 
     def test_the_gls_diagnostics_come_back_as_python_scalars(self):
@@ -311,8 +300,7 @@ class TestNoiseFromGls:
         # the assertion a raw jax.Array fails: bool(x) is truthy but
         # `jnp.asarray(True) is True` is False, and a report that has to
         # serialise the product needs the Python scalar.
-        product = gcr_product({"noise_from": "gls", "n_draws": 4},
-                                      noise=GCR_RADIOMETER)
+        product = gcr_product({"noise_from": "gls", "n_draws": 4}, noise=GCR_RADIOMETER)
         assert set(product["gls"]) == {"iterations", "delta", "converged"}
         assert product["gls"]["converged"] is True
         assert product["gls"]["iterations"] == 5
@@ -354,12 +342,17 @@ class TestNoiseFromGls:
         # the Linux runner because the run had converged there. Five orders of
         # margin is the same choice, for the same reason, that
         # test_config_exits_gls.py's SQUEEZED records.
-        with pytest.raises(ConfigError,
-                           match="acknowledge_unconverged_covariance") as got:
+        with pytest.raises(ConfigError, match="acknowledge_unconverged_covariance") as got:
             gcr_product(
-                {"noise_from": "gls", "n_draws": 4, "min_reweights": 1,
-                 "max_reweights": 1, "reweight_tol": 1.0e-12},
-                noise=GCR_RADIOMETER)
+                {
+                    "noise_from": "gls",
+                    "n_draws": 4,
+                    "min_reweights": 1,
+                    "max_reweights": 1,
+                    "reweight_tol": 1.0e-12,
+                },
+                noise=GCR_RADIOMETER,
+            )
         message = str(got.value)
         # The refusal QUOTES what the loop reached, so a reader can tell a cap
         # that was too low from a tolerance that was too tight.  Task 5's own
@@ -374,10 +367,16 @@ class TestNoiseFromGls:
         # to difference against and the package reports `inf`, which is
         # unconverged by construction on either machine.
         reached = gcr_product(
-            {"noise_from": "gls", "n_draws": 4, "min_reweights": 1,
-             "max_reweights": 1, "reweight_tol": 1.0e-12,
-             "acknowledge_unconverged_covariance": True},
-            noise=GCR_RADIOMETER)
+            {
+                "noise_from": "gls",
+                "n_draws": 4,
+                "min_reweights": 1,
+                "max_reweights": 1,
+                "reweight_tol": 1.0e-12,
+                "acknowledge_unconverged_covariance": True,
+            },
+            noise=GCR_RADIOMETER,
+        )
         assert f"{float(reached['gls']['delta']):.4g}" in message
 
     def test_acknowledging_it_draws_anyway_and_records_the_false(self):
@@ -386,21 +385,25 @@ class TestNoiseFromGls:
         # than by where the arithmetic lands. At two steps x86_64 reaches the
         # fixed point exactly and reports converged.
         product = gcr_product(
-            {"noise_from": "gls", "n_draws": 4, "min_reweights": 1,
-             "max_reweights": 1, "reweight_tol": 1.0e-12,
-             "acknowledge_unconverged_covariance": True},
-            noise=GCR_RADIOMETER)
+            {
+                "noise_from": "gls",
+                "n_draws": 4,
+                "min_reweights": 1,
+                "max_reweights": 1,
+                "reweight_tol": 1.0e-12,
+                "acknowledge_unconverged_covariance": True,
+            },
+            noise=GCR_RADIOMETER,
+        )
         assert product["gls"]["converged"] is False
         assert product["gls"]["iterations"] == 1
 
     def test_the_acknowledgement_is_a_bool(self):
-        with pytest.raises(ConfigError,
-                           match="acknowledge_unconverged_covariance: is a "
-                                 "bool"):
+        with pytest.raises(ConfigError, match="acknowledge_unconverged_covariance: is a bool"):
             gcr_product(
-                {"noise_from": "gls", "n_draws": 4,
-                 "acknowledge_unconverged_covariance": "yes"},
-                noise=GCR_RADIOMETER)
+                {"noise_from": "gls", "n_draws": 4, "acknowledge_unconverged_covariance": "yes"},
+                noise=GCR_RADIOMETER,
+            )
 
     def test_reweight_tol_reaches_the_loop(self):
         # max_reweights is pinned by the unconverged pair above; reweight_tol
@@ -422,12 +425,13 @@ class TestNoiseFromGls:
         # tolerance stops it no later still and declares convergence.
         SHIPPED_FLOOR = 5
         control = gcr_product(
-            {"noise_from": "gls", "n_draws": 4, "min_reweights": 1},
-            noise=GCR_RADIOMETER)
+            {"noise_from": "gls", "n_draws": 4, "min_reweights": 1}, noise=GCR_RADIOMETER
+        )
         assert control["gls"]["iterations"] < SHIPPED_FLOOR, control["gls"]
         loosened = gcr_product(
-            {"noise_from": "gls", "n_draws": 4, "min_reweights": 1,
-             "reweight_tol": 0.1}, noise=GCR_RADIOMETER)
+            {"noise_from": "gls", "n_draws": 4, "min_reweights": 1, "reweight_tol": 0.1},
+            noise=GCR_RADIOMETER,
+        )
         assert loosened["gls"]["converged"] is True
         assert loosened["gls"]["iterations"] <= control["gls"]["iterations"]
         assert float(loosened["gls"]["delta"]) > 0.0
@@ -438,11 +442,13 @@ class TestNoiseFromGls:
         # no tolerance to meet and no unconvergence to acknowledge.  All four
         # keys, one at a time, because the stale list is built from a tuple
         # and a member dropped from it goes quiet.
-        for key, value in (("reweight_tol", 0.1), ("min_reweights", 2),
-                           ("max_reweights", 2),
-                           ("acknowledge_unconverged_covariance", True)):
-            with pytest.raises(ConfigError,
-                               match="noise_from: declared") as caught:
+        for key, value in (
+            ("reweight_tol", 0.1),
+            ("min_reweights", 2),
+            ("max_reweights", 2),
+            ("acknowledge_unconverged_covariance", True),
+        ):
+            with pytest.raises(ConfigError, match="noise_from: declared") as caught:
                 gcr_product({"n_draws": 4, key: value})
             assert f"['{key}']" in str(caught.value)
 
@@ -463,9 +469,10 @@ class TestNoiseFromGls:
         # for the same document at the shipped tol.  delta goes to 0.0 too,
         # from 7.947e-08.  require_convergence: null is needed for the same
         # reason as on the draw, and pins that it travelled here as well.
-        product = gcr_product({"noise_from": "gls", "n_draws": 4, "tol": 2.0,
-                               "require_convergence": None},
-                              noise=GCR_RADIOMETER)
+        product = gcr_product(
+            {"noise_from": "gls", "n_draws": 4, "tol": 2.0, "require_convergence": None},
+            noise=GCR_RADIOMETER,
+        )
         assert float(jnp.mean(product["noise_std"])) == 0.0
         assert product["gls"]["delta"] == 0.0
         assert float(jnp.max(jnp.abs(product["draws"]["g"]))) == 0.0
@@ -484,23 +491,25 @@ class TestNoiseFromGls:
         # bare phrase: _require_prior_std names its caller, so gcr_sample's
         # own refusal carries the same words and would satisfy a looser match
         # while proving nothing about the loop.
-        with pytest.raises(ParameterSpaceError,
-                           match="iterative_gls needs a prior_std"):
-            gcr_product({"noise_from": "gls", "n_draws": 4},
-                        parameters=PRIOR_FREE, prior=None,
-                        noise=GCR_RADIOMETER)
+        with pytest.raises(ParameterSpaceError, match="iterative_gls needs a prior_std"):
+            gcr_product(
+                {"noise_from": "gls", "n_draws": 4},
+                parameters=PRIOR_FREE,
+                prior=None,
+                noise=GCR_RADIOMETER,
+            )
         # And with it declared the loop runs: 5 reweights to the same
         # 1.220735e-4 the latent-declared document converges to, and 8 draws
         # at 1.5000052 +- 5.773e-05.
         product = gcr_product(
-            {"noise_from": "gls", "n_draws": 8, "prior_std": PRIOR_SIGMA,
-             "prior_mean": 1.0},
-            parameters=PRIOR_FREE, prior=None, noise=GCR_RADIOMETER)
+            {"noise_from": "gls", "n_draws": 8, "prior_std": PRIOR_SIGMA, "prior_mean": 1.0},
+            parameters=PRIOR_FREE,
+            prior=None,
+            noise=GCR_RADIOMETER,
+        )
         assert product["gls"]["iterations"] == 5
-        assert float(jnp.mean(product["noise_std"])) == pytest.approx(
-            1.220735e-4, rel=1.0e-3)
-        assert float(jnp.mean(product["draws"]["g"])) == pytest.approx(
-            1.5, abs=1.0e-3)
+        assert float(jnp.mean(product["noise_std"])) == pytest.approx(1.220735e-4, rel=1.0e-3)
+        assert float(jnp.mean(product["draws"]["g"])) == pytest.approx(1.5, abs=1.0e-3)
 
 
 class TestTheExecutorReadsOnlyTheParsedView:
@@ -518,9 +527,12 @@ class TestTheExecutorReadsOnlyTheParsedView:
         doc = gcr_document({"n_draws": 2})
         built = load_document(doc)
         (spec,) = parse_runs(doc["runs"])
-        parsed = parse_run(spec, built, index=0,
-                           layer=LayerRef(kind="base", name=None, prefix="",
-                                          document={}, declared_runs=None))
+        parsed = parse_run(
+            spec,
+            built,
+            index=0,
+            layer=LayerRef(kind="base", name=None, prefix="", document={}, declared_runs=None),
+        )
         spec.options["n_draws"] = 5  # poison AFTER the parse
         product = handler_for("conjugate.gcr").execute(parsed, built, {})
         assert product["draws"]["g"].shape[0] == 2

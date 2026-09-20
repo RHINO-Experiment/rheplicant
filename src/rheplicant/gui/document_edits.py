@@ -85,12 +85,8 @@ def _validate_variant(plain: dict[str, object], variant: str | None) -> dict[str
 
 def _validate_node_settings(node_id: str, settings: object) -> None:
     node = RADIO_GRAPH.nodes[node_id]
-    if node.reserved and (
-        not isinstance(settings, Mapping) or "python" not in settings
-    ):
-        raise ConfigError(
-            f"model.{node_id}: is reserved; configure it with python: settings."
-        )
+    if node.reserved and (not isinstance(settings, Mapping) or "python" not in settings):
+        raise ConfigError(f"model.{node_id}: is reserved; configure it with python: settings.")
     if node.many:
         if node_id == "cal_loads":
             if not isinstance(settings, Mapping) or any(

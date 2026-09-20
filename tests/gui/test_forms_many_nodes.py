@@ -76,11 +76,7 @@ def _document(nodes: str, *, switching: bool = False) -> dict:
 
 def _widgets(document: dict) -> dict[str, ProjectedWidget]:
     projected = project_forms(document)
-    return {
-        widget.path: widget
-        for section in projected.sections
-        for widget in section.widgets
-    }
+    return {widget.path: widget for section in projected.sections for widget in section.widgets}
 
 
 def _catalog_paths() -> set[str]:
@@ -173,10 +169,7 @@ class TestManyNodeInstancePaths:
         falls through to the Instrument default -- silently moving every
         filter field out of Backend, where its ``processing`` segment puts
         it."""
-        sections = {
-            widget.path: widget.section
-            for widget in widget_catalog().widgets
-        }
+        sections = {widget.path: widget.section for widget in widget_catalog().widgets}
 
         assert sections["model.filters"] == "backend"
         assert sections["model.filters[].axis"] == "backend"

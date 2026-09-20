@@ -249,7 +249,8 @@ def _tone_survives_flagging(run: Built) -> Iterable[Finding]:
             continue
         where = _where(replaced, "flagging")
         yield refuse(
-            "A43", where,
+            "A43",
+            where,
             f"{where}.threshold is {float(threshold):.6g} and the tone's own "
             f"protection cut sits at {counts:.6g} in the same units "
             f"(protect_floor {tone.protect_floor:.6g} x amplitude "
@@ -264,7 +265,8 @@ def _tone_survives_flagging(run: Built) -> Iterable[Finding]:
             f"gone.' Raise {where}.threshold above {counts:.6g}, or lower "
             "model.cw_tone.protect_floor so the protected set reaches down "
             f"past it ({float(threshold) / counts * tone.protect_floor:.6g} "
-            f"or less does it at this amplitude). {_A43_TAIL} (check A43).")
+            f"or less does it at this amplitude). {_A43_TAIL} (check A43).",
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -381,8 +383,7 @@ def _beam_analysed_twice(run: Built) -> Iterable[Finding]:
     for (ref, lmax, iterations), members in groups.items():
         if len(members) < 2:
             continue
-        alms = [getattr(resources.get(dotted), "beam_alms", None)
-                for dotted in members]
+        alms = [getattr(resources.get(dotted), "beam_alms", None) for dotted in members]
         if any(one is None for one in alms):
             continue
         if all(one is alms[0] for one in alms[1:]):
@@ -394,12 +395,14 @@ def _beam_analysed_twice(run: Built) -> Iterable[Finding]:
         # advised on its driftscan member does.
         advised_engine = specs[members[1]][3]
         yield warn(
-            "B9", members[1],
+            "B9",
+            members[1],
             f"{members[1]} and {members[0]} both analyse {ref} at lmax="
             f"{lmax} with beam_iterations={iterations}, and this run's two "
             "beam_alms are not the same array -- so the identical spherical "
             f"harmonic transform ran {len(members)} times. "
-            f"{_remedy(advised_engine, members[0])} {_B9_TAIL} (check B9).")
+            f"{_remedy(advised_engine, members[0])} {_B9_TAIL} (check B9).",
+        )
 
 
 def _remedy(advised_engine: str, first: str) -> str:
@@ -434,12 +437,16 @@ def _remedy(advised_engine: str, first: str) -> str:
     group down the driftscan branch and called that conservative, which it
     was, because the branch said there was nothing to do.
     """
-    advice = (f"Write beam_alms: {{ref: {first}.beam_alms}} on the second "
-              "entry: measured, that route analyses the beam once and hands "
-              "both projectors the same array.")
+    advice = (
+        f"Write beam_alms: {{ref: {first}.beam_alms}} on the second "
+        "entry: measured, that route analyses the beam once and hands "
+        "both projectors the same array."
+    )
     if advised_engine == "driftscan":
-        return advice + (" On engine: driftscan write nside: too -- alms "
-                         "carry no pixel count, so the resolution the beam "
-                         "route infers from the map length has to be "
-                         "declared on this one.")
+        return advice + (
+            " On engine: driftscan write nside: too -- alms "
+            "carry no pixel count, so the resolution the beam "
+            "route infers from the map length has to be "
+            "declared on this one."
+        )
     return advice

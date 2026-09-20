@@ -174,8 +174,10 @@ class TestBackendOperator:
         expected = ramp.reshape(N_TIME // 4, 4, N_FREQ).mean(axis=1)
         assert jnp.allclose(out.data, expected)
         # And it is not the first, last or max of each chunk.
-        for wrong in (ramp.reshape(N_TIME // 4, 4, N_FREQ)[:, 0, :],
-                      ramp.reshape(N_TIME // 4, 4, N_FREQ)[:, -1, :]):
+        for wrong in (
+            ramp.reshape(N_TIME // 4, 4, N_FREQ)[:, 0, :],
+            ramp.reshape(N_TIME // 4, 4, N_FREQ)[:, -1, :],
+        ):
             assert not jnp.allclose(out.data, wrong)
 
     def test_updates_time_coordinate(self, data_state):

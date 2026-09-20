@@ -58,9 +58,9 @@ _ROOT = pathlib.Path(__file__).resolve().parents[2]
 #: Every top-level module name the table probes.  Read off the table rather
 #: than written out, so a requirement added without a thought about the
 #: environment still gets blocked by the sweeping tests below.
-MODULES = tuple(sorted({requirement[1]
-                        for requirements in _FEATURES.values()
-                        for requirement in requirements}))
+MODULES = tuple(
+    sorted({requirement[1] for requirements in _FEATURES.values() for requirement in requirements})
+)
 
 #: The distribution this module never asks the environment about, in either
 #: direction.
@@ -122,8 +122,7 @@ def a35_wheres(document):
     """
     from rheplicant.config.preflight import preflight
 
-    return sorted(one.where for one in preflight(document).findings
-                  if one.check == "A35")
+    return sorted(one.where for one in preflight(document).findings if one.check == "A35")
 
 
 #: An ``inference:`` patch whose latent declares NO prior, for the rows that
@@ -139,80 +138,178 @@ def beam(**spec):
 #: The eight routes measured in the plan's own table, plus the four §0.3 E.2
 #: added.  Each row is ``(id, the patch, the where, the module to block)``.
 ROUTES = (
-    ("beam-format-cst",
-     {"resources": beam(format="cst", directory="cst", phi0_deg=0.0,
-                        phi_sense="ccw")},
-     "resources.beams.horn", "limTOD"),
-    ("beam-format-uvbeam",
-     {"resources": beam(format="uvbeam", path="b.beamfits")},
-     "resources.beams.horn", "pyuvdata"),
-    ("beam-format-healpix",
-     {"resources": beam(format="healpix", path="b.fits", order="ring",
-                        freq={"ones": ["n_freq"]}, frame="beam_local")},
-     "resources.beams.horn", "healpy"),
-    ("beam-format-gaussian",
-     {"resources": beam(format="gaussian", fwhm_deg=10.0, frame="beam_local")},
-     "resources.beams.horn", "healpy"),
-    ("beam-horizon-truncate-map",
-     {"resources": beam(format="npy", path="b.npy", frame="beam_local",
-                        horizon={"mode": "truncate_map"})},
-     "resources.beams.horn", "limtod_jax"),
-    ("projector-engine-driftscan",
-     {"resources": {"projectors": {"p": {"engine": "driftscan", "lmax": 8,
-                                         "normalize_beam": True,
-                                         "beam": {"ref": "resources.beams.horn"}}}}},
-     "resources.projectors.p", "limtod_jax"),
-    ("projector-engine-general-pointing",
-     {"resources": {"projectors": {"p": {"engine": "general_pointing", "lmax": 8,
-                                         "nside": 4, "normalize_beam": True,
-                                         "beam": {"ref": "resources.beams.horn"}}}}},
-     "resources.projectors.p", "limtod_jax"),
-    ("s-params-termination",
-     {"resources": {"s_params": {"z": {"kind": "termination",
-                                       "termination": "open"}}}},
-     "resources.s_params.z", "rhino_cal_jax"),
-    ("sky-model-gdsm",
-     {"resources": {"sky_models": {"s": {"kind": "gdsm", "nside": 8}}}},
-     "resources.sky_models.s", "pygdsm"),
-    ("observation-from-file",
-     {"observation": {"from_file": {"format": "rhino_hdf5", "path": "obs.h5",
-                                    "freq_unit": "MHz"}}},
-     "observation.from_file", "h5py"),
-    ("model-noise-wave",
-     {"model": {"noise_wave": {"type": "NoiseWaveOperator"}}},
-     "model.noise_wave", "rhino_cal_jax"),
-    ("model-flagging-momentrfi",
-     {"model": {"flagging": {"type": "MomentRFIFlaggingOperator"}}},
-     "model.flagging", "MomentRFI"),
-    ("transform-beam-analysis",
-     {"inference": {"parameters": {"g": {"init": 1.0, "into": "gain.gain",
-                                         "transform": {"beam_analysis":
-                                                       {"nside": 4, "lmax": 8}}}}}},
-     "inference.parameters.g", "limtod_jax"),
-    ("run-kind-nuts",
-     {"runs": [{"kind": "nuts", "name": "n"}], "inference": NO_PRIOR},
-     "runs[0]", "numpyro"),
-    ("inference-parameter-prior",
-     {"inference": {"parameters": {"g": {"init": 1.0, "into": "gain.gain",
-                                         "prior": {"normal": {"loc": 1.0,
-                                                              "scale": 0.5}}}}}},
-     "inference.parameters.g", "numpyro"),
+    (
+        "beam-format-cst",
+        {"resources": beam(format="cst", directory="cst", phi0_deg=0.0, phi_sense="ccw")},
+        "resources.beams.horn",
+        "limTOD",
+    ),
+    (
+        "beam-format-uvbeam",
+        {"resources": beam(format="uvbeam", path="b.beamfits")},
+        "resources.beams.horn",
+        "pyuvdata",
+    ),
+    (
+        "beam-format-healpix",
+        {
+            "resources": beam(
+                format="healpix",
+                path="b.fits",
+                order="ring",
+                freq={"ones": ["n_freq"]},
+                frame="beam_local",
+            )
+        },
+        "resources.beams.horn",
+        "healpy",
+    ),
+    (
+        "beam-format-gaussian",
+        {"resources": beam(format="gaussian", fwhm_deg=10.0, frame="beam_local")},
+        "resources.beams.horn",
+        "healpy",
+    ),
+    (
+        "beam-horizon-truncate-map",
+        {
+            "resources": beam(
+                format="npy", path="b.npy", frame="beam_local", horizon={"mode": "truncate_map"}
+            )
+        },
+        "resources.beams.horn",
+        "limtod_jax",
+    ),
+    (
+        "projector-engine-driftscan",
+        {
+            "resources": {
+                "projectors": {
+                    "p": {
+                        "engine": "driftscan",
+                        "lmax": 8,
+                        "normalize_beam": True,
+                        "beam": {"ref": "resources.beams.horn"},
+                    }
+                }
+            }
+        },
+        "resources.projectors.p",
+        "limtod_jax",
+    ),
+    (
+        "projector-engine-general-pointing",
+        {
+            "resources": {
+                "projectors": {
+                    "p": {
+                        "engine": "general_pointing",
+                        "lmax": 8,
+                        "nside": 4,
+                        "normalize_beam": True,
+                        "beam": {"ref": "resources.beams.horn"},
+                    }
+                }
+            }
+        },
+        "resources.projectors.p",
+        "limtod_jax",
+    ),
+    (
+        "s-params-termination",
+        {"resources": {"s_params": {"z": {"kind": "termination", "termination": "open"}}}},
+        "resources.s_params.z",
+        "rhino_cal_jax",
+    ),
+    (
+        "sky-model-gdsm",
+        {"resources": {"sky_models": {"s": {"kind": "gdsm", "nside": 8}}}},
+        "resources.sky_models.s",
+        "pygdsm",
+    ),
+    (
+        "observation-from-file",
+        {
+            "observation": {
+                "from_file": {"format": "rhino_hdf5", "path": "obs.h5", "freq_unit": "MHz"}
+            }
+        },
+        "observation.from_file",
+        "h5py",
+    ),
+    (
+        "model-noise-wave",
+        {"model": {"noise_wave": {"type": "NoiseWaveOperator"}}},
+        "model.noise_wave",
+        "rhino_cal_jax",
+    ),
+    (
+        "model-flagging-momentrfi",
+        {"model": {"flagging": {"type": "MomentRFIFlaggingOperator"}}},
+        "model.flagging",
+        "MomentRFI",
+    ),
+    (
+        "transform-beam-analysis",
+        {
+            "inference": {
+                "parameters": {
+                    "g": {
+                        "init": 1.0,
+                        "into": "gain.gain",
+                        "transform": {"beam_analysis": {"nside": 4, "lmax": 8}},
+                    }
+                }
+            }
+        },
+        "inference.parameters.g",
+        "limtod_jax",
+    ),
+    (
+        "run-kind-nuts",
+        {"runs": [{"kind": "nuts", "name": "n"}], "inference": NO_PRIOR},
+        "runs[0]",
+        "numpyro",
+    ),
+    (
+        "inference-parameter-prior",
+        {
+            "inference": {
+                "parameters": {
+                    "g": {
+                        "init": 1.0,
+                        "into": "gain.gain",
+                        "prior": {"normal": {"loc": 1.0, "scale": 0.5}},
+                    }
+                }
+            }
+        },
+        "inference.parameters.g",
+        "numpyro",
+    ),
 )
 ROUTE_IDS = [row[0] for row in ROUTES]
 
 #: Every ``(token, value)`` that needs nothing optional.  Written out rather
 #: than derived from ``_FEATURES``, deliberately: derived, it would agree with
 #: the table by construction and assert nothing at all.
-EMPTY = frozenset({
-    ("format", "npy"), ("format", "npz"), ("format", "inline"),
-    ("format", "python"),
-    ("horizon", "none"), ("horizon", "projector_mask"),
-    ("engine", "matrix"),
-    ("s_params", "touchstone"),
-    ("sky_model", "uniform"), ("sky_model", "power_law"),
-    ("sky_model", "maps"), ("sky_model", "python"),
-    ("run", "npe"),
-})
+EMPTY = frozenset(
+    {
+        ("format", "npy"),
+        ("format", "npz"),
+        ("format", "inline"),
+        ("format", "python"),
+        ("horizon", "none"),
+        ("horizon", "projector_mask"),
+        ("engine", "matrix"),
+        ("s_params", "touchstone"),
+        ("sky_model", "uniform"),
+        ("sky_model", "power_law"),
+        ("sky_model", "maps"),
+        ("sky_model", "python"),
+        ("run", "npe"),
+    }
+)
 
 
 class TestTheRegistration:
@@ -241,14 +338,20 @@ class TestTheRegistration:
         and cannot be un-happened.
         """
         done = subprocess.run(
-            [sys.executable, "-c",
-             "from rheplicant.config.preflight import CHECKS\n"
-             "assert 'A35' in CHECKS, sorted(CHECKS)\n"],
-            capture_output=True, text=True, cwd=str(_ROOT))
+            [
+                sys.executable,
+                "-c",
+                "from rheplicant.config.preflight import CHECKS\n"
+                "assert 'A35' in CHECKS, sorted(CHECKS)\n",
+            ],
+            capture_output=True,
+            text=True,
+            cwd=str(_ROOT),
+        )
         assert done.returncode == 0, (
             "A35 is decorated but not wired: importing the package does not "
-            "import preflight/depends.py, so the pass never runs it.\n"
-            + done.stdout + done.stderr)
+            "import preflight/depends.py, so the pass never runs it.\n" + done.stdout + done.stderr
+        )
 
     def test_this_module_head_imports_no_sibling_under_preflight(self):
         """**Not** the precedence claim §0.3 C.5 asks for -- the mechanism under
@@ -295,16 +398,18 @@ class TestTheRegistration:
 
         source = pathlib.Path(_extras.__globals__["__file__"]).read_text()
         module = ast.parse(source)
-        head = [node for node in module.body
-                if isinstance(node, (ast.Import, ast.ImportFrom))]
+        head = [node for node in module.body if isinstance(node, (ast.Import, ast.ImportFrom))]
         named = {node.module for node in head if isinstance(node, ast.ImportFrom)}
-        named |= {alias.name for node in head if isinstance(node, ast.Import)
-                  for alias in node.names}
-        siblings = {name for name in named
-                    if name and name.startswith("rheplicant.config.preflight.")}
+        named |= {
+            alias.name for node in head if isinstance(node, ast.Import) for alias in node.names
+        }
+        siblings = {
+            name for name in named if name and name.startswith("rheplicant.config.preflight.")
+        }
         assert siblings == set(), (
             f"{sorted(siblings)} are head-imported, so their checks register "
-            "before this module's own and A35 no longer leads the pass")
+            "before this module's own and A35 no longer leads the pass"
+        )
 
     def test_the_base_document_earns_no_A35(self):
         """The fixture is the one every other test is a patch of.
@@ -325,12 +430,16 @@ class TestTheTableIsTheSourcesOwn:
     failing test rather than a discovery three plans later.
     """
 
-    @pytest.mark.parametrize("token, declared", [
-        ("format", BEAM_FORMATS),
-        ("engine", ENGINES),
-        ("s_params", S_PARAM_KINDS),
-        ("sky_model", SKY_KINDS),
-    ], ids=["beam-formats", "projector-engines", "s-param-kinds", "sky-kinds"])
+    @pytest.mark.parametrize(
+        "token, declared",
+        [
+            ("format", BEAM_FORMATS),
+            ("engine", ENGINES),
+            ("s_params", S_PARAM_KINDS),
+            ("sky_model", SKY_KINDS),
+        ],
+        ids=["beam-formats", "projector-engines", "s-param-kinds", "sky-kinds"],
+    )
     def test_the_table_covers_every_value_the_source_declares(self, token, declared):
         covered = {value for name, value in _FEATURES if name == token}
         assert covered == set(declared)
@@ -357,8 +466,17 @@ class TestTheTableIsTheSourcesOwn:
         dotted path with a hole in it.  Both halves are asserted -- the words
         themselves, and that every token in the table has a sentence to say."""
         assert set(_TRIGGER) == {
-            "format", "horizon", "engine", "s_params", "sky_model", "file",
-            "node", "transform", "run", "prior"}
+            "format",
+            "horizon",
+            "engine",
+            "s_params",
+            "sky_model",
+            "file",
+            "node",
+            "transform",
+            "run",
+            "prior",
+        }
         assert {name for name, _ in _FEATURES} == set(_TRIGGER)
         assert all("." not in token for token in _TRIGGER)
 
@@ -366,9 +484,9 @@ class TestTheTableIsTheSourcesOwn:
         """R4: advice that cannot be followed is not advice.  Both directions,
         because a stale ``_INSTALL`` row is advice about a requirement nobody
         has."""
-        named = {requirement[0]
-                 for requirements in _FEATURES.values()
-                 for requirement in requirements}
+        named = {
+            requirement[0] for requirements in _FEATURES.values() for requirement in requirements
+        }
         named |= {requirement[0] for _, requirement in _CONDITIONAL.values()}
         assert named == set(_INSTALL)
 
@@ -412,10 +530,10 @@ class TestTheTableIsTheSourcesOwn:
 
 
 class TestEveryRouteThatReachesTheUserBadlyToday:
-    @pytest.mark.parametrize("patch, where, module",
-                             [row[1:] for row in ROUTES], ids=ROUTE_IDS)
+    @pytest.mark.parametrize("patch, where, module", [row[1:] for row in ROUTES], ids=ROUTE_IDS)
     def test_the_route_earns_exactly_one_A35_naming_its_own_place(
-            self, monkeypatch, patch, where, module):
+        self, monkeypatch, patch, where, module
+    ):
         """One finding per place, pointing at the entry the reader must edit.
 
         ``only`` rather than an ``in`` assertion: a walk that forgot to break
@@ -431,10 +549,10 @@ class TestEveryRouteThatReachesTheUserBadlyToday:
         assert finding.message.startswith(f"{where}: ")
         assert finding.message.endswith("(check A35).")
 
-    @pytest.mark.parametrize("patch, where, module",
-                             [row[1:] for row in ROUTES], ids=ROUTE_IDS)
+    @pytest.mark.parametrize("patch, where, module", [row[1:] for row in ROUTES], ids=ROUTE_IDS)
     def test_the_same_route_is_silent_when_the_distribution_is_there(
-            self, monkeypatch, patch, where, module):
+        self, monkeypatch, patch, where, module
+    ):
         """The anti-vacuity partner of the test above, and the reason every
         row of :data:`ROUTES` names the module it blocks.
 
@@ -492,7 +610,8 @@ class TestTheWholeSentence:
             "own dependencies, so a missing one means the install is incomplete: pip "
             'install "limTOD[jax]>=1.10". Said from the document\'s text, so that a '
             "missing dependency arrives before the run rather than as an ImportError in "
-            "the middle of one (check A35).")
+            "the middle of one (check A35)."
+        )
 
     def test_the_cst_beam_says_which_submodule_it_did_not_probe(self, monkeypatch):
         """§0.3 E.2(1): a submodule requirement is probed by its top-level
@@ -511,7 +630,8 @@ class TestTheWholeSentence:
             "resource is built, because probing one at this phase would import limTOD -- "
             "measured at 1180.8 ms against this pass's 50 ms budget. Said from the "
             "document's text, so that a missing dependency arrives before the run rather "
-            "than as an ImportError in the middle of one (check A35).")
+            "than as an ImportError in the middle of one (check A35)."
+        )
 
     def test_the_momentrfi_node_says_what_needs_none_of_it(self, monkeypatch):
         """The alternative clause, and the sentence :class:`TestApplyingTheAdvice`
@@ -535,17 +655,21 @@ class TestTheWholeSentence:
             'git+https://github.com/zzhang0123/MomentRFI". The threshold-based '
             "FlaggingOperator needs none of it. Said from the document's text, so that a "
             "missing dependency arrives before the run rather than as an ImportError in "
-            "the middle of one (check A35).")
+            "the middle of one (check A35)."
+        )
 
     def test_a_uvbeam_missing_both_hears_about_both(self, monkeypatch):
         """Two distributions for one route, which is the whole reason
         ``_FEATURES`` maps to a TUPLE of requirements.  A table mapping one
         token to one requirement passes every other test in this module."""
         blocked(monkeypatch, "pyuvdata", "limTOD")
-        findings = [one for one in _findings(preflight_document(**ROUTES[1][1]))
-                    if one.check == "A35"]
+        findings = [
+            one for one in _findings(preflight_document(**ROUTES[1][1])) if one.check == "A35"
+        ]
         assert [one.message.split(" needs ")[1].split(",")[0] for one in findings] == [
-            "the pyuvdata distribution", "the limTOD distribution"]
+            "the pyuvdata distribution",
+            "the limTOD distribution",
+        ]
 
 
 def _findings(document):
@@ -558,33 +682,53 @@ def _findings(document):
 #: declare for it to be followable.  ``None`` where the requirement is not an
 #: extra of this package at all.
 INSTALL_LINES = (
-    ("limTOD", None,
-     "limTOD is a hard dependency of this package rather than an extra, so a missing "
-     'one means the install is broken or limTOD was removed: pip install '
-     '"limTOD[jax]>=1.10".'),
-    ("healpy", None,
-     "healpy arrives with limTOD's own dependencies, so a missing one means the "
-     'install is incomplete: pip install "limTOD[jax]>=1.10".'),
-    ("pygdsm", None,
-     "pygdsm is optional and arrives through limTOD's extra rather than through this "
-     'package\'s: pip install "limTOD[gdsm]". There is no rheplicant[gdsm].'),
-    ("pyuvdata", "uvbeam",
-     "pyuvdata is the 'uvbeam' extra; the limTOD bridge itself ships with limTOD, so "
-     'only the file reader is missing: uv pip install -e ".[uvbeam]".'),
-    ("h5py", "rhino",
-     "h5py is the 'rhino' extra and it does resolve from an index: uv pip install -e "
-     '".[rhino]".'),
-    ("numpyro", "numpyro",
-     "numpyro is the 'numpyro' extra: pip install 'rheplicant[numpyro]'."),
-    ("rhino-cal-jax", "cal",
-     "rhino-cal-jax is the 'cal' extra and is not on PyPI, so the extra names the "
-     "requirement rather than resolving it, and the branch matters: uv pip install "
-     '"rhino-cal-jax @ '
-     'git+https://github.com/RHINO-Experiment/rhino-cal@feat/rhino-cal-jax".'),
-    ("MomentRFI", "rfi",
-     "MomentRFI is the 'rfi' extra and is not on PyPI, so the extra names the "
-     'requirement rather than resolving it: uv pip install "MomentRFI @ '
-     'git+https://github.com/zzhang0123/MomentRFI".'),
+    (
+        "limTOD",
+        None,
+        "limTOD is a hard dependency of this package rather than an extra, so a missing "
+        "one means the install is broken or limTOD was removed: pip install "
+        '"limTOD[jax]>=1.10".',
+    ),
+    (
+        "healpy",
+        None,
+        "healpy arrives with limTOD's own dependencies, so a missing one means the "
+        'install is incomplete: pip install "limTOD[jax]>=1.10".',
+    ),
+    (
+        "pygdsm",
+        None,
+        "pygdsm is optional and arrives through limTOD's extra rather than through this "
+        'package\'s: pip install "limTOD[gdsm]". There is no rheplicant[gdsm].',
+    ),
+    (
+        "pyuvdata",
+        "uvbeam",
+        "pyuvdata is the 'uvbeam' extra; the limTOD bridge itself ships with limTOD, so "
+        'only the file reader is missing: uv pip install -e ".[uvbeam]".',
+    ),
+    (
+        "h5py",
+        "rhino",
+        "h5py is the 'rhino' extra and it does resolve from an index: uv pip install -e "
+        '".[rhino]".',
+    ),
+    ("numpyro", "numpyro", "numpyro is the 'numpyro' extra: pip install 'rheplicant[numpyro]'."),
+    (
+        "rhino-cal-jax",
+        "cal",
+        "rhino-cal-jax is the 'cal' extra and is not on PyPI, so the extra names the "
+        "requirement rather than resolving it, and the branch matters: uv pip install "
+        '"rhino-cal-jax @ '
+        'git+https://github.com/RHINO-Experiment/rhino-cal@feat/rhino-cal-jax".',
+    ),
+    (
+        "MomentRFI",
+        "rfi",
+        "MomentRFI is the 'rfi' extra and is not on PyPI, so the extra names the "
+        'requirement rather than resolving it: uv pip install "MomentRFI @ '
+        'git+https://github.com/zzhang0123/MomentRFI".',
+    ),
 )
 
 
@@ -606,15 +750,16 @@ class TestTheMessageTablesThemselves:
     def test_every_install_line_is_pinned_and_no_line_is_unpinned(self):
         assert {name for name, _, _ in INSTALL_LINES} == set(_INSTALL)
 
-    @pytest.mark.parametrize("distribution, extra, text", INSTALL_LINES,
-                             ids=[row[0] for row in INSTALL_LINES])
+    @pytest.mark.parametrize(
+        "distribution, extra, text", INSTALL_LINES, ids=[row[0] for row in INSTALL_LINES]
+    )
     def test_the_install_line_says_this(self, distribution, extra, text):
         assert _INSTALL[distribution] == text
 
-    @pytest.mark.parametrize("distribution, extra, text", INSTALL_LINES,
-                             ids=[row[0] for row in INSTALL_LINES])
-    def test_the_extra_it_names_is_one_pyproject_declares(self, distribution,
-                                                          extra, text):
+    @pytest.mark.parametrize(
+        "distribution, extra, text", INSTALL_LINES, ids=[row[0] for row in INSTALL_LINES]
+    )
+    def test_the_extra_it_names_is_one_pyproject_declares(self, distribution, extra, text):
         """R4, mechanically: advice that cannot be followed is not advice.
 
         Reads ``pyproject.toml``'s own ``[project.optional-dependencies]``
@@ -636,12 +781,13 @@ class TestTheMessageTablesThemselves:
             declared = set(tomllib.load(handle)["project"]["optional-dependencies"])
         if extra is None:
             assert not any(f"[{name}]" in text for name in declared), (
-                f"{distribution}'s advice points at an extra of this package, "
-                "and it has none")
+                f"{distribution}'s advice points at an extra of this package, and it has none"
+            )
         else:
             assert extra in declared, (
                 f"{distribution} is advised as the {extra!r} extra and "
-                f"pyproject.toml declares {sorted(declared)}")
+                f"pyproject.toml declares {sorted(declared)}"
+            )
             assert f"'{extra}'" in text or f"[{extra}]" in text
 
     def test_every_trigger_phrase_says_this(self):
@@ -662,13 +808,17 @@ class TestTheMessageTablesThemselves:
         """Each names a route that needs nothing optional, quoted from the
         package's own gate.  A rewritten one that named a route which is NOT
         dependency-free would be an R4 loop, and survived until this pin."""
-        matrix = ("engine: matrix takes a precomputed sky->TOD matrix and needs no "
-                  "optional dependency (fixed pointing and beam only).")
+        matrix = (
+            "engine: matrix takes a precomputed sky->TOD matrix and needs no "
+            "optional dependency (fixed pointing and beam only)."
+        )
         assert _ALTERNATIVE == {
             ("engine", "driftscan"): matrix,
             ("engine", "general_pointing"): matrix,
-            ("node", "MomentRFIFlaggingOperator"):
-                "The threshold-based FlaggingOperator needs none of it.",
+            (
+                "node",
+                "MomentRFIFlaggingOperator",
+            ): "The threshold-based FlaggingOperator needs none of it.",
         }
         assert _FEATURES[("engine", "matrix")] == ()
 
@@ -687,7 +837,8 @@ class TestTheWholeSentenceOnEveryDistribution:
             "h5py is not importable in this environment. h5py is the 'rhino' extra and "
             'it does resolve from an index: uv pip install -e ".[rhino]". Said from the '
             "document's text, so that a missing dependency arrives before the run rather "
-            "than as an ImportError in the middle of one (check A35).")
+            "than as an ImportError in the middle of one (check A35)."
+        )
 
     def test_the_nuts_run_says_this(self, monkeypatch):
         """Also the only pin on ``_TRIGGER["run"]``'s sentence in a real
@@ -699,7 +850,8 @@ class TestTheWholeSentenceOnEveryDistribution:
             "importable in this environment. numpyro is the 'numpyro' extra: pip install "
             "'rheplicant[numpyro]'. Said from the document's text, so that a missing "
             "dependency arrives before the run rather than as an ImportError in the "
-            "middle of one (check A35).")
+            "middle of one (check A35)."
+        )
 
     def test_the_declared_prior_says_this(self, monkeypatch):
         """``_TRIGGER["prior"]`` is the one phrase that names no key, because
@@ -711,7 +863,8 @@ class TestTheWholeSentenceOnEveryDistribution:
             "and numpyro is not importable in this environment. numpyro is the 'numpyro' "
             "extra: pip install 'rheplicant[numpyro]'. Said from the document's text, so "
             "that a missing dependency arrives before the run rather than as an "
-            "ImportError in the middle of one (check A35).")
+            "ImportError in the middle of one (check A35)."
+        )
 
     def test_the_uvbeam_route_says_this(self, monkeypatch):
         blocked(monkeypatch, "pyuvdata")
@@ -722,10 +875,10 @@ class TestTheWholeSentenceOnEveryDistribution:
             "extra; the limTOD bridge itself ships with limTOD, so only the file reader "
             'is missing: uv pip install -e ".[uvbeam]". Said from the document\'s text, '
             "so that a missing dependency arrives before the run rather than as an "
-            "ImportError in the middle of one (check A35).")
+            "ImportError in the middle of one (check A35)."
+        )
 
-    def test_the_noise_wave_node_names_the_DISTRIBUTION_and_the_MODULE(
-            self, monkeypatch):
+    def test_the_noise_wave_node_names_the_DISTRIBUTION_and_the_MODULE(self, monkeypatch):
         """**The whole reason ``Requirement`` is a triple**, pinned.
 
         ``rhino-cal-jax`` is the distribution and ``rhino_cal_jax`` is the
@@ -743,14 +896,14 @@ class TestTheWholeSentenceOnEveryDistribution:
             '"rhino-cal-jax @ '
             'git+https://github.com/RHINO-Experiment/rhino-cal@feat/rhino-cal-jax". '
             "Said from the document's text, so that a missing dependency arrives before "
-            "the run rather than as an ImportError in the middle of one (check A35).")
+            "the run rather than as an ImportError in the middle of one (check A35)."
+        )
 
 
 class TestTheTwins:
     """S3.  Each of these is a second route to a rule the first one guards."""
 
-    def test_an_UNSELECTED_variant_that_introduces_the_route_is_walked(
-            self, monkeypatch):
+    def test_an_UNSELECTED_variant_that_introduces_the_route_is_walked(self, monkeypatch):
         """§0.3 F.5(1), and **this is the only property the layer walk buys**.
 
         The document's BASE carries no beam, so a base-only check finds
@@ -762,13 +915,14 @@ class TestTheTwins:
         """
         blocked(monkeypatch, "healpy")
         document = preflight_document(
-            variants={"big": {"resources": beam(format="gaussian", fwhm_deg=10.0,
-                                                frame="beam_local")}})
+            variants={
+                "big": {"resources": beam(format="gaussian", fwhm_deg=10.0, frame="beam_local")}
+            }
+        )
         finding = only(document, "A35")
         assert finding.message.startswith("variants.big: resources.beams.horn: ")
 
-    def test_a_SELECTED_variant_reaches_the_check_without_the_layer_walk(
-            self, monkeypatch):
+    def test_a_SELECTED_variant_reaches_the_check_without_the_layer_walk(self, monkeypatch):
         """The other half of the same twin, and the one that is NOT the walk's.
 
         ``config/document.py::_assemble`` applies the selected variant BEFORE
@@ -782,8 +936,10 @@ class TestTheTwins:
 
         blocked(monkeypatch, "healpy")
         document = preflight_document(
-            variants={"big": {"resources": beam(format="gaussian", fwhm_deg=10.0,
-                                                frame="beam_local")}})
+            variants={
+                "big": {"resources": beam(format="gaussian", fwhm_deg=10.0, frame="beam_local")}
+            }
+        )
         with pytest.raises(ConfigError) as excinfo:
             load_document(document, variant="big")
         assert "needs the healpy distribution" in str(excinfo.value)
@@ -796,7 +952,8 @@ class TestTheTwins:
         patch = beam(format="gaussian", fwhm_deg=10.0, frame="beam_local")
         document = preflight_document(
             resources=patch,
-            variants={f"v{index}": {"runtime": {"seed": index}} for index in range(4)})
+            variants={f"v{index}": {"runtime": {"seed": index}} for index in range(4)},
+        )
         assert only(document, "A35").where == "resources.beams.horn"
 
     def test_a_variant_s_own_route_is_not_counted_twice(self, monkeypatch):
@@ -817,9 +974,12 @@ class TestTheTwins:
         node = {"file": {"path": "o.h5", "format": "rhino_hdf5"}}
         document = preflight_document(
             resources={"arrays": {"base": dict(node)}},
-            variants={"big": {"resources": {"arrays": {"rec": dict(node)}}}})
-        assert a35_wheres(document) == ["resources.arrays.base",
-                                        "variants.big.resources.arrays.rec"]
+            variants={"big": {"resources": {"arrays": {"rec": dict(node)}}}},
+        )
+        assert a35_wheres(document) == [
+            "resources.arrays.base",
+            "variants.big.resources.arrays.rec",
+        ]
 
     def test_inference_twin_replace_reaches_the_same_builder(self, monkeypatch):
         """§0.3 E.10, and it is a real candidate rather than a formality:
@@ -830,13 +990,18 @@ class TestTheTwins:
         ``f"model.{node_id}: "`` could not."""
         blocked(monkeypatch, "rhino_cal_jax")
         document = preflight_document(
-            inference={"twin": {"without": ["noise"],
-                                "replace": {"noise_wave":
-                                            {"type": "NoiseWaveOperator"}}}})
+            inference={
+                "twin": {
+                    "without": ["noise"],
+                    "replace": {"noise_wave": {"type": "NoiseWaveOperator"}},
+                }
+            }
+        )
         finding = only(document, "A35")
         assert finding.where == "inference.twin.replace.noise_wave"
         assert finding.message.startswith(
-            "inference.twin.replace.noise_wave: NoiseWaveOperator needs ")
+            "inference.twin.replace.noise_wave: NoiseWaveOperator needs "
+        )
 
     def test_a_file_value_node_is_the_from_file_twin(self, monkeypatch):
         """A10's twin is A35's too: ``observation.from_file`` is not the only
@@ -846,13 +1011,12 @@ class TestTheTwins:
         at ``resources.arrays.<n>``, which is where this one writes it."""
         blocked(monkeypatch, "h5py")
         document = preflight_document(
-            resources={"arrays": {"rec": {"file": {"path": "obs.h5",
-                                                   "format": "rhino_hdf5"}}}})
+            resources={"arrays": {"rec": {"file": {"path": "obs.h5", "format": "rhino_hdf5"}}}}
+        )
         finding = only(document, "A35")
         assert finding.where == "resources.arrays.rec"
 
-    def test_a_binding_s_transform_is_the_latent_s_transform_s_twin(
-            self, monkeypatch):
+    def test_a_binding_s_transform_is_the_latent_s_transform_s_twin(self, monkeypatch):
         """``parse_transform`` has two call sites, not one.
 
         ``transforms.py::parse_transform`` reads a LATENT's own ``transform:`` and
@@ -862,16 +1026,22 @@ class TestTheTwins:
         deleting the bindings walk survived everything.
         """
         blocked(monkeypatch, "limtod_jax")
-        document = preflight_document(inference={
-            "parameters": {"g": {"init": 1.0}},
-            "bindings": [{"latents": ["g"], "into": "gain.gain",
-                          "transform": {"beam_analysis": {"nside": 4, "lmax": 8}}}]})
+        document = preflight_document(
+            inference={
+                "parameters": {"g": {"init": 1.0}},
+                "bindings": [
+                    {
+                        "latents": ["g"],
+                        "into": "gain.gain",
+                        "transform": {"beam_analysis": {"nside": 4, "lmax": 8}},
+                    }
+                ],
+            }
+        )
         finding = only(document, "A35")
-        assert finding.message.startswith(
-            "inference.bindings[0]: transform: beam_analysis needs ")
+        assert finding.message.startswith("inference.bindings[0]: transform: beam_analysis needs ")
 
-    def test_a_file_node_inside_a_LIST_is_pointed_at_by_its_index(
-            self, monkeypatch):
+    def test_a_file_node_inside_a_LIST_is_pointed_at_by_its_index(self, monkeypatch):
         """The ``[index]`` leg of the path builder, which nothing else drives.
 
         Every other route lands on a mapping key, so a ``_joined`` that
@@ -880,9 +1050,15 @@ class TestTheTwins:
         reader pastes back into their document, and it writes ``runs[0]``.
         """
         blocked(monkeypatch, "h5py")
-        document = preflight_document(runs=[{
-            "kind": "forward", "name": "f",
-            "at": {"g": {"file": {"path": "o.h5", "format": "rhino_hdf5"}}}}])
+        document = preflight_document(
+            runs=[
+                {
+                    "kind": "forward",
+                    "name": "f",
+                    "at": {"g": {"file": {"path": "o.h5", "format": "rhino_hdf5"}}},
+                }
+            ]
+        )
         finding = only(document, "A35")
         assert finding.message.startswith("runs[0].at.g: format: rhino_hdf5 needs ")
 
@@ -892,13 +1068,11 @@ class TestTheTwins:
         that only handled a list would miss every single-run document written
         that way -- and the schema's own pages use the form."""
         blocked(monkeypatch, "numpyro")
-        document = preflight_document(runs={"kind": "nuts", "name": "n"},
-                                      inference=NO_PRIOR)
+        document = preflight_document(runs={"kind": "nuts", "name": "n"}, inference=NO_PRIOR)
         finding = only(document, "A35")
         assert finding.where == "runs[0]"
 
-    def test_the_python_spelling_of_a_node_is_the_type_spelling_s_twin(
-            self, monkeypatch):
+    def test_the_python_spelling_of_a_node_is_the_type_spelling_s_twin(self, monkeypatch):
         """``{python: 'rheplicant.radio:NoiseWaveOperator'}`` builds the same
         class as ``{type: NoiseWaveOperator}`` and 3A's tests already exercise
         it.  Resolved through ``preflight/model.py::_t5_radio_class``, which
@@ -906,45 +1080,61 @@ class TestTheTwins:
         ``import rheplicant.config`` imports ``rheplicant.radio``."""
         blocked(monkeypatch, "rhino_cal_jax")
         document = preflight_document(
-            model={"noise_wave": {"python": "rheplicant.radio:NoiseWaveOperator"}})
+            model={"noise_wave": {"python": "rheplicant.radio:NoiseWaveOperator"}}
+        )
         finding = only(document, "A35")
         assert finding.message.startswith("model.noise_wave: NoiseWaveOperator needs ")
 
-    def test_gaussian_and_healpix_are_one_twin_inside_one_function(
-            self, monkeypatch):
+    def test_gaussian_and_healpix_are_one_twin_inside_one_function(self, monkeypatch):
         """``_maps_for`` dispatches both, three lines apart: ``_healpix_maps``
         opens with a bare ``import healpy as hp`` and ``_gaussian`` calls
         ``_require_healpy``.  A35 must not inherit that asymmetry."""
         blocked(monkeypatch, "healpy")
-        document = preflight_document(resources={"beams": {
-            "ga": {"format": "gaussian", "nside": 4, "normalize": "pixel_sum",
-                   "fwhm_deg": 10.0, "frame": "beam_local"},
-            "hp": {"format": "healpix", "nside": 4, "normalize": "pixel_sum",
-                   "path": "b.fits", "order": "ring", "frame": "beam_local",
-                   "freq": {"ones": ["n_freq"]}}}})
-        wheres = sorted(one.where for one in _findings(document)
-                        if one.check == "A35")
+        document = preflight_document(
+            resources={
+                "beams": {
+                    "ga": {
+                        "format": "gaussian",
+                        "nside": 4,
+                        "normalize": "pixel_sum",
+                        "fwhm_deg": 10.0,
+                        "frame": "beam_local",
+                    },
+                    "hp": {
+                        "format": "healpix",
+                        "nside": 4,
+                        "normalize": "pixel_sum",
+                        "path": "b.fits",
+                        "order": "ring",
+                        "frame": "beam_local",
+                        "freq": {"ones": ["n_freq"]},
+                    },
+                }
+            }
+        )
+        wheres = sorted(one.where for one in _findings(document) if one.check == "A35")
         assert wheres == ["resources.beams.ga", "resources.beams.hp"]
 
     def test_the_two_flagging_classes_are_not_one(self, monkeypatch):
         """Both register at node ``flagging`` and only one needs anything."""
         del monkeypatch
         document = preflight_document(
-            model={"flagging": {"type": "FlaggingOperator",
-                                "threshold": {"value": 3.0,
-                                               "unit": "adc_count"}}})
+            model={
+                "flagging": {
+                    "type": "FlaggingOperator",
+                    "threshold": {"value": 3.0, "unit": "adc_count"},
+                }
+            }
+        )
         assert "A35" not in ids(document)
 
     def test_the_nuts_exit_and_the_npe_one_are_not_one(self, monkeypatch):
         """§0.3 E.2(6): ``kind: npe`` needs nothing optional.  Blocking numpyro
         for both halves is what makes the negative half mean something."""
         blocked(monkeypatch, "numpyro")
-        base = {"inference": {"parameters": {"g": {"init": 1.0,
-                                                   "into": "gain.gain"}}}}
-        assert only(preflight_document(runs=[{"kind": "nuts", "name": "n"}],
-                                       **base), "A35")
-        assert "A35" not in ids(preflight_document(
-            runs=[{"kind": "npe", "name": "n"}], **base))
+        base = {"inference": {"parameters": {"g": {"init": 1.0, "into": "gain.gain"}}}}
+        assert only(preflight_document(runs=[{"kind": "nuts", "name": "n"}], **base), "A35")
+        assert "A35" not in ids(preflight_document(runs=[{"kind": "npe", "name": "n"}], **base))
 
 
 #: ``token -> a patch putting ``value`` where that token is read``.  Nine of
@@ -963,21 +1153,19 @@ class TestTheTwins:
 #:   that are the whole point of this battery are unreachable there.
 HOSTILE_TOKENS = {
     "format": lambda value: {"resources": beam(format=value)},
-    "horizon": lambda value: {"resources": beam(format="npy", path="b.npy",
-                                                frame="beam_local",
-                                                horizon={"mode": value})},
+    "horizon": lambda value: {
+        "resources": beam(format="npy", path="b.npy", frame="beam_local", horizon={"mode": value})
+    },
     "engine": lambda value: {"resources": {"projectors": {"p": {"engine": value}}}},
     "s_params": lambda value: {"resources": {"s_params": {"z": {"kind": value}}}},
     "sky_model": lambda value: {"resources": {"sky_models": {"s": {"kind": value}}}},
-    "file": lambda value: {"observation": {"from_file": {"format": value,
-                                                         "path": "o.h5"}}},
+    "file": lambda value: {"observation": {"from_file": {"format": value, "path": "o.h5"}}},
     "file-value-node": lambda value: {
-        "resources": {"arrays": {"rec": {"file": {"path": "o.h5",
-                                                  "format": value}}}}},
+        "resources": {"arrays": {"rec": {"file": {"path": "o.h5", "format": value}}}}
+    },
     "node": lambda value: {"model": {"flagging": {"type": value}}},
     "run": lambda value: {"runs": [{"kind": value, "name": "r"}]},
-    "variants-inner": lambda value: {
-        "variants": {"big": {"resources": beam(format=value)}}},
+    "variants-inner": lambda value: {"variants": {"big": {"resources": beam(format=value)}}},
 }
 
 #: The supported evidence shapes a YAML author can put where a token's value
@@ -987,8 +1175,7 @@ HOSTILE_TOKENS = {
 #: tuple raises ``TypeError: unhashable type`` before any check logic runs.
 #: YAML sets are tested separately because the evidence boundary rejects them
 #: before any check runs.
-HOSTILE_VALUES = (["x"], {"x": 1}, None, 7, True, [["x"]], [{"x": 1}],
-                  (1, 2), 1.5)
+HOSTILE_VALUES = (["x"], {"x": 1}, None, 7, True, [["x"]], [{"x": 1}], (1, 2), 1.5)
 
 
 class TestNoHostileDocumentCanAbortA35:
@@ -1009,9 +1196,9 @@ class TestNoHostileDocumentCanAbortA35:
     A35's ten tokens.  The other nine tokens were covered by nothing.
     """
 
-    @pytest.mark.parametrize("value", HOSTILE_VALUES,
-                             ids=[str(index) for index in
-                                  range(len(HOSTILE_VALUES))])
+    @pytest.mark.parametrize(
+        "value", HOSTILE_VALUES, ids=[str(index) for index in range(len(HOSTILE_VALUES))]
+    )
     @pytest.mark.parametrize("token", sorted(HOSTILE_TOKENS))
     def test_the_whole_pass_survives_it(self, token, value):
         """The pass RETURNS, and no finding is a report about A35 crashing.
@@ -1025,12 +1212,11 @@ class TestNoHostileDocumentCanAbortA35:
         report = preflight(preflight_document(**HOSTILE_TOKENS[token](value)))
         assert not [one for one in report.findings if "'A35' RAISED" in one.message]
 
-    @pytest.mark.parametrize("value", HOSTILE_VALUES,
-                             ids=[str(index) for index in
-                                  range(len(HOSTILE_VALUES))])
+    @pytest.mark.parametrize(
+        "value", HOSTILE_VALUES, ids=[str(index) for index in range(len(HOSTILE_VALUES))]
+    )
     @pytest.mark.parametrize("token", sorted(HOSTILE_TOKENS))
-    def test_it_survives_with_every_distribution_blocked_too(
-            self, monkeypatch, token, value):
+    def test_it_survives_with_every_distribution_blocked_too(self, monkeypatch, token, value):
         """The same sweep on the environment that makes A35 speak.
 
         With everything present most rows return before building a message, so
@@ -1044,14 +1230,13 @@ class TestNoHostileDocumentCanAbortA35:
         assert not [one for one in report.findings if "'A35' RAISED" in one.message]
 
     @pytest.mark.parametrize("token", sorted(HOSTILE_TOKENS))
-    def test_an_unsupported_set_is_rejected_at_the_evidence_boundary(
-            self, token):
+    def test_an_unsupported_set_is_rejected_at_the_evidence_boundary(self, token):
         """A set is not recursively frozen evidence, so checks never see it."""
         from rheplicant.config.preflight import preflight
 
         with pytest.raises(
-                ConfigError,
-                match=r"initial_merge document: unsupported evidence leaf type set"):
+            ConfigError, match=r"initial_merge document: unsupported evidence leaf type set"
+        ):
             preflight(preflight_document(**HOSTILE_TOKENS[token]({"x"})))
 
     def test_the_prior_token_reads_no_user_value(self):
@@ -1063,10 +1248,12 @@ class TestNoHostileDocumentCanAbortA35:
         """
         from rheplicant.config.preflight.depends import _routes
 
-        document = preflight_document(inference={"parameters": {
-            "g": {"init": 1.0, "into": "gain.gain", "prior": ["nonsense"]}}})
-        values = [value for _, token, value, _ in _routes(document)
-                  if token == "prior"]
+        document = preflight_document(
+            inference={
+                "parameters": {"g": {"init": 1.0, "into": "gain.gain", "prior": ["nonsense"]}}
+            }
+        )
+        values = [value for _, token, value, _ in _routes(document) if token == "prior"]
         assert values == ["declared"]
 
 
@@ -1083,27 +1270,44 @@ class TestTheStandDowns:
         a statement about the value rather than about the walk never reaching
         ``resources.s_params``."""
         blocked(monkeypatch, *MODULES)
-        entry = {"z": {"kind": "touchstone",
-                       "file": {"path": "z.s1p", "format": "touchstone"}}}
+        entry = {"z": {"kind": "touchstone", "file": {"path": "z.s1p", "format": "touchstone"}}}
         assert "resources.s_params.z" not in a35_wheres(
-            preflight_document(resources={"s_params": entry}))
-        assert "resources.s_params.z" in a35_wheres(preflight_document(
-            resources={"s_params": {"z": {"kind": "termination",
-                                          "termination": "open"}}}))
+            preflight_document(resources={"s_params": entry})
+        )
+        assert "resources.s_params.z" in a35_wheres(
+            preflight_document(
+                resources={"s_params": {"z": {"kind": "termination", "termination": "open"}}}
+            )
+        )
 
     def test_a_matrix_projector_needs_nothing_optional(self, monkeypatch):
         """The engine that returns before every limTOD call.  Its sibling
         ``driftscan`` fires on the same blocked environment."""
         blocked(monkeypatch, *MODULES)
-        matrix = {"projectors": {"p": {"engine": "matrix",
-                                       "matrix": {"ones": [4, 4]},
-                                       "provenance": {"by": "a test"}}}}
-        assert "resources.projectors.p" not in a35_wheres(
-            preflight_document(resources=matrix))
-        assert "resources.projectors.p" in a35_wheres(preflight_document(
-            resources={"projectors": {"p": {"engine": "driftscan", "lmax": 8,
-                                            "normalize_beam": True,
-                                            "beam": {"ref": "resources.beams.horn"}}}}))
+        matrix = {
+            "projectors": {
+                "p": {
+                    "engine": "matrix",
+                    "matrix": {"ones": [4, 4]},
+                    "provenance": {"by": "a test"},
+                }
+            }
+        }
+        assert "resources.projectors.p" not in a35_wheres(preflight_document(resources=matrix))
+        assert "resources.projectors.p" in a35_wheres(
+            preflight_document(
+                resources={
+                    "projectors": {
+                        "p": {
+                            "engine": "driftscan",
+                            "lmax": 8,
+                            "normalize_beam": True,
+                            "beam": {"ref": "resources.beams.horn"},
+                        }
+                    }
+                }
+            )
+        )
 
     def test_a_driftscan_projector_does_not_need_healpy(self, monkeypatch):
         """**The test that makes this task's one departure from §0.3 survive
@@ -1126,18 +1330,22 @@ class TestTheStandDowns:
         because healpy is installed here, so A35 stays silent either way.  This
         test is red for that edit and only for it.
         """
-        entry = {"projectors": {"p": {"engine": "driftscan", "lmax": 8,
-                                      "normalize_beam": True,
-                                      "beam": {"ref": "resources.beams.horn"}}}}
+        entry = {
+            "projectors": {
+                "p": {
+                    "engine": "driftscan",
+                    "lmax": 8,
+                    "normalize_beam": True,
+                    "beam": {"ref": "resources.beams.horn"},
+                }
+            }
+        }
         blocked(monkeypatch, "healpy")
-        assert "resources.projectors.p" not in a35_wheres(
-            preflight_document(resources=entry))
+        assert "resources.projectors.p" not in a35_wheres(preflight_document(resources=entry))
         blocked(monkeypatch, "limtod_jax")
-        assert "resources.projectors.p" in a35_wheres(
-            preflight_document(resources=entry))
+        assert "resources.projectors.p" in a35_wheres(preflight_document(resources=entry))
 
-    def test_a_general_pointing_projector_is_not_asked_for_healpy_either(
-            self, monkeypatch):
+    def test_a_general_pointing_projector_is_not_asked_for_healpy_either(self, monkeypatch):
         """The sibling, and the reason its row is empty of healpy too.
 
         ``general_pointing`` DOES reach ``_analyse`` -- but only when
@@ -1148,27 +1356,41 @@ class TestTheStandDowns:
         -- is the recorded backstop.
         """
         blocked(monkeypatch, "healpy")
-        entry = {"projectors": {"g": {"engine": "general_pointing", "lmax": 8,
-                                      "nside": 4, "normalize_beam": True,
-                                      "beam_alms": {"ones": [45]}}}}
-        assert "resources.projectors.g" not in a35_wheres(
-            preflight_document(resources=entry))
+        entry = {
+            "projectors": {
+                "g": {
+                    "engine": "general_pointing",
+                    "lmax": 8,
+                    "nside": 4,
+                    "normalize_beam": True,
+                    "beam_alms": {"ones": [45]},
+                }
+            }
+        }
+        assert "resources.projectors.g" not in a35_wheres(preflight_document(resources=entry))
 
-    def test_a_value_the_table_has_no_row_for_is_left_to_its_builder(
-            self, monkeypatch):
+    def test_a_value_the_table_has_no_row_for_is_left_to_its_builder(self, monkeypatch):
         """A typo is ``build_beam``'s refusal to make, naming every format it
         knows -- not this check's, which would pre-empt it with advice about a
         distribution nobody asked for.  The anti-vacuity partner is the same
         entry spelled right."""
         blocked(monkeypatch, *MODULES)
-        assert "resources.beams.horn" not in a35_wheres(preflight_document(
-            resources=beam(format="helpix", path="b.fits")))
-        assert "resources.beams.horn" in a35_wheres(preflight_document(
-            resources=beam(format="healpix", path="b.fits", order="ring",
-                           frame="beam_local", freq={"ones": ["n_freq"]})))
+        assert "resources.beams.horn" not in a35_wheres(
+            preflight_document(resources=beam(format="helpix", path="b.fits"))
+        )
+        assert "resources.beams.horn" in a35_wheres(
+            preflight_document(
+                resources=beam(
+                    format="healpix",
+                    path="b.fits",
+                    order="ring",
+                    frame="beam_local",
+                    freq={"ones": ["n_freq"]},
+                )
+            )
+        )
 
-    def test_a_resources_entry_that_does_not_resolve_is_stood_down_on(
-            self, monkeypatch):
+    def test_a_resources_entry_that_does_not_resolve_is_stood_down_on(self, monkeypatch):
         """``resolved_specs`` is TOTAL and DROPS a malformed entry rather than
         raising; a check that read the raw text instead would refuse an entry
         whose ``format:`` comes from its parent, and one that let the
@@ -1179,10 +1401,20 @@ class TestTheStandDowns:
         phase.
         """
         blocked(monkeypatch, "healpy")
-        document = preflight_document(resources={"beams": {
-            "horn": {"extends": "no_such_parent", "format": "gaussian",
-                     "nside": 4, "normalize": "pixel_sum", "fwhm_deg": 10.0,
-                     "frame": "beam_local"}}})
+        document = preflight_document(
+            resources={
+                "beams": {
+                    "horn": {
+                        "extends": "no_such_parent",
+                        "format": "gaussian",
+                        "nside": 4,
+                        "normalize": "pixel_sum",
+                        "fwhm_deg": 10.0,
+                        "frame": "beam_local",
+                    }
+                }
+            }
+        )
         assert a35_wheres(document) == []
 
     def test_a_present_distribution_lets_the_specific_refusal_win(self):
@@ -1199,8 +1431,9 @@ class TestTheStandDowns:
         pytest.importorskip("pyuvdata")
         from rheplicant.config import load_document
 
-        document = preflight_document(**{
-            "resources": beam(format="uvbeam", path="b.beamfits", phi0_deg=0.0)})
+        document = preflight_document(
+            **{"resources": beam(format="uvbeam", path="b.beamfits", phi0_deg=0.0)}
+        )
         assert "A35" not in ids(document)
         with pytest.raises(ConfigError) as excinfo:
             load_document(document)
@@ -1222,8 +1455,7 @@ class TestApplyingTheAdvice:
     still true.  See :data:`PRESENCE_ALWAYS_SIMULATED`.
     """
 
-    def test_the_document_that_earns_it_would_otherwise_load_and_die_later(
-            self, monkeypatch):
+    def test_the_document_that_earns_it_would_otherwise_load_and_die_later(self, monkeypatch):
         """What A35 buys, stated as the thing it replaces.
 
         With MomentRFI present the document LOADS -- constructing
@@ -1232,14 +1464,13 @@ class TestApplyingTheAdvice:
         A35 is the whole of what stands between the two.
         """
         blocked(monkeypatch, PRESENCE_ALWAYS_SIMULATED)
-        document = preflight_document(
-            model={"flagging": {"type": "MomentRFIFlaggingOperator"}})
+        document = preflight_document(model={"flagging": {"type": "MomentRFIFlaggingOperator"}})
         assert only(document, "A35")
 
-    @pytest.mark.parametrize("installed", [False, True],
-                             ids=["simulated-absent", "simulated-present"])
-    def test_both_verdicts_are_reachable_whatever_this_venv_carries(
-            self, monkeypatch, installed):
+    @pytest.mark.parametrize(
+        "installed", [False, True], ids=["simulated-absent", "simulated-present"]
+    )
+    def test_both_verdicts_are_reachable_whatever_this_venv_carries(self, monkeypatch, installed):
         """Both sides of the only dispatch A35 makes, pinned in one test.
 
         The check branches on one question -- is the distribution findable --
@@ -1256,12 +1487,12 @@ class TestApplyingTheAdvice:
         regressed, and its own ``blocked`` call is what holds it.
         """
         if installed:
-            monkeypatch.setitem(sys.modules, PRESENCE_ALWAYS_SIMULATED,
-                                _stand_in(PRESENCE_ALWAYS_SIMULATED))
+            monkeypatch.setitem(
+                sys.modules, PRESENCE_ALWAYS_SIMULATED, _stand_in(PRESENCE_ALWAYS_SIMULATED)
+            )
         else:
             blocked(monkeypatch, PRESENCE_ALWAYS_SIMULATED)
-        document = preflight_document(
-            model={"flagging": {"type": "MomentRFIFlaggingOperator"}})
+        document = preflight_document(model={"flagging": {"type": "MomentRFIFlaggingOperator"}})
         assert a35_wheres(document) == ([] if installed else ["model.flagging"])
 
     def test_taking_the_advice_leaves_a_document_that_loads(self):
@@ -1271,8 +1502,12 @@ class TestApplyingTheAdvice:
         from rheplicant.config import load_document
 
         document = preflight_document(
-            model={"flagging": {"type": "FlaggingOperator",
-                                "threshold": {"value": 3.0,
-                                               "unit": "adc_count"}}})
+            model={
+                "flagging": {
+                    "type": "FlaggingOperator",
+                    "threshold": {"value": 3.0, "unit": "adc_count"},
+                }
+            }
+        )
         assert "A35" not in ids(document)
         load_document(document)

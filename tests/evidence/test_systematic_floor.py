@@ -139,12 +139,8 @@ class TestTheFloorWatchesADirectionAndNamesIt:
         from rheplicant.inference.factorize import Factorization
         from rheplicant.inference.parameters import Bind, Latent, ParameterSpace
 
-        latent = Latent(
-            "x", init=jnp.zeros(2), prior=camp._Normal(0.0, self.PRIOR_STD)
-        )
-        space = ParameterSpace(
-            latents=(latent,), bindings=(Bind("x", into=lambda p: p.x),)
-        )
+        latent = Latent("x", init=jnp.zeros(2), prior=camp._Normal(0.0, self.PRIOR_STD))
+        space = ParameterSpace(latents=(latent,), bindings=(Bind("x", into=lambda p: p.x),))
         memory = BayesMemory(Factorization(space))
         rng = np.random.default_rng(seed)
         for e in range(n_epochs):
@@ -252,18 +248,14 @@ def test_the_direction_is_omitted_for_a_latent_that_has_only_one():
     """A width-1 latent's only direction is itself, and naming it is noise."""
     assert _direction_phrase("t_rx", np.array([1.0])) == ""
     assert _direction_phrase("x", None) == ""
-    assert _direction_phrase("x", np.array([0.6, 0.8])) == (
-        " in direction (0.600, 0.800) of x"
-    )
+    assert _direction_phrase("x", np.array([0.6, 0.8])) == (" in direction (0.600, 0.800) of x")
 
 
 def _total_information(memory, prior_std):
     """``F_like + F_prior`` for a single latent with an isotropic normal prior."""
     import jax.numpy as jnp
 
-    return np.asarray(
-        memory.fisher(at={"x": jnp.zeros(2)}).matrix
-    ) + np.eye(2) / prior_std**2
+    return np.asarray(memory.fisher(at={"x": jnp.zeros(2)}).matrix) + np.eye(2) / prior_std**2
 
 
 def test_a_mature_campaign_is_below_the_floor():

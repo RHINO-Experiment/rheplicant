@@ -23,15 +23,17 @@ def test_npz_bytes_are_deterministic_sorted_and_pickle_free():
     first, metadata = deterministic_npz(values)
     second, again = deterministic_npz(dict(reversed(tuple(values.items()))))
     assert first == second
-    assert metadata == again == {
-        "a": {"dtype": "int16", "shape": [1, 2]},
-        "z/complex": {"dtype": "complex64", "shape": [1]},
-    }
+    assert (
+        metadata
+        == again
+        == {
+            "a": {"dtype": "int16", "shape": [1, 2]},
+            "z/complex": {"dtype": "complex64", "shape": [1]},
+        }
+    )
     with zipfile.ZipFile(io.BytesIO(first)) as archive:
         assert archive.namelist() == ["a.npy", "z/complex.npy"]
-        assert {entry.date_time for entry in archive.infolist()} == {
-            (1980, 1, 1, 0, 0, 0)
-        }
+        assert {entry.date_time for entry in archive.infolist()} == {(1980, 1, 1, 0, 0, 0)}
     with np.load(io.BytesIO(first), allow_pickle=False) as loaded:
         np.testing.assert_array_equal(loaded["a"], values["a"])
         np.testing.assert_array_equal(loaded["z/complex"], values["z/complex"])

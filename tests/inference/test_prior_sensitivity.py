@@ -132,20 +132,22 @@ def tour(_float64):
         meta={"telescope": "RHINO", "obs_id": "tour-001"},
     )
     gamma_rec = rcj.termination_gamma("resistive", N_FREQ, impedance=45.0)
-    gamma_src = jnp.stack([
-        rcj.cable_gamma(rcj.termination_gamma("open", N_FREQ), freq, length=2.0, loss=0.92),
-        rcj.termination_gamma("resistive", N_FREQ, impedance=10.0),
-        rcj.cable_gamma(rcj.termination_gamma("short", N_FREQ), freq, length=0.4, loss=0.98),
-        rcj.cable_gamma(
-            rcj.termination_gamma("resistive", N_FREQ, impedance=150.0),
-            freq, length=1.1, loss=0.95,
-        ),
-    ])
+    gamma_src = jnp.stack(
+        [
+            rcj.cable_gamma(rcj.termination_gamma("open", N_FREQ), freq, length=2.0, loss=0.92),
+            rcj.termination_gamma("resistive", N_FREQ, impedance=10.0),
+            rcj.cable_gamma(rcj.termination_gamma("short", N_FREQ), freq, length=0.4, loss=0.98),
+            rcj.cable_gamma(
+                rcj.termination_gamma("resistive", N_FREQ, impedance=150.0),
+                freq,
+                length=1.1,
+                loss=0.95,
+            ),
+        ]
+    )
     bandpass = 1.0 + 0.10 * jnp.cos(2 * jnp.pi * (freq - freq[0]) / (freq[-1] - freq[0]))
     twin = assemble(
-        GlobalSignalOperator(
-            depth=jnp.array(0.5), centre=jnp.array(75e6), width=jnp.array(5e6)
-        ),
+        GlobalSignalOperator(depth=jnp.array(0.5), centre=jnp.array(75e6), width=jnp.array(5e6)),
         ForegroundOperator(
             amplitude=jnp.array(2500.0), spectral_index=jnp.array(2.55), ref_freq=70e6
         ),
@@ -159,8 +161,10 @@ def tour(_float64):
             t_cos=30.0 * jnp.cos(jnp.linspace(0.0, 3.0, N_FREQ)),
             t_sin=-40.0 + 8.0 * jnp.linspace(-1.0, 1.0, N_FREQ) ** 2,
             t_rx=290.0 + 5.0 * jnp.linspace(-1.0, 1.0, N_FREQ) ** 3,
-            gamma_src_re=gamma_src.real, gamma_src_im=gamma_src.imag,
-            gamma_rec_re=gamma_rec.real, gamma_rec_im=gamma_rec.imag,
+            gamma_src_re=gamma_src.real,
+            gamma_src_im=gamma_src.imag,
+            gamma_rec_re=gamma_rec.real,
+            gamma_rec_im=gamma_rec.imag,
         ),
         ReceiverOperator(bandpass=bandpass / jnp.mean(bandpass)),
         GainOperator(gain=1.0 + 0.02 * jnp.sin(2 * jnp.pi * time_s / 60.0)),
@@ -170,8 +174,11 @@ def tour(_float64):
     observed = twin(state).data
     space = ParameterSpace(
         latents=[
-            Latent("fg_log_amp", init=jnp.log(jnp.array(2000.0)),
-                   prior=dist.Normal(jnp.log(2000.0), 0.5)),
+            Latent(
+                "fg_log_amp",
+                init=jnp.log(jnp.array(2000.0)),
+                prior=dist.Normal(jnp.log(2000.0), 0.5),
+            ),
             Latent("fg_beta", init=jnp.array(2.30), prior=dist.Normal(2.3, 0.3)),
         ],
         bindings=[
@@ -190,16 +197,18 @@ def tour(_float64):
 
 @pytest.fixture(scope="module")
 def report(tour):
-    return prior_sensitivity(
-        tour["space"], tour["fit"], tour["state"], tour["observed"], NOISE_STD
-    )
+    return prior_sensitivity(tour["space"], tour["fit"], tour["state"], tour["observed"], NOISE_STD)
 
 
 @pytest.fixture(scope="module")
 def conditional(tour, report):
     """``fg_beta`` alone, with ``fg_log_amp`` pinned at the joint mode."""
     return prior_sensitivity(
-        tour["space"], tour["fit"], tour["state"], tour["observed"], NOISE_STD,
+        tour["space"],
+        tour["fit"],
+        tour["state"],
+        tour["observed"],
+        NOISE_STD,
         names=("fg_beta",),
         at={"fg_log_amp": jnp.asarray(report.mode_of("fg_log_amp"))},
     )
@@ -253,9 +262,7 @@ def _conditional_refit(tour, log_amp, prior_std):
     loglik = NoiseModelLikelihood(as_noise_model(NOISE_STD))
 
     def neg_log_lik(x):
-        return -loglik(
-            forward({"fg_log_amp": log_amp, "fg_beta": x[0]}), tour["observed"]
-        )
+        return -loglik(forward({"fg_log_amp": log_amp, "fg_beta": x[0]}), tour["observed"])
 
     def neg_log_post(x):
         return neg_log_lik(x) + 0.5 * ((x[0] - 2.3) / prior_std) ** 2
@@ -294,13 +301,9 @@ class TestTheTourPosterior:
         assert report.for_latent("fg_log_amp")["sigma_post"] == pytest.approx(
             2.9775575e-04, rel=1e-6
         )
-        assert report.for_latent("fg_beta")["sigma_post"] == pytest.approx(
-            2.4990616e-03, rel=1e-6
-        )
+        assert report.for_latent("fg_beta")["sigma_post"] == pytest.approx(2.4990616e-03, rel=1e-6)
         # |m - theta_hat|: 2.3 is 101 sigma below the mode, in beta's own sigmas.
-        assert report.for_latent("fg_beta")["mean_offset"] == pytest.approx(
-            0.253069844, rel=1e-8
-        )
+        assert report.for_latent("fg_beta")["mean_offset"] == pytest.approx(0.253069844, rel=1e-8)
         assert report.for_latent("fg_log_amp")["mean_offset"] == pytest.approx(
             0.223418530, rel=1e-8
         )
@@ -308,9 +311,7 @@ class TestTheTourPosterior:
 
 class TestTheShiftAtTheDeclaredPrior:
     def test_the_tour_prior_moves_beta_by_seven_thousandths_of_a_sigma(self, report):
-        assert report.for_latent("fg_beta")["shift_sigma"] == pytest.approx(
-            -0.0069239167, rel=1e-6
-        )
+        assert report.for_latent("fg_beta")["shift_sigma"] == pytest.approx(-0.0069239167, rel=1e-6)
         assert report.for_latent("fg_log_amp")["shift_sigma"] == pytest.approx(
             +0.0024711038, rel=1e-6
         )
@@ -392,16 +393,12 @@ class TestTheLadder:
         assert refit == pytest.approx(expected, rel=1e-3, abs=QUOTED_ATOL)
 
     @pytest.mark.parametrize(("prior_std", "expected"), LADDER[:-1])
-    def test_the_closed_form_tracks_it_down_to_a_prior_of_0_025(
-        self, report, prior_std, expected
-    ):
+    def test_the_closed_form_tracks_it_down_to_a_prior_of_0_025(self, report, prior_std, expected):
         assert float(report.shift_at("fg_beta", prior_std)) == pytest.approx(
             expected, rel=1e-3, abs=QUOTED_ATOL
         )
 
-    def test_at_a_prior_of_0_01_the_closed_form_has_drifted_to_two_digits(
-        self, report, tour
-    ):
+    def test_at_a_prior_of_0_01_the_closed_form_has_drifted_to_two_digits(self, report, tour):
         """Six sigma of shift is past what one expansion about the mode covers.
 
         Stated as a measurement rather than left as a silently loosened
@@ -469,9 +466,7 @@ class TestTheOneOverSSquaredLawAtItsExtremes:
         assert conditional.for_latent("fg_beta")["sigma_post"] == pytest.approx(
             2.301707e-03, rel=1e-5
         )
-        assert conditional.mode_of("fg_beta") == pytest.approx(
-            report.mode_of("fg_beta"), rel=1e-9
-        )
+        assert conditional.mode_of("fg_beta") == pytest.approx(report.mode_of("fg_beta"), rel=1e-9)
 
     @pytest.mark.parametrize(
         ("prior_std", "expected"),
@@ -516,9 +511,7 @@ class TestTheOneOverSSquaredLawAtItsExtremes:
         assert loose == pytest.approx(mid, rel=1e-6)
         assert loose == pytest.approx(-5.8256125e-04, rel=1e-6)
 
-    def test_at_the_tight_extreme_the_law_bends_by_five_percent(
-        self, conditional, tour, report
-    ):
+    def test_at_the_tight_extreme_the_law_bends_by_five_percent(self, conditional, tour, report):
         """And that is not a bug — it is the prior becoming the curvature.
 
         At s = 0.01 the prior's own curvature 1/s^2 = 1e4 has reached 5.298% of
@@ -591,11 +584,9 @@ class TestTheOneOverSSquaredLawAtItsExtremes:
         if prior_std == 0.01:
             assert disagreement == pytest.approx(expected_disagreement, rel=0.05)
         else:
-            assert (
-                0.2 * expected_disagreement
-                < disagreement
-                < 5 * expected_disagreement
-            ), disagreement
+            assert 0.2 * expected_disagreement < disagreement < 5 * expected_disagreement, (
+                disagreement
+            )
         assert closed == pytest.approx(refit, rel=3e-3)
 
 
@@ -623,9 +614,7 @@ def vector_report(tour):
         ],
         bindings=[Bind("t_rx", into=lambda p: p["noise_wave"].t_rx)],
     )
-    return prior_sensitivity(
-        space, tour["fit"], tour["state"], tour["observed"], NOISE_STD
-    )
+    return prior_sensitivity(space, tour["fit"], tour["state"], tour["observed"], NOISE_STD)
 
 
 class TestAVectorLatent:
@@ -641,9 +630,7 @@ class TestAVectorLatent:
         assert entry["prior_loc"] == pytest.approx(np.full(N_FREQ, 280.0))
         assert entry["prior_std"] == pytest.approx(np.full(N_FREQ, 40.0))
 
-    def test_one_exact_newton_step_plus_one_to_confirm_it_did_not_move(
-        self, vector_report
-    ):
+    def test_one_exact_newton_step_plus_one_to_confirm_it_did_not_move(self, vector_report):
         """A noise-wave temperature enters the prediction affinely.
 
         The negative log-posterior is then exactly quadratic, one Newton step
@@ -654,9 +641,7 @@ class TestAVectorLatent:
         assert vector_report.newton_steps == 2
         assert vector_report.refit_steps == 2
 
-    def test_worst_names_the_element_and_the_index_agrees_with_the_column(
-        self, vector_report
-    ):
+    def test_worst_names_the_element_and_the_index_agrees_with_the_column(self, vector_report):
         name, index, value = vector_report.worst
         assert name == "t_rx"
         column = vector_report.for_latent("t_rx")["shift_sigma"]
@@ -667,9 +652,7 @@ class TestAVectorLatent:
         assert index == N_FREQ - 1
         assert value == pytest.approx(column[index])
 
-    def test_a_scalar_width_and_a_vector_of_that_width_are_the_same_question(
-        self, vector_report
-    ):
+    def test_a_scalar_width_and_a_vector_of_that_width_are_the_same_question(self, vector_report):
         scalar = vector_report.shift_at("t_rx", 4.0)
         vector = vector_report.shift_at("t_rx", np.full(N_FREQ, 4.0))
         assert scalar.shape == (N_FREQ,)
@@ -694,9 +677,7 @@ class TestAVectorLatent:
         others = [i for i in range(N_FREQ) if i != 3]
         assert np.all(np.abs(shifted[others]) < 100.0 * np.abs(declared[others]))
 
-    def test_both_routes_agree_on_all_eight_and_the_floor_is_the_refit_s(
-        self, vector_report
-    ):
+    def test_both_routes_agree_on_all_eight_and_the_floor_is_the_refit_s(self, vector_report):
         """2.1e-11 to 2.4e-10 relative — and here it is the REFIT that is inexact.
 
         The prediction is affine in a noise-wave temperature and the noise is
@@ -720,18 +701,12 @@ class TestAVectorLatent:
         """
         assert vector_report.refit_converged
         assert bool(np.all(vector_report.verified))
-        assert vector_report.shift_sigma == pytest.approx(
-            vector_report.shift_sigma_refit, rel=1e-8
-        )
-        disagreement = np.abs(
-            vector_report.shift_sigma / vector_report.shift_sigma_refit - 1.0
-        )
+        assert vector_report.shift_sigma == pytest.approx(vector_report.shift_sigma_refit, rel=1e-8)
+        disagreement = np.abs(vector_report.shift_sigma / vector_report.shift_sigma_refit - 1.0)
         cancellation = 290.0 * float(np.finfo(np.float64).eps) / 5e-4
         assert cancellation / 10.0 < disagreement.max() < cancellation * 10.0
 
-    def test_this_prior_is_the_clean_bill_of_health_the_tour_s_beta_is_not(
-        self, vector_report
-    ):
+    def test_this_prior_is_the_clean_bill_of_health_the_tour_s_beta_is_not(self, vector_report):
         """Declared 40 K against a criterion of 3.4-5.9 K: a factor of 7 to 12.
 
         Worth one test because a diagnostic that only ever fires is not a
@@ -747,26 +722,18 @@ class TestAVectorLatent:
 
 
 class TestTheCriterion:
-    def test_the_tour_beta_would_need_a_prior_of_0_0795_to_move_a_tenth_of_a_sigma(
-        self, report
-    ):
-        assert report.for_latent("fg_beta")["criterion_std"] == pytest.approx(
-            0.0795, rel=1e-3
-        )
+    def test_the_tour_beta_would_need_a_prior_of_0_0795_to_move_a_tenth_of_a_sigma(self, report):
+        assert report.for_latent("fg_beta")["criterion_std"] == pytest.approx(0.0795, rel=1e-3)
         assert report.for_latent("fg_log_amp")["criterion_std"] == pytest.approx(
             0.025792276, rel=1e-6
         )
 
-    def test_the_declared_prior_is_almost_four_times_looser_than_the_criterion(
-        self, report
-    ):
+    def test_the_declared_prior_is_almost_four_times_looser_than_the_criterion(self, report):
         assert 0.3 / float(report.for_latent("fg_beta")["criterion_std"]) == pytest.approx(
             3.77, rel=0.01
         )
 
-    def test_evaluating_the_shift_at_the_criterion_returns_a_tenth_of_a_sigma(
-        self, report
-    ):
+    def test_evaluating_the_shift_at_the_criterion_returns_a_tenth_of_a_sigma(self, report):
         """To 0.19% on beta and 2.75% on log-amp — the cross term, not an error.
 
         ``criterion_std`` inverts the DIAGONAL law, which is the only part of
@@ -822,9 +789,7 @@ class TestTheReportItself:
         with pytest.raises(StateValidationError, match="fg_gamma"):
             report.shift_at("fg_gamma", 0.1)
 
-    def test_a_nonpositive_prior_width_is_refused_rather_than_dividing_by_zero(
-        self, report
-    ):
+    def test_a_nonpositive_prior_width_is_refused_rather_than_dividing_by_zero(self, report):
         with pytest.raises(StateValidationError, match="positive"):
             report.shift_at("fg_beta", 0.0)
         with pytest.raises(StateValidationError, match="positive"):
@@ -849,9 +814,7 @@ class TestTheReportItself:
 class TestWhenNewtonDoesNotGetThere:
     """Both solves can fail, and they are not the same kind of failure."""
 
-    def test_a_mode_that_is_not_found_is_fatal_and_says_what_it_prevents(
-        self, tour, monkeypatch
-    ):
+    def test_a_mode_that_is_not_found_is_fatal_and_says_what_it_prevents(self, tour, monkeypatch):
         # bayesmith's constant, not this package's: the Newton solve moved
         # there when the module became a facade, and patching the
         # re-exported name here would change nothing while reading as
@@ -882,7 +845,11 @@ class TestWhenNewtonDoesNotGetThere:
         # though it had -- a test that cannot fail.
         monkeypatch.setattr(bayesmith_sensitivity, "MAX_NEWTON_STEPS", 2)
         starved = prior_sensitivity(
-            tour["space"], tour["fit"], tour["state"], tour["observed"], NOISE_STD,
+            tour["space"],
+            tour["fit"],
+            tour["state"],
+            tour["observed"],
+            NOISE_STD,
             at={
                 "fg_log_amp": jnp.asarray(report.mode_of("fg_log_amp")),
                 "fg_beta": jnp.asarray(report.mode_of("fg_beta")),
@@ -904,16 +871,17 @@ class TestRefusals:
     def test_a_prior_with_no_quadratic_form_is_refused_by_name(self, tour):
         space = ParameterSpace(
             latents=[
-                Latent("fg_log_amp", init=jnp.log(jnp.array(2000.0)),
-                       prior=dist.Normal(jnp.log(2000.0), 0.5)),
+                Latent(
+                    "fg_log_amp",
+                    init=jnp.log(jnp.array(2000.0)),
+                    prior=dist.Normal(jnp.log(2000.0), 0.5),
+                ),
                 Latent("fg_beta", init=jnp.array(2.30), prior=dist.Uniform(2.0, 3.0)),
             ],
             bindings=list(tour["space"].bindings),
         )
         with pytest.raises(ParameterSpaceError) as excinfo:
-            prior_sensitivity(
-                space, tour["fit"], tour["state"], tour["observed"], NOISE_STD
-            )
+            prior_sensitivity(space, tour["fit"], tour["state"], tour["observed"], NOISE_STD)
         message = str(excinfo.value)
         assert "fg_beta" in message
         assert "Uniform" in message
@@ -929,14 +897,17 @@ class TestRefusals:
         """
         space = ParameterSpace(
             latents=[
-                Latent("fg_log_amp", init=jnp.log(jnp.array(2000.0)),
-                       prior=dist.Uniform(6.0, 9.0)),
+                Latent("fg_log_amp", init=jnp.log(jnp.array(2000.0)), prior=dist.Uniform(6.0, 9.0)),
                 Latent("fg_beta", init=jnp.array(2.30), prior=dist.Normal(2.3, 0.3)),
             ],
             bindings=list(tour["space"].bindings),
         )
         report = prior_sensitivity(
-            space, tour["fit"], tour["state"], tour["observed"], NOISE_STD,
+            space,
+            tour["fit"],
+            tour["state"],
+            tour["observed"],
+            NOISE_STD,
             names=("fg_beta",),
         )
         assert report.names == ("fg_beta",)
@@ -957,7 +928,11 @@ class TestRefusals:
         )
         with pytest.raises(ParameterSpaceError) as excinfo:
             prior_sensitivity(
-                space, tour["fit"], tour["state"], tour["observed"], NOISE_STD,
+                space,
+                tour["fit"],
+                tour["state"],
+                tour["observed"],
+                NOISE_STD,
                 names=("t_rx",),
             )
         message = str(excinfo.value)
@@ -971,13 +946,9 @@ class TestRefusals:
             bindings=[Bind("fg_beta", into=lambda p: p["foregrounds"].spectral_index)],
         )
         with pytest.raises(ParameterSpaceError, match="fg_beta"):
-            prior_sensitivity(
-                space, tour["fit"], tour["state"], tour["observed"], NOISE_STD
-            )
+            prior_sensitivity(space, tour["fit"], tour["state"], tour["observed"], NOISE_STD)
 
-    def test_a_rank_deficient_selection_is_refused_and_identifiability_is_named(
-        self, tour
-    ):
+    def test_a_rank_deficient_selection_is_refused_and_identifiability_is_named(self, tour):
         """Two latents whose sum is the only thing the data sees.
 
         The posterior is still proper — the declared priors make it so — and
@@ -992,14 +963,15 @@ class TestRefusals:
                 Latent("fg_b", init=jnp.array(3.8), prior=dist.Normal(3.8, 0.5)),
             ],
             bindings=[
-                Bind(("fg_a", "fg_b"), into=lambda p: p["foregrounds"].amplitude,
-                     fn=lambda a, b: jnp.exp(a + b)),
+                Bind(
+                    ("fg_a", "fg_b"),
+                    into=lambda p: p["foregrounds"].amplitude,
+                    fn=lambda a, b: jnp.exp(a + b),
+                ),
             ],
         )
         with pytest.raises(ParameterSpaceError) as excinfo:
-            prior_sensitivity(
-                space, tour["fit"], tour["state"], tour["observed"], NOISE_STD
-            )
+            prior_sensitivity(space, tour["fit"], tour["state"], tour["observed"], NOISE_STD)
         message = str(excinfo.value)
         assert "identifiability" in message
         assert "rank 1 of 2" in message
@@ -1008,19 +980,30 @@ class TestRefusals:
     def test_observed_of_the_wrong_shape_is_refused_before_any_solve(self, tour):
         with pytest.raises(ParameterSpaceError, match="broadcast|shape"):
             prior_sensitivity(
-                tour["space"], tour["fit"], tour["state"],
-                tour["observed"][0], NOISE_STD,
+                tour["space"],
+                tour["fit"],
+                tour["state"],
+                tour["observed"][0],
+                NOISE_STD,
             )
 
     def test_an_undeclared_name_is_refused(self, tour):
         with pytest.raises(ParameterSpaceError, match="fg_gamma"):
             prior_sensitivity(
-                tour["space"], tour["fit"], tour["state"], tour["observed"], NOISE_STD,
+                tour["space"],
+                tour["fit"],
+                tour["state"],
+                tour["observed"],
+                NOISE_STD,
                 names=("fg_gamma",),
             )
         with pytest.raises(ParameterSpaceError, match="fg_gamma"):
             prior_sensitivity(
-                tour["space"], tour["fit"], tour["state"], tour["observed"], NOISE_STD,
+                tour["space"],
+                tour["fit"],
+                tour["state"],
+                tour["observed"],
+                NOISE_STD,
                 at={"fg_gamma": jnp.array(1.0)},
             )
 
@@ -1079,17 +1062,20 @@ class TestTheClosedFormAgreesWithTheRefit:
 
         n = 8
         freq = jnp.linspace(60e6, 85e6, n)
-        state = State(coords=Coordinates(time=jnp.arange(float(n)), freq=freq),
-                      key=jax.random.key(0), meta={"telescope": "affine"})
+        state = State(
+            coords=Coordinates(time=jnp.arange(float(n)), freq=freq),
+            key=jax.random.key(0),
+            meta={"telescope": "affine"},
+        )
         twin = assemble(
-            ForegroundOperator(amplitude=jnp.array(1.0),
-                               spectral_index=jnp.array(2.5), ref_freq=70e6),
+            ForegroundOperator(
+                amplitude=jnp.array(1.0), spectral_index=jnp.array(2.5), ref_freq=70e6
+            ),
             GainOperator(gain=jnp.array(1.1)),
         )
         observed = twin(state).data
         space = ParameterSpace(
-            latents=[Latent("gain", init=jnp.array(1.0),
-                            prior=dist.Normal(1.4, 0.2))],
+            latents=[Latent("gain", init=jnp.array(1.0), prior=dist.Normal(1.4, 0.2))],
             bindings=[Bind("gain", into=lambda p: p["gain"].gain)],
         )
         report = prior_sensitivity(space, twin, state, observed, 1.0)
@@ -1130,9 +1116,7 @@ class TestTheCounterfactualIsAnchoredWhereItCanBe:
     only by running the counterfactual for real.
     """
 
-    @pytest.mark.parametrize(
-        ("hypothetical", "tolerance"), [(0.1, 1e-4), (0.01, 5e-3)]
-    )
+    @pytest.mark.parametrize(("hypothetical", "tolerance"), [(0.1, 1e-4), (0.01, 5e-3)])
     def test_it_matches_an_actual_run_at_that_width(
         self, tour, report, hypothetical, tolerance
     ) -> None:
@@ -1262,9 +1246,7 @@ class TestAModelDeclaredInSinglePrecision:
             )
             observed = twin(state).data
             space = ParameterSpace(
-                latents=[
-                    Latent("gain", init=jnp.array(1.0), prior=dist.Normal(1.4, 0.2))
-                ],
+                latents=[Latent("gain", init=jnp.array(1.0), prior=dist.Normal(1.4, 0.2))],
                 bindings=[Bind("gain", into=lambda p: p["gain"].gain)],
             )
         return {"space": space, "twin": twin, "state": state, "observed": observed}
@@ -1293,8 +1275,11 @@ class TestAModelDeclaredInSinglePrecision:
         """
         with _ambient_float32():
             report = prior_sensitivity(
-                affine32["space"], affine32["twin"], affine32["state"],
-                affine32["observed"], 1.0,
+                affine32["space"],
+                affine32["twin"],
+                affine32["state"],
+                affine32["observed"],
+                1.0,
             )
         assert report.mode.dtype == jnp.float64
         assert report.precision.dtype == jnp.float64

@@ -220,11 +220,13 @@ def _task3_run_options_in(layer) -> Iterable[Finding]:
             _sweep(run, allowed[run.kind])
         except ConfigError as exc:
             yield refuse(
-                "A1", f"runs[{index}]",
+                "A1",
+                f"runs[{index}]",
                 f"{exc} This sweep is the executor's own, moved in front of "
                 "the build: it used to run inside execute_run, so an "
                 "unrecognised key on a later run cost every earlier run's "
-                "execution first (check A1).")
+                "execution first (check A1).",
+            )
 
 
 @register("A1.runs")
@@ -253,8 +255,11 @@ def _task3_inherited_angles(
         current, seen = beams[name], {name}
         while True:
             parent = current.get("extends")
-            if (not isinstance(parent, str) or parent in seen
-                    or not isinstance(beams.get(parent), Mapping)):
+            if (
+                not isinstance(parent, str)
+                or parent in seen
+                or not isinstance(beams.get(parent), Mapping)
+            ):
                 break
             seen.add(parent)
             current = beams[parent]
@@ -287,15 +292,16 @@ def _task3_horizon_in(layer) -> Iterable[Finding]:
             continue
         dotted = f"resources.beams.{name}"
         effective = resolved.get(dotted)
-        merged = (effective.get("horizon")
-                  if isinstance(effective, Mapping) else None)
+        merged = effective.get("horizon") if isinstance(effective, Mapping) else None
         if isinstance(merged, Mapping):
             problem = _unread_horizon_angles(
-                dotted, merged, merged.get("mode", "none"),
-                inherited=_task3_inherited_angles(beams, name, merged))
+                dotted,
+                merged,
+                merged.get("mode", "none"),
+                inherited=_task3_inherited_angles(beams, name, merged),
+            )
             if problem is not None:
-                yield refuse("A1", longest_legal_prefix(f"{dotted}.horizon"),
-                             problem)
+                yield refuse("A1", longest_legal_prefix(f"{dotted}.horizon"), problem)
                 continue
         horizon = spec.get("horizon")
         if not isinstance(horizon, Mapping):
@@ -307,12 +313,14 @@ def _task3_horizon_in(layer) -> Iterable[Finding]:
             if isinstance(value, bool) or not isinstance(value, (int, float)):
                 where = f"resources.beams.{name}.horizon.{key}"
                 yield refuse(
-                    "A1", longest_legal_prefix(where),
+                    "A1",
+                    longest_legal_prefix(where),
                     f"{where}: is a plain number of degrees; got {value!r}. "
                     "kinds/beams.py hands both horizon angles straight to "
                     "float(), so the value grammar never reaches here and a "
                     "value node arrives as a bare TypeError from inside the "
-                    "build (check A1).")
+                    "build (check A1).",
+                )
 
 
 @register("A1.horizon")
@@ -338,8 +346,14 @@ def _variant_text(document) -> Iterable[Finding]:
             where = "campaign"
         else:
             allowed = {
-                "schema_version", "runtime", "observation", "resources",
-                "model", "inference", "runs", "campaign",
+                "schema_version",
+                "runtime",
+                "observation",
+                "resources",
+                "model",
+                "inference",
+                "runs",
+                "campaign",
             }
             unknown = next((key for key in document if key not in allowed), None)
             if isinstance(unknown, str):
@@ -401,7 +415,8 @@ def _task3_fan_one(where: str, spec: Mapping) -> Iterable[Finding]:
     if transform is not None and transform != "identity":
         return
     yield refuse(
-        "A38", longest_legal_prefix(where),
+        "A38",
+        longest_legal_prefix(where),
         f"{where}: into: names {len(targets)} targets {list(targets)} and "
         "fan: is absent. broadcast writes one produced value into every "
         "target and distribute writes the k-th into the k-th, and with fan: "
@@ -409,7 +424,8 @@ def _task3_fan_one(where: str, spec: Mapping) -> Iterable[Finding]:
         "produced is a JAX array or a Python container -- measured on two "
         "scalar leaves, the same [2, 5] gives 4.0 one way and 10.0 the other "
         "(inference/parameters.py:299). Write fan: broadcast or fan: "
-        "distribute (check A38).")
+        "distribute (check A38).",
+    )
 
 
 def _task3_fan_in(layer) -> Iterable[Finding]:
@@ -457,9 +473,12 @@ def _task3_capability(where: str, key: str, got: str = "") -> Finding:
     the same capability and the same schema section.
     """
     capability, section = _CAPABILITY_KEYS[key]
-    return refuse("A39", longest_legal_prefix(where),
-                  f"{where}: {got}is reserved with {capability}, schema "
-                  f"{section}, and refused in v1 (check A39).")
+    return refuse(
+        "A39",
+        longest_legal_prefix(where),
+        f"{where}: {got}is reserved with {capability}, schema "
+        f"{section}, and refused in v1 (check A39).",
+    )
 
 
 def _task3_capability_in(layer) -> Iterable[Finding]:
@@ -467,8 +486,7 @@ def _task3_capability_in(layer) -> Iterable[Finding]:
     inference = layer.get("inference")
     if isinstance(inference, Mapping):
         if "transitions" in inference:
-            yield _task3_capability("inference.transitions",
-                                    "inference.transitions")
+            yield _task3_capability("inference.transitions", "inference.transitions")
         parameters = inference.get("parameters")
         if isinstance(parameters, Mapping):
             for name, spec in parameters.items():
@@ -478,19 +496,22 @@ def _task3_capability_in(layer) -> Iterable[Finding]:
                     if key in spec:
                         yield _task3_capability(
                             f"inference.parameters.{name}.{key}",
-                            f"inference.parameters.<name>.{key}")
+                            f"inference.parameters.<name>.{key}",
+                        )
                 scope = spec.get("scope")
                 if scope in _TASK3_SCOPES_RESERVED:
                     yield _task3_capability(
                         f"inference.parameters.{name}.scope",
-                        "inference.parameters.<name>.scope", got=f"{scope!r} ")
+                        "inference.parameters.<name>.scope",
+                        got=f"{scope!r} ",
+                    )
     model = layer.get("model")
     if isinstance(model, Mapping):
         for node, spec in model.items():
             if isinstance(spec, Mapping) and spec.get("type") == "NeuralOperator":
-                yield _task3_capability(f"model.{node}.type",
-                                        "model.<node>.type: NeuralOperator",
-                                        got="NeuralOperator ")
+                yield _task3_capability(
+                    f"model.{node}.type", "model.<node>.type: NeuralOperator", got="NeuralOperator "
+                )
 
 
 @register("A39")

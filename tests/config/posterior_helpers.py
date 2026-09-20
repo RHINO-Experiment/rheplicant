@@ -74,9 +74,14 @@ from tests.config.exit_helpers import (
 # test_config_exits_nuts.py's MCMC spy closes the FORWARD leg, and the same
 # module's ``product({"drop": ("progress_bar",)})`` is how the silent document
 # is still reachable.
-NUTS = {"name": "chain", "kind": "nuts", "num_warmup": 200,
-        "num_samples": 200, "seed": {"from": "runtime.seeds.chain"},
-        "progress_bar": False}
+NUTS = {
+    "name": "chain",
+    "kind": "nuts",
+    "num_warmup": 200,
+    "num_samples": 200,
+    "seed": {"from": "runtime.seeds.chain"},
+    "progress_bar": False,
+}
 
 
 def nuts_document(run=None, **kwargs):
@@ -136,11 +141,11 @@ def nuts_spec(drop=(), **options):
     missing a key builds one and deletes the key, the way
     ``test_config_exits_gcr.py::TestGcrDraws.test_the_compiled_prior_reaches_the_draw`` does.
     """
-    body = {key: value for key, value in NUTS.items()
-            if key not in ("name", "kind") and key not in drop}
+    body = {
+        key: value for key, value in NUTS.items() if key not in ("name", "kind") and key not in drop
+    }
     body.update(options)
-    return RunSpec(name="chain", kind="nuts", variant=None, on="primary",
-                   expect="ok", options=body)
+    return RunSpec(name="chain", kind="nuts", variant=None, on="primary", expect="ok", options=body)
 
 
 def nuts_product(run=None, **kwargs):
@@ -174,15 +179,19 @@ def nuts_product(run=None, **kwargs):
 #: else unchanged, c comes back mean 2.93e7 std 1.60e7, against 8.00e7 and
 #: 1.11e5 from the unit-carrying one.  A document that proves nothing looks
 #: exactly like one that does.
-NEEDLE_CENTRE = {"init": {"value": 78.0, "unit": "MHz"},
-                 "into": "global_signal.centre",
-                 "ref": {"value": 60.0, "unit": "MHz"},
-                 "prior": {"normal": {"loc": {"value": 78.0, "unit": "MHz"},
-                                      "scale": {"value": 30.0,
-                                                "unit": "MHz"}}}}
-NEEDLE = {"parameters": {"c": NEEDLE_CENTRE}, "noise": HOMOSCEDASTIC,
-          "observed": {"from": "simulation",
-                       "at": {"c": {"value": 80.0, "unit": "MHz"}}}}
+NEEDLE_CENTRE = {
+    "init": {"value": 78.0, "unit": "MHz"},
+    "into": "global_signal.centre",
+    "ref": {"value": 60.0, "unit": "MHz"},
+    "prior": {
+        "normal": {"loc": {"value": 78.0, "unit": "MHz"}, "scale": {"value": 30.0, "unit": "MHz"}}
+    },
+}
+NEEDLE = {
+    "parameters": {"c": NEEDLE_CENTRE},
+    "noise": HOMOSCEDASTIC,
+    "observed": {"from": "simulation", "at": {"c": {"value": 80.0, "unit": "MHz"}}},
+}
 
 
 # --- What kind: npe is measured on ------------------------------------------
@@ -224,10 +233,13 @@ NPE_SEEDS = {"bank": 11, "create": 12, "train": 13, "sample": 14}
 #: by opening the default one.
 NPE_SECTION = {
     "bank": {"n_simulations": 64, "seed": {"from": "runtime.seeds.bank"}},
-    "create": {"n_components": 1, "width": 16, "depth": 2,
-               "seed": {"from": "runtime.seeds.create"}},
-    "train": {"n_steps": 50, "batch_size": 32,
-              "seed": {"from": "runtime.seeds.train"}},
+    "create": {
+        "n_components": 1,
+        "width": 16,
+        "depth": 2,
+        "seed": {"from": "runtime.seeds.create"},
+    },
+    "train": {"n_steps": 50, "batch_size": 32, "seed": {"from": "runtime.seeds.train"}},
     "sample": {"n_draws": 100, "seed": {"from": "runtime.seeds.sample"}},
 }
 
@@ -276,13 +288,13 @@ def npe_document(run=None, *extra_runs, npe=None, **kwargs):
     supplied = npe or {}
     block["npe"] = {
         **{name: dict(sub) for name, sub in NPE_SECTION.items()},
-        **{name: ({**NPE_SECTION[name], **value}
-                  if name in NPE_SECTION else value)
-           for name, value in supplied.items()},
+        **{
+            name: ({**NPE_SECTION[name], **value} if name in NPE_SECTION else value)
+            for name, value in supplied.items()
+        },
     }
     kwargs.setdefault("seeds", NPE_SEEDS)
-    return conjugate_document({**NPE, **(run or {})}, *extra_runs,
-                              inference=block, **kwargs)
+    return conjugate_document({**NPE, **(run or {})}, *extra_runs, inference=block, **kwargs)
 
 
 def npe_built(run=None, **kwargs):
@@ -309,8 +321,9 @@ def npe_spec():
     refusals through ``run_document``, which is where a user meets them --
     so the parameter is gone with the commit that decided it.
     """
-    return RunSpec(name="amortized", kind="npe", variant=None, on="primary",
-                   expect="ok", options={})
+    return RunSpec(
+        name="amortized", kind="npe", variant=None, on="primary", expect="ok", options={}
+    )
 
 
 def npe_product(run=None, **kwargs):
@@ -332,12 +345,13 @@ def npe_product(run=None, **kwargs):
 #: rather than replacing it: every number the conjugate family pins was
 #: measured on the scalar gain.
 VECTOR_GAIN_MODEL = {
-    "global_signal": {"depth": {"value": 0.5, "unit": "K"},
-                      "centre": {"value": 75.0, "unit": "MHz"},
-                      "width": {"value": 5.0, "unit": "MHz"}},
+    "global_signal": {
+        "depth": {"value": 0.5, "unit": "K"},
+        "centre": {"value": 75.0, "unit": "MHz"},
+        "width": {"value": 5.0, "unit": "MHz"},
+    },
     "uniform_sky": {"amplitude": {"value": 10.0, "unit": "K"}},
-    "gain": {"gain": {"full": {"shape": ["n_time"], "value": 1.1},
-                      "unit": "dimensionless"}},
+    "gain": {"gain": {"full": {"shape": ["n_time"], "value": 1.1}, "unit": "dimensionless"}},
     "noise": MODEL_NOISE,
 }
 
@@ -351,13 +365,24 @@ VECTOR_GAIN_MODEL = {
 #: lets a mis-ordered unravel be read off a mean.
 NPE_TRIO = {
     "parameters": {
-        "d": {"init": 0.5, "linear": True, "into": "global_signal.depth",
-              "prior": {"normal": {"loc": 0.5, "scale": 0.1}}},
-        "a": {"init": 10.0, "linear": True, "into": "uniform_sky.amplitude",
-              "prior": {"normal": {"loc": 10.0, "scale": 1.0}}},
-        "m": {"init": {"full": {"shape": ["n_time"], "value": 1.1}},
-              "linear": True, "into": "gain.gain",
-              "prior": {"normal": {"loc": 1.1, "scale": 0.05}}},
+        "d": {
+            "init": 0.5,
+            "linear": True,
+            "into": "global_signal.depth",
+            "prior": {"normal": {"loc": 0.5, "scale": 0.1}},
+        },
+        "a": {
+            "init": 10.0,
+            "linear": True,
+            "into": "uniform_sky.amplitude",
+            "prior": {"normal": {"loc": 10.0, "scale": 1.0}},
+        },
+        "m": {
+            "init": {"full": {"shape": ["n_time"], "value": 1.1}},
+            "linear": True,
+            "into": "gain.gain",
+            "prior": {"normal": {"loc": 1.1, "scale": 0.05}},
+        },
     },
     "noise": HOMOSCEDASTIC,
     "observed": {"from": "simulation"},
@@ -387,10 +412,15 @@ def trio_npe_document():
     this document's to begin with.
     """
     document = npe_document(
-        None, inference=NPE_TRIO, model=VECTOR_GAIN_MODEL,
-        npe={"bank": {"n_simulations": 32},
-             "train": {"n_steps": 20, "batch_size": 16},
-             "sample": {"n_draws": 40}})
+        None,
+        inference=NPE_TRIO,
+        model=VECTOR_GAIN_MODEL,
+        npe={
+            "bank": {"n_simulations": 32},
+            "train": {"n_steps": 20, "batch_size": 16},
+            "sample": {"n_draws": 40},
+        },
+    )
     del document["variants"]
     return document
 
@@ -443,8 +473,11 @@ def joint_prior_document():
     the template for every later document in the process.
     """
     return conjugate_document(
-        {**NPE, "expect": "refuse"}, NUTS,
-        inference={**JOINT_PRIOR_PAIR,
-                   "npe": {name: dict(sub)
-                           for name, sub in NPE_SECTION.items()}},
-        seeds={**NPE_SEEDS, "chain": 3})
+        {**NPE, "expect": "refuse"},
+        NUTS,
+        inference={
+            **JOINT_PRIOR_PAIR,
+            "npe": {name: dict(sub) for name, sub in NPE_SECTION.items()},
+        },
+        seeds={**NPE_SEEDS, "chain": 3},
+    )

@@ -31,12 +31,12 @@ N_TIME, N_FREQ = 12, 4
 # structured antenna reflection, a near-matched ambient load, and a short-like
 # reflection of opposite sign. Three is the minimum that makes the per-channel
 # noise-wave system full rank -- see TestIdentifiability.
-G_SRC_RE = np.array([[0.30, 0.28, 0.26, 0.24],
-                     [0.02, 0.01, 0.00, -0.01],
-                     [-0.60, -0.62, -0.64, -0.66]])
-G_SRC_IM = np.array([[0.10, 0.05, 0.00, -0.05],
-                     [0.00, 0.03, 0.02, 0.01],
-                     [0.15, -0.10, 0.05, 0.20]])
+G_SRC_RE = np.array(
+    [[0.30, 0.28, 0.26, 0.24], [0.02, 0.01, 0.00, -0.01], [-0.60, -0.62, -0.64, -0.66]]
+)
+G_SRC_IM = np.array(
+    [[0.10, 0.05, 0.00, -0.05], [0.00, 0.03, 0.02, 0.01], [0.15, -0.10, 0.05, 0.20]]
+)
 N_SOURCE = G_SRC_RE.shape[0]
 G_REC_RE = np.full(N_FREQ, 0.08)
 G_REC_IM = np.full(N_FREQ, -0.03)
@@ -49,10 +49,14 @@ RTOL = 1e-13 if jax.config.read("jax_enable_x64") else 2e-6
 
 def make_operator(**overrides):
     kwargs = dict(
-        t_unc=jnp.array(250.0), t_cos=jnp.array(30.0),
-        t_sin=jnp.array(-40.0), t_rx=jnp.array(290.0),
-        gamma_src_re=jnp.asarray(G_SRC_RE), gamma_src_im=jnp.asarray(G_SRC_IM),
-        gamma_rec_re=jnp.asarray(G_REC_RE), gamma_rec_im=jnp.asarray(G_REC_IM),
+        t_unc=jnp.array(250.0),
+        t_cos=jnp.array(30.0),
+        t_sin=jnp.array(-40.0),
+        t_rx=jnp.array(290.0),
+        gamma_src_re=jnp.asarray(G_SRC_RE),
+        gamma_src_im=jnp.asarray(G_SRC_IM),
+        gamma_rec_re=jnp.asarray(G_REC_RE),
+        gamma_rec_im=jnp.asarray(G_REC_IM),
     )
     kwargs.update(overrides)
     return NoiseWaveOperator(**kwargs)
@@ -88,22 +92,28 @@ class TestForward:
             ).stacked
         )
         expected = (
-            300.0 * stacked[..., 0] + 250.0 * stacked[..., 1]
-            + 30.0 * stacked[..., 2] - 40.0 * stacked[..., 3] + 290.0
+            300.0 * stacked[..., 0]
+            + 250.0 * stacked[..., 1]
+            + 30.0 * stacked[..., 2]
+            - 40.0 * stacked[..., 3]
+            + 290.0
         )
         np.testing.assert_allclose(np.asarray(out), np.asarray(expected), rtol=RTOL)
 
     def test_a_matched_single_source_reduces_to_t_src_plus_t_rx(self):
         op = make_operator(
-            gamma_src_re=jnp.zeros((1, N_FREQ)), gamma_src_im=jnp.zeros((1, N_FREQ)),
-            gamma_rec_re=jnp.zeros(N_FREQ), gamma_rec_im=jnp.zeros(N_FREQ),
+            gamma_src_re=jnp.zeros((1, N_FREQ)),
+            gamma_src_im=jnp.zeros((1, N_FREQ)),
+            gamma_rec_re=jnp.zeros(N_FREQ),
+            gamma_rec_im=jnp.zeros(N_FREQ),
         )
         out = op(make_state(np.zeros(N_TIME, dtype=int))).data
         np.testing.assert_allclose(np.asarray(out), 300.0 + 290.0, rtol=RTOL)
 
     def test_a_single_source_needs_no_switch_array(self):
         op = make_operator(
-            gamma_src_re=jnp.zeros((1, N_FREQ)), gamma_src_im=jnp.zeros((1, N_FREQ)),
+            gamma_src_re=jnp.zeros((1, N_FREQ)),
+            gamma_src_im=jnp.zeros((1, N_FREQ)),
         )
         assert op(make_state()).data.shape == (N_TIME, N_FREQ)
 
@@ -129,13 +139,11 @@ class TestRejections:
 
     def test_a_gamma_whose_channels_do_not_match_the_receiver_is_refused(self):
         with pytest.raises(StateValidationError, match="n_freq"):
-            make_operator(gamma_rec_re=jnp.zeros(N_FREQ + 1),
-                          gamma_rec_im=jnp.zeros(N_FREQ + 1))
+            make_operator(gamma_rec_re=jnp.zeros(N_FREQ + 1), gamma_rec_im=jnp.zeros(N_FREQ + 1))
 
     def test_a_one_dimensional_gamma_src_is_refused(self):
         with pytest.raises(StateValidationError, match="2D"):
-            make_operator(gamma_src_re=jnp.zeros(N_FREQ),
-                          gamma_src_im=jnp.zeros(N_FREQ))
+            make_operator(gamma_src_re=jnp.zeros(N_FREQ), gamma_src_im=jnp.zeros(N_FREQ))
 
     def test_mismatched_gamma_rec_real_and_imaginary_shapes_are_refused(self):
         """The receiver's counterpart of the ``gamma_src`` check above.
@@ -155,8 +163,7 @@ class TestRejections:
     def test_a_two_dimensional_gamma_rec_is_refused(self):
         """Reaching this needs BOTH parts reshaped -- see the order test."""
         with pytest.raises(StateValidationError, match="gamma_rec_re must be 1D"):
-            make_operator(gamma_rec_re=jnp.zeros((2, N_FREQ)),
-                          gamma_rec_im=jnp.zeros((2, N_FREQ)))
+            make_operator(gamma_rec_re=jnp.zeros((2, N_FREQ)), gamma_rec_im=jnp.zeros((2, N_FREQ)))
 
     def test_the_shape_agreement_check_precedes_the_rank_check(self):
         """A raise-order dependency the two tests above are built on.
@@ -189,8 +196,7 @@ class TestRejections:
         assert bool(jnp.all(jnp.isfinite(out.data)))
 
     def test_data_whose_channels_disagree_with_gamma_is_refused(self):
-        state = make_state(np.arange(N_TIME) % N_SOURCE,
-                           data=jnp.full((N_TIME, N_FREQ + 2), 300.0))
+        state = make_state(np.arange(N_TIME) % N_SOURCE, data=jnp.full((N_TIME, N_FREQ + 2), 300.0))
         with pytest.raises(StateValidationError, match="n_freq"):
             make_operator()(state)
 
@@ -280,9 +286,7 @@ class TestTemperatureShapes:
         column = jnp.linspace(240.0, 260.0, N_TIME)[:, None]
         np.testing.assert_allclose(
             np.asarray(make_operator(t_unc=column)(state).data),
-            np.asarray(
-                make_operator(t_unc=jnp.broadcast_to(column, (N_TIME, N_FREQ)))(state).data
-            ),
+            np.asarray(make_operator(t_unc=jnp.broadcast_to(column, (N_TIME, N_FREQ)))(state).data),
             rtol=RTOL,
         )
 
@@ -299,15 +303,21 @@ class TestTemperatureShapes:
         """
         n = N_FREQ
         op_kwargs = dict(
-            t_cos=jnp.array(30.0), t_sin=jnp.array(-40.0), t_rx=jnp.array(290.0),
-            gamma_src_re=jnp.asarray(G_SRC_RE[:1]), gamma_src_im=jnp.asarray(G_SRC_IM[:1]),
-            gamma_rec_re=jnp.asarray(G_REC_RE), gamma_rec_im=jnp.asarray(G_REC_IM),
+            t_cos=jnp.array(30.0),
+            t_sin=jnp.array(-40.0),
+            t_rx=jnp.array(290.0),
+            gamma_src_re=jnp.asarray(G_SRC_RE[:1]),
+            gamma_src_im=jnp.asarray(G_SRC_IM[:1]),
+            gamma_rec_re=jnp.asarray(G_REC_RE),
+            gamma_rec_im=jnp.asarray(G_REC_IM),
         )
         square = State(
             data=jnp.full((n, n), 300.0),
-            coords=Coordinates(time=jnp.arange(float(n)),
-                               freq=jnp.linspace(60e6, 85e6, n),
-                               extra={"receiver_input": jnp.zeros(n, dtype=int)}),
+            coords=Coordinates(
+                time=jnp.arange(float(n)),
+                freq=jnp.linspace(60e6, 85e6, n),
+                extra={"receiver_input": jnp.zeros(n, dtype=int)},
+            ),
         )
         meant_per_time = jnp.linspace(240.0, 260.0, n)
 
@@ -345,7 +355,9 @@ class TestIdentifiability:
 
         def predict(flat):  # flat: (3, n_freq) -- t_unc, t_cos, t_sin per channel
             op = make_operator(
-                t_unc=flat[0], t_cos=flat[1], t_sin=flat[2],
+                t_unc=flat[0],
+                t_cos=flat[1],
+                t_sin=flat[2],
                 gamma_src_re=jnp.asarray(G_SRC_RE[:n_source]),
                 gamma_src_im=jnp.asarray(G_SRC_IM[:n_source]),
             )
@@ -375,7 +387,8 @@ class TestIdentifiability:
 
         np.testing.assert_allclose(
             np.asarray(predict(jnp.array([250.0, 30.0, -40.0]))),
-            np.asarray(truth).ravel(), rtol=RTOL,
+            np.asarray(truth).ravel(),
+            rtol=RTOL,
         )
 
 
@@ -406,7 +419,7 @@ class TestTransforms:
 # leaf like the other three, and it was stated as though it survived a change of
 # parameterisation, which it does not.
 
-N_TIME_RANK = 11   # prime, and equal to no other dimension here
+N_TIME_RANK = 11  # prime, and equal to no other dimension here
 N_BASIS = 3
 N_SRC_MAX = 5
 
@@ -449,20 +462,24 @@ def _gamma_bank(n_freq: int) -> tuple[np.ndarray, np.ndarray]:
     """
     x = np.linspace(-1.0, 1.0, n_freq)
     ramp = np.arange(n_freq) / n_freq
-    re = np.stack([
-        0.30 - 0.06 * ramp,
-        0.55 * np.cos(np.linspace(0.0, 2.0, n_freq)),
-        -0.60 - 0.06 * x,
-        0.20 * np.sin(np.linspace(0.5, 3.5, n_freq)),
-        -0.35 + 0.25 * x**2,
-    ])
-    im = np.stack([
-        0.10 - 0.05 * ramp,
-        0.05 * np.sin(np.linspace(0.0, 4.0, n_freq)),
-        0.15 - 0.10 * x,
-        -0.30 * np.cos(np.linspace(0.2, 2.2, n_freq)),
-        0.22 * x,
-    ])
+    re = np.stack(
+        [
+            0.30 - 0.06 * ramp,
+            0.55 * np.cos(np.linspace(0.0, 2.0, n_freq)),
+            -0.60 - 0.06 * x,
+            0.20 * np.sin(np.linspace(0.5, 3.5, n_freq)),
+            -0.35 + 0.25 * x**2,
+        ]
+    )
+    im = np.stack(
+        [
+            0.10 - 0.05 * ramp,
+            0.05 * np.sin(np.linspace(0.0, 4.0, n_freq)),
+            0.15 - 0.10 * x,
+            -0.30 * np.cos(np.linspace(0.2, 2.2, n_freq)),
+            0.22 * x,
+        ]
+    )
     return re, im
 
 
@@ -486,9 +503,12 @@ def _rank_report(*, loads, k, n_freq, basis=None, dtype=None):
     g_re, g_im = _gamma_bank(n_freq)
     cast = (lambda a: jnp.asarray(a, dtype=dtype)) if dtype else jnp.asarray
     op = NoiseWaveOperator(
-        t_unc=jnp.zeros(n_freq), t_cos=jnp.zeros(n_freq),
-        t_sin=jnp.zeros(n_freq), t_rx=jnp.zeros(n_freq),
-        gamma_src_re=cast(g_re[list(loads)]), gamma_src_im=cast(g_im[list(loads)]),
+        t_unc=jnp.zeros(n_freq),
+        t_cos=jnp.zeros(n_freq),
+        t_sin=jnp.zeros(n_freq),
+        t_rx=jnp.zeros(n_freq),
+        gamma_src_re=cast(g_re[list(loads)]),
+        gamma_src_im=cast(g_im[list(loads)]),
         gamma_rec_re=cast(np.full(n_freq, 0.08)),
         gamma_rec_im=cast(np.full(n_freq, -0.03)),
     )
@@ -672,7 +692,6 @@ class TestBasisRegimeBreaksTheRule:
         basis = _legendre(N_BASIS, n_freq)
         with _float64_leaves():
             good = _rank_report(loads=(0,), k=3, n_freq=n_freq, basis=basis)
-            bad = _rank_report(loads=(0,), k=3, n_freq=n_freq, basis=basis,
-                               dtype=jnp.float32)
+            bad = _rank_report(loads=(0,), k=3, n_freq=n_freq, basis=basis, dtype=jnp.float32)
         assert good.weakest_identified > 1e2 * DEFAULT_RANK_RTOL
         assert bad.weakest_identified < 1e2 * DEFAULT_RANK_RTOL

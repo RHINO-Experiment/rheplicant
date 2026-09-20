@@ -88,8 +88,11 @@ class DarwinOutputPlatform:
             # inability to inspect the descriptor.
             if error == errno.ENOENT:
                 return True, False, True, None
-            return False, True, False, (
-                f"cannot verify access control: acl_get_fd_np errno {error}"
+            return (
+                False,
+                True,
+                False,
+                (f"cannot verify access control: acl_get_fd_np errno {error}"),
             )
         try:
             return self._walk_entries(handle)
@@ -109,17 +112,21 @@ class DarwinOutputPlatform:
                 # "no more entries"; anything else means the walk itself failed
                 # and nothing may be concluded from a partial read.
                 if result != 0 and ctypes.get_errno() not in (0, errno.EINVAL, errno.ENOENT):
-                    return False, True, False, (
-                        "cannot verify access control: acl_get_entry errno "
-                        f"{ctypes.get_errno()}"
+                    return (
+                        False,
+                        True,
+                        False,
+                        (f"cannot verify access control: acl_get_entry errno {ctypes.get_errno()}"),
                     )
                 return seen == 0, False, True, None if seen == 0 else "deny-only access ACL"
             tag = ctypes.c_int()
             ctypes.set_errno(0)
             if self._acl_get_tag_type(entry, ctypes.byref(tag)) != 0:
-                return False, True, False, (
-                    "cannot verify access control: acl_get_tag_type errno "
-                    f"{ctypes.get_errno()}"
+                return (
+                    False,
+                    True,
+                    False,
+                    (f"cannot verify access control: acl_get_tag_type errno {ctypes.get_errno()}"),
                 )
             if tag.value != _ACL_EXTENDED_DENY:
                 # An ALLOW ACE, or a tag this code does not recognise. Either

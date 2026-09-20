@@ -50,9 +50,7 @@ def _parser() -> _Parser:
     # which is the same path ``--help`` takes and which ``main`` reports as
     # its own exit code; the ``error`` override above deliberately does not
     # touch either.
-    parser.add_argument(
-        "--version", action="version", version=f"rheplicant {package_version()}"
-    )
+    parser.add_argument("--version", action="version", version=f"rheplicant {package_version()}")
     commands = parser.add_subparsers(dest="command", required=True)
     for name in ("validate", "run", "script"):
         command = commands.add_parser(name)
@@ -111,9 +109,7 @@ def _main(
             command="script",
         )
         if source.source_path == "<stdin>" and request.target_path is None:
-            raise ConfigError(
-                "outputs.dir: script from stdin requires an explicit directory."
-            )
+            raise ConfigError("outputs.dir: script from stdin requires an explicit directory.")
         payload = render_script(
             source,
             prepared.source.bootstrap_manifest.presets,

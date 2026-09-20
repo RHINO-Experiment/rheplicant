@@ -162,10 +162,7 @@ def score_directions(
     # zips this against a declared-order list would then be wrong by a
     # permutation that is the identity exactly when the latents happen to be
     # named alphabetically. That is Plan A's BayesMemory.fisher() bug verbatim.
-    return {
-        name: jnp.reshape(jacobian[name], (jacobian[name].shape[0], -1)).T
-        for name in selected
-    }
+    return {name: jnp.reshape(jacobian[name], (jacobian[name].shape[0], -1)).T for name in selected}
 
 
 class ReducedBasis(eqx.Module):
@@ -350,8 +347,7 @@ class ReducedBasis(eqx.Module):
         check with a different failure mode.
         """
         payload = b"".join(
-            np.asarray(leaf).tobytes()
-            for leaf in (self.whitened, self.weight, self.c_ref)
+            np.asarray(leaf).tobytes() for leaf in (self.whitened, self.weight, self.c_ref)
         )
         return hashlib.sha256(payload).hexdigest()[:16]
 
@@ -508,9 +504,7 @@ def build_reduced_basis(
     if seed_scores:
         scores = score_directions(space, pipeline, state_template, names=names, at=values)
         seeded_names = tuple(scores)
-        seeds = _whiten(
-            jnp.concatenate([scores[name] for name in seeded_names], axis=0), weight
-        )
+        seeds = _whiten(jnp.concatenate([scores[name] for name in seeded_names], axis=0), weight)
         n_scores = int(seeds.shape[0])
         if n_scores > n_basis:
             raise StateValidationError(
@@ -543,9 +537,7 @@ def build_reduced_basis(
             # Two causes, two remedies, and reporting the second as the first
             # would send the caller to run an identifiability report on a model
             # that is perfectly identifiable.
-            dropped = [
-                index for index in range(seeds.shape[0]) if index not in seed_kept
-            ]
+            dropped = [index for index in range(seeds.shape[0]) if index not in seed_kept]
             if dropped[0] < n_scores:
                 raise StateValidationError(
                     f"The score directions of {list(seeded_names)} are linearly "
@@ -563,9 +555,7 @@ def build_reduced_basis(
                 "which is exactly what declaring it was for."
             )
         orthonormal_seeds = seed_transform @ seeds
-        whitened_bank = (
-            whitened_bank - (whitened_bank @ orthonormal_seeds.T) @ orthonormal_seeds
-        )
+        whitened_bank = whitened_bank - (whitened_bank @ orthonormal_seeds.T) @ orthonormal_seeds
 
     remainder = n_basis - seeds.shape[0]
     if method == "svd":
@@ -573,9 +563,7 @@ def build_reduced_basis(
     elif method == "greedy":
         extra = select_greedy(whitened_bank, remainder)
     else:
-        raise StateValidationError(
-            f"method must be 'svd' or 'greedy', got {method!r}."
-        )
+        raise StateValidationError(f"method must be 'svd' or 'greedy', got {method!r}.")
 
     # The SAME combination is applied to the whitened candidates and to their
     # raw counterparts, rather than dividing the orthonormal rows by the weight.
@@ -640,9 +628,7 @@ class FidelityReport(eqx.Module):
         is a model to fix, and reporting the second as the first would send the
         caller to raise ``n_S`` against a derivative that is identically zero.
         """
-        absent = sorted(
-            name for name, value in self.residuals.items() if np.isnan(value)
-        )
+        absent = sorted(name for name, value in self.residuals.items() if np.isnan(value))
         if absent:
             raise StateValidationError(
                 f"The prediction does not respond to {absent} at this point: "
@@ -652,13 +638,9 @@ class FidelityReport(eqx.Module):
                 "identifiability(space, pipeline, state), or move the expansion "
                 "point with at= if the derivative merely happens to vanish here."
             )
-        bad = {
-            name: value for name, value in self.residuals.items() if value > tolerance
-        }
+        bad = {name: value for name, value in self.residuals.items() if value > tolerance}
         if bad:
-            listed = ", ".join(
-                f"{name}={value:.4f}" for name, value in sorted(bad.items())
-            )
+            listed = ", ".join(f"{name}={value:.4f}" for name, value in sorted(bad.items()))
             raise StateValidationError(
                 f"This basis loses {listed} against a tolerance of {tolerance}. "
                 "Compression is refused: the stored term would have a collapsed "
@@ -692,9 +674,7 @@ def basis_fidelity(basis: ReducedBasis, scores: dict[str, jax.Array]) -> Fidelit
         for name, rows in scores.items()
     }
     names, spans, shapes = _named_spans(template)
-    stacked = _whiten(
-        jnp.concatenate([scores[name] for name in names], axis=0), basis.weight
-    )
+    stacked = _whiten(jnp.concatenate([scores[name] for name in names], axis=0), basis.weight)
     # `_whiten` selects first, so a non-finite entry at a sample the reference
     # could not see is already an exact 0.0 here and this fires only for the case
     # the message names. Ordered before anything comparison-based, because NaN
@@ -715,9 +695,7 @@ def basis_fidelity(basis: ReducedBasis, scores: dict[str, jax.Array]) -> Fidelit
     # `where` twice, never a multiply: the inner one keeps the division finite,
     # since a masked-out `0/0` is nan and `0.0 * nan` is nan too.
     safe = jnp.where(norms > 0.0, norms, 1.0)
-    per_row = np.asarray(
-        jnp.where(norms > 0.0, jnp.linalg.norm(residuals, axis=1) / safe, jnp.nan)
-    )
+    per_row = np.asarray(jnp.where(norms > 0.0, jnp.linalg.norm(residuals, axis=1) / safe, jnp.nan))
     # `np.max` and NOT `np.nanmax`: a multi-component latent with one dead
     # component IS a dead direction, and hiding it behind its live components is
     # the failure this whole function exists to make visible.
@@ -764,14 +742,11 @@ def _whiten(rows: jax.Array, weight: jax.Array) -> jax.Array:
 def _refuse_shapes_no_projector_can_use(rows: jax.Array, weight: jax.Array) -> None:
     """The structural checks, before anything is derived from them."""
     if rows.ndim != 2:
-        raise StateValidationError(
-            f"ReducedBasis.rows must be (n_S, n_data); got {rows.shape}."
-        )
+        raise StateValidationError(f"ReducedBasis.rows must be (n_S, n_data); got {rows.shape}.")
     n_basis, n_data = rows.shape
     if weight.shape != (n_data,):
         raise StateValidationError(
-            f"ReducedBasis.weight is {weight.shape} but the rows are over "
-            f"{n_data} samples."
+            f"ReducedBasis.weight is {weight.shape} but the rows are over {n_data} samples."
         )
     if n_basis > n_data:
         raise StateValidationError(

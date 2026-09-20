@@ -74,8 +74,13 @@ from tests.config.preflight_helpers import (
 MINE = frozenset({"A50"})
 
 #: A raw-array beam that earns nothing from A11 or A12.
-NPY_BEAM = {"format": "npy", "path": "beam.npy", "nside": 4,
-            "normalize": "pixel_sum", "frame": "beam_local"}
+NPY_BEAM = {
+    "format": "npy",
+    "path": "beam.npy",
+    "nside": 4,
+    "normalize": "pixel_sum",
+    "frame": "beam_local",
+}
 
 #: The same beam, cut at the horizon.  ``truncate_map`` is the ONE mode leg A
 #: is about; ``none`` and ``projector_mask`` are the other two and both are
@@ -85,41 +90,51 @@ TRUNCATED = {**NPY_BEAM, "horizon": {"mode": "truncate_map"}}
 #: A driftscan projector over ``horn``.  ``acknowledge_float32_sky`` keeps A44
 #: (a different Task 2 row, on a float32 base document) off every document
 #: here, so an ``ids()`` assertion below is about A50 and nothing else.
-DRIFTSCAN = {"engine": "driftscan", "beam": {"ref": "resources.beams.horn"},
-             "lmax": 8, "lat_deg": {"value": 53.2367, "unit": "deg"},
-             "az_deg": {"value": 0.0, "unit": "deg"},
-             "el_deg": {"value": 90.0, "unit": "deg"},
-             "normalize_beam": True, "acknowledge_float32_sky": True}
+DRIFTSCAN = {
+    "engine": "driftscan",
+    "beam": {"ref": "resources.beams.horn"},
+    "lmax": 8,
+    "lat_deg": {"value": 53.2367, "unit": "deg"},
+    "az_deg": {"value": 0.0, "unit": "deg"},
+    "el_deg": {"value": 90.0, "unit": "deg"},
+    "normalize_beam": True,
+    "acknowledge_float32_sky": True,
+}
 
 #: The same projector asking for the cached rotation -- leg B's subject.
 #: ``lst_ref_deg`` is present because A48 would otherwise refuse it first,
 #: which would make every leg-B document carry two findings.
-CACHED = {**DRIFTSCAN, "optimizations": ["cache_beam_rotation"],
-          "lst_ref_deg": {"value": 0.0, "unit": "deg"}}
+CACHED = {
+    **DRIFTSCAN,
+    "optimizations": ["cache_beam_rotation"],
+    "lst_ref_deg": {"value": 0.0, "unit": "deg"},
+}
 
 #: ``model.beam_spill``, taking its fraction off the projector.
-SPILL = {"from": "projector",
-         "projector": {"ref": "resources.projectors.drift"},
-         "t_ground": {"value": 300.0, "unit": "K"}}
+SPILL = {
+    "from": "projector",
+    "projector": {"ref": "resources.projectors.drift"},
+    "t_ground": {"value": 300.0, "unit": "K"},
+}
 
 #: A pointing this run can actually have.  Without it ``observation.pointing``
 #: is ``mode: none`` by default and A52 refuses every projector reference in
 #: ``model:`` -- a second finding on every document here, about a fault none
 #: of these tests is written for.
-POINTING = {"mode": "drift",
-            "az_deg": {"value": 0.0, "unit": "deg"},
-            "el_deg": {"value": 90.0, "unit": "deg"},
-            "materialise": ["pointing"],
-            "lst": {"mode": "uniform_turn", "n_time": "n_time",
-                    "lst0_deg": {"value": 0.0, "unit": "deg"}}}
+POINTING = {
+    "mode": "drift",
+    "az_deg": {"value": 0.0, "unit": "deg"},
+    "el_deg": {"value": 90.0, "unit": "deg"},
+    "materialise": ["pointing"],
+    "lst": {"mode": "uniform_turn", "n_time": "n_time", "lst0_deg": {"value": 0.0, "unit": "deg"}},
+}
 
 
 def _doc(*, beam=NPY_BEAM, projector=DRIFTSCAN, spill=SPILL, **patch):
     """The base document with one beam, one projector and one spill node."""
     sections = {
         "observation": {**BASE_OBSERVATION, "pointing": POINTING},
-        "resources": {"beams": {"horn": beam},
-                      "projectors": {"drift": projector}},
+        "resources": {"beams": {"horn": beam}, "projectors": {"drift": projector}},
         "model": {**BASE_MODEL, **({"beam_spill": spill} if spill else {})},
     }
     sections.update(patch)
@@ -149,8 +164,7 @@ def context(tmp_path):
     before a grid is read; ``base_dir`` is a fresh directory holding no beam,
     which is what makes ``UNREADABLE_BEAM``'s file genuinely absent.
     """
-    return ResolutionContext(freq=None, time=None, dtype="float32",
-                             base_dir=str(tmp_path))
+    return ResolutionContext(freq=None, time=None, dtype="float32", base_dir=str(tmp_path))
 
 
 class TestTheRegistry:
@@ -212,20 +226,30 @@ class TestLegATheGroundThatVanishes:
         to have a masked projector and a spill node at once -- given the
         projector masks, which is ``A50.projector_mask``'s separate question
         (``TestAProjectorMaskNeedsAMaskingProjector``)."""
-        assert "A50" not in ids(_doc(
-            beam={**NPY_BEAM, "horizon": {"mode": mode}},
-            projector={**DRIFTSCAN, "horizon_mask": True}))
+        assert "A50" not in ids(
+            _doc(
+                beam={**NPY_BEAM, "horizon": {"mode": mode}},
+                projector={**DRIFTSCAN, "horizon_mask": True},
+            )
+        )
         assert not _refused_saying(
-            _doc(beam={**NPY_BEAM, "horizon": {"mode": mode}}),
-            "already cut at the horizon")
+            _doc(beam={**NPY_BEAM, "horizon": {"mode": mode}}), "already cut at the horizon"
+        )
 
     def test_a_projector_mask_beam_beside_a_masking_projector_is_correct(self):
         """The combination the schema recommends, spelled in full: the beam
         declares ``projector_mask``, the projector does the masking, and the
         spill node reads the fraction off it."""
-        assert ids(_doc(
-            beam={**NPY_BEAM, "horizon": {"mode": "projector_mask"}},
-            projector={**DRIFTSCAN, "horizon_mask": True})) & MINE == frozenset()
+        assert (
+            ids(
+                _doc(
+                    beam={**NPY_BEAM, "horizon": {"mode": "projector_mask"}},
+                    projector={**DRIFTSCAN, "horizon_mask": True},
+                )
+            )
+            & MINE
+            == frozenset()
+        )
 
     def test_a_truncated_beam_with_no_spill_node_earns_nothing(self):
         """The other half of the same mutant.  Truncating a beam is a normal
@@ -239,12 +263,15 @@ class TestLegATheGroundThatVanishes:
         intact."""
         doc = preflight_document(
             observation={**BASE_OBSERVATION, "pointing": POINTING},
-            resources={"beams": {"horn": NPY_BEAM, "cut": TRUNCATED},
-                       "projectors": {
-                           "drift": DRIFTSCAN,
-                           "other": {**DRIFTSCAN,
-                                     "beam": {"ref": "resources.beams.cut"}}}},
-            model={**BASE_MODEL, "beam_spill": SPILL})
+            resources={
+                "beams": {"horn": NPY_BEAM, "cut": TRUNCATED},
+                "projectors": {
+                    "drift": DRIFTSCAN,
+                    "other": {**DRIFTSCAN, "beam": {"ref": "resources.beams.cut"}},
+                },
+            },
+            model={**BASE_MODEL, "beam_spill": SPILL},
+        )
         assert "A50" not in ids(doc)
 
     def test_a_horizon_that_is_not_a_mapping_is_a_stand_down(self):
@@ -254,8 +281,7 @@ class TestLegATheGroundThatVanishes:
 
     @pytest.mark.parametrize("mode", ["truncate", "TRUNCATE_MAP", None])
     def test_a_mode_that_is_not_truncate_map_is_a_stand_down(self, mode):
-        assert "A50" not in ids(
-            _doc(beam={**NPY_BEAM, "horizon": {"mode": mode}}))
+        assert "A50" not in ids(_doc(beam={**NPY_BEAM, "horizon": {"mode": mode}}))
 
 
 class TestLegBTheFractionThatCannotBeRead:
@@ -304,8 +330,7 @@ class TestLegBTheFractionThatCannotBeRead:
         for instead.  Leg B follows ``optimizations:``, which is what a
         document may actually write."""
         assert "A50" in ids(_doc(projector=CACHED))
-        assert "A50" not in ids(_doc(
-            projector={**DRIFTSCAN, "beam_frame": "reference"}))
+        assert "A50" not in ids(_doc(projector={**DRIFTSCAN, "beam_frame": "reference"}))
 
     def test_leg_B_pre_empts_leg_A_rather_than_joining_it(self):
         """A projector that is BOTH cached and built on a truncated beam
@@ -326,19 +351,32 @@ class TestTheEngineGate:
     and that sentence is better than anything this layer could write.
     """
 
-    @pytest.mark.parametrize("engine", [
-        pytest.param({"engine": "matrix", "matrix": {"zeros": [16, 12]},
-                      "provenance": {"built_by": "the test suite"}},
-                     id="matrix"),
-        pytest.param({"engine": "general_pointing",
-                      "beam": {"ref": "resources.beams.horn"},
-                      "lmax": 8, "nside": 4,
-                      "lat_deg": {"value": 53.2367, "unit": "deg"},
-                      "normalize_beam": True,
-                      "acknowledge_float32_sky": True},
-                     id="general_pointing"),
-        pytest.param({"engine": "nonsense"}, id="not-an-engine-at-all"),
-    ])
+    @pytest.mark.parametrize(
+        "engine",
+        [
+            pytest.param(
+                {
+                    "engine": "matrix",
+                    "matrix": {"zeros": [16, 12]},
+                    "provenance": {"built_by": "the test suite"},
+                },
+                id="matrix",
+            ),
+            pytest.param(
+                {
+                    "engine": "general_pointing",
+                    "beam": {"ref": "resources.beams.horn"},
+                    "lmax": 8,
+                    "nside": 4,
+                    "lat_deg": {"value": 53.2367, "unit": "deg"},
+                    "normalize_beam": True,
+                    "acknowledge_float32_sky": True,
+                },
+                id="general_pointing",
+            ),
+            pytest.param({"engine": "nonsense"}, id="not-an-engine-at-all"),
+        ],
+    )
     def test_no_other_engine_earns_A50_even_on_a_truncated_beam(self, engine):
         assert "A50" not in ids(_doc(beam=TRUNCATED, projector=engine))
 
@@ -348,10 +386,9 @@ class TestTheEngineGate:
         beam and no spherical harmonic transform."""
         with pytest.raises(StateValidationError) as caught:
             BeamSpillOperator.from_projector(
-                MatrixProjector(matrix=jnp.zeros((2, 12))),
-                t_ground=jnp.asarray(300.0))
-        assert str(caught.value).startswith(
-            "MatrixProjector does not expose horizon_fraction()")
+                MatrixProjector(matrix=jnp.zeros((2, 12))), t_ground=jnp.asarray(300.0)
+            )
+        assert str(caught.value).startswith("MatrixProjector does not expose horizon_fraction()")
 
     def test_general_pointing_fails_the_same_criterion(self):
         """``from_projector``'s gate is ``hasattr(projector,
@@ -372,25 +409,31 @@ class TestTheValueNodeRouteIsNotSpokenAboutTwice:
     """
 
     def _derived(self, projector):
-        return {"sky_fraction": {"from": "horizon_fraction",
-                                 "projector": {"ref":
-                                               "resources.projectors.drift"}},
-                "t_ground": {"value": 300.0, "unit": "K"}}
+        return {
+            "sky_fraction": {
+                "from": "horizon_fraction",
+                "projector": {"ref": "resources.projectors.drift"},
+            },
+            "t_ground": {"value": 300.0, "unit": "K"},
+        }
 
-    def test_the_derivation_against_a_cached_projector_is_not_A50s_business(
-            self):
-        assert "A50" not in ids(
-            _doc(projector=CACHED, spill=self._derived(CACHED)))
+    def test_the_derivation_against_a_cached_projector_is_not_A50s_business(self):
+        assert "A50" not in ids(_doc(projector=CACHED, spill=self._derived(CACHED)))
 
     def test_nor_against_a_truncated_beam(self):
-        assert "A50" not in ids(
-            _doc(beam=TRUNCATED, spill=self._derived(DRIFTSCAN)))
+        assert "A50" not in ids(_doc(beam=TRUNCATED, spill=self._derived(DRIFTSCAN)))
 
     def test_a_spill_node_writing_sky_fraction_outright_is_not_either(self):
         """The remedy leg A names, applied: no ``from:`` at all."""
-        assert "A50" not in ids(_doc(beam=TRUNCATED, spill={
-            "sky_fraction": {"ref": "resources.beams.horn.sky_fraction"},
-            "t_ground": {"value": 300.0, "unit": "K"}}))
+        assert "A50" not in ids(
+            _doc(
+                beam=TRUNCATED,
+                spill={
+                    "sky_fraction": {"ref": "resources.beams.horn.sky_fraction"},
+                    "t_ground": {"value": 300.0, "unit": "K"},
+                },
+            )
+        )
 
 
 class TestTakingTheAdvice:
@@ -411,16 +454,26 @@ class TestTakingTheAdvice:
         """
         assert "A50" in ids(_doc(beam=TRUNCATED))
         masked = {**NPY_BEAM, "horizon": {"mode": "projector_mask"}}
-        assert ids(_doc(beam=masked,
-                        projector={**DRIFTSCAN, "horizon_mask": True})
-                   ) & MINE == frozenset()
-        assert _refused_saying(_doc(beam=masked),
-                               "projector_mask cuts nothing itself")
+        assert (
+            ids(_doc(beam=masked, projector={**DRIFTSCAN, "horizon_mask": True})) & MINE
+            == frozenset()
+        )
+        assert _refused_saying(_doc(beam=masked), "projector_mask cuts nothing itself")
 
     def test_leg_A_remedy_2_read_the_truncations_own_second_product(self):
-        assert ids(_doc(beam=TRUNCATED, spill={
-            "sky_fraction": {"ref": "resources.beams.horn.sky_fraction"},
-            "t_ground": {"value": 300.0, "unit": "K"}})) & MINE == frozenset()
+        assert (
+            ids(
+                _doc(
+                    beam=TRUNCATED,
+                    spill={
+                        "sky_fraction": {"ref": "resources.beams.horn.sky_fraction"},
+                        "t_ground": {"value": 300.0, "unit": "K"},
+                    },
+                )
+            )
+            & MINE
+            == frozenset()
+        )
 
     def test_leg_B_remedy_1_drop_the_optimisation(self):
         assert "A50" in ids(_doc(projector=CACHED))
@@ -430,17 +483,23 @@ class TestTakingTheAdvice:
         """Measured: ``lst_ref_deg`` is a plain ``from_beam_maps`` argument
         and a local-frame projector carrying one builds and answers
         ``horizon_fraction()``.  The remedy does not force a second edit."""
-        assert ids(_doc(projector={
-            **DRIFTSCAN, "lst_ref_deg": {"value": 0.0, "unit": "deg"}})
-        ) & MINE == frozenset()
+        assert (
+            ids(_doc(projector={**DRIFTSCAN, "lst_ref_deg": {"value": 0.0, "unit": "deg"}})) & MINE
+            == frozenset()
+        )
 
     def test_leg_B_remedy_2_a_second_uncached_projector(self):
         doc = preflight_document(
             observation={**BASE_OBSERVATION, "pointing": POINTING},
-            resources={"beams": {"horn": NPY_BEAM},
-                       "projectors": {"drift": CACHED, "plain": DRIFTSCAN}},
-            model={**BASE_MODEL, "beam_spill": {
-                **SPILL, "projector": {"ref": "resources.projectors.plain"}}})
+            resources={
+                "beams": {"horn": NPY_BEAM},
+                "projectors": {"drift": CACHED, "plain": DRIFTSCAN},
+            },
+            model={
+                **BASE_MODEL,
+                "beam_spill": {**SPILL, "projector": {"ref": "resources.projectors.plain"}},
+            },
+        )
         assert ids(doc) & MINE == frozenset()
 
 
@@ -457,20 +516,20 @@ class TestTheRouteNodesCannotSee:
 
     def _replacing(self, spill):
         inference = preflight_document()["inference"]
-        return {**inference,
-                "twin": {**inference.get("twin", {}), "replace":
-                         {"beam_spill": spill}}}
+        return {
+            **inference,
+            "twin": {**inference.get("twin", {}), "replace": {"beam_spill": spill}},
+        }
 
     def test_leg_A_fires_on_the_replace_route(self):
-        found = only(_doc(beam=TRUNCATED, spill=None,
-                          inference=self._replacing(SPILL)), "A50")
+        found = only(_doc(beam=TRUNCATED, spill=None, inference=self._replacing(SPILL)), "A50")
         assert found.where == "inference.twin.replace.beam_spill"
         assert found.message.startswith(
-            "inference.twin.replace.beam_spill: from: projector takes f_sky")
+            "inference.twin.replace.beam_spill: from: projector takes f_sky"
+        )
 
     def test_leg_B_fires_on_the_replace_route(self):
-        found = only(_doc(projector=CACHED, spill=None,
-                          inference=self._replacing(SPILL)), "A50")
+        found = only(_doc(projector=CACHED, spill=None, inference=self._replacing(SPILL)), "A50")
         assert found.where == "inference.twin.replace.beam_spill"
         assert "cache_beam_rotation" in found.message
 
@@ -480,13 +539,14 @@ class TestTheRouteNodesCannotSee:
         twice."""
         doc = _doc(beam=TRUNCATED, inference=self._replacing(SPILL))
         assert [one.where for one in findings(doc) if one.check == "A50"] == [
-            "model.beam_spill", "inference.twin.replace.beam_spill"]
+            "model.beam_spill",
+            "inference.twin.replace.beam_spill",
+        ]
 
     def test_the_compose_route_is_walked_too(self):
         """``compose:`` expands to its stages, which are what reach
         ``build_node_operator``; the composing mapping never does."""
-        found = only(_doc(beam=TRUNCATED,
-                          spill={"compose": True, "stages": [SPILL]}), "A50")
+        found = only(_doc(beam=TRUNCATED, spill={"compose": True, "stages": [SPILL]}), "A50")
         assert found.where == "model.beam_spill.stages[0]"
         assert found.message.startswith("model.beam_spill.stages[0]: ")
 
@@ -496,21 +556,27 @@ class TestEveryLayerIsWalked:
     ``resources:`` -- so a variant can introduce it from either side."""
 
     def test_a_variant_that_truncates_the_beam_earns_it(self):
-        doc = _doc(variants={"cut": {"resources": {"beams": {
-            "horn": {"horizon": {"mode": "truncate_map"}}}}}})
+        doc = _doc(
+            variants={
+                "cut": {"resources": {"beams": {"horn": {"horizon": {"mode": "truncate_map"}}}}}
+            }
+        )
         found = only(doc, "A50")
         assert found.message.startswith("variants.cut: model.beam_spill:")
 
     def test_a_variant_that_adds_the_spill_node_earns_it(self):
-        doc = _doc(beam=TRUNCATED, spill=None,
-                   variants={"split": {"model": {"beam_spill": SPILL}}})
+        doc = _doc(beam=TRUNCATED, spill=None, variants={"split": {"model": {"beam_spill": SPILL}}})
         found = only(doc, "A50")
         assert found.message.startswith("variants.split: model.beam_spill:")
 
     def test_the_base_documents_own_fault_is_said_once(self):
-        doc = _doc(beam=TRUNCATED,
-                   variants={"a": {"runtime": {"jax_enable_x64": False}},
-                             "b": {"runtime": {"jax_enable_x64": False}}})
+        doc = _doc(
+            beam=TRUNCATED,
+            variants={
+                "a": {"runtime": {"jax_enable_x64": False}},
+                "b": {"runtime": {"jax_enable_x64": False}},
+            },
+        )
         assert only(doc, "A50").message.startswith("model.beam_spill:")
 
 
@@ -518,37 +584,46 @@ class TestTheShapesThisCheckDeclinesToRead:
     """A stand-down is silent, and every one of these has a better sentence
     of its own somewhere below this pass."""
 
-    @pytest.mark.parametrize("spill", [
-        pytest.param({"sky_fraction": 0.9, "t_ground": 300.0},
-                     id="no-from-at-all"),
-        pytest.param({"from": "somewhere_else"}, id="another-from-route"),
-        pytest.param({"python": "pkg.mod:factory", "from": "projector",
-                      "projector": {"ref": "resources.projectors.drift"}},
-                     id="the-python-hatch-wins-first"),
-        pytest.param({"from": "projector", "projector": "drift"},
-                     id="projector-not-a-mapping"),
-        pytest.param({"from": "projector", "projector": {"ref": 7}},
-                     id="ref-not-a-string"),
-        pytest.param({"from": "projector",
-                      "projector": {"ref": "resources.beams.horn"}},
-                     id="ref-into-the-wrong-kind"),
-        pytest.param({"from": "projector",
-                      "projector": {"ref": "resources.projectors.absent"}},
-                     id="ref-to-an-entry-that-is-not-declared"),
-        pytest.param("nonsense", id="node-not-a-mapping"),
-    ])
+    @pytest.mark.parametrize(
+        "spill",
+        [
+            pytest.param({"sky_fraction": 0.9, "t_ground": 300.0}, id="no-from-at-all"),
+            pytest.param({"from": "somewhere_else"}, id="another-from-route"),
+            pytest.param(
+                {
+                    "python": "pkg.mod:factory",
+                    "from": "projector",
+                    "projector": {"ref": "resources.projectors.drift"},
+                },
+                id="the-python-hatch-wins-first",
+            ),
+            pytest.param({"from": "projector", "projector": "drift"}, id="projector-not-a-mapping"),
+            pytest.param({"from": "projector", "projector": {"ref": 7}}, id="ref-not-a-string"),
+            pytest.param(
+                {"from": "projector", "projector": {"ref": "resources.beams.horn"}},
+                id="ref-into-the-wrong-kind",
+            ),
+            pytest.param(
+                {"from": "projector", "projector": {"ref": "resources.projectors.absent"}},
+                id="ref-to-an-entry-that-is-not-declared",
+            ),
+            pytest.param("nonsense", id="node-not-a-mapping"),
+        ],
+    )
     def test_it_says_nothing(self, spill):
-        assert "A50" not in ids(_doc(beam=TRUNCATED, projector=CACHED,
-                                     spill=spill))
+        assert "A50" not in ids(_doc(beam=TRUNCATED, projector=CACHED, spill=spill))
 
     def test_a_sub_value_reference_still_resolves_to_its_entry(self):
         """The anti-vacuity partner for the two ``ref``-shaped stand-downs
         above: a reference is cut to three segments, so a legal deeper one is
         still followed rather than dropped."""
-        found = only(_doc(beam=TRUNCATED, spill={
-            **SPILL,
-            "projector": {"ref": "resources.projectors.drift.beam_alms"}}),
-            "A50")
+        found = only(
+            _doc(
+                beam=TRUNCATED,
+                spill={**SPILL, "projector": {"ref": "resources.projectors.drift.beam_alms"}},
+            ),
+            "A50",
+        )
         assert "resources.projectors.drift" in found.message
 
     def test_an_extends_this_layer_cannot_resolve_is_a_stand_down(self):
@@ -557,9 +632,9 @@ class TestTheShapesThisCheckDeclinesToRead:
         would hide every other finding on the document."""
         doc = preflight_document(
             observation={**BASE_OBSERVATION, "pointing": POINTING},
-            resources={"beams": {"horn": NPY_BEAM},
-                       "projectors": {"drift": {"extends": "nobody"}}},
-            model={**BASE_MODEL, "beam_spill": SPILL})
+            resources={"beams": {"horn": NPY_BEAM}, "projectors": {"drift": {"extends": "nobody"}}},
+            model={**BASE_MODEL, "beam_spill": SPILL},
+        )
         assert "A50" not in ids(doc)
 
     def test_the_extends_copy_of_a_cached_projector_IS_followed(self):
@@ -568,17 +643,19 @@ class TestTheShapesThisCheckDeclinesToRead:
         about it."""
         doc = preflight_document(
             observation={**BASE_OBSERVATION, "pointing": POINTING},
-            resources={"beams": {"horn": NPY_BEAM},
-                       "projectors": {"base": CACHED,
-                                      "drift": {"extends": "base",
-                                                "lmax": 16}}},
-            model={**BASE_MODEL, "beam_spill": SPILL})
+            resources={
+                "beams": {"horn": NPY_BEAM},
+                "projectors": {"base": CACHED, "drift": {"extends": "base", "lmax": 16}},
+            },
+            model={**BASE_MODEL, "beam_spill": SPILL},
+        )
         assert "cache_beam_rotation" in only(doc, "A50").message
 
     def test_a_hostile_model_section_does_not_abort_the_pass(self):
-        doc = _doc(beam=TRUNCATED,
-                   spill={"from": "projector", "projector": {"ref": None},
-                          "t_ground": [1, 2]})
+        doc = _doc(
+            beam=TRUNCATED,
+            spill={"from": "projector", "projector": {"ref": None}, "t_ground": [1, 2]},
+        )
         assert "A50" not in ids(doc)
 
 
@@ -602,9 +679,9 @@ class TestThePhaseThisBuys:
     def _unreadable(self, projector):
         return preflight_document(
             observation={**BASE_OBSERVATION, "pointing": POINTING},
-            resources={**UNREADABLE_BEAM,
-                       "projectors": {"drift": projector}},
-            model={**BASE_MODEL, "beam_spill": SPILL})
+            resources={**UNREADABLE_BEAM, "projectors": {"drift": projector}},
+            model={**BASE_MODEL, "beam_spill": SPILL},
+        )
 
     def test_leg_B_out_ranks_the_beam(self):
         doc = self._unreadable(CACHED)
@@ -616,10 +693,17 @@ class TestThePhaseThisBuys:
     def test_leg_A_out_ranks_it_too(self):
         doc = preflight_document(
             observation={**BASE_OBSERVATION, "pointing": POINTING},
-            resources={"beams": {"horn": {**UNREADABLE_BEAM["beams"]["horn"],
-                                          "horizon": {"mode": "truncate_map"}}},
-                       "projectors": {"drift": DRIFTSCAN}},
-            model={**BASE_MODEL, "beam_spill": SPILL})
+            resources={
+                "beams": {
+                    "horn": {
+                        **UNREADABLE_BEAM["beams"]["horn"],
+                        "horizon": {"mode": "truncate_map"},
+                    }
+                },
+                "projectors": {"drift": DRIFTSCAN},
+            },
+            model={**BASE_MODEL, "beam_spill": SPILL},
+        )
         with pytest.raises(ConfigError) as caught:
             load_document(doc)
         assert _refused_saying(doc, "(check A50).")
@@ -671,19 +755,19 @@ class TestAProjectorMaskNeedsAMaskingProjector:
         )
 
     def test_horizon_mask_false_is_refused_too(self):
-        assert "A50" in ids(_doc(beam=self.MASKED,
-                                 projector={**DRIFTSCAN, "horizon_mask": False}))
+        assert "A50" in ids(_doc(beam=self.MASKED, projector={**DRIFTSCAN, "horizon_mask": False}))
 
     def test_every_projector_reading_the_beam_must_mask(self):
         """One masking and one not: the one that does not is named, and only
         it."""
         doc = preflight_document(
             observation={**BASE_OBSERVATION, "pointing": POINTING},
-            resources={"beams": {"horn": self.MASKED},
-                       "projectors": {
-                           "drift": {**DRIFTSCAN, "horizon_mask": True},
-                           "bare": DRIFTSCAN}},
-            model=BASE_MODEL)
+            resources={
+                "beams": {"horn": self.MASKED},
+                "projectors": {"drift": {**DRIFTSCAN, "horizon_mask": True}, "bare": DRIFTSCAN},
+            },
+            model=BASE_MODEL,
+        )
         found = only(doc, "A50")
         assert "resources.projectors.bare does not set" in found.message
         assert "resources.projectors.drift" not in found.message
@@ -691,43 +775,59 @@ class TestAProjectorMaskNeedsAMaskingProjector:
     def test_a_projector_reading_another_beam_is_not_asked(self):
         doc = preflight_document(
             observation={**BASE_OBSERVATION, "pointing": POINTING},
-            resources={"beams": {"horn": self.MASKED, "other": NPY_BEAM},
-                       "projectors": {
-                           "drift": {**DRIFTSCAN, "horizon_mask": True},
-                           "plain": {**DRIFTSCAN, "beam": {
-                               "ref": "resources.beams.other"}}}},
-            model=BASE_MODEL)
+            resources={
+                "beams": {"horn": self.MASKED, "other": NPY_BEAM},
+                "projectors": {
+                    "drift": {**DRIFTSCAN, "horizon_mask": True},
+                    "plain": {**DRIFTSCAN, "beam": {"ref": "resources.beams.other"}},
+                },
+            },
+            model=BASE_MODEL,
+        )
         assert ids(doc) & MINE == frozenset()
 
     def test_a_beam_no_projector_reads_is_left_alone(self):
-        doc = preflight_document(
-            resources={"beams": {"horn": self.MASKED}}, model=BASE_MODEL)
+        doc = preflight_document(resources={"beams": {"horn": self.MASKED}}, model=BASE_MODEL)
         assert ids(doc) & MINE == frozenset()
 
     def test_a_general_pointing_projector_cannot_mask(self):
-        general = {"engine": "general_pointing",
-                   "beam": {"ref": "resources.beams.horn"}, "lmax": 8,
-                   "nside": 4, "lat_deg": {"value": 53.2367, "unit": "deg"},
-                   "normalize_beam": True, "acknowledge_float32_sky": True}
-        found = only(_doc(beam=self.MASKED, projector=general, spill=None),
-                     "A50")
-        assert ("resources.projectors.drift is engine: general_pointing, "
-                "which has no horizon mask.") in found.message
-        assert ("Read this beam through a driftscan projector with "
-                "horizon_mask: true, or cut the beam map itself") in found.message
+        general = {
+            "engine": "general_pointing",
+            "beam": {"ref": "resources.beams.horn"},
+            "lmax": 8,
+            "nside": 4,
+            "lat_deg": {"value": 53.2367, "unit": "deg"},
+            "normalize_beam": True,
+            "acknowledge_float32_sky": True,
+        }
+        found = only(_doc(beam=self.MASKED, projector=general, spill=None), "A50")
+        assert (
+            "resources.projectors.drift is engine: general_pointing, which has no horizon mask."
+        ) in found.message
+        assert (
+            "Read this beam through a driftscan projector with "
+            "horizon_mask: true, or cut the beam map itself"
+        ) in found.message
 
-    GENERAL = {"engine": "general_pointing",
-               "beam": {"ref": "resources.beams.horn"}, "lmax": 8,
-               "nside": 4, "lat_deg": {"value": 53.2367, "unit": "deg"},
-               "normalize_beam": True, "acknowledge_float32_sky": True}
+    GENERAL = {
+        "engine": "general_pointing",
+        "beam": {"ref": "resources.beams.horn"},
+        "lmax": 8,
+        "nside": 4,
+        "lat_deg": {"value": 53.2367, "unit": "deg"},
+        "normalize_beam": True,
+        "acknowledge_float32_sky": True,
+    }
 
     def _both(self, *, drift=DRIFTSCAN, general=None, beams=None):
         return preflight_document(
             observation={**BASE_OBSERVATION, "pointing": POINTING},
-            resources={"beams": beams or {"horn": self.MASKED},
-                       "projectors": {"drift": drift,
-                                      "wide": general or self.GENERAL}},
-            model=BASE_MODEL)
+            resources={
+                "beams": beams or {"horn": self.MASKED},
+                "projectors": {"drift": drift, "wide": general or self.GENERAL},
+            },
+            model=BASE_MODEL,
+        )
 
     def test_both_kinds_of_unmasked_reader_get_both_remedies_at_once(self):
         """An unmasked driftscan projector and a general_pointing one on the
@@ -752,12 +852,16 @@ class TestAProjectorMaskNeedsAMaskingProjector:
         document = self._both(
             drift={**DRIFTSCAN, "horizon_mask": True},
             general={**self.GENERAL, "beam": {"ref": "resources.beams.cut"}},
-            beams={"horn": self.MASKED, "cut": cut})
+            beams={"horn": self.MASKED, "cut": cut},
+        )
         assert ids(document) & MINE == frozenset()
 
     def test_load_document_refuses_it_before_the_beam_is_read(self):
         """``UNREADABLE_BEAM`` names a file that does not exist, so a refusal
         that arrives at all arrived before ``build_resources``."""
         with pytest.raises(ConfigError, match="projector_mask cuts nothing"):
-            load_document(_doc(beam={**UNREADABLE_BEAM["beams"]["horn"],
-                                     "horizon": {"mode": "projector_mask"}}))
+            load_document(
+                _doc(
+                    beam={**UNREADABLE_BEAM["beams"]["horn"], "horizon": {"mode": "projector_mask"}}
+                )
+            )

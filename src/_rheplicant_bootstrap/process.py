@@ -55,9 +55,7 @@ class RawProcessEntry:
 
     def __post_init__(self) -> None:
         try:
-            raw_schema_version = object.__getattribute__(
-                self, "schema_version"
-            )
+            raw_schema_version = object.__getattribute__(self, "schema_version")
             raw_defaults = object.__getattribute__(self, "defaults")
             raw_plugins = object.__getattribute__(self, "plugins")
             raw_runtime = object.__getattribute__(self, "raw_runtime")
@@ -76,28 +74,21 @@ class RawProcessEntry:
                 raw_defaults,
                 failure=_DEFAULTS_FORM_ERROR,
                 limit_message=(
-                    "defaults: sequence entry count exceeds limit "
-                    f"{_PROCESS_SEQUENCE_ENTRY_LIMIT}."
+                    f"defaults: sequence entry count exceeds limit {_PROCESS_SEQUENCE_ENTRY_LIMIT}."
                 ),
             )
         )
         if any(type(item) is not PresetRequest for item in defaults):
             raise ConfigError(_DEFAULTS_FORM_ERROR)
-        canonical_defaults = tuple(
-            PresetRequest(item.name, item.only) for item in defaults
-        )
-        if len({item.name for item in canonical_defaults}) != len(
-            canonical_defaults
-        ):
+        canonical_defaults = tuple(PresetRequest(item.name, item.only) for item in defaults)
+        if len({item.name for item in canonical_defaults}) != len(canonical_defaults):
             raise ConfigError("defaults: duplicate package preset.")
         plugins = _parse_plugins(raw_plugins)
         frozen_runtime = raw_runtime
         if raw_runtime is not None:
             if not static_isinstance(raw_runtime, Mapping):
                 raise ConfigError("raw process runtime must be a mapping or null.")
-            frozen_runtime = freeze_evidence(
-                raw_runtime, where="raw process runtime"
-            )
+            frozen_runtime = freeze_evidence(raw_runtime, where="raw process runtime")
             if not static_isinstance(frozen_runtime, Mapping):
                 raise ConfigError("raw process runtime must be a mapping or null.")
         frozen_outputs = _freeze_output(raw_outputs)
@@ -131,8 +122,7 @@ class RuntimeSpec:
         if platform not in _PLATFORMS:
             raise ConfigError(f"runtime.platform is one of {list(_PLATFORMS)}.")
         if raw_seed is not None and (
-            static_isinstance(raw_seed, bool)
-            or not static_isinstance(raw_seed, int)
+            static_isinstance(raw_seed, bool) or not static_isinstance(raw_seed, int)
         ):
             raise ConfigError("runtime.seed is an int or null.")
         frozen_seeds = freeze_evidence(raw_seeds, where="runtime seeds")
@@ -145,9 +135,7 @@ class RuntimeSpec:
             canonical_seeds[name] = int.__int__(value)
         object.__setattr__(self, "jax_enable_x64", raw_x64)
         object.__setattr__(self, "platform", platform)
-        object.__setattr__(
-            self, "seed", None if raw_seed is None else int.__int__(raw_seed)
-        )
+        object.__setattr__(self, "seed", None if raw_seed is None else int.__int__(raw_seed))
         object.__setattr__(self, "seeds", MappingProxyType(canonical_seeds))
 
 
@@ -252,8 +240,7 @@ def _sequence_items(
 def _top_level(document: Mapping[str, object]) -> dict[str, object]:
     if not static_isinstance(document, Mapping):
         raise ConfigError(
-            "document: configuration root must be a mapping; got "
-            f"{static_type_name(document)}."
+            f"document: configuration root must be a mapping; got {static_type_name(document)}."
         )
     result: dict[str, object] = {}
     for position, (key, value) in enumerate(
@@ -271,8 +258,7 @@ def _top_level(document: Mapping[str, object]) -> dict[str, object]:
         if not static_isinstance(key, str):
             detail = (
                 f" {int.__int__(key)}"
-                if static_isinstance(key, int)
-                and not static_isinstance(key, bool)
+                if static_isinstance(key, int) and not static_isinstance(key, bool)
                 else ""
             )
             raise ConfigError(
@@ -281,25 +267,20 @@ def _top_level(document: Mapping[str, object]) -> dict[str, object]:
             )
         exact = str.__str__(key)
         if exact in result:
-            raise ConfigError(
-                "document: top-level keys collide after canonicalization."
-            )
+            raise ConfigError("document: top-level keys collide after canonicalization.")
         result[exact] = value
     return result
 
 
 def _parse_defaults(raw: object) -> tuple[PresetRequest, ...]:
-    if static_isinstance(raw, (str, bytes)) or not static_isinstance(
-        raw, Sequence
-    ):
+    if static_isinstance(raw, (str, bytes)) or not static_isinstance(raw, Sequence):
         raise ConfigError(_DEFAULTS_FORM_ERROR)
     entries = tuple(
         _sequence_items(
             raw,
             failure=_DEFAULTS_FORM_ERROR,
             limit_message=(
-                "defaults: sequence entry count exceeds limit "
-                f"{_PROCESS_SEQUENCE_ENTRY_LIMIT}."
+                f"defaults: sequence entry count exceeds limit {_PROCESS_SEQUENCE_ENTRY_LIMIT}."
             ),
         )
     )
@@ -311,9 +292,7 @@ def _parse_defaults(raw: object) -> tuple[PresetRequest, ...]:
         except ConfigError:
             raise ConfigError(_DEFAULTS_FORM_ERROR) from None
         if request.name in seen:
-            raise ConfigError(
-                f"defaults[{index}]: duplicate package preset {request.name!r}."
-            )
+            raise ConfigError(f"defaults[{index}]: duplicate package preset {request.name!r}.")
         seen.add(request.name)
         parsed.append(request)
     return tuple(parsed)
@@ -322,39 +301,26 @@ def _parse_defaults(raw: object) -> tuple[PresetRequest, ...]:
 def _module_name(raw: object, *, index: int) -> str:
     if not static_isinstance(raw, str):
         raise ConfigError(
-            f"plugins[{index}]: module name must be a string; got "
-            f"{static_type_name(raw)}."
+            f"plugins[{index}]: module name must be a string; got {static_type_name(raw)}."
         )
     name = str.__str__(raw)
     pieces = str.split(name, ".")
-    if (
-        not name
-        or any(
-            not piece
-            or not str.isidentifier(piece)
-            or keyword.iskeyword(piece)
-            for piece in pieces
-        )
+    if not name or any(
+        not piece or not str.isidentifier(piece) or keyword.iskeyword(piece) for piece in pieces
     ):
-        raise ConfigError(
-            f"plugins[{index}]: {name!r} is not a dot-separated Python "
-            "module name."
-        )
+        raise ConfigError(f"plugins[{index}]: {name!r} is not a dot-separated Python module name.")
     return name
 
 
 def _parse_plugins(raw: object) -> tuple[str, ...]:
-    if static_isinstance(raw, (str, bytes)) or not static_isinstance(
-        raw, Sequence
-    ):
+    if static_isinstance(raw, (str, bytes)) or not static_isinstance(raw, Sequence):
         raise ConfigError("plugins: must be a list of Python module names.")
     entries = tuple(
         _sequence_items(
             raw,
             failure="plugins: sequence traversal failed.",
             limit_message=(
-                "plugins: sequence entry count exceeds limit "
-                f"{_PROCESS_SEQUENCE_ENTRY_LIMIT}."
+                f"plugins: sequence entry count exceeds limit {_PROCESS_SEQUENCE_ENTRY_LIMIT}."
             ),
         )
     )
@@ -369,9 +335,7 @@ def _parse_plugins(raw: object) -> tuple[str, ...]:
     return tuple(result)
 
 
-def _call_output_parser(
-    parser: OutputGrammarParser, raw_outputs: object
-) -> object:
+def _call_output_parser(parser: OutputGrammarParser, raw_outputs: object) -> object:
     if not callable(parser):
         raise ConfigError("parse_outputs must be callable.")
     try:
@@ -379,9 +343,7 @@ def _call_output_parser(
     except ConfigError:
         raise
     except Exception as error:
-        raise ConfigError(
-            "outputs: grammar parser raised " f"{static_type_name(error)}."
-        ) from error
+        raise ConfigError(f"outputs: grammar parser raised {static_type_name(error)}.") from error
 
 
 def parse_raw_process_mapping(
@@ -419,28 +381,21 @@ def parse_raw_process_mapping(
 def parse_runtime(section: object) -> RuntimeSpec:
     """Normalize ``runtime:`` without importing or consulting JAX."""
     if not static_isinstance(section, Mapping):
-        raise ConfigError(
-            "runtime: is a mapping; got " f"{_runtime_description(section)}."
-        )
+        raise ConfigError(f"runtime: is a mapping; got {_runtime_description(section)}.")
     canonical: dict[str, object] = {}
     for key, value in _mapping_pairs(
         section,
         failure="runtime: mapping traversal failed.",
         limit=_RUNTIME_MAPPING_ENTRY_LIMIT,
         limit_message=(
-            "runtime: mapping entry count exceeds limit "
-            f"{_RUNTIME_MAPPING_ENTRY_LIMIT}."
+            f"runtime: mapping entry count exceeds limit {_RUNTIME_MAPPING_ENTRY_LIMIT}."
         ),
     ):
         if not static_isinstance(key, str):
-            raise ConfigError(
-                "runtime: keys are strings; got " f"{static_type_name(key)}."
-            )
+            raise ConfigError(f"runtime: keys are strings; got {static_type_name(key)}.")
         exact_key = str.__str__(key)
         if exact_key in canonical:
-            raise ConfigError(
-                "runtime: keys collide after canonicalization."
-            )
+            raise ConfigError("runtime: keys collide after canonicalization.")
         canonical[exact_key] = value
     unknown = sorted(set(canonical) - _RUNTIME_KEYS)
     if unknown:
@@ -459,28 +414,19 @@ def parse_runtime(section: object) -> RuntimeSpec:
     if not static_isinstance(x64, bool):
         x64_type, x64_rendered = _runtime_description_parts(x64)
         if x64_rendered is not None:
-            raise ConfigError(
-                f"runtime.jax_enable_x64 is a bool; got {x64_type} "
-                f"({x64_rendered})."
-            )
+            raise ConfigError(f"runtime.jax_enable_x64 is a bool; got {x64_type} ({x64_rendered}).")
         raise ConfigError(f"runtime.jax_enable_x64 is a bool; got {x64_type}.")
     platform = canonical.get("platform", "auto")
     if not static_isinstance(platform, str):
         raise ConfigError(
-            f"runtime.platform is one of {list(_PLATFORMS)}; got "
-            f"{_runtime_render(platform)}."
+            f"runtime.platform is one of {list(_PLATFORMS)}; got {_runtime_render(platform)}."
         )
     exact_platform = str.__str__(platform)
     if exact_platform not in _PLATFORMS:
-        raise ConfigError(
-            f"runtime.platform is one of {list(_PLATFORMS)}; got "
-            f"{exact_platform!r}."
-        )
+        raise ConfigError(f"runtime.platform is one of {list(_PLATFORMS)}; got {exact_platform!r}.")
 
     seed = canonical.get("seed")
-    if seed is not None and (
-        static_isinstance(seed, bool) or not static_isinstance(seed, int)
-    ):
+    if seed is not None and (static_isinstance(seed, bool) or not static_isinstance(seed, int)):
         seed_type, seed_rendered = _runtime_description_parts(seed)
         if seed_rendered is not None:
             raise ConfigError(
@@ -502,35 +448,26 @@ def parse_runtime(section: object) -> RuntimeSpec:
         seeds_type, seeds_rendered = _runtime_description_parts(raw_seeds)
         if seeds_rendered is not None:
             raise ConfigError(
-                f"runtime.seeds is a mapping of name -> int; got {seeds_type} "
-                f"({seeds_rendered})."
+                f"runtime.seeds is a mapping of name -> int; got {seeds_type} ({seeds_rendered})."
             )
-        raise ConfigError(
-            f"runtime.seeds is a mapping of name -> int; got {seeds_type}."
-        )
+        raise ConfigError(f"runtime.seeds is a mapping of name -> int; got {seeds_type}.")
     seeds: dict[str, int] = {}
     for name, value in _mapping_pairs(
         raw_seeds,
         failure="runtime.seeds: mapping traversal failed.",
         limit=_RUNTIME_MAPPING_ENTRY_LIMIT,
         limit_message=(
-            "runtime.seeds: mapping entry count exceeds limit "
-            f"{_RUNTIME_MAPPING_ENTRY_LIMIT}."
+            f"runtime.seeds: mapping entry count exceeds limit {_RUNTIME_MAPPING_ENTRY_LIMIT}."
         ),
     ):
         if not static_isinstance(name, str):
-            raise ConfigError(
-                "runtime.seeds keys are strings; got " f"{_runtime_render(name)}."
-            )
+            raise ConfigError(f"runtime.seeds keys are strings; got {_runtime_render(name)}.")
         exact_name = str.__str__(name)
         if exact_name in seeds:
-            raise ConfigError(
-                "runtime.seeds keys collide after canonicalization."
-            )
+            raise ConfigError("runtime.seeds keys collide after canonicalization.")
         if static_isinstance(value, bool) or not static_isinstance(value, int):
             raise ConfigError(
-                f"runtime.seeds.{exact_name} is an int; got "
-                f"{_runtime_description(value)}."
+                f"runtime.seeds.{exact_name} is an int; got {_runtime_description(value)}."
             )
         seeds[exact_name] = int.__int__(value)
     return RuntimeSpec(
@@ -549,10 +486,7 @@ def _runtime_render(value: object) -> str:
     def render(item: object, depth: int) -> str | None:
         nonlocal nodes
         nodes += 1
-        if (
-            nodes > _RUNTIME_RENDER_NODE_LIMIT
-            or depth > _RUNTIME_RENDER_DEPTH_LIMIT
-        ):
+        if nodes > _RUNTIME_RENDER_NODE_LIMIT or depth > _RUNTIME_RENDER_DEPTH_LIMIT:
             return None
         item_type = type(item)
         if item is None:
@@ -604,11 +538,7 @@ def _runtime_render(value: object) -> str:
                     return None
                 result = "{" + ", ".join(children) + "}"
             else:
-                iterator = (
-                    list.__iter__(item)
-                    if item_type is list
-                    else tuple.__iter__(item)
-                )
+                iterator = list.__iter__(item) if item_type is list else tuple.__iter__(item)
                 for child in iterator:
                     rendered_child = render(child, depth + 1)
                     if rendered_child is None:
@@ -654,16 +584,14 @@ def _variant_pairs(document: dict[str, object]):
         return ()
     if not static_isinstance(variants, Mapping):
         raise ConfigError(
-            "variants: is a mapping of name -> patch; got "
-            f"{static_type_name(variants)}."
+            f"variants: is a mapping of name -> patch; got {static_type_name(variants)}."
         )
     return _mapping_pairs(
         variants,
         failure="variants: mapping traversal failed.",
         limit=_PROCESS_MAPPING_ENTRY_LIMIT,
         limit_message=(
-            "variants: mapping entry count exceeds limit "
-            f"{_PROCESS_MAPPING_ENTRY_LIMIT}."
+            f"variants: mapping entry count exceeds limit {_PROCESS_MAPPING_ENTRY_LIMIT}."
         ),
     )
 
@@ -676,8 +604,7 @@ def validate_variant_process_sections(
     for raw_name, patch in _variant_pairs(top):
         if not static_isinstance(raw_name, str):
             raise ConfigError(
-                "variants: names must be non-empty strings; got "
-                f"{static_type_name(raw_name)}."
+                f"variants: names must be non-empty strings; got {static_type_name(raw_name)}."
             )
         name = str.__str__(raw_name)
         if not name:
@@ -793,17 +720,12 @@ def parse_effective_process_mapping(
     if "runtime" not in top:
         raise ConfigError("runtime: is required after package presets are layered.")
     base_runtime = parse_runtime(top["runtime"])
-    effective_plugins = (
-        _parse_plugins(top["plugins"]) if "plugins" in top else ()
-    )
+    effective_plugins = _parse_plugins(top["plugins"]) if "plugins" in top else ()
     if effective_plugins != raw_plugins:
         raise ConfigError(
-            "plugins: effective process-entry list differs from the raw "
-            "process entry."
+            "plugins: effective process-entry list differs from the raw process entry."
         )
-    if static_isinstance(layers, (str, bytes)) or not static_isinstance(
-        layers, Sequence
-    ):
+    if static_isinstance(layers, (str, bytes)) or not static_isinstance(layers, Sequence):
         raise ConfigError("effective layer sequence must be a sequence.")
     frozen_layers = tuple(
         _sequence_items(
@@ -818,9 +740,7 @@ def parse_effective_process_mapping(
     from _rheplicant_bootstrap.variants import LayerRef
 
     if any(type(layer) is not LayerRef for layer in frozen_layers):
-        raise ConfigError(
-            "effective layer sequence must contain LayerRef values."
-        )
+        raise ConfigError("effective layer sequence must contain LayerRef values.")
 
     layer_snapshots: list[tuple[str, str | None, Mapping]] = []
     for layer in frozen_layers:
@@ -879,7 +799,7 @@ def parse_effective_process_mapping(
         except ConfigError as error:
             message = str(error)
             if message.startswith("runtime"):
-                message = f"variants.{name}.runtime{message[len('runtime'):]}"
+                message = f"variants.{name}.runtime{message[len('runtime') :]}"
             else:
                 message = f"variants.{name}.runtime: {message}"
             raise ConfigError(message) from None
@@ -894,9 +814,7 @@ def parse_effective_process_mapping(
                 )
     if mismatches:
         raise ConfigError(
-            "runtime: process-global settings disagree: "
-            + "; ".join(mismatches)
-            + "."
+            "runtime: process-global settings disagree: " + "; ".join(mismatches) + "."
         )
 
     outputs = _call_output_parser(parse_outputs, top.get("outputs", {}))

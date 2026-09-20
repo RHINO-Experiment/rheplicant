@@ -52,8 +52,11 @@ def space():
     # linear=True is what lets the SAME space drive both the exact conjugate
     # solvers and NUTS -- which is the comparison this file exists for.
     return ParameterSpace.direct(
-        "gain", init=1.0, into=lambda p: p["gain"].gain,
-        prior=dist.Normal(PRIOR_MEAN, PRIOR_STD), linear=True,
+        "gain",
+        init=1.0,
+        into=lambda p: p["gain"].gain,
+        prior=dist.Normal(PRIOR_MEAN, PRIOR_STD),
+        linear=True,
     )
 
 
@@ -73,7 +76,9 @@ class TestTheNoiseModelReachesThePotential:
     ):
         bare = to_numpyro_model(twin, template_state, space, noise_std=SIGMA)
         model = to_numpyro_model(
-            twin, template_state, space,
+            twin,
+            template_state,
+            space,
             noise_std=HomoscedasticNoise(jnp.asarray(SIGMA)),
         )
         values = {"gain": jnp.array(1.05)}
@@ -81,9 +86,7 @@ class TestTheNoiseModelReachesThePotential:
         b, _ = log_density(model, (), {"observed": observed}, values)
         assert jnp.allclose(a, b, rtol=1e-6)
 
-    def test_the_logdet_is_in_the_potential(
-        self, twin, space, template_state, observed
-    ):
+    def test_the_logdet_is_in_the_potential(self, twin, space, template_state, observed):
         """``Normal(loc, scale).log_prob`` carries ``-log scale``, so a scale
         that depends on the sampled parameters brings its log-determinant into
         the potential automatically. This is the FULL Gaussian density, not the
@@ -112,9 +115,9 @@ class TestTheNoiseModelReachesThePotential:
         density once sigma tracks the prediction."""
         noise = RadiometerNoise(CHANNEL_WIDTH, INTEGRATION_TIME)
         model = to_numpyro_model(twin, template_state, space, noise_std=noise)
-        grad = jax.grad(
-            lambda g: log_density(model, (), {"observed": observed}, {"gain": g})[0]
-        )(jnp.array(1.05))
+        grad = jax.grad(lambda g: log_density(model, (), {"observed": observed}, {"gain": g})[0])(
+            jnp.array(1.05)
+        )
         assert jnp.isfinite(grad) and grad != 0.0
 
     def test_an_unobserved_sample_does_not_send_the_potential_to_minus_infinity(
@@ -123,7 +126,9 @@ class TestTheNoiseModelReachesThePotential:
         flags = jnp.zeros(observed.shape, bool).at[0, 0].set(True)
         ruined = observed.at[0, 0].set(1e9)
         model = to_numpyro_model(
-            twin, template_state, space,
+            twin,
+            template_state,
+            space,
             noise_std=FlaggedNoise(HomoscedasticNoise(jnp.asarray(SIGMA)), flags),
         )
         total, _ = log_density(model, (), {"observed": ruined}, {"gain": jnp.array(1.05)})
@@ -133,11 +138,11 @@ class TestTheNoiseModelReachesThePotential:
         self, twin, space, template_state, observed
     ):
         flags = jnp.zeros(observed.shape, bool).at[:, :2].set(True)
-        via_kwarg = to_numpyro_model(
-            twin, template_state, space, noise_std=SIGMA, flags=flags
-        )
+        via_kwarg = to_numpyro_model(twin, template_state, space, noise_std=SIGMA, flags=flags)
         via_wrapper = to_numpyro_model(
-            twin, template_state, space,
+            twin,
+            template_state,
+            space,
             noise_std=FlaggedNoise(HomoscedasticNoise(jnp.asarray(SIGMA)), flags),
         )
         values = {"gain": jnp.array(1.05)}
@@ -166,14 +171,21 @@ class TestAgainstTheExactPosterior:
     def exact(self, block, observed):
         """Mean and width from the constrained realization, in closed form."""
         mean, _ = wiener_solve(
-            block, observed, noise_std=SIGMA,
-            prior_std=PRIOR_STD, prior_mean=PRIOR_MEAN,
+            block,
+            observed,
+            noise_std=SIGMA,
+            prior_std=PRIOR_STD,
+            prior_mean=PRIOR_MEAN,
         )
         keys = jax.random.split(jax.random.key(4), 4000)
         draws = jax.vmap(
             lambda k: gcr_sample(
-                block, observed, noise_std=SIGMA, prior_std=PRIOR_STD,
-                prior_mean=PRIOR_MEAN, key=k,
+                block,
+                observed,
+                noise_std=SIGMA,
+                prior_std=PRIOR_STD,
+                prior_mean=PRIOR_MEAN,
+                key=k,
             )[0]
         )(keys)
         return float(mean), float(jnp.std(draws))
@@ -181,12 +193,15 @@ class TestAgainstTheExactPosterior:
     @pytest.fixture
     def nuts(self, twin, space, template_state, observed):
         model = to_numpyro_model(
-            twin, template_state, space,
+            twin,
+            template_state,
+            space,
             noise_std=HomoscedasticNoise(jnp.asarray(SIGMA)),
         )
         mcmc = numpyro.infer.MCMC(
             numpyro.infer.NUTS(model),
-            num_warmup=self.N_WARMUP, num_samples=self.N_SAMPLES,
+            num_warmup=self.N_WARMUP,
+            num_samples=self.N_SAMPLES,
             progress_bar=False,
         )
         mcmc.run(jax.random.key(0), observed=observed)
@@ -231,9 +246,7 @@ class TestInitToDeclared:
         strategy = init_to_declared(space)
         model = to_numpyro_model(twin, template_state, space, noise_std=SIGMA)
         kernel = numpyro.infer.NUTS(model, init_strategy=strategy)
-        mcmc = numpyro.infer.MCMC(
-            kernel, num_warmup=1, num_samples=1, progress_bar=False
-        )
+        mcmc = numpyro.infer.MCMC(kernel, num_warmup=1, num_samples=1, progress_bar=False)
         # It runs, which is the integration; the values it carries are the
         # space's own, which is the contract.
         mcmc.run(jax.random.key(0), observed=jnp.zeros((8, 4)))
@@ -251,11 +264,15 @@ class TestInitToDeclared:
         from rheplicant.inference import init_to_declared
 
         first = ParameterSpace.direct(
-            "gain", init=1.0, into=lambda p: p["gain"].gain,
+            "gain",
+            init=1.0,
+            into=lambda p: p["gain"].gain,
             prior=dist.Normal(1.0, 0.3),
         )
         second = ParameterSpace.direct(
-            "gain", init=2.5, into=lambda p: p["gain"].gain,
+            "gain",
+            init=2.5,
+            into=lambda p: p["gain"].gain,
             prior=dist.Normal(1.0, 0.3),
         )
         assert (

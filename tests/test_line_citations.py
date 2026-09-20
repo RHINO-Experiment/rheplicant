@@ -57,7 +57,7 @@ def _source_of(citation: str) -> str:
         path
         for top in LIVE
         for path in (ROOT / top).rglob("*.py")
-        if path.parts[-len(target.split("/")):] == tuple(target.split("/"))
+        if path.parts[-len(target.split("/")) :] == tuple(target.split("/"))
     ]
     assert len(matches) == 1, (citation, matches)
     text = matches[0].read_text(encoding="utf-8")
@@ -82,9 +82,7 @@ def _source_of(citation: str) -> str:
     return "\n".join(lines[start - 1 : found.end_lineno])
 
 
-@pytest.mark.parametrize(
-    ("citation", "expected"), EXPECTED, ids=[row[1][:40] for row in EXPECTED]
-)
+@pytest.mark.parametrize(("citation", "expected"), EXPECTED, ids=[row[1][:40] for row in EXPECTED])
 def test_the_named_definition_still_contains_what_it_is_cited_for(citation, expected):
     assert expected in _source_of(citation), (
         f"{citation} no longer contains {expected!r}. Either the claim moved "
@@ -105,7 +103,6 @@ def test_every_pinned_citation_is_actually_written_somewhere():
         for citation, _expected in EXPECTED
         for top in LIVE
         for path in (ROOT / top).rglob("*.py")
-        if path.name != pathlib.Path(__file__).name
-        and citation in path.read_text(encoding="utf-8")
+        if path.name != pathlib.Path(__file__).name and citation in path.read_text(encoding="utf-8")
     }
     assert cited == {citation for citation, _expected in EXPECTED}

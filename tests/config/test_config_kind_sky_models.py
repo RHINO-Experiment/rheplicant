@@ -21,8 +21,15 @@ def context():
 class TestTheFourKinds:
     def test_uniform(self, context):
         built = build_resources(
-            {"sky_models": {"flat": {"kind": "uniform", "amplitude": {"value": 200.0, "unit": "K"},
-                                     "n_pix": 192}}},
+            {
+                "sky_models": {
+                    "flat": {
+                        "kind": "uniform",
+                        "amplitude": {"value": 200.0, "unit": "K"},
+                        "n_pix": 192,
+                    }
+                }
+            },
             context,
         )
         sky = built.resources["resources.sky_models.flat"]
@@ -31,11 +38,17 @@ class TestTheFourKinds:
 
     def test_power_law(self, context):
         built = build_resources(
-            {"sky_models": {"fg": {"kind": "power_law",
-                                   "amplitude": {"value": 300.0, "unit": "K"},
-                                   "spectral_index": 2.5,
-                                   "ref_freq": {"value": 70.0, "unit": "MHz"},
-                                   "n_pix": 192}}},
+            {
+                "sky_models": {
+                    "fg": {
+                        "kind": "power_law",
+                        "amplitude": {"value": 300.0, "unit": "K"},
+                        "spectral_index": 2.5,
+                        "ref_freq": {"value": 70.0, "unit": "MHz"},
+                        "n_pix": 192,
+                    }
+                }
+            },
             context,
         )
         sky = built.resources["resources.sky_models.fg"]
@@ -48,11 +61,16 @@ class TestTheFourKinds:
         are DRAWN, not read, and will never be on disk -- which is why MapSky
         ships with a value-node constructor as well as a file one."""
         built = build_resources(
-            {"sky_models": {"drawn": {"kind": "maps",
-                                      "maps": {"full": {"shape": ["n_freq", 192], "value": 100.0},
-                                               "unit": "K"},
-                                      "freq": {"from_grid": "freq"},
-                                      "nside": 4}}},
+            {
+                "sky_models": {
+                    "drawn": {
+                        "kind": "maps",
+                        "maps": {"full": {"shape": ["n_freq", 192], "value": 100.0}, "unit": "K"},
+                        "freq": {"from_grid": "freq"},
+                        "nside": 4,
+                    }
+                }
+            },
             context,
         )
         sky = built.resources["resources.sky_models.drawn"]
@@ -61,10 +79,15 @@ class TestTheFourKinds:
 
     def test_python(self, context):
         built = build_resources(
-            {"sky_models": {"custom": {"kind": "python",
-                                       "python": "rheplicant.radio:UniformSkyModel",
-                                       "args": {"amplitude": {"value": 10.0, "unit": "K"},
-                                                "n_pix": 12}}}},
+            {
+                "sky_models": {
+                    "custom": {
+                        "kind": "python",
+                        "python": "rheplicant.radio:UniformSkyModel",
+                        "args": {"amplitude": {"value": 10.0, "unit": "K"}, "n_pix": 12},
+                    }
+                }
+            },
             context,
         )
         sky = built.resources["resources.sky_models.custom"]
@@ -93,10 +116,16 @@ class TestTheFourKinds:
         on a uniform sky was silently discarded rather than refused."""
         with pytest.raises(ConfigError) as excinfo:
             build_resources(
-                {"sky_models": {"bad": {"kind": "uniform",
-                                        "amplitude": {"value": 200.0, "unit": "K"},
-                                        "n_pix": 192,
-                                        "spectral_index": 2.5}}},
+                {
+                    "sky_models": {
+                        "bad": {
+                            "kind": "uniform",
+                            "amplitude": {"value": 200.0, "unit": "K"},
+                            "n_pix": 192,
+                            "spectral_index": 2.5,
+                        }
+                    }
+                },
                 context,
             )
         assert "spectral_index" in str(excinfo.value)
@@ -104,11 +133,16 @@ class TestTheFourKinds:
     def test_python_stray_key_is_refused(self, context):
         with pytest.raises(ConfigError) as excinfo:
             build_resources(
-                {"sky_models": {"bad": {"kind": "python",
-                                        "python": "rheplicant.radio:UniformSkyModel",
-                                        "args": {"amplitude": {"value": 10.0, "unit": "K"},
-                                                 "n_pix": 12},
-                                        "amplitude": {"value": 5.0, "unit": "K"}}}},
+                {
+                    "sky_models": {
+                        "bad": {
+                            "kind": "python",
+                            "python": "rheplicant.radio:UniformSkyModel",
+                            "args": {"amplitude": {"value": 10.0, "unit": "K"}, "n_pix": 12},
+                            "amplitude": {"value": 5.0, "unit": "K"},
+                        }
+                    }
+                },
                 context,
             )
         assert "amplitude" in str(excinfo.value)
@@ -120,17 +154,21 @@ class TestTheFourKinds:
         would silently decide which happened."""
         with pytest.raises(ConfigError) as excinfo:
             build_resources(
-                {"sky_models": {"bad": {"kind": "python",
-                                        "python": "rheplicant.radio:UniformSkyModel",
-                                        "args": {"amplitude": {"value": 10.0, "unit": "K"}},
-                                        "literal": {"amplitude": 5.0, "n_pix": 12}}}},
+                {
+                    "sky_models": {
+                        "bad": {
+                            "kind": "python",
+                            "python": "rheplicant.radio:UniformSkyModel",
+                            "args": {"amplitude": {"value": 10.0, "unit": "K"}},
+                            "literal": {"amplitude": 5.0, "n_pix": 12},
+                        }
+                    }
+                },
                 context,
             )
         assert "amplitude" in str(excinfo.value)
 
-    def test_python_argument_targets_are_validated_before_import(
-        self, context, monkeypatch
-    ):
+    def test_python_argument_targets_are_validated_before_import(self, context, monkeypatch):
         imported = []
         monkeypatch.setattr(
             sky_models_module,
@@ -159,9 +197,15 @@ class TestStaticFieldGuards:
     def test_n_pix_as_a_bool_is_refused(self, context):
         with pytest.raises(ConfigError) as excinfo:
             build_resources(
-                {"sky_models": {"bad": {"kind": "uniform",
-                                        "amplitude": {"value": 200.0, "unit": "K"},
-                                        "n_pix": True}}},
+                {
+                    "sky_models": {
+                        "bad": {
+                            "kind": "uniform",
+                            "amplitude": {"value": 200.0, "unit": "K"},
+                            "n_pix": True,
+                        }
+                    }
+                },
                 context,
             )
         message = str(excinfo.value)
@@ -173,11 +217,17 @@ class TestStaticFieldGuards:
         exactly the array-producing form _static_float exists to catch."""
         with pytest.raises(ConfigError) as excinfo:
             build_resources(
-                {"sky_models": {"bad": {"kind": "power_law",
-                                        "amplitude": {"value": 300.0, "unit": "K"},
-                                        "spectral_index": 2.5,
-                                        "ref_freq": {"list": [70.0], "unit": "MHz"},
-                                        "n_pix": 192}}},
+                {
+                    "sky_models": {
+                        "bad": {
+                            "kind": "power_law",
+                            "amplitude": {"value": 300.0, "unit": "K"},
+                            "spectral_index": 2.5,
+                            "ref_freq": {"list": [70.0], "unit": "MHz"},
+                            "n_pix": 192,
+                        }
+                    }
+                },
                 context,
             )
         message = str(excinfo.value)
@@ -193,11 +243,16 @@ class TestTheGridCheck:
         traced and only the shape is static."""
         with pytest.raises(ConfigError) as excinfo:
             build_resources(
-                {"sky_models": {"bad": {"kind": "maps",
-                                        "maps": {"full": {"shape": ["n_freq", 100], "value": 1.0},
-                                                 "unit": "K"},
-                                        "freq": {"from_grid": "freq"},
-                                        "nside": 4}}},
+                {
+                    "sky_models": {
+                        "bad": {
+                            "kind": "maps",
+                            "maps": {"full": {"shape": ["n_freq", 100], "value": 1.0}, "unit": "K"},
+                            "freq": {"from_grid": "freq"},
+                            "nside": 4,
+                        }
+                    }
+                },
                 context,
             )
         message = str(excinfo.value)
@@ -207,11 +262,16 @@ class TestTheGridCheck:
     def test_the_first_axis_must_be_the_runs_frequency_axis(self, context):
         with pytest.raises(ConfigError) as excinfo:
             build_resources(
-                {"sky_models": {"bad": {"kind": "maps",
-                                        "maps": {"full": {"shape": [3, 192], "value": 1.0},
-                                                 "unit": "K"},
-                                        "freq": {"from_grid": "freq"},
-                                        "nside": 4}}},
+                {
+                    "sky_models": {
+                        "bad": {
+                            "kind": "maps",
+                            "maps": {"full": {"shape": [3, 192], "value": 1.0}, "unit": "K"},
+                            "freq": {"from_grid": "freq"},
+                            "nside": 4,
+                        }
+                    }
+                },
                 context,
             )
         message = str(excinfo.value)
@@ -225,11 +285,16 @@ class TestTheGridCheck:
         ever see, since this is refused before MapSky is constructed."""
         with pytest.raises(ConfigError) as excinfo:
             build_resources(
-                {"sky_models": {"bad": {"kind": "maps",
-                                        "maps": {"full": {"shape": ["n_freq", 192], "value": 1.0},
-                                                 "unit": "K"},
-                                        "freq": {"list": [60e6, 70e6, 80e6], "unit": "Hz"},
-                                        "nside": 4}}},
+                {
+                    "sky_models": {
+                        "bad": {
+                            "kind": "maps",
+                            "maps": {"full": {"shape": ["n_freq", 192], "value": 1.0}, "unit": "K"},
+                            "freq": {"list": [60e6, 70e6, 80e6], "unit": "Hz"},
+                            "nside": 4,
+                        }
+                    }
+                },
                 context,
             )
         message = str(excinfo.value)
@@ -239,11 +304,16 @@ class TestTheGridCheck:
     def test_maps_must_be_two_dimensional(self, context):
         with pytest.raises(ConfigError) as excinfo:
             build_resources(
-                {"sky_models": {"bad": {"kind": "maps",
-                                        "maps": {"full": {"shape": [192], "value": 1.0},
-                                                 "unit": "K"},
-                                        "freq": {"from_grid": "freq"},
-                                        "nside": 4}}},
+                {
+                    "sky_models": {
+                        "bad": {
+                            "kind": "maps",
+                            "maps": {"full": {"shape": [192], "value": 1.0}, "unit": "K"},
+                            "freq": {"from_grid": "freq"},
+                            "nside": 4,
+                        }
+                    }
+                },
                 context,
             )
         message = str(excinfo.value)
@@ -256,12 +326,17 @@ class TestTheGridCheck:
         in the wrong place."""
         with pytest.raises(ConfigError) as excinfo:
             build_resources(
-                {"sky_models": {"bad": {"kind": "maps",
-                                        "maps": {"full": {"shape": ["n_freq", 192], "value": 1.0},
-                                                 "unit": "K"},
-                                        "freq": {"from_grid": "freq"},
-                                        "nside": 4,
-                                        "order": "nested"}}},
+                {
+                    "sky_models": {
+                        "bad": {
+                            "kind": "maps",
+                            "maps": {"full": {"shape": ["n_freq", 192], "value": 1.0}, "unit": "K"},
+                            "freq": {"from_grid": "freq"},
+                            "nside": 4,
+                            "order": "nested",
+                        }
+                    }
+                },
                 context,
             )
         message = str(excinfo.value)
@@ -271,12 +346,17 @@ class TestTheGridCheck:
     def test_maps_stray_key_is_refused(self, context):
         with pytest.raises(ConfigError) as excinfo:
             build_resources(
-                {"sky_models": {"bad": {"kind": "maps",
-                                        "maps": {"full": {"shape": ["n_freq", 192], "value": 1.0},
-                                                 "unit": "K"},
-                                        "freq": {"from_grid": "freq"},
-                                        "nside": 4,
-                                        "amplitude": {"value": 1.0, "unit": "K"}}}},
+                {
+                    "sky_models": {
+                        "bad": {
+                            "kind": "maps",
+                            "maps": {"full": {"shape": ["n_freq", 192], "value": 1.0}, "unit": "K"},
+                            "freq": {"from_grid": "freq"},
+                            "nside": 4,
+                            "amplitude": {"value": 1.0, "unit": "K"},
+                        }
+                    }
+                },
                 context,
             )
         assert "amplitude" in str(excinfo.value)
@@ -288,11 +368,16 @@ class TestTheGridCheck:
         other = jnp.linspace(100e6, 125e6, 4)
         with pytest.raises(ConfigError) as excinfo:
             build_resources(
-                {"sky_models": {"bad": {"kind": "maps",
-                                        "maps": {"full": {"shape": ["n_freq", 192], "value": 1.0},
-                                                 "unit": "K"},
-                                        "freq": {"list": [float(v) for v in other], "unit": "Hz"},
-                                        "nside": 4}}},
+                {
+                    "sky_models": {
+                        "bad": {
+                            "kind": "maps",
+                            "maps": {"full": {"shape": ["n_freq", 192], "value": 1.0}, "unit": "K"},
+                            "freq": {"list": [float(v) for v in other], "unit": "Hz"},
+                            "nside": 4,
+                        }
+                    }
+                },
                 context,
             )
         message = str(excinfo.value)
@@ -318,13 +403,15 @@ class TestGdsm:
 
     @pytest.fixture
     def two_channels(self):
-        return ResolutionContext(freq=jnp.asarray([70e6, 80e6]), time=jnp.arange(8.0),
-                                 dtype="float32")
+        return ResolutionContext(
+            freq=jnp.asarray([70e6, 80e6]), time=jnp.arange(8.0), dtype="float32"
+        )
 
     def test_it_builds_a_mapsky_on_the_runs_own_grid(self, two_channels):
         pytest.importorskip("pygdsm")
-        built = build_resources({"sky_models": {"real": {"kind": "gdsm", "nside": 8}}},
-                                two_channels)
+        built = build_resources(
+            {"sky_models": {"real": {"kind": "gdsm", "nside": 8}}}, two_channels
+        )
         sky = built.resources["resources.sky_models.real"]
         assert isinstance(sky, MapSky)
         assert sky.maps.shape == (2, 768)
@@ -336,8 +423,9 @@ class TestGdsm:
         the model call was replaced by a constant; identical channels mean the
         frequency loop collapsed to one call."""
         pytest.importorskip("pygdsm")
-        built = build_resources({"sky_models": {"real": {"kind": "gdsm", "nside": 8}}},
-                                two_channels)
+        built = build_resources(
+            {"sky_models": {"real": {"kind": "gdsm", "nside": 8}}}, two_channels
+        )
         maps = built.resources["resources.sky_models.real"].maps
         assert float(maps[0].std()) > 0.0
         assert not bool(jnp.allclose(maps[0], maps[1]))
@@ -349,10 +437,8 @@ class TestGdsm:
         MJysr differ by orders of magnitude) and an Hz-for-MHz slip in the
         conversion this builder owns."""
         pytest.importorskip("pygdsm")
-        context = ResolutionContext(freq=jnp.asarray([70e6]), time=jnp.arange(8.0),
-                                    dtype="float32")
-        built = build_resources({"sky_models": {"real": {"kind": "gdsm", "nside": 8}}},
-                                context)
+        context = ResolutionContext(freq=jnp.asarray([70e6]), time=jnp.arange(8.0), dtype="float32")
+        built = build_resources({"sky_models": {"real": {"kind": "gdsm", "nside": 8}}}, context)
         mean = float(built.resources["resources.sky_models.real"].maps.mean())
         assert 1000.0 < mean < 10000.0
 
@@ -365,8 +451,15 @@ class TestGdsm:
     def test_stray_keys_are_refused(self, context):
         with pytest.raises(ConfigError) as excinfo:
             build_resources(
-                {"sky_models": {"real": {"kind": "gdsm", "nside": 8,
-                                         "amplitude": {"value": 1.0, "unit": "K"}}}},
+                {
+                    "sky_models": {
+                        "real": {
+                            "kind": "gdsm",
+                            "nside": 8,
+                            "amplitude": {"value": 1.0, "unit": "K"},
+                        }
+                    }
+                },
                 context,
             )
         assert "amplitude" in str(excinfo.value)

@@ -160,8 +160,12 @@ def _noise(floor):
 
 def _estimate(block, floor, **kwargs):
     return SamplingPlan(_space(), block).estimate(
-        _pipeline(), _state(), jnp.asarray(_observed())[None, :], noise=_noise(floor),
-        check_identifiability=False, **kwargs,
+        _pipeline(),
+        _state(),
+        jnp.asarray(_observed())[None, :],
+        noise=_noise(floor),
+        check_identifiability=False,
+        **kwargs,
     )
 
 

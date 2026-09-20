@@ -31,8 +31,19 @@ from rheplicant.core.environment import Environment
 __all__ = ["ObservationBuild", "SiteFacts", "build_observation"]
 
 _OBSERVATION_KEYS = frozenset(
-    {"meta", "freq", "time", "site", "pointing", "switching", "environment",
-     "extra", "aux", "data", "from_file"}
+    {
+        "meta",
+        "freq",
+        "time",
+        "site",
+        "pointing",
+        "switching",
+        "environment",
+        "extra",
+        "aux",
+        "data",
+        "from_file",
+    }
 )
 _FREQ_KEYS = frozenset({"grid"})
 _TIME_KEYS = frozenset({"grid", "epoch", "integration_time", "channel_width"})
@@ -69,20 +80,15 @@ class ObservationBuild(NamedTuple):
     ingest: Any
 
 
-def _dimensioned(where: str, node: Any, context: ResolutionContext, *,
-                 dimension: str, what: str):
+def _dimensioned(where: str, node: Any, context: ResolutionContext, *, dimension: str, what: str):
     """Resolve a value node and refuse it by MEANING: the declared unit's
     dimension must be ``dimension``."""
     destination = DestinationDescriptor(where, "config_path", where)
     resolved = resolve_value(node, context, destination=destination)
     unit = resolved.unit
     if unit is None or unit.dimension != dimension:
-        got = ("no unit" if unit is None
-               else f"unit {unit.canonical!r} (dimension {unit.dimension})")
-        raise ConfigError(
-            f"{where}: declares {got}; it is {what} and takes a {dimension} "
-            "unit."
-        )
+        got = "no unit" if unit is None else f"unit {unit.canonical!r} (dimension {unit.dimension})"
+        raise ConfigError(f"{where}: declares {got}; it is {what} and takes a {dimension} unit.")
     record_resolved_delivery(context, destination, resolved.unit)
     return resolved
 
@@ -101,8 +107,13 @@ def _freq_grid(spec: Any, context: ResolutionContext):
             "unit; it becomes Coordinates.freq, (n_freq,), Hz."
         )
     check_unknown_keys("observation.freq", dict(spec), _FREQ_KEYS, label="freq:")
-    resolved = _dimensioned("observation.freq.grid", spec["grid"], context,
-                            dimension="frequency", what="the frequency axis")
+    resolved = _dimensioned(
+        "observation.freq.grid",
+        spec["grid"],
+        context,
+        dimension="frequency",
+        what="the frequency axis",
+    )
     return _one_d("observation.freq.grid", resolved.value)
 
 
@@ -116,30 +127,48 @@ def _time_facts(spec: Any, context: ResolutionContext):
             "time.epoch in unix_s."
         )
     check_unknown_keys("observation.time", dict(spec), _TIME_KEYS, label="time:")
-    resolved = _dimensioned("observation.time.grid", spec["grid"], context,
-                            dimension="time", what="the time axis")
+    resolved = _dimensioned(
+        "observation.time.grid", spec["grid"], context, dimension="time", what="the time axis"
+    )
     time_s = _one_d("observation.time.grid", resolved.value)
     epoch = integration = width = None
     if "epoch" in spec:
-        epoch = float(_dimensioned(
-            "observation.time.epoch", spec["epoch"], context,
-            dimension="time_epoch",
-            what="an absolute moment (declare unit: unix_s)").value)
+        epoch = float(
+            _dimensioned(
+                "observation.time.epoch",
+                spec["epoch"],
+                context,
+                dimension="time_epoch",
+                what="an absolute moment (declare unit: unix_s)",
+            ).value
+        )
     else:
         epoch = context.use_default("observation.time.epoch", None)
     if "integration_time" in spec:
-        integration = float(_dimensioned(
-            "observation.time.integration_time", spec["integration_time"],
-            context, dimension="time", what="a duration").value)
+        integration = float(
+            _dimensioned(
+                "observation.time.integration_time",
+                spec["integration_time"],
+                context,
+                dimension="time",
+                what="a duration",
+            ).value
+        )
     else:
         integration = context.use_default(
             "observation.time.integration_time",
             None,
         )
     if "channel_width" in spec:
-        width = float(_dimensioned(
-            "observation.time.channel_width", spec["channel_width"], context,
-            dimension="frequency", what="a bandwidth").value)
+        width = float(
+            _dimensioned(
+                "observation.time.channel_width",
+                spec["channel_width"],
+                context,
+                dimension="frequency",
+                what="a bandwidth",
+            ).value
+        )
     else:
         width = context.use_default(
             "observation.time.channel_width",
@@ -175,9 +204,7 @@ def _meta(
     if spec is None:
         return {} if context is None else context.use_default("observation.meta", {})
     if not isinstance(spec, Mapping):
-        raise ConfigError(
-            f"observation.meta: is a mapping; got {type(spec).__name__}."
-        )
+        raise ConfigError(f"observation.meta: is a mapping; got {type(spec).__name__}.")
     out: dict[str, Any] = {}
     for key, value in spec.items():
         if not isinstance(key, str):
@@ -190,9 +217,7 @@ def _site(spec: Any, context: ResolutionContext) -> SiteFacts:
     if spec is None:
         spec = context.use_default("observation.site", {})
     if not isinstance(spec, Mapping):
-        raise ConfigError(
-            f"observation.site: is a mapping; got {type(spec).__name__}."
-        )
+        raise ConfigError(f"observation.site: is a mapping; got {type(spec).__name__}.")
     check_unknown_keys("observation.site", dict(spec), _SITE_KEYS, label="site:")
     values: dict[str, float | None] = {}
     for key, dimension, what in (
@@ -201,9 +226,11 @@ def _site(spec: Any, context: ResolutionContext) -> SiteFacts:
         ("alt_m", "length", "the site altitude"),
     ):
         if key in spec:
-            values[key] = float(_dimensioned(
-                f"observation.site.{key}", spec[key], context,
-                dimension=dimension, what=what).value)
+            values[key] = float(
+                _dimensioned(
+                    f"observation.site.{key}", spec[key], context, dimension=dimension, what=what
+                ).value
+            )
         else:
             values[key] = context.use_default(
                 f"observation.site.{key}",
@@ -216,18 +243,22 @@ def _environment(spec: Any, context: ResolutionContext) -> Environment | None:
     if spec is None:
         return context.use_default("observation.environment", None)
     if not isinstance(spec, Mapping):
-        raise ConfigError(
-            f"observation.environment: is a mapping; got {type(spec).__name__}."
-        )
-    check_unknown_keys("observation.environment", dict(spec), _ENVIRONMENT_KEYS,
-                       label="environment:")
+        raise ConfigError(f"observation.environment: is a mapping; got {type(spec).__name__}.")
+    check_unknown_keys(
+        "observation.environment", dict(spec), _ENVIRONMENT_KEYS, label="environment:"
+    )
     temperature = humidity = None
     if "temperature" in spec:
         temperature = jnp.asarray(
-            _dimensioned("observation.environment.temperature",
-                         spec["temperature"], context,
-                         dimension="temperature", what="a temperature").value,
-            dtype=context.dtype)
+            _dimensioned(
+                "observation.environment.temperature",
+                spec["temperature"],
+                context,
+                dimension="temperature",
+                what="a temperature",
+            ).value,
+            dtype=context.dtype,
+        )
     else:
         temperature = context.use_default(
             "observation.environment.temperature",
@@ -238,11 +269,15 @@ def _environment(spec: Any, context: ResolutionContext) -> Environment | None:
         # must declare one (schema §4.1.1): relative humidity is
         # 'dimensionless' in this alphabet.
         humidity = jnp.asarray(
-            _dimensioned("observation.environment.humidity", spec["humidity"],
-                         context, dimension="dimensionless",
-                         what="relative humidity (declare unit: "
-                              "dimensionless)").value,
-            dtype=context.dtype)
+            _dimensioned(
+                "observation.environment.humidity",
+                spec["humidity"],
+                context,
+                dimension="dimensionless",
+                what="relative humidity (declare unit: dimensionless)",
+            ).value,
+            dtype=context.dtype,
+        )
     else:
         humidity = context.use_default(
             "observation.environment.humidity",
@@ -270,9 +305,7 @@ def _extra(spec: Any, context: ResolutionContext) -> dict[str, Any]:
     if spec is None:
         return context.use_default("observation.extra", {})
     if not isinstance(spec, Mapping):
-        raise ConfigError(
-            f"observation.extra: is a mapping; got {type(spec).__name__}."
-        )
+        raise ConfigError(f"observation.extra: is a mapping; got {type(spec).__name__}.")
     out: dict[str, Any] = {}
     for key, node in spec.items():
         if key == "receiver_input":
@@ -291,14 +324,11 @@ def _extra(spec: Any, context: ResolutionContext) -> dict[str, Any]:
     return out
 
 
-def _aux(spec: Any, context: ResolutionContext, *, n_time: int,
-         n_freq: int) -> dict[str, Any]:
+def _aux(spec: Any, context: ResolutionContext, *, n_time: int, n_freq: int) -> dict[str, Any]:
     if spec is None:
         return context.use_default("observation.aux", {})
     if not isinstance(spec, Mapping):
-        raise ConfigError(
-            f"observation.aux: is a mapping; got {type(spec).__name__}."
-        )
+        raise ConfigError(f"observation.aux: is a mapping; got {type(spec).__name__}.")
     check_unknown_keys("observation.aux", dict(spec), _AUX_KEYS, label="aux:")
     out: dict[str, Any] = {}
     if "flags" in spec:
@@ -332,9 +362,7 @@ def _aux(spec: Any, context: ResolutionContext, *, n_time: int,
 def _data(node: Any, context: ResolutionContext, *, n_time: int, n_freq: int):
     if node is None:
         return None
-    destination = DestinationDescriptor(
-        "observation.data", "config_path", "observation.data"
-    )
+    destination = DestinationDescriptor("observation.data", "config_path", "observation.data")
     resolved = resolve_value(node, context, destination=destination)
     data = jnp.asarray(resolved.value)
     if data.shape != (n_time, n_freq):
@@ -362,14 +390,13 @@ def build_observation(section: Any, *, runtime, base_dir: str | None = None):
     )
 
     if not isinstance(section, Mapping):
-        raise ConfigError(
-            f"observation: is a mapping; got {type(section).__name__}."
-        )
-    check_unknown_keys("observation", dict(section), _OBSERVATION_KEYS,
-                       label="the observation section")
+        raise ConfigError(f"observation: is a mapping; got {type(section).__name__}.")
+    check_unknown_keys(
+        "observation", dict(section), _OBSERVATION_KEYS, label="the observation section"
+    )
     bootstrap = ResolutionContext(
-        dtype=runtime.dtype, base_dir=base_dir, seed=runtime.seed,
-        seeds=dict(runtime.seeds))
+        dtype=runtime.dtype, base_dir=base_dir, seed=runtime.seed, seeds=dict(runtime.seeds)
+    )
 
     ingest = None
     meta = _meta(section.get("meta"), bootstrap)
@@ -390,8 +417,7 @@ def build_observation(section: Any, *, runtime, base_dir: str | None = None):
         import numpy as np
 
         freq_hz = jnp.asarray(ingest.freq_hz)
-        time_s = jnp.asarray(np.asarray(ingest.time_s)
-                             - float(ingest.time_s[0]))
+        time_s = jnp.asarray(np.asarray(ingest.time_s) - float(ingest.time_s[0]))
         epoch = float(ingest.time_s[0])
         integration = width = None
         switching_spec = section.get("switching")
@@ -403,8 +429,7 @@ def build_observation(section: Any, *, runtime, base_dir: str | None = None):
                     f"only -- the recording carries the cycle; got "
                     f"{extra_keys} too."
                 )
-            switching = SwitchingBuild(
-                order=declared_order(switching_spec), receiver_input=None)
+            switching = SwitchingBuild(order=declared_order(switching_spec), receiver_input=None)
         else:
             bootstrap.use_default("observation.switching", {"order": []})
             switching = SwitchingBuild(order=(), receiver_input=None)
@@ -412,39 +437,40 @@ def build_observation(section: Any, *, runtime, base_dir: str | None = None):
         aux: dict[str, Any] = {}
     else:
         freq_hz = _freq_grid(section.get("freq", {}), bootstrap)
-        time_s, epoch, integration, width = _time_facts(
-            section.get("time", {}), bootstrap)
+        time_s, epoch, integration, width = _time_facts(section.get("time", {}), bootstrap)
 
     grid_context = ResolutionContext(
-        freq=freq_hz, time=time_s, dtype=runtime.dtype, base_dir=base_dir,
-        seed=runtime.seed, seeds=dict(runtime.seeds))
+        freq=freq_hz,
+        time=time_s,
+        dtype=runtime.dtype,
+        base_dir=base_dir,
+        seed=runtime.seed,
+        seeds=dict(runtime.seeds),
+    )
     n_time, n_freq = int(time_s.shape[0]), int(freq_hz.shape[0])
 
     site = _site(section.get("site"), grid_context)
     env = _environment(section.get("environment"), grid_context)
     extra = _extra(section.get("extra"), grid_context)
     if "from_file" not in section:
-        aux = _aux(section.get("aux"), grid_context, n_time=n_time,
-                   n_freq=n_freq)
+        aux = _aux(section.get("aux"), grid_context, n_time=n_time, n_freq=n_freq)
         data_node = (
             section["data"]
             if "data" in section
             else grid_context.use_default("observation.data", None)
         )
-        data = _data(data_node, grid_context, n_time=n_time,
-                     n_freq=n_freq)
-        switching = compile_switching(section.get("switching"), grid_context,
-                                      n_time=n_time)
+        data = _data(data_node, grid_context, n_time=n_time, n_freq=n_freq)
+        switching = compile_switching(section.get("switching"), grid_context, n_time=n_time)
 
-    pointing = compile_pointing(section.get("pointing"), grid_context,
-                                time_s=time_s, epoch_unix_s=epoch, site=site)
+    pointing = compile_pointing(
+        section.get("pointing"), grid_context, time_s=time_s, epoch_unix_s=epoch, site=site
+    )
     # Baked-pointing provenance lands in meta AFTER _meta's own hashability
     # gate has already run (compile_pointing's `provenance:` values are
     # arbitrary document data, not swept by `_meta`) -- so the same check
     # applies again here, at the merge, keyed by the `pointing/<key>` name
     # `compile_pointing` already prefixed them with.
-    meta = {**meta, **{key: _hashable(key, value)
-                       for key, value in pointing.provenance.items()}}
+    meta = {**meta, **{key: _hashable(key, value) for key, value in pointing.provenance.items()}}
     if epoch is not None:
         meta.setdefault("time_epoch_unix_s", epoch)
 
@@ -460,12 +486,28 @@ def build_observation(section: Any, *, runtime, base_dir: str | None = None):
         merged_extra["receiver_input"] = switching.receiver_input
 
     build = ObservationBuild(
-        time_s=time_s, freq_hz=freq_hz, epoch_unix_s=epoch,
-        integration_time_s=integration, channel_width_hz=width, site=site,
-        env=env, meta=meta, aux=aux, data=data, pointing=pointing.pointing,
-        extra=merged_extra, switch_order=switching.order, ingest=ingest)
+        time_s=time_s,
+        freq_hz=freq_hz,
+        epoch_unix_s=epoch,
+        integration_time_s=integration,
+        channel_width_hz=width,
+        site=site,
+        env=env,
+        meta=meta,
+        aux=aux,
+        data=data,
+        pointing=pointing.pointing,
+        extra=merged_extra,
+        switch_order=switching.order,
+        ingest=ingest,
+    )
     context = ResolutionContext(
-        freq=freq_hz, time=time_s, dtype=runtime.dtype, base_dir=base_dir,
-        seed=runtime.seed, seeds=dict(runtime.seeds),
-        switch_order=switching.order)
+        freq=freq_hz,
+        time=time_s,
+        dtype=runtime.dtype,
+        base_dir=base_dir,
+        seed=runtime.seed,
+        seeds=dict(runtime.seeds),
+        switch_order=switching.order,
+    )
     return build, context

@@ -47,12 +47,21 @@ _ROOT = pathlib.Path(__file__).resolve().parents[2]
 #: symbol the table no longer asks for.  Reading it off ``_FEATURES`` makes
 #: that mutation shrink this tuple instead, which the per-row negatives below
 #: then notice.
-LIMTOD_JAX_FEATURES = tuple(sorted(
-    {attribute for requirements in _FEATURES.values()
-     for _, module, attribute in requirements
-     if module == "limtod_jax" and attribute}
-    | {requirement[2] for _, requirement in _CONDITIONAL.values()
-       if requirement[1] == "limtod_jax" and requirement[2]}))
+LIMTOD_JAX_FEATURES = tuple(
+    sorted(
+        {
+            attribute
+            for requirements in _FEATURES.values()
+            for _, module, attribute in requirements
+            if module == "limtod_jax" and attribute
+        }
+        | {
+            requirement[2]
+            for _, requirement in _CONDITIONAL.values()
+            if requirement[1] == "limtod_jax" and requirement[2]
+        }
+    )
+)
 
 
 def stand_in(name, *attributes, spec=True):
@@ -80,24 +89,52 @@ def stand_in(name, *attributes, spec=True):
 
 def truncating_beam():
     """A document whose beam asks for ``limtod_jax.horizon_truncated_beam``."""
-    return preflight_document(resources={"beams": {
-        "horn": {"format": "npy", "path": "b.npy", "nside": 4,
-                 "normalize": "pixel_sum", "frame": "beam_local",
-                 "horizon": {"mode": "truncate_map"}}}})
+    return preflight_document(
+        resources={
+            "beams": {
+                "horn": {
+                    "format": "npy",
+                    "path": "b.npy",
+                    "nside": 4,
+                    "normalize": "pixel_sum",
+                    "frame": "beam_local",
+                    "horizon": {"mode": "truncate_map"},
+                }
+            }
+        }
+    )
 
 
 def driftscan(**extra):
     """A document with one driftscan projector, ``extra`` written onto it."""
-    return preflight_document(resources={"projectors": {
-        "p": {"engine": "driftscan", "lmax": 8, "normalize_beam": True,
-              "beam": {"ref": "resources.beams.horn"}, **extra}}})
+    return preflight_document(
+        resources={
+            "projectors": {
+                "p": {
+                    "engine": "driftscan",
+                    "lmax": 8,
+                    "normalize_beam": True,
+                    "beam": {"ref": "resources.beams.horn"},
+                    **extra,
+                }
+            }
+        }
+    )
 
 
 def analysing_transform():
     """A document whose latent transform asks for ``limtod_jax.map2alm_iter``."""
-    return preflight_document(inference={"parameters": {
-        "g": {"init": 1.0, "into": "gain.gain",
-              "transform": {"beam_analysis": {"nside": 4, "lmax": 8}}}}})
+    return preflight_document(
+        inference={
+            "parameters": {
+                "g": {
+                    "init": 1.0,
+                    "into": "gain.gain",
+                    "transform": {"beam_analysis": {"nside": 4, "lmax": 8}},
+                }
+            }
+        }
+    )
 
 
 #: ``(the symbol, the document that asks for it, where it is asked)`` -- one
@@ -109,8 +146,7 @@ ATTRIBUTE_ROWS = (
     ("horizon_truncated_beam", truncating_beam, "resources.beams.horn"),
     ("driftscan", driftscan, "resources.projectors.p"),
     ("map2alm_iter", analysing_transform, "inference.parameters.g"),
-    ("check_uniform_grid", lambda: driftscan(uniform_sampling=True),
-     "resources.projectors.p"),
+    ("check_uniform_grid", lambda: driftscan(uniform_sampling=True), "resources.projectors.p"),
 )
 
 
@@ -132,16 +168,15 @@ class TestTheVersionCase:
             "of this package rather than an extra, so a missing one means the install is "
             'broken or limTOD was removed: pip install "limTOD[jax]>=1.10". Said from '
             "the document's text, so that a missing dependency arrives before the run "
-            "rather than as an ImportError in the middle of one (check A35).")
+            "rather than as an ImportError in the middle of one (check A35)."
+        )
 
     def test_a_limtod_jax_that_carries_it_says_nothing(self, monkeypatch):
         """The anti-vacuity partner: the leg reads the ATTRIBUTE, not the
         stand-in.  Without this, an implementation that refused every
         ``sys.modules`` stand-in would pass the test above."""
-        monkeypatch.setitem(sys.modules, "limtod_jax",
-                            stand_in("limtod_jax", *LIMTOD_JAX_FEATURES))
-        assert not [one for one in _findings(truncating_beam())
-                    if one.check == "A35"]
+        monkeypatch.setitem(sys.modules, "limtod_jax", stand_in("limtod_jax", *LIMTOD_JAX_FEATURES))
+        assert not [one for one in _findings(truncating_beam()) if one.check == "A35"]
 
     def test_every_attribute_row_has_a_case_below(self):
         """The parametrization is a second list; this is what keeps it honest.
@@ -150,13 +185,12 @@ class TestTheVersionCase:
         beside it would otherwise be covered by nothing while every test here
         stayed green.
         """
-        assert tuple(sorted(symbol for symbol, _, _ in ATTRIBUTE_ROWS)) == \
-            LIMTOD_JAX_FEATURES
+        assert tuple(sorted(symbol for symbol, _, _ in ATTRIBUTE_ROWS)) == LIMTOD_JAX_FEATURES
 
-    @pytest.mark.parametrize("symbol, build, where", ATTRIBUTE_ROWS,
-                             ids=[row[0] for row in ATTRIBUTE_ROWS])
-    def test_each_row_loses_its_own_symbol_and_says_so(self, monkeypatch,
-                                                       symbol, build, where):
+    @pytest.mark.parametrize(
+        "symbol, build, where", ATTRIBUTE_ROWS, ids=[row[0] for row in ATTRIBUTE_ROWS]
+    )
+    def test_each_row_loses_its_own_symbol_and_says_so(self, monkeypatch, symbol, build, where):
         """**Per ROW**, not per module -- the distinction that matters.
 
         A whole-module mutant ("delete the ``hasattr`` leg") is killed by any
@@ -170,17 +204,14 @@ class TestTheVersionCase:
         symbol EXCEPT this row's must earn A35 on this row's route, naming this
         row's symbol.
         """
-        others = [feature for feature in LIMTOD_JAX_FEATURES
-                  if feature != symbol]
-        monkeypatch.setitem(sys.modules, "limtod_jax",
-                            stand_in("limtod_jax", *others))
+        others = [feature for feature in LIMTOD_JAX_FEATURES if feature != symbol]
+        monkeypatch.setitem(sys.modules, "limtod_jax", stand_in("limtod_jax", *others))
         finding = only(build(), "A35")
         assert finding.where == where
         assert f"needs limtod_jax.{symbol}," in finding.message
 
     @pytest.mark.parametrize("feature", LIMTOD_JAX_FEATURES)
-    def test_the_real_limtod_jax_carries_every_symbol_the_table_asks_for(
-            self, feature):
+    def test_the_real_limtod_jax_carries_every_symbol_the_table_asks_for(self, feature):
         """The other direction, and the one that would make this check a live
         defect: a table naming a symbol limTOD never had would refuse every
         install.  Skipped rather than importing limTOD from cold -- the module
@@ -209,11 +240,9 @@ class TestHasattrIsLegalForOneModuleOnly:
                     assert attribute is None, (distribution, attribute)
 
     def test_only_limtod_jax_is_asked_for_an_attribute_at_all(self):
-        every = [requirement for requirements in _FEATURES.values()
-                 for requirement in requirements]
+        every = [requirement for requirements in _FEATURES.values() for requirement in requirements]
         every += [requirement for _, requirement in _CONDITIONAL.values()]
-        assert {module for _, module, attribute in every
-                if attribute is not None} == {"limtod_jax"}
+        assert {module for _, module, attribute in every if attribute is not None} == {"limtod_jax"}
 
     def test_the_submodules_really_are_invisible_to_hasattr(self):
         """The measurement the ruling rests on, RUN rather than quoted -- and
@@ -238,11 +267,17 @@ class TestHasattrIsLegalForOneModuleOnly:
         if importlib.util.find_spec("limTOD") is None:  # pragma: no cover
             pytest.skip("limTOD is not installed in this environment")
         done = subprocess.run(
-            [sys.executable, "-c",
-             "import limTOD;"
-             " print(hasattr(limTOD, 'uvbeam'), hasattr(limTOD, 'cstbeam'),"
-             " hasattr(limTOD, 'sky_model'))"],
-            capture_output=True, text=True, cwd=str(_ROOT))
+            [
+                sys.executable,
+                "-c",
+                "import limTOD;"
+                " print(hasattr(limTOD, 'uvbeam'), hasattr(limTOD, 'cstbeam'),"
+                " hasattr(limTOD, 'sky_model'))",
+            ],
+            capture_output=True,
+            text=True,
+            cwd=str(_ROOT),
+        )
         assert done.returncode == 0, done.stdout + done.stderr
         assert done.stdout.split()[:3] == ["False", "False", "True"], done.stdout
 
@@ -256,9 +291,12 @@ class TestHasattrIsLegalForOneModuleOnly:
 
         with pytest.raises(importlib.metadata.PackageNotFoundError):
             importlib.metadata.version("limtod-jax")
-        assert {requirement[0] for requirements in _FEATURES.values()
-                for requirement in requirements
-                if requirement[1] == "limtod_jax"} == {"limTOD"}
+        assert {
+            requirement[0]
+            for requirements in _FEATURES.values()
+            for requirement in requirements
+            if requirement[1] == "limtod_jax"
+        } == {"limTOD"}
 
 
 class TestTheConditionalRequirement:
@@ -270,9 +308,11 @@ class TestTheConditionalRequirement:
     """
 
     def test_uniform_sampling_adds_the_fft_fast_path_requirement(self, monkeypatch):
-        monkeypatch.setitem(sys.modules, "limtod_jax",
-                            stand_in("limtod_jax", "driftscan",
-                                     "horizon_truncated_beam", "map2alm_iter"))
+        monkeypatch.setitem(
+            sys.modules,
+            "limtod_jax",
+            stand_in("limtod_jax", "driftscan", "horizon_truncated_beam", "map2alm_iter"),
+        )
         finding = only(driftscan(uniform_sampling=True), "A35")
         assert "limtod_jax.check_uniform_grid" in finding.message
 
@@ -280,9 +320,11 @@ class TestTheConditionalRequirement:
         """The mutant this kills is folding the conditional into ``_FEATURES``:
         that refuses a document the package builds, on an install that runs it
         fine."""
-        monkeypatch.setitem(sys.modules, "limtod_jax",
-                            stand_in("limtod_jax", "driftscan",
-                                     "horizon_truncated_beam", "map2alm_iter"))
+        monkeypatch.setitem(
+            sys.modules,
+            "limtod_jax",
+            stand_in("limtod_jax", "driftscan", "horizon_truncated_beam", "map2alm_iter"),
+        )
         assert not [one for one in _findings(driftscan()) if one.check == "A35"]
 
     def test_the_sibling_is_read_off_the_entry_and_not_the_document(self):
@@ -292,8 +334,7 @@ class TestTheConditionalRequirement:
         assert key == "uniform_sampling"
         assert requirement == ("limTOD", "limtod_jax", "check_uniform_grid")
 
-    def test_one_absent_module_is_said_once_however_many_rows_want_it(
-            self, monkeypatch):
+    def test_one_absent_module_is_said_once_however_many_rows_want_it(self, monkeypatch):
         """``uniform_sampling: true`` puts TWO limtod_jax requirements on one
         entry, and an absent module has no attribute to distinguish them -- so
         without the de-duplication in ``_in_layer`` the reader gets the same
@@ -341,9 +382,11 @@ class TestABrokenInstallIsNotAnAbsentOne:
 
     def test_a_broken_install_is_found_and_stood_down_on(self, broken):
         del broken
-        document = preflight_document(observation={
-            "from_file": {"format": "rhino_hdf5", "path": "obs.h5",
-                          "freq_unit": "MHz"}})
+        document = preflight_document(
+            observation={
+                "from_file": {"format": "rhino_hdf5", "path": "obs.h5", "freq_unit": "MHz"}
+            }
+        )
         assert not [one for one in _findings(document) if one.check == "A35"]
 
     def test_and_the_import_really_does_fail(self, broken):
@@ -357,9 +400,11 @@ class TestABrokenInstallIsNotAnAbsentOne:
     def test_the_same_document_with_h5py_absent_IS_refused(self, monkeypatch):
         """And the difference between the two verdicts, on one document."""
         monkeypatch.setitem(sys.modules, "h5py", None)
-        document = preflight_document(observation={
-            "from_file": {"format": "rhino_hdf5", "path": "obs.h5",
-                          "freq_unit": "MHz"}})
+        document = preflight_document(
+            observation={
+                "from_file": {"format": "rhino_hdf5", "path": "obs.h5", "freq_unit": "MHz"}
+            }
+        )
         assert only(document, "A35").where == "observation.from_file"
 
 
@@ -374,13 +419,13 @@ class TestTheOldRecipe:
         that the choice holds: the same stand-in, ``__spec__`` deleted, still
         gets the feature verdict and no ``RAISED`` sentence appears.
         """
-        monkeypatch.setitem(sys.modules, "limtod_jax",
-                            stand_in("limtod_jax", spec=False))
+        monkeypatch.setitem(sys.modules, "limtod_jax", stand_in("limtod_jax", spec=False))
         findings = _findings(truncating_beam())
         assert not [one for one in findings if "RAISED" in one.message]
         assert only(truncating_beam(), "A35").message.startswith(
             "resources.beams.horn: horizon.mode: truncate_map needs "
-            "limtod_jax.horizon_truncated_beam,")
+            "limtod_jax.horizon_truncated_beam,"
+        )
 
     def test_find_spec_still_raises_on_one_without_a_spec(self):
         """The measurement behind the recipe, kept because it is what makes the
@@ -399,7 +444,7 @@ class TestTheOldRecipe:
 #: The child of :class:`TestTheLegNeverImports`.  A FRESH process, because the
 #: property is about a module that is absent from ``sys.modules`` and a test
 #: session has imported half the package by the time it runs.
-_CHILD = textwrap.dedent('''
+_CHILD = textwrap.dedent("""
     import sys
 
     from rheplicant.config.preflight import preflight
@@ -412,7 +457,7 @@ _CHILD = textwrap.dedent('''
     report = preflight(document)
     print("limtod_jax" in sys.modules)
     print(sorted(one.check for one in report.findings))
-''')
+""")
 
 
 class TestTheLegNeverImports:
@@ -429,8 +474,9 @@ class TestTheLegNeverImports:
         A change that made the leg speak here would necessarily have imported
         limtod_jax, and the first line of this assertion is what says so.
         """
-        done = subprocess.run([sys.executable, "-c", _CHILD],
-                              capture_output=True, text=True, cwd=str(_ROOT))
+        done = subprocess.run(
+            [sys.executable, "-c", _CHILD], capture_output=True, text=True, cwd=str(_ROOT)
+        )
         assert done.returncode == 0, done.stdout + done.stderr
         imported, checks = done.stdout.splitlines()[:2]
         assert imported == "False", "the pass imported limtod_jax"

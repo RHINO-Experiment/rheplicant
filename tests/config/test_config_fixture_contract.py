@@ -161,14 +161,14 @@ _FIXTURE_HOME = pathlib.Path(inspect.getsourcefile(synthetic_document)).name
 #: recorded at all because "86 of 90" travelled through two plans as prose and
 #: was two different numbers by the time anyone re-took it.
 _KNOWN_OFFENDERS = {
-    "test_config_exits_predict.py": 27,      # of 29 on its own document;
-                                             # the other 11 of its 40 run on
-                                             # shared ones and 9 of those bite
-    "test_config_exits_plan.py": 20,         # of 20; none notice
-    "test_config_exits_estimators.py": 19,   # of 21; 2 declare a twin
+    "test_config_exits_predict.py": 27,  # of 29 on its own document;
+    # the other 11 of its 40 run on
+    # shared ones and 9 of those bite
+    "test_config_exits_plan.py": 20,  # of 20; none notice
+    "test_config_exits_estimators.py": 19,  # of 21; 2 declare a twin
     "test_config_exits_diagnostics.py": 23,  # of the 23 on its own
-                                             # condition_document; the OTHER
-                                             # 25 are shared and 12 notice
+    # condition_document; the OTHER
+    # 25 are shared and 12 notice
 }
 
 #: The list may SHRINK and may never GROW.  Without this, the ceiling test is
@@ -187,8 +187,7 @@ _OFFENDER_CEILING = 4
 #: standard as a builder that rolls its own -- measured when the row landed,
 #: and measured again without the row, where this file goes red naming
 #: ``['preflight_helpers']``.
-_BUILDER_FLOOR = {"exit_helpers": 8, "posterior_helpers": 4,
-                  "preflight_helpers": 1}
+_BUILDER_FLOOR = {"exit_helpers": 8, "posterior_helpers": 4, "preflight_helpers": 1}
 
 #: A run every builder in every helper module accepts as its first argument.
 #: The property below is about the document's two TWINS, which no run touches,
@@ -212,8 +211,10 @@ def _helper_modules() -> dict[str, object]:
     the same two-line edit removes the assertion that would have caught it.
     A glob cannot be shortened without deleting or renaming a file.
     """
-    return {path.stem: importlib.import_module(f"tests.config.{path.stem}")
-            for path in sorted(_HERE.glob("*_helpers.py"))}
+    return {
+        path.stem: importlib.import_module(f"tests.config.{path.stem}")
+        for path in sorted(_HERE.glob("*_helpers.py"))
+    }
 
 
 def _sanctioned() -> set[str]:
@@ -232,19 +233,20 @@ def _factories() -> frozenset[str]:
     """
     names = set()
     for module in _helper_modules().values():
-        names.update(name for name, value in vars(module).items()
-                     if inspect.isfunction(value)
-                     and value.__module__ == module.__name__
-                     and name.endswith("_document"))
+        names.update(
+            name
+            for name, value in vars(module).items()
+            if inspect.isfunction(value)
+            and value.__module__ == module.__name__
+            and name.endswith("_document")
+        )
     return frozenset(names)
 
 
 def _sites(node, where: str = "<module>"):
     """Every node in ``node``, paired with the function that encloses it."""
     for child in ast.iter_child_nodes(node):
-        inner = (child.name
-                 if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef))
-                 else where)
+        inner = child.name if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)) else where
         yield child, inner
         yield from _sites(child, inner)
 
@@ -278,8 +280,7 @@ def _depth_of(target) -> int | None:
     layers = 0
     probe = target
     while isinstance(probe, ast.Subscript):
-        if (isinstance(probe.slice, ast.Constant)
-                and probe.slice.value == "inference"):
+        if isinstance(probe.slice, ast.Constant) and probe.slice.value == "inference":
             return layers + 1
         layers += 1
         probe = probe.value
@@ -314,17 +315,18 @@ def _writes(tree: ast.Module) -> list[tuple[str, str, int, bool]]:
                 if depth is not None:
                     found.append(("delete", where, depth, False))
         if isinstance(node, ast.Dict) and any(key is None for key in node.keys):
-            if any(isinstance(key, ast.Constant) and key.value == "inference"
-                   for key in node.keys):
+            if any(isinstance(key, ast.Constant) and key.value == "inference" for key in node.keys):
                 found.append(("star", where, 1, False))
-        if (isinstance(node, ast.Call)
-                and isinstance(node.func, ast.Attribute)
-                and node.func.attr == "update"):
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "update"
+        ):
             for argument in node.args:
                 if isinstance(argument, ast.Dict) and any(
-                        isinstance(key, ast.Constant)
-                        and key.value == "inference"
-                        for key in argument.keys):
+                    isinstance(key, ast.Constant) and key.value == "inference"
+                    for key in argument.keys
+                ):
                     found.append(("update", where, 1, False))
     return found
 
@@ -378,16 +380,20 @@ def _rolls_its_own(path: pathlib.Path) -> list[str]:
     if _RAW in called:
         return sorted({where for _, where, _, _ in writes})
     if called & _factories():
-        return sorted({where for kind, where, depth, blank in writes
-                       if kind in ("assign", "star", "update")
-                       and depth == 1 and not blank})
+        return sorted(
+            {
+                where
+                for kind, where, depth, blank in writes
+                if kind in ("assign", "star", "update") and depth == 1 and not blank
+            }
+        )
     return []
 
 
 def _census() -> dict[str, list[str]]:
-    return {path.name: found
-            for path in sorted(_HERE.glob("*.py"))
-            if (found := _rolls_its_own(path))}
+    return {
+        path.name: found for path in sorted(_HERE.glob("*.py")) if (found := _rolls_its_own(path))
+    }
 
 
 def _builders() -> dict[str, dict[str, object]]:
@@ -397,11 +403,16 @@ def _builders() -> dict[str, dict[str, object]]:
     task exists to prevent is a walk that silently covers one module: a flat
     mapping can be short by four and still look plentiful.
     """
-    return {stem: {name: value for name, value in sorted(vars(module).items())
-                   if name.endswith("_document")
-                   and inspect.isfunction(value)
-                   and value.__module__ == module.__name__}
-            for stem, module in _helper_modules().items()}
+    return {
+        stem: {
+            name: value
+            for name, value in sorted(vars(module).items())
+            if name.endswith("_document")
+            and inspect.isfunction(value)
+            and value.__module__ == module.__name__
+        }
+        for stem, module in _helper_modules().items()
+    }
 
 
 def _build(builder) -> object:
@@ -450,13 +461,18 @@ class TestOnlyOnePlaceBuildsADocument:
         """
         census = _census()
         assert set(census.get("exit_helpers.py", [])) >= {
-            "conjugate_document", "diagnostic_document"}, census
+            "conjugate_document",
+            "diagnostic_document",
+        }, census
 
-    @pytest.mark.parametrize("source, expected", [
-        # --- route A: the raw fixture, built on ---------------------------
-        # The refactor that broke the first draft: call in one function,
-        # write in another.
-        ("""
+    @pytest.mark.parametrize(
+        "source, expected",
+        [
+            # --- route A: the raw fixture, built on ---------------------------
+            # The refactor that broke the first draft: call in one function,
+            # write in another.
+            (
+                """
 def _base():
     doc = synthetic_document()
     doc["model"] = {}
@@ -467,21 +483,30 @@ def document():
     doc = _base()
     doc["inference"] = {"parameters": {}}
     return doc
-""", ["document"]),
-        # Module scope, which a FunctionDef walk cannot see at all.
-        ("""
+""",
+                ["document"],
+            ),
+            # Module scope, which a FunctionDef walk cannot see at all.
+            (
+                """
 DOC = synthetic_document()
 DOC["inference"] = {"parameters": {}}
-""", ["<module>"]),
-        # Qualified call.
-        ("""
+""",
+                ["<module>"],
+            ),
+            # Qualified call.
+            (
+                """
 def document():
     doc = test_config_document.synthetic_document()
     doc["inference"] = {"parameters": {}}
     return doc
-""", ["document"]),
-        # Aliased import.
-        ("""
+""",
+                ["document"],
+            ),
+            # Aliased import.
+            (
+                """
 from tests.config.test_config_document import synthetic_document as raw
 
 
@@ -489,84 +514,126 @@ def document():
     doc = raw()
     doc["inference"] = {"parameters": {}}
     return doc
-""", ["document"]),
-        # The `{**base, "inference": ...}` literal.
-        ("""
+""",
+                ["document"],
+            ),
+            # The `{**base, "inference": ...}` literal.
+            (
+                """
 def document():
     return {**synthetic_document(), "inference": {"parameters": {}}}
-""", ["document"]),
-        # dict.update.
-        ("""
+""",
+                ["document"],
+            ),
+            # dict.update.
+            (
+                """
 def document():
     doc = synthetic_document()
     doc.update({"inference": {"parameters": {}}})
     return doc
-""", ["document"]),
-        # Nested, on the raw fixture: there is no repaired block to preserve,
-        # so depth does not save it.
-        ("""
+""",
+                ["document"],
+            ),
+            # Nested, on the raw fixture: there is no repaired block to preserve,
+            # so depth does not save it.
+            (
+                """
 def document():
     doc = synthetic_document()
     doc["inference"]["twin"] = {"replace": {}}
     return doc
-""", ["document"]),
-        # The raw fixture used without an inference block of its own.
-        ("""
+""",
+                ["document"],
+            ),
+            # The raw fixture used without an inference block of its own.
+            (
+                """
 def test_it_loads():
     assert load_document(synthetic_document())
-""", []),
-        # --- route B: a helper document, replaced -------------------------
-        ("""
+""",
+                [],
+            ),
+            # --- route B: a helper document, replaced -------------------------
+            (
+                """
 def variant():
     doc = conjugate_document({"kind": "forward"})
     doc["inference"] = ONE_LATENT
     return doc
-""", ["variant"]),
-        # No `return` required -- a fixture that yields, or a test that
-        # replaces the block inline, loses the repair just the same.
-        ("""
+""",
+                ["variant"],
+            ),
+            # No `return` required -- a fixture that yields, or a test that
+            # replaces the block inline, loses the repair just the same.
+            (
+                """
 def test_variant():
     doc = conjugate_document({"kind": "forward"})
     doc["inference"] = ONE_LATENT
     run_document(doc)
-""", ["test_variant"]),
-        # Not route B: blanking to reach the refusal.
-        ("""
+""",
+                ["test_variant"],
+            ),
+            # Not route B: blanking to reach the refusal.
+            (
+                """
 def test_without_parameters_it_is_refused():
     doc = diagnostic_document({"kind": "identifiability"})
     doc["inference"] = {}
     with pytest.raises(ConfigError):
         run_document(doc)
-""", []),
-        # Not route B: editing INSIDE the repaired block.
-        ("""
+""",
+                [],
+            ),
+            # Not route B: editing INSIDE the repaired block.
+            (
+                """
 def test_fisher_evaluates_the_repaired_fit_twin():
     doc = diagnostic_document({"kind": "fisher"})
     doc["inference"]["twin"] = {"replace": {}}
     run_document(doc)
-""", []),
-        # Not route B: deleting a key, or the block.
-        ("""
+""",
+                [],
+            ),
+            # Not route B: deleting a key, or the block.
+            (
+                """
 def test_the_seed_is_required():
     doc = npe_document()
     del doc["inference"]["npe"]["bank"]["seed"]
     run_document(doc)
-""", []),
-        # Not an offence at all: a helper is used as it stands.
-        ("""
+""",
+                [],
+            ),
+            # Not an offence at all: a helper is used as it stands.
+            (
+                """
 def test_it_runs():
     results = run_document(conjugate_document({"kind": "forward"}))
     assert results
-""", []),
-    ], ids=["raw-split-across-functions", "raw-at-module-scope",
-            "raw-called-qualified", "raw-imported-under-an-alias",
-            "raw-star-unpacked", "raw-via-update", "raw-written-nested",
-            "raw-with-no-block", "helper-block-replaced",
-            "helper-block-replaced-inline", "helper-block-blanked",
-            "helper-block-edited-inside", "helper-key-deleted",
-            "helper-used-as-is"])
-    def test_the_matcher_reads_both_routes_and_neither_more(
-            self, tmp_path, source, expected):
+""",
+                [],
+            ),
+        ],
+        ids=[
+            "raw-split-across-functions",
+            "raw-at-module-scope",
+            "raw-called-qualified",
+            "raw-imported-under-an-alias",
+            "raw-star-unpacked",
+            "raw-via-update",
+            "raw-written-nested",
+            "raw-with-no-block",
+            "helper-block-replaced",
+            "helper-block-replaced-inline",
+            "helper-block-blanked",
+            "helper-block-edited-inside",
+            "helper-key-deleted",
+            "helper-used-as-is",
+        ],
+    )
+    def test_the_matcher_reads_both_routes_and_neither_more(self, tmp_path, source, expected):
         """The matcher's reach, pinned on synthetic sources.
 
         Every case here is a mutation this module would otherwise ship green,
@@ -661,8 +728,9 @@ class TestTheSharedDocumentsCanTellTheTwoTwinsApart:
         and correctly needs no row.
         """
         by_module = _builders()
-        missing = sorted(stem for stem, found in by_module.items()
-                         if found and stem not in _BUILDER_FLOOR)
+        missing = sorted(
+            stem for stem, found in by_module.items() if found and stem not in _BUILDER_FLOOR
+        )
         assert not missing, (
             f"{missing} define document builders but have no row in "
             "_BUILDER_FLOOR, so nothing measures whether the property test "

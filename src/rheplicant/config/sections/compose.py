@@ -85,6 +85,7 @@ def model_nodes(document: Mapping[str, Any]) -> dict[str, Any]:
         return {}
     return node_specs(section)
 
+
 def node_placement_problems(specs: Mapping[str, Any], graph) -> list[tuple[str, str, str]]:
     """Checks A2, A3 and A4 over a ``model:`` mapping -- text and graph only.
 

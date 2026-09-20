@@ -84,9 +84,7 @@ class Level(AbstractOperator):
 
 
 def _state(switch=SWITCH) -> State:
-    return State(
-        coords=Coordinates(time=TIME, extra={"switch_state": jnp.asarray(switch)})
-    )
+    return State(coords=Coordinates(time=TIME, extra={"switch_state": jnp.asarray(switch)}))
 
 
 def _select(singular: bool) -> SelectOperator:

@@ -47,9 +47,9 @@ from rheplicant.radio import (
 
 # 4 x 11: non-square, and 11 channels is enough room for a line with wings.
 N_TIME, N_FREQ = 4, 11
-CHANNEL = 1e6                                   # channel spacing [Hz]
+CHANNEL = 1e6  # channel spacing [Hz]
 FREQ = 60e6 + CHANNEL * jnp.arange(N_FREQ, dtype=float)
-TONE_CHANNEL = 4                                # 64 MHz — NOT the middle (5)
+TONE_CHANNEL = 4  # 64 MHz — NOT the middle (5)
 TONE_FREQ = float(FREQ[TONE_CHANNEL])
 TONE_KELVIN = 5000.0
 TIME = 100.0 * jnp.arange(N_TIME, dtype=float)  # 0, 100, 200, 300 s
@@ -95,9 +95,7 @@ class TestTheInjectedTotalIsTheKnownLevel:
     @pytest.mark.parametrize("lineshape", ["sinc2", "gaussian"])
     @pytest.mark.parametrize("width", [1.0 * CHANNEL, 2.3 * CHANNEL])
     @pytest.mark.parametrize("offset", [0.0, 0.5 * CHANNEL, 0.31 * CHANNEL])
-    def test_the_total_is_the_amplitude_whatever_the_shape(
-        self, state, lineshape, width, offset
-    ):
+    def test_the_total_is_the_amplitude_whatever_the_shape(self, state, lineshape, width, offset):
         op = _tone(lineshape=lineshape, line_width=width, tone_freq=TONE_FREQ + offset)
         total = _injected(op, state).sum(axis=-1)
         assert np.allclose(total, TONE_KELVIN, rtol=1e-4), total
@@ -137,7 +135,7 @@ class TestTheSincSquaredResponse:
         """
         injected = _injected(_tone(tone_freq=TONE_FREQ + 0.5 * CHANNEL), state)
         left, right = injected[0, TONE_CHANNEL], injected[0, TONE_CHANNEL + 1]
-        assert np.isclose(left, right, rtol=1e-5)          # symmetric about the line
+        assert np.isclose(left, right, rtol=1e-5)  # symmetric about the line
         assert 0.40 < left / TONE_KELVIN < 0.43
         assert np.isclose(injected[0].sum(), TONE_KELVIN, rtol=1e-4)
 
@@ -178,7 +176,7 @@ class TestTheGaussianResponse:
         injected = np.asarray(out.data - state.data)
         assert np.isfinite(injected).all()
         assert np.isclose(injected[0].sum(), TONE_KELVIN, rtol=1e-4)
-        assert injected[0].argmax() == N_FREQ - 1      # the nearest channel
+        assert injected[0].argmax() == N_FREQ - 1  # the nearest channel
 
 
 # ------------------------------------------------------------------- refusals
@@ -227,9 +225,7 @@ class TestTheWidthIsAWidthThisGridCouldHaveProduced:
         floor for both would either reject the canonical FFT value or admit a
         sinc2 whose sampled channels sit on its nulls."""
         half = 0.5 * CHANNEL
-        assert np.isfinite(
-            _injected(_tone(lineshape="gaussian", line_width=half), state)
-        ).all()
+        assert np.isfinite(_injected(_tone(lineshape="gaussian", line_width=half), state)).all()
         with pytest.raises(StateValidationError, match="narrower than the channel"):
             _tone(lineshape="sinc2", line_width=half)(state)
 
@@ -258,7 +254,7 @@ class TestTheWidthIsAWidthThisGridCouldHaveProduced:
         """Four channels: a quarter of the band is three quarters of ONE
         channel, so a pure band-fraction ceiling would refuse the width the
         floor calls canonical. The ceiling never falls below two channels."""
-        coarse_freq = 60e6 + 8e6 * jnp.arange(4, dtype=float)   # span 24 MHz
+        coarse_freq = 60e6 + 8e6 * jnp.arange(4, dtype=float)  # span 24 MHz
         coarse = State(
             data=jnp.full((N_TIME, 4), 10.0),
             coords=Coordinates(time=TIME, freq=coarse_freq),
@@ -330,9 +326,9 @@ class TestTheProtectionFloorIsAFraction:
     def test_a_floor_of_exactly_one_protects_only_the_peak(self, state):
         """The other side of the boundary: 1.0 is legal and means "the peak
         channel only"."""
-        mask = _tone(
-            lineshape="gaussian", line_width=2.0 * CHANNEL, protect_floor=1.0
-        )(state).aux[PROTECTED_KEY]
+        mask = _tone(lineshape="gaussian", line_width=2.0 * CHANNEL, protect_floor=1.0)(state).aux[
+            PROTECTED_KEY
+        ]
         assert int(np.asarray(mask).sum()) == 1
 
 
@@ -348,9 +344,7 @@ class TestTheCentreDrifts:
         assert np.allclose(injected.max(axis=-1), TONE_KELVIN, rtol=1e-5)
 
     @pytest.mark.parametrize("anchor", [0.0, 43200.0, 1.0e6])
-    def test_the_drift_is_measured_from_the_first_sample_not_from_zero(
-        self, state, anchor
-    ):
+    def test_the_drift_is_measured_from_the_first_sample_not_from_zero(self, state, anchor):
         """The anchor, pinned — every other fixture in this file starts its
         time axis at zero, where ``t`` and ``t - t[0]`` are the same array.
 
@@ -412,6 +406,7 @@ class TestTheCentreDrifts:
         pipeline dies on ``TracerArrayConversionError`` raised from inside a
         validity check.
         """
+
         def over_times(t):
             return _tone(drift_rate=DRIFT_PER_CHANNEL)(
                 state.replace(coords=state.coords.replace(time=t))
@@ -422,6 +417,7 @@ class TestTheCentreDrifts:
             np.asarray(over_times(TIME)),
             rtol=1e-5,
         )
+
         # and the drift out of band is NOT caught here — this is the limit
         def wild(t):
             return _tone(drift_rate=100.0 * DRIFT_PER_CHANNEL)(
@@ -453,8 +449,7 @@ class TestTheLevelDrifts:
         expected = TONE_KELVIN * (1.0 + self.RATE * np.asarray(TIME))
         assert np.allclose(injected.sum(axis=-1), expected, rtol=1e-4)
         # asymmetric on purpose: last sample is 0.7 of the first, not 1.0
-        assert np.isclose(injected.sum(axis=-1)[-1] / injected.sum(axis=-1)[0], 0.7,
-                          rtol=1e-4)
+        assert np.isclose(injected.sum(axis=-1)[-1] / injected.sum(axis=-1)[0], 0.7, rtol=1e-4)
 
     def test_a_level_that_passes_through_zero_is_refused(self, state):
         """A tone that turns into a notch part-way through the run is finite,
@@ -473,7 +468,7 @@ class TestTheLevelDrifts:
             coords=Coordinates(time=jnp.array([0.0, 128.0, 256.0, 512.0]), freq=FREQ),
             meta={"obs_id": "exact-zero"},
         )
-        assert 1.0 + (-1.0 / 512.0) * 512.0 == 0.0     # the arithmetic, pinned
+        assert 1.0 + (-1.0 / 512.0) * 512.0 == 0.0  # the arithmetic, pinned
         with pytest.raises(StateValidationError, match="stops being a tone"):
             _tone(amplitude_drift_rate=-1.0 / 512.0)(powers)
 
@@ -531,8 +526,7 @@ class TestTheProtectionCoversWhatTheToneWets:
         "the best N channels": ranking would keep one of two exactly equal
         channels and hand the other to the flagger."""
         mask = np.asarray(
-            _tone(tone_freq=TONE_FREQ + 0.5 * CHANNEL, protect_floor=1.0)(state)
-            .aux[PROTECTED_KEY]
+            _tone(tone_freq=TONE_FREQ + 0.5 * CHANNEL, protect_floor=1.0)(state).aux[PROTECTED_KEY]
         )
         assert list(np.nonzero(mask)[0]) == [TONE_CHANNEL, TONE_CHANNEL + 1]
 
@@ -547,9 +541,7 @@ class TestTheProtectionCoversWhatTheToneWets:
 
 class TestADriftingToneProtectsADriftingSetOfChannels:
     def test_the_mask_is_a_waterfall_and_it_moves(self, state):
-        mask = np.asarray(
-            _tone(drift_rate=DRIFT_PER_CHANNEL)(state).aux[PROTECTED_KEY]
-        )
+        mask = np.asarray(_tone(drift_rate=DRIFT_PER_CHANNEL)(state).aux[PROTECTED_KEY])
         assert mask.shape == (N_TIME, N_FREQ)
         assert [list(np.nonzero(row)[0]) for row in mask] == [[4], [5], [6], [7]]
 
@@ -562,8 +554,7 @@ class TestADriftingToneProtectsADriftingSetOfChannels:
         between channels it protects NOTHING at all, and hands both wet
         channels to the flagger."""
         mask = np.asarray(
-            _tone(drift_rate=0.5 * DRIFT_PER_CHANNEL, protect_floor=0.9)(state)
-            .aux[PROTECTED_KEY]
+            _tone(drift_rate=0.5 * DRIFT_PER_CHANNEL, protect_floor=0.9)(state).aux[PROTECTED_KEY]
         )
         assert [int(row.sum()) for row in mask] == [1, 2, 1, 2]
         assert [list(np.nonzero(row)[0]) for row in mask] == [[4], [4, 5], [5], [5, 6]]
@@ -585,9 +576,7 @@ class TestADriftingToneProtectsADriftingSetOfChannels:
         )(state)
         mask = np.asarray(both.aux[PROTECTED_KEY])
         assert mask.shape == (N_TIME, N_FREQ)
-        assert [list(np.nonzero(row)[0]) for row in mask] == [
-            [0, 4], [0, 5], [0, 6], [0, 7]
-        ]
+        assert [list(np.nonzero(row)[0]) for row in mask] == [[0, 4], [0, 5], [0, 6], [0, 7]]
 
 
 # ------------------------------------------------------ the aux contract now
@@ -622,9 +611,7 @@ class TestProtectRefusesAMaskItCannotCompose:
         water = jnp.zeros((N_TIME, N_FREQ), dtype=bool).at[2, TONE_CHANNEL].set(True)
         combined = np.asarray(protect(protect({}, channel), water)[PROTECTED_KEY])
         assert combined.shape == (N_TIME, N_FREQ)
-        assert [list(np.nonzero(row)[0]) for row in combined] == [
-            [0], [0], [0, TONE_CHANNEL], [0]
-        ]
+        assert [list(np.nonzero(row)[0]) for row in combined] == [[0], [0], [0, TONE_CHANNEL], [0]]
 
 
 class TestWhatAWideToneActuallyMeasures:
@@ -640,9 +627,7 @@ class TestWhatAWideToneActuallyMeasures:
 
     # Curved, and asymmetric about the tone channel, so a weighted average
     # cannot coincide with the centre value by symmetry.
-    BANDPASS = jnp.array(
-        [0.60, 0.68, 0.78, 0.85, 0.90, 0.98, 1.10, 1.26, 1.30, 1.24, 1.10]
-    )
+    BANDPASS = jnp.array([0.60, 0.68, 0.78, 0.85, 0.90, 0.98, 1.10, 1.26, 1.30, 1.24, 1.10])
     GAIN = jnp.array([1.5, 1.6, 1.7, 1.8])
 
     def _response(self, state, op):
@@ -661,9 +646,7 @@ class TestWhatAWideToneActuallyMeasures:
         op = _tone(lineshape="gaussian", line_width=1.5 * CHANNEL)
         weights = _injected(op, state)[0] / TONE_KELVIN
         total = self._response(state, op).sum(axis=-1)
-        expected = TONE_KELVIN * float(weights @ np.asarray(self.BANDPASS)) * np.asarray(
-            self.GAIN
-        )
+        expected = TONE_KELVIN * float(weights @ np.asarray(self.BANDPASS)) * np.asarray(self.GAIN)
         assert np.allclose(total, expected, rtol=1e-4)
         # ... and it is NOT the bandpass at the tone's own channel: on this
         # curve the weighted average sits 2.37% high (0.9213 against 0.9000),
@@ -747,5 +730,4 @@ class TestItStillCompilesAndStillCarriesNoParameters:
     def test_a_drifting_tone_runs_under_jit(self, state):
         op = _tone(drift_rate=DRIFT_PER_CHANNEL, amplitude_drift_rate=-1e-4)
         run = eqx.filter_jit(lambda o, s: o(s))
-        assert np.allclose(np.asarray(run(op, state).data), np.asarray(op(state).data),
-                           rtol=1e-5)
+        assert np.allclose(np.asarray(run(op, state).data), np.asarray(op(state).data), rtol=1e-5)

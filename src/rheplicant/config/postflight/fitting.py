@@ -141,15 +141,16 @@ _PARAMETERS = "inference.parameters"
 #: true}`` is refused by name in pre-flight -- advice that earns a second
 #: refusal is the advice loop this project keeps paying for, and
 #: ``TestTheAdviceLoop`` applies both of these literally.
-_ESCAPE = ("Write {where}: {{mode: warn}} so a failure here warns rather "
-           "than blocks the load, or {{mode: skip, reason: \"...\"}} to "
-           "decline the check and record why.")
+_ESCAPE = (
+    "Write {where}: {{mode: warn}} so a failure here warns rather "
+    'than blocks the load, or {{mode: skip, reason: "..."}} to '
+    "decline the check and record why."
+)
 
 #: The clause C13 and C19 carry and C12 does not: ``linearity`` is the one
 #: check on by default (``gating.DEFAULT_MODE``), so only the other two can
 #: tell a reader that this DOCUMENT asked for the cost.
-_TURNED_ON = ("{name} is off by default and this document turned it on at "
-              "{where}. ")
+_TURNED_ON = "{name} is off by default and this document turned it on at {where}. "
 
 
 def _tagged(check: str, message: str) -> str:
@@ -175,8 +176,7 @@ def _where(names: Iterable[str]) -> str:
 
 def _escape(gate: Gate) -> str:
     """The tail of every C12/C13/C19 message: the gate, and both ways out."""
-    lead = ("" if gate.name == "linearity"
-            else _TURNED_ON.format(name=gate.name, where=gate.where()))
+    lead = "" if gate.name == "linearity" else _TURNED_ON.format(name=gate.name, where=gate.where())
     return lead + _ESCAPE.format(where=gate.where())
 
 
@@ -188,8 +188,7 @@ def _dtypes(space: Any, names: Iterable[str] | None) -> dict[str, str]:
     return {name: str(space.latent(name).init.dtype) for name in selected}
 
 
-def _undifferentiable(space: Any,
-                      names: Iterable[str] | None = None) -> dict[str, str]:
+def _undifferentiable(space: Any, names: Iterable[str] | None = None) -> dict[str, str]:
     """``{latent: dtype}`` for every latent C13 and C19 cannot be asked about.
 
     Mirrors ``identifiability._check_differentiable``: **complex OR
@@ -200,12 +199,14 @@ def _undifferentiable(space: Any,
     Not the same predicate as :func:`_unlinearisable`, and the difference is
     one word: ``floating`` here, ``inexact`` there.
     """
-    return {name: dtype for name, dtype in _dtypes(space, names).items()
-            if not jnp.issubdtype(jnp.dtype(dtype), jnp.floating)}
+    return {
+        name: dtype
+        for name, dtype in _dtypes(space, names).items()
+        if not jnp.issubdtype(jnp.dtype(dtype), jnp.floating)
+    }
 
 
-def _unlinearisable(space: Any,
-                    names: Iterable[str] | None = None) -> dict[str, str]:
+def _unlinearisable(space: Any, names: Iterable[str] | None = None) -> dict[str, str]:
     """``{latent: dtype}`` for every latent C12 cannot be asked about.
 
     Mirrors ``linear._require_inexact``: **non-floating only**.  A complex
@@ -213,12 +214,16 @@ def _unlinearisable(space: Any,
     linear operator -- so it is absent from this mapping and present in
     :func:`_undifferentiable`'s.
     """
-    return {name: dtype for name, dtype in _dtypes(space, names).items()
-            if not jnp.issubdtype(jnp.dtype(dtype), jnp.inexact)}
+    return {
+        name: dtype
+        for name, dtype in _dtypes(space, names).items()
+        if not jnp.issubdtype(jnp.dtype(dtype), jnp.inexact)
+    }
 
 
-def _departure(measured: Mapping[str, Mapping[float, float]],
-               names: Iterable[str]) -> Departure | None:
+def _departure(
+    measured: Mapping[str, Mapping[float, float]], names: Iterable[str]
+) -> Departure | None:
     """The measured per-scale departures for ``names``, as C12's own numbers.
 
     Nested tuples, scales ascending, in ``names``' order -- the shape
@@ -259,15 +264,14 @@ def _departure(measured: Mapping[str, Mapping[float, float]],
     type it is.
     """
     table = tuple(
-        (name, tuple((float(scale), error)
-                     for scale, error in sorted(measured[name].items())))
-        for name in names if name in measured
+        (name, tuple((float(scale), error) for scale, error in sorted(measured[name].items())))
+        for name in names
+        if name in measured
     )
     return table or None
 
 
-def _auto_skip(gate: Gate, blocked: Mapping[str, str],
-               reason: str) -> Iterable[Finding]:
+def _auto_skip(gate: Gate, blocked: Mapping[str, str], reason: str) -> Iterable[Finding]:
     """The ONE C14 a gate that cannot be decided here emits.
 
     ``gating.auto_skipped`` returns a NEW gate, kept locally: one gates
@@ -283,18 +287,22 @@ def _auto_skip(gate: Gate, blocked: Mapping[str, str],
     with a straight face.
     """
     named = ", ".join(f"{name} ({dtype})" for name, dtype in blocked.items())
-    message = _tagged("C14", (
-        f"{gate.where()} asked for {gate.name} and it is not defined on this "
-        f"document: {named}. {reason} The check was skipped automatically and "
-        "its reason recorded here; nothing you wrote needs changing."))
-    found = verdict(auto_skipped(gate, message), failed=False,
-                    where=_where(blocked), message=message)
+    message = _tagged(
+        "C14",
+        (
+            f"{gate.where()} asked for {gate.name} and it is not defined on this "
+            f"document: {named}. {reason} The check was skipped automatically and "
+            "its reason recorded here; nothing you wrote needs changing."
+        ),
+    )
+    found = verdict(
+        auto_skipped(gate, message), failed=False, where=_where(blocked), message=message
+    )
     if found is not None:
         yield found
 
 
-def _differentiability_stand_down(gate: Gate,
-                                  space: Any) -> Iterable[Finding] | None:
+def _differentiability_stand_down(gate: Gate, space: Any) -> Iterable[Finding] | None:
     """C13's and C19's shared step 4, so the two cannot drift apart.
 
     Returns the C14 findings, or ``None`` when every selected latent carries a
@@ -309,18 +317,31 @@ def _differentiability_stand_down(gate: Gate,
     blocked = _undifferentiable(space)
     if not blocked:
         return None
-    complexes = {name: dtype for name, dtype in blocked.items()
-                 if jnp.issubdtype(jnp.dtype(dtype), jnp.complexfloating)}
+    complexes = {
+        name: dtype
+        for name, dtype in blocked.items()
+        if jnp.issubdtype(jnp.dtype(dtype), jnp.complexfloating)
+    }
     if complexes:
-        return _auto_skip(gate, complexes, (
-            "The prediction is real, so the map from complex coefficients to "
-            "data is R-linear but not C-linear and its rank over C is not the "
-            "number this check is about -- declare the real and imaginary "
-            "parts as separate latents if you want it asked."))
-    return _auto_skip(gate, blocked, (
-        "A latent that is not floating-point has no derivative for the "
-        "prediction to be taken with respect to, and this check is a "
-        "statement about a Jacobian."))
+        return _auto_skip(
+            gate,
+            complexes,
+            (
+                "The prediction is real, so the map from complex coefficients to "
+                "data is R-linear but not C-linear and its rank over C is not the "
+                "number this check is about -- declare the real and imaginary "
+                "parts as separate latents if you want it asked."
+            ),
+        )
+    return _auto_skip(
+        gate,
+        blocked,
+        (
+            "A latent that is not floating-point has no derivative for the "
+            "prediction to be taken with respect to, and this check is a "
+            "statement about a Jacobian."
+        ),
+    )
 
 
 def _rtol(gate: Gate) -> dict[str, float]:
@@ -360,10 +381,15 @@ def _linearity(payload: Priced) -> Iterable[Finding]:
         return
     blocked = _unlinearisable(space, claimed)
     if blocked:
-        yield from _auto_skip(gate, blocked, (
-            "A latent that is not floating-point or complex carries no "
-            "derivative, so there is no linearization for the prediction to "
-            "be compared against."))
+        yield from _auto_skip(
+            gate,
+            blocked,
+            (
+                "A latent that is not floating-point or complex carries no "
+                "derivative, so there is no linearization for the prediction to "
+                "be compared against."
+            ),
+        )
         return
 
     from rheplicant.inference.linear import check_linearity
@@ -378,8 +404,9 @@ def _linearity(payload: Priced) -> Iterable[Finding]:
     failures: list[tuple[str, str]] = []
     for name in claimed:
         try:
-            measured[name] = check_linearity(space, payload.run.inference.fit_twin,
-                                             payload.run.state, name=name)
+            measured[name] = check_linearity(
+                space, payload.run.inference.fit_twin, payload.run.state, name=name
+            )
         except (ParameterSpaceError, StateValidationError) as refused:
             failures.append((name, str(refused)))
             # Only this ONE refusal measured anything.  The others -- a
@@ -391,32 +418,48 @@ def _linearity(payload: Priced) -> Iterable[Finding]:
 
     if failures:
         refused_names = [name for name, _ in failures]
-        detail = " ".join(f"{name}: {sentence}"
-                          for name, sentence in failures)
-        message = _tagged("C12", (
-            f"{_where(refused_names)}: the prediction is not "
-            "affine in a latent this document declares linear: true, so the "
-            "claim does not hold and every conjugate exit built on it is "
-            f"solving the wrong problem. check_linearity refuses it in its "
-            f"own words -- {detail} {_escape(gate)}"))
-        found = verdict(gate, failed=True,
-                        where=_where(refused_names),
-                        message=message,
-                        departure=_departure(measured, refused_names))
+        detail = " ".join(f"{name}: {sentence}" for name, sentence in failures)
+        message = _tagged(
+            "C12",
+            (
+                f"{_where(refused_names)}: the prediction is not "
+                "affine in a latent this document declares linear: true, so the "
+                "claim does not hold and every conjugate exit built on it is "
+                f"solving the wrong problem. check_linearity refuses it in its "
+                f"own words -- {detail} {_escape(gate)}"
+            ),
+        )
+        found = verdict(
+            gate,
+            failed=True,
+            where=_where(refused_names),
+            message=message,
+            departure=_departure(measured, refused_names),
+        )
         if found is not None:
             yield found
         return
 
     detail = "; ".join(
-        f"{name}: " + ", ".join(f"{scale:g}x -> {error:.2e}"
-                                for scale, error in sorted(errors.items()))
-        for name, errors in measured.items())
-    message = _tagged("C12", (
-        f"{_where(claimed)}: check_linearity holds for every latent this "
-        f"document declares linear: true -- relative departure from each "
-        f"one's own linearization at {detail}. {_escape(gate)}"))
-    found = verdict(gate, failed=False, where=_where(claimed), message=message,
-                    departure=_departure(measured, claimed))
+        f"{name}: "
+        + ", ".join(f"{scale:g}x -> {error:.2e}" for scale, error in sorted(errors.items()))
+        for name, errors in measured.items()
+    )
+    message = _tagged(
+        "C12",
+        (
+            f"{_where(claimed)}: check_linearity holds for every latent this "
+            f"document declares linear: true -- relative departure from each "
+            f"one's own linearization at {detail}. {_escape(gate)}"
+        ),
+    )
+    found = verdict(
+        gate,
+        failed=False,
+        where=_where(claimed),
+        message=message,
+        departure=_departure(measured, claimed),
+    )
     if found is not None:
         yield found
 
@@ -444,39 +487,53 @@ def _identifiability(payload: Priced) -> Iterable[Finding]:
 
     subject = _where(space.names)
     try:
-        report = identifiability(space, payload.run.inference.fit_twin,
-                                 payload.run.state, **_rtol(gate))
+        report = identifiability(
+            space, payload.run.inference.fit_twin, payload.run.state, **_rtol(gate)
+        )
     except (ParameterSpaceError, StateValidationError) as refused:
-        message = _tagged("C13", (
-            f"{subject}: identifiability could not be decided for this "
-            f"document. The package refuses it in its own words: {refused} "
-            f"{_escape(gate)}"))
+        message = _tagged(
+            "C13",
+            (
+                f"{subject}: identifiability could not be decided for this "
+                f"document. The package refuses it in its own words: {refused} "
+                f"{_escape(gate)}"
+            ),
+        )
         found = verdict(gate, failed=True, where=subject, message=message)
         if found is not None:
             yield found
         return
 
-    numbers = (f"rank {report.rank} of {report.n_par} parameters over "
-               f"{report.n_data} data points, nullity {report.nullity}, at "
-               f"rtol {report.rtol:.0e}")
+    numbers = (
+        f"rank {report.rank} of {report.n_par} parameters over "
+        f"{report.n_data} data points, nullity {report.nullity}, at "
+        f"rtol {report.rtol:.0e}"
+    )
     if report.nullity:
         shares = ", ".join(
             f"{name} {share:.2f}"
-            for name, share in sorted(report.participation(0).items(),
-                                      key=lambda item: -item[1]))
-        message = _tagged("C13", (
-            f"{subject}: the data cannot see {report.nullity} direction(s) of "
-            f"this parameter space -- {numbers}. The worst one is carried by "
-            f"{shares}, so those latents trade off against each other and a "
-            "fit will return a finite, correctly-shaped answer in which they "
-            f"are not separately determined. {_escape(gate)}"))
+            for name, share in sorted(report.participation(0).items(), key=lambda item: -item[1])
+        )
+        message = _tagged(
+            "C13",
+            (
+                f"{subject}: the data cannot see {report.nullity} direction(s) of "
+                f"this parameter space -- {numbers}. The worst one is carried by "
+                f"{shares}, so those latents trade off against each other and a "
+                "fit will return a finite, correctly-shaped answer in which they "
+                f"are not separately determined. {_escape(gate)}"
+            ),
+        )
     else:
-        message = _tagged("C13", (
-            f"{subject}: identifiability finds {numbers} -- weakest "
-            f"identified direction {report.weakest_identified:.3e} of the "
-            f"strongest. {_escape(gate)}"))
-    found = verdict(gate, failed=bool(report.nullity), where=subject,
-                    message=message)
+        message = _tagged(
+            "C13",
+            (
+                f"{subject}: identifiability finds {numbers} -- weakest "
+                f"identified direction {report.weakest_identified:.3e} of the "
+                f"strongest. {_escape(gate)}"
+            ),
+        )
+    found = verdict(gate, failed=bool(report.nullity), where=subject, message=message)
     if found is not None:
         yield found
 
@@ -523,33 +580,40 @@ def _prior_sensitivity(payload: Priced) -> Iterable[Finding]:
 
     subject = _where(space.names)
     try:
-        report = prior_sensitivity(space, inference.fit_twin, payload.run.state,
-                                   observed.entries[observed.primary], noise)
+        report = prior_sensitivity(
+            space, inference.fit_twin, payload.run.state, observed.entries[observed.primary], noise
+        )
     except (ParameterSpaceError, StateValidationError) as refused:
-        message = _tagged("C19", (
-            f"{subject}: prior sensitivity could not be decided for this "
-            f"document. The package refuses it in its own words: {refused} "
-            f"{_escape(gate)}"))
+        message = _tagged(
+            "C19",
+            (
+                f"{subject}: prior sensitivity could not be decided for this "
+                f"document. The package refuses it in its own words: {refused} "
+                f"{_escape(gate)}"
+            ),
+        )
         found = verdict(gate, failed=True, where=subject, message=message)
         if found is not None:
             yield found
         return
 
     name, index, shift = report.worst
-    criterion = float(
-        report.for_latent(name)["criterion_std"].ravel()[index])
+    criterion = float(report.for_latent(name)["criterion_std"].ravel()[index])
     failed = abs(shift) >= CRITERION_SHIFT
-    numbers = (f"the declared priors move the mode of {name}[{index}] by "
-               f"{shift:+.3e} posterior sigma, the largest of this space's "
-               f"{report.n_par} parameter(s), against the "
-               f"{CRITERION_SHIFT:.3e} sigma at which a shift is large enough "
-               "to change a published central value without visibly widening "
-               "its error bar")
-    tail = (f"That element reaches {CRITERION_SHIFT:g} sigma at a prior width "
-            f"of {criterion:.3e}; compare it with the prior this document "
-            "declares.")
-    message = _tagged("C19", (
-        f"{subject}: {numbers}. {tail} {_escape(gate)}"))
+    numbers = (
+        f"the declared priors move the mode of {name}[{index}] by "
+        f"{shift:+.3e} posterior sigma, the largest of this space's "
+        f"{report.n_par} parameter(s), against the "
+        f"{CRITERION_SHIFT:.3e} sigma at which a shift is large enough "
+        "to change a published central value without visibly widening "
+        "its error bar"
+    )
+    tail = (
+        f"That element reaches {CRITERION_SHIFT:g} sigma at a prior width "
+        f"of {criterion:.3e}; compare it with the prior this document "
+        "declares."
+    )
+    message = _tagged("C19", (f"{subject}: {numbers}. {tail} {_escape(gate)}"))
     found = verdict(gate, failed=failed, where=subject, message=message)
     if found is not None:
         yield found

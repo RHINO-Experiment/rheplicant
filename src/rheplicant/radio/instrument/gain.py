@@ -50,6 +50,5 @@ class GainOperator(AbstractOperator):
                 )
             return state.with_data(state.data * self.gain[:, None])
         raise StateValidationError(
-            f"{type(self).__name__}: gain must be scalar or 1D, got "
-            f"ndim={self.gain.ndim}."
+            f"{type(self).__name__}: gain must be scalar or 1D, got ndim={self.gain.ndim}."
         )

@@ -54,9 +54,7 @@ class TestTheIntegrityManifest:
         Without this, a reader that refused EVERYTHING would pass every other
         test in this class.
         """
-        problems = self._verify(
-            {"format_version": INTEGRITY_FORMAT_VERSION, "files": []}
-        )
+        problems = self._verify({"format_version": INTEGRITY_FORMAT_VERSION, "files": []})
         assert not [p for p in problems if "format_version" in p], problems
 
     @pytest.mark.parametrize("coerce", LOOSE)
@@ -104,11 +102,8 @@ class TestTheArchiveManifest:
             # `factorization` is never reached: the manifest's version is
             # checked first, which is the ordering this refusal depends on.
             archive.load_memory(target, None)
-        assert "format_version" in str(raised.value) or "format version" in str(
-            raised.value
-        ), (
-            f"{value!r} was not refused for being a "
-            f"{type(value).__name__}: {raised.value}"
+        assert "format_version" in str(raised.value) or "format version" in str(raised.value), (
+            f"{value!r} was not refused for being a {type(value).__name__}: {raised.value}"
         )
 
     def test_the_refusal_names_the_type_rather_than_the_number(self, tmp_path):
@@ -119,9 +114,7 @@ class TestTheArchiveManifest:
         """
         from rheplicant.inference.archive import _FORMAT_VERSION
 
-        archive, target, StateValidationError = self._read(
-            tmp_path, float(_FORMAT_VERSION)
-        )
+        archive, target, StateValidationError = self._read(tmp_path, float(_FORMAT_VERSION))
         with pytest.raises(StateValidationError) as raised:
             archive.load_memory(target, None)
         assert "float" in str(raised.value), raised.value
@@ -148,11 +141,12 @@ def test_no_stored_version_is_compared_loosely_anywhere():
     for path in sorted(src.rglob("*.py")):
         text = path.read_text(encoding="utf-8")
         for match in re.finditer(
-            r'^.*\[.format_version.\]\s*!=\s*|^.*\.get\(.format_version.\)\s*!=\s*',
-            text, re.M,
+            r"^.*\[.format_version.\]\s*!=\s*|^.*\.get\(.format_version.\)\s*!=\s*",
+            text,
+            re.M,
         ):
             line_no = text[: match.start()].count("\n")
-            window = "\n".join(text.splitlines()[max(0, line_no - 25): line_no + 1])
+            window = "\n".join(text.splitlines()[max(0, line_no - 25) : line_no + 1])
             # The guard must be ON format_version. Asking only whether the
             # window contains "type(" was the first version of this check and
             # it was VACUOUS: every one of these conditions type-checks its
@@ -166,9 +160,7 @@ def test_no_stored_version_is_compared_loosely_anywhere():
             # a `[^)]*` pattern cannot cross it, which cost one red run. The
             # window is 25 lines because archive.py's guard sits above a long
             # refusal message.
-            if not re.search(
-                r"type\([^\n]*format_version[^\n]*is\s+not\s+int", window
-            ):
+            if not re.search(r"type\([^\n]*format_version[^\n]*is\s+not\s+int", window):
                 loose.append(f"{path.relative_to(src)}:{line_no + 1}")
     assert not loose, (
         f"these compare a stored format_version without a type check in the "

@@ -241,13 +241,10 @@ class SignalGraph:
                 # here would reject legitimate templates in order to restate a
                 # check that already exists, from further away and with less
                 # information to phrase it well.
-                raise AssemblyError(
-                    f"Transform node {n!r} must have in-degree <= 1, got {indeg}."
-                )
+                raise AssemblyError(f"Transform node {n!r} must have in-degree <= 1, got {indeg}.")
             if spec.kind in ("junction", "selector") and indeg < 2:
                 raise AssemblyError(
-                    f"{spec.kind.capitalize()} node {n!r} must have in-degree >= 2, "
-                    f"got {indeg}."
+                    f"{spec.kind.capitalize()} node {n!r} must have in-degree >= 2, got {indeg}."
                 )
 
     # -- rendering -----------------------------------------------------------
@@ -301,9 +298,7 @@ class SignalGraph:
         palette = _MERMAID_THEMES[theme]  # KeyError names the unknown theme
         for cls in ("lit", "wire", "dim"):
             fill, stroke, text = palette[cls]
-            lines.append(
-                f"  classDef {cls} fill:{fill},stroke:{stroke},color:{text};"
-            )
+            lines.append(f"  classDef {cls} fill:{fill},stroke:{stroke},color:{text};")
         for n in self.nodes:
             cls = "lit" if n in lit else ("wire" if n in skipped else "dim")
             lines.append(f"  class {n} {cls};")
@@ -423,9 +418,7 @@ class Assembly(AbstractOperator):
     skipped: tuple[str, ...] = eqx.field(static=True)
     has_source: bool = eqx.field(static=True)
     root_label: str = eqx.field(static=True, default="")
-    instances: tuple[tuple[str, tuple[str, ...]], ...] = eqx.field(
-        static=True, default=()
-    )
+    instances: tuple[tuple[str, tuple[str, ...]], ...] = eqx.field(static=True, default=())
     materialized: tuple[str, ...] = eqx.field(static=True, default=())
     aliased: tuple[str, ...] = eqx.field(static=True, default=())
     # The recipe, as ADDRESSES rather than operators: (template nodes, the id
@@ -434,9 +427,7 @@ class Assembly(AbstractOperator):
     # the `aliased` failure this class refuses to create. Addresses are static
     # strings, so the fold stays the only place an operator lives, and
     # `without` recovers the set by reading them back off the built tree.
-    placements: tuple[tuple[tuple[str, ...], str], ...] = eqx.field(
-        static=True, default=()
-    )
+    placements: tuple[tuple[tuple[str, ...], str], ...] = eqx.field(static=True, default=())
 
     def __call__(self, state: State) -> State:
         if self.has_source and state.data is not None:
@@ -575,8 +566,7 @@ class Assembly(AbstractOperator):
             )
         return assemble(
             get_graph(self.graph_name),
-            *(At(nodes if len(nodes) > 1 else nodes[0], self[address])
-              for nodes, address in kept),
+            *(At(nodes if len(nodes) > 1 else nodes[0], self[address]) for nodes, address in kept),
         )
 
     @property
@@ -596,8 +586,11 @@ class Assembly(AbstractOperator):
     def to_html(self, title: str | None = None, theme: str = "light") -> str:
         """Standalone HTML page: the full graph with this assembly's nodes lit."""
         return get_graph(self.graph_name).to_html(
-            lit=self.lit, skipped=self.skipped, title=title,
-            counts=self._counts, theme=theme,
+            lit=self.lit,
+            skipped=self.skipped,
+            title=title,
+            counts=self._counts,
+            theme=theme,
         )
 
     def to_svg(self, title: str | None = None, theme: str = "light") -> str:
@@ -606,8 +599,11 @@ class Assembly(AbstractOperator):
         ``theme`` is ``"light"`` or ``"dark"``; see :meth:`SignalGraph.to_svg`.
         """
         return get_graph(self.graph_name).to_svg(
-            lit=self.lit, skipped=self.skipped, title=title,
-            counts=self._counts, theme=theme,
+            lit=self.lit,
+            skipped=self.skipped,
+            title=title,
+            counts=self._counts,
+            theme=theme,
         )
 
     def __repr__(self) -> str:
@@ -615,9 +611,7 @@ class Assembly(AbstractOperator):
         # operators sit on it — so the multiplicity is reported beside it
         # rather than folded into the list, where it would read as a node id.
         counts = self._counts
-        lit = [
-            f"{nid} x{counts[nid]}" if nid in counts else nid for nid in self.lit
-        ]
+        lit = [f"{nid} x{counts[nid]}" if nid in counts else nid for nid in self.lit]
         # `aliased` appears ONLY when it is non-empty, and the asymmetry is the
         # point. It is empty for every shipped graph and for every user graph
         # whose nodes each reach the sink by one path, so an always-present
@@ -628,11 +622,7 @@ class Assembly(AbstractOperator):
         # through them, but a hand-rolled `eqx.tree_at` goes through neither and
         # rewrites one copy only. Seeing them here is how that is noticed
         # without knowing to ask -- see the `aliased` attribute for the rest.
-        fan_out = (
-            f", aliased-at-several-positions={list(self.aliased)}"
-            if self.aliased
-            else ""
-        )
+        fan_out = f", aliased-at-several-positions={list(self.aliased)}" if self.aliased else ""
         return (
             f"Assembly(graph={self.graph_name!r}, lit={lit}, "
             f"skipped-as-identity={list(self.skipped)}{fan_out})"
@@ -700,9 +690,7 @@ def _spine_pairs(
         if twin is None:
             queue.extend((child, None) for child in children)
         else:
-            queue.extend(
-                zip(children, _children_through_assemblies(twin), strict=True)
-            )
+            queue.extend(zip(children, _children_through_assemblies(twin), strict=True))
 
 
 class _LeafPath:
@@ -733,9 +721,7 @@ def _aliased_leaf_paths(pipeline: AbstractOperator) -> dict[tuple, str]:
     one leaves the first live — the same wrong answer from the other end.
     Assemblies nested inside a larger composite are covered too.
     """
-    if not any(
-        isinstance(op, Assembly) and op.aliased for op, _ in _spine_pairs(pipeline)
-    ):
+    if not any(isinstance(op, Assembly) and op.aliased for op, _ in _spine_pairs(pipeline)):
         return {}
     tagged = jax.tree_util.tree_map_with_path(lambda path, _: _LeafPath(path), pipeline)
     owned: dict[tuple, str] = {}
@@ -749,8 +735,7 @@ def _aliased_leaf_paths(pipeline: AbstractOperator) -> dict[tuple, str]:
             for below, below_twin in _spine_pairs(current.operator, twin.operator):
                 if below is target:
                     owned.update(
-                        (tag.path, node_id)
-                        for tag in jax.tree_util.tree_leaves(below_twin)
+                        (tag.path, node_id) for tag in jax.tree_util.tree_leaves(below_twin)
                     )
     return owned
 
@@ -858,9 +843,7 @@ def _descend_to_own_stage(part: AbstractOperator, name: str) -> AbstractOperator
     return part
 
 
-def _claimed_nodes(
-    graph: SignalGraph, item: AbstractOperator | At
-) -> tuple[str, ...]:
+def _claimed_nodes(graph: SignalGraph, item: AbstractOperator | At) -> tuple[str, ...]:
     """The template nodes ``item`` claims: from ``At(...)``, or its registration.
 
     One node for an ordinary placement, several for a region claim. Every id is
@@ -963,9 +946,7 @@ def _resolve(
     return placement, regions
 
 
-def assemble(
-    graph: SignalGraph, *operators: AbstractOperator | At
-) -> Assembly:
+def assemble(graph: SignalGraph, *operators: AbstractOperator | At) -> Assembly:
     """Compile a set of operators into the sub-pipeline they induce on ``graph``.
 
     See the module docstring for the contraction rules. Raises

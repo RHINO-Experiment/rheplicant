@@ -40,8 +40,8 @@ FREQ = 60e6 + CHANNEL * jnp.arange(N_FREQ, dtype=float)
 TONE_CHANNEL = 4
 TONE_FREQ = float(FREQ[TONE_CHANNEL])
 TONE_KELVIN = 5000.0
-TIME = 100.0 * jnp.arange(N_TIME, dtype=float)      # 0, 100, 200, 300 s
-DRIFT_PER_CHANNEL = CHANNEL / 100.0                 # one channel per sample
+TIME = 100.0 * jnp.arange(N_TIME, dtype=float)  # 0, 100, 200, 300 s
+DRIFT_PER_CHANNEL = CHANNEL / 100.0  # one channel per sample
 
 
 @pytest.fixture
@@ -106,9 +106,9 @@ class TestTheTimeAxisMustBeAbleToExpressItsOwnCadence:
         with pytest.raises(StateValidationError) as excinfo:
             _tone(drift_rate=DRIFT_PER_CHANNEL)(self._at(state, 1.75e9))
         message = str(excinfo.value)
-        assert "read_rhino_observation" in message      # where the axis comes from
-        assert "JAX_ENABLE_X64" in message              # one of the two remedies
-        assert "start of the run" in message            # the other
+        assert "read_rhino_observation" in message  # where the axis comes from
+        assert "JAX_ENABLE_X64" in message  # one of the two remedies
+        assert "start of the run" in message  # the other
 
     def test_the_same_run_measured_from_its_own_start_is_accepted(self, state):
         """The remedy, run: subtract the epoch BEFORE the axis is stored."""
@@ -217,9 +217,7 @@ class TestADriftingMaskThroughAShapeChangingStage:
         protects a PAIR of channels per chunk — the union of what the tone wet
         while the chunk was integrating, which is what the chunk mean contains.
         """
-        out = Pipeline(
-            _tone(drift_rate=DRIFT_PER_CHANNEL), BackendOperator(n_chunk=2)
-        )(state)
+        out = Pipeline(_tone(drift_rate=DRIFT_PER_CHANNEL), BackendOperator(n_chunk=2))(state)
         assert out.data.shape == (N_TIME // 2, N_FREQ)
         mask = np.asarray(out.aux[PROTECTED_KEY])
         assert mask.shape == (N_TIME // 2, N_FREQ)
@@ -233,9 +231,7 @@ class TestADriftingMaskThroughAShapeChangingStage:
         without passing through the stage that reshaped them."""
         stale = jnp.ones((N_TIME, N_FREQ), dtype=bool)
         with pytest.raises(StateValidationError, match="stale"):
-            unflag_protected(
-                jnp.zeros((N_TIME // 2, N_FREQ), dtype=bool), {PROTECTED_KEY: stale}
-            )
+            unflag_protected(jnp.zeros((N_TIME // 2, N_FREQ), dtype=bool), {PROTECTED_KEY: stale})
 
     def test_a_static_tone_survives_the_same_stage(self, state):
         """The contrast, and the reason this is not a blanket refusal: a

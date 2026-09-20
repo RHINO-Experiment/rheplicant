@@ -73,11 +73,15 @@ CONDITION_WHERE = "runs['condition']"
 # reword of the production one would leave these four green.
 
 
-LINEARITY_DECLINED = {"linearity": {"mode": "skip",
-                      "reason": "this fixture declares linear: true on a "
-                                "latent the prediction is not affine in, on "
-                                "purpose, so that the exit-level check: has "
-                                "a lever"}}
+LINEARITY_DECLINED = {
+    "linearity": {
+        "mode": "skip",
+        "reason": "this fixture declares linear: true on a "
+        "latent the prediction is not affine in, on "
+        "purpose, so that the exit-level check: has "
+        "a lever",
+    }
+}
 
 
 class TestTheLeafIsWired:
@@ -158,12 +162,10 @@ class TestTheConjugateBlock:
         in, so the declared linear=True is a false claim: check=True catches
         it and check=False builds the block anyway.
         """
-        nonlinear = conjugate_built(
-            inference={**NONLINEAR_LATENT, "checks": LINEARITY_DECLINED})
+        nonlinear = conjugate_built(inference={**NONLINEAR_LATENT, "checks": LINEARITY_DECLINED})
         with pytest.raises(ParameterSpaceError, match="not affine"):
             _conjugate_block(spec(names=["w"]), nonlinear, WHERE)
-        block, _, _ = _conjugate_block(spec(names=["w"], check=False),
-                                       nonlinear, WHERE)
+        block, _, _ = _conjugate_block(spec(names=["w"], check=False), nonlinear, WHERE)
         assert block.names == ("w",)
 
     def test_a_non_bool_check_is_refused(self):
@@ -180,11 +182,12 @@ class TestTheConjugateBlock:
         bare = load_document(conjugate_document(inference=NO_OBSERVED))
         with pytest.raises(ConfigError, match="inference.observed"):
             _conjugate_block(spec(names=["g"]), bare, WHERE)
-        block, sigma, observed = _conjugate_block(spec(names=["g"]), bare,
-                                                  WHERE, needs_observed=False)
+        block, sigma, observed = _conjugate_block(
+            spec(names=["g"]), bare, WHERE, needs_observed=False
+        )
         assert block.names == ("g",)
-        assert observed is None          # the third element, suppressed
-        assert sigma.shape == (16, 8)    # the sigma is still decided
+        assert observed is None  # the third element, suppressed
+        assert sigma.shape == (16, 8)  # the sigma is still decided
 
     def test_the_two_kinds_that_find_their_own_sigma_get_none(self):
         """The False branch of _DECIDES_SIGMA_HERE, which nothing else here takes.
@@ -197,8 +200,7 @@ class TestTheConjugateBlock:
         exist to serve.
         """
         for kind in ("conjugate.gcr", "conjugate.gls"):
-            _, sigma, _ = _conjugate_block(spec(kind=kind, names=["g"]),
-                                           ONE, WHERE)
+            _, sigma, _ = _conjugate_block(spec(kind=kind, names=["g"]), ONE, WHERE)
             assert sigma is None
 
     def test_condition_is_the_other_kind_that_decides_its_sigma_here(self):
@@ -213,13 +215,12 @@ class TestTheConjugateBlock:
         """
         bare = conjugate_built(inference=NO_OBSERVED)
         block, sigma, observed = _conjugate_block(
-            spec(kind="condition", names=["g"]), bare, CONDITION_WHERE,
-            needs_observed=False)
+            spec(kind="condition", names=["g"]), bare, CONDITION_WHERE, needs_observed=False
+        )
         assert observed is None
         assert sigma.shape == (16, 8)
         assert float(sigma[0, 0]) == pytest.approx(SIGMA_K)
-        assert float(condition_estimate(block, noise_std=sigma)) == (
-            pytest.approx(1.0, abs=1e-3))
+        assert float(condition_estimate(block, noise_std=sigma)) == (pytest.approx(1.0, abs=1e-3))
 
     def test_check_A27_fires_under_kind_condition_too(self):
         """A27 must reach all four kinds it names, not just the default one.
@@ -231,8 +232,9 @@ class TestTheConjugateBlock:
         """
         built = conjugate_built(inference={**NO_OBSERVED, "noise": RADIOMETER})
         with pytest.raises(ConfigError, match="check A27") as caught:
-            _conjugate_block(spec(kind="condition", names=["g"]), built,
-                             CONDITION_WHERE, needs_observed=False)
+            _conjugate_block(
+                spec(kind="condition", names=["g"]), built, CONDITION_WHERE, needs_observed=False
+            )
         assert "kind: condition takes a DECIDED sigma" in str(caught.value)
         # CONDITION_WHERE has to EARN its name.  _decided_sigma builds its own
         # prefix from run.name rather than taking `where`, so without this the
@@ -249,10 +251,8 @@ class TestTheConjugateBlock:
         and no other test can tell.  Data it never declared is the more
         actionable of the two.
         """
-        doubly = conjugate_built(inference={**NO_OBSERVED,
-                                            "noise": RADIOMETER})
-        with pytest.raises(ConfigError,
-                           match="compares against inference.observed") as got:
+        doubly = conjugate_built(inference={**NO_OBSERVED, "noise": RADIOMETER})
+        with pytest.raises(ConfigError, match="compares against inference.observed") as got:
             _conjugate_block(spec(names=["g"]), doubly, WHERE)
         assert "check A27" not in str(got.value)
 
@@ -276,8 +276,7 @@ class TestThePriorKwargs:
     def test_a_scalar_broadcasts_into_the_one_name_the_block_holds(self):
         run = spec(names=["g"], prior_std=0.25)
         block, _, _ = _conjugate_block(run, ONE, WHERE)
-        assert _prior_kwargs(run, ONE, block, WHERE) == {
-            "prior_std": {"g": 0.25}}
+        assert _prior_kwargs(run, ONE, block, WHERE) == {"prior_std": {"g": 0.25}}
 
     def test_a_scalar_over_several_latents_is_check_A51(self):
         run = spec(names=["d", "a"], prior_std=0.25)
@@ -288,12 +287,14 @@ class TestThePriorKwargs:
 
     def test_the_mapping_form_keeps_each_width_on_its_own_latent(self):
         """Distinct numbers per key and per keyword: nothing may be swapped."""
-        run = spec(names=["d", "a"], prior_std={"d": 0.25, "a": 7.0},
-                   prior_mean={"d": -1.0, "a": 3.0})
+        run = spec(
+            names=["d", "a"], prior_std={"d": 0.25, "a": 7.0}, prior_mean={"d": -1.0, "a": 3.0}
+        )
         block, _, _ = _conjugate_block(run, TWO, WHERE)
         assert _prior_kwargs(run, TWO, block, WHERE) == {
             "prior_std": {"d": 0.25, "a": 7.0},
-            "prior_mean": {"d": -1.0, "a": 3.0}}
+            "prior_mean": {"d": -1.0, "a": 3.0},
+        }
 
     def test_a_partial_mapping_names_the_members_that_declare_a_prior(self):
         run = spec(names=["d", "a"], prior_std={"d": 0.25})
@@ -310,9 +311,11 @@ class TestThePriorKwargs:
         """
         run = spec(names=["d", "a"], prior_std={"d": 0.25, "a": 7.0, "g": 1.0})
         block, _, _ = _conjugate_block(run, TWO, WHERE)
-        with pytest.raises(ConfigError,
-                           match=r"names \['a', 'd', 'g'\], and this block "
-                                 r"groups \['d', 'a'\]"):
+        with pytest.raises(
+            ConfigError,
+            match=r"names \['a', 'd', 'g'\], and this block "
+            r"groups \['d', 'a'\]",
+        ):
             _prior_kwargs(run, TWO, block, WHERE)
 
     def test_a_negative_width_is_refused_and_a_negative_centre_is_not(self):
@@ -320,9 +323,10 @@ class TestThePriorKwargs:
         block, _, _ = _conjugate_block(spec(names=["g"]), ONE, WHERE)
         with pytest.raises(ConfigError, match="prior_std") as caught:
             _prior_kwargs(spec(names=["g"], prior_std=-1.0), ONE, block, WHERE)
-        assert ">= 0" in str(caught.value)   # the FLOOR, not the A51 refusal
-        assert _prior_kwargs(spec(names=["g"], prior_mean=-1.0), ONE, block,
-                             WHERE) == {"prior_mean": {"g": -1.0}}
+        assert ">= 0" in str(caught.value)  # the FLOOR, not the A51 refusal
+        assert _prior_kwargs(spec(names=["g"], prior_mean=-1.0), ONE, block, WHERE) == {
+            "prior_mean": {"g": -1.0}
+        }
 
     def test_a_non_numeric_width_is_refused_naming_the_member(self):
         block, _, _ = _conjugate_block(spec(names=["g"]), ONE, WHERE)
@@ -356,8 +360,7 @@ class TestThePriorKwargsReachTheSolve:
         block, sigma, observed = _conjugate_block(run, built, WHERE)
         kwargs = _prior_kwargs(run, built, block, WHERE)
         assert kwargs == {"prior_std": {"g": 0.25}}
-        solved, residual = wiener_solve(block, observed, noise_std=sigma,
-                                        **kwargs)
+        solved, residual = wiener_solve(block, observed, noise_std=sigma, **kwargs)
         assert float(solved["g"]) == pytest.approx(TRUTH_G, abs=1e-4)
         assert float(residual) < 1e-5
 
@@ -367,16 +370,14 @@ class TestThePriorKwargsReachTheSolve:
         Wide priors and centres away from the truth, so the data has to do
         the work: a swapped prior_mean would pull the answer off it.
         """
-        built = conjugate_built(inference=TWO_LATENTS,
-                                parameters=PRIOR_FREE_TWO)
-        run = spec(names=["d", "a"], prior_std={"d": 5.0, "a": 50.0},
-                   prior_mean={"d": 0.0, "a": 10.0})
+        built = conjugate_built(inference=TWO_LATENTS, parameters=PRIOR_FREE_TWO)
+        run = spec(
+            names=["d", "a"], prior_std={"d": 5.0, "a": 50.0}, prior_mean={"d": 0.0, "a": 10.0}
+        )
         block, sigma, observed = _conjugate_block(run, built, WHERE)
         kwargs = _prior_kwargs(run, built, block, WHERE)
-        assert kwargs == {"prior_std": {"d": 5.0, "a": 50.0},
-                          "prior_mean": {"d": 0.0, "a": 10.0}}
-        solved, residual = wiener_solve(block, observed, noise_std=sigma,
-                                        **kwargs)
+        assert kwargs == {"prior_std": {"d": 5.0, "a": 50.0}, "prior_mean": {"d": 0.0, "a": 10.0}}
+        solved, residual = wiener_solve(block, observed, noise_std=sigma, **kwargs)
         assert float(solved["d"]) == pytest.approx(TRUTH_D, abs=1e-3)
         assert float(solved["a"]) == pytest.approx(TRUTH_A, abs=1e-2)
         assert float(residual) < 1e-5
@@ -404,8 +405,7 @@ class TestThePriorKwargsReachTheSolve:
         That is the tautology the one-latent test above rules out, and Tasks
         3-6 reach for the GROUPED constant far more often than the single.
         """
-        built = conjugate_built(inference=TWO_LATENTS,
-                                parameters=PRIOR_FREE_TWO)
+        built = conjugate_built(inference=TWO_LATENTS, parameters=PRIOR_FREE_TWO)
         run = spec(names=["d", "a"])
         block, sigma, observed = _conjugate_block(run, built, WHERE)
         assert _prior_kwargs(run, built, block, WHERE) == {}
@@ -438,26 +438,23 @@ class TestTheDecidedSigma:
         sigma = _decided_sigma(spec(), built)
         observed = built.inference.observed.entries["primary"]
         assert float(sigma[0, 0]) == pytest.approx(
-            abs(float(observed[0, 0]))
-            / (CHANNEL_WIDTH_HZ * INTEGRATION_TIME_S) ** 0.5, rel=1e-5)
+            abs(float(observed[0, 0])) / (CHANNEL_WIDTH_HZ * INTEGRATION_TIME_S) ** 0.5, rel=1e-5
+        )
 
     def test_noise_kind_none_keeps_the_shared_refusal(self):
-        built = conjugate_built(inference={"parameters":
-                                           NO_OBSERVED["parameters"]})
+        built = conjugate_built(inference={"parameters": NO_OBSERVED["parameters"]})
         with pytest.raises(ConfigError, match="forward and optimize"):
             _decided_sigma(spec(), built)
 
 
 class TestTheDecidedModel:
     def test_a_homoscedastic_document_hands_back_the_model(self):
-        assert isinstance(_decided_model(spec(), ONE, **_A28_GLS_CLAUSES),
-                          HomoscedasticNoise)
+        assert isinstance(_decided_model(spec(), ONE, **_A28_GLS_CLAUSES), HomoscedasticNoise)
 
     def test_what_A27_refuses_is_exactly_what_gls_takes(self):
         """The mirror: the radiometer the array route refuses is gls's input."""
         built = conjugate_built(noise=RADIOMETER)
-        assert isinstance(_decided_model(spec(), built, **_A28_GLS_CLAUSES),
-                          RadiometerNoise)
+        assert isinstance(_decided_model(spec(), built, **_A28_GLS_CLAUSES), RadiometerNoise)
 
     def test_a_decided_array_is_refused_naming_conjugate_wiener(self):
         """Run it as gls, so the named alternative is not the interpolated kind.
@@ -479,8 +476,7 @@ class TestTheDecidedModel:
         """
         built = conjugate_built(noise=FROZEN)
         with pytest.raises(ConfigError, match="conjugate.wiener") as caught:
-            _decided_model(spec(kind="conjugate.gls"), built,
-                           **_A28_GLS_CLAUSES)
+            _decided_model(spec(kind="conjugate.gls"), built, **_A28_GLS_CLAUSES)
         assert "check A28" in str(caught.value)
         assert "radiometer_frozen" in str(caught.value)
 
@@ -504,8 +500,7 @@ class TestTheDecidedModel:
         """
         built = conjugate_built(noise=FROZEN)
         with pytest.raises(ConfigError) as caught:
-            _decided_model(spec(kind="conjugate.gls"), built,
-                           **_A28_GLS_CLAUSES)
+            _decided_model(spec(kind="conjugate.gls"), built, **_A28_GLS_CLAUSES)
         assert str(caught.value) == (
             "runs['conjugate.gls']: kind: conjugate.gls solves for the "
             "covariance a PREDICTION-DEPENDENT sigma implies, so it reads "
@@ -514,7 +509,8 @@ class TestTheDecidedModel:
             "run sees it, and a decided array has no fixed point to iterate "
             "(check A28). Declare inference.noise.kind: radiometer to "
             "iterate the rule, or run kind: conjugate.wiener, which is what "
-            "a decided sigma wants.")
+            "a decided sigma wants."
+        )
 
     def test_noise_kind_none_keeps_the_shared_refusal(self):
         """The mirror of the sigma route's own kind: none test.
@@ -526,9 +522,7 @@ class TestTheDecidedModel:
         "decides its sigma into an array" -- of a document that declares no
         sigma at all.
         """
-        built = conjugate_built(inference={"parameters":
-                                           NO_OBSERVED["parameters"]})
+        built = conjugate_built(inference={"parameters": NO_OBSERVED["parameters"]})
         with pytest.raises(ConfigError, match="forward and optimize") as got:
-            _decided_model(spec(kind="conjugate.gls"), built,
-                           **_A28_GLS_CLAUSES)
+            _decided_model(spec(kind="conjugate.gls"), built, **_A28_GLS_CLAUSES)
         assert "check A28" not in str(got.value)

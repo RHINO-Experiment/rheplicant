@@ -59,8 +59,7 @@ def _refusal(row: object) -> ExtractedProduct:
         )
     error = row.result.error
     payload = (
-        f"exception_type: {type(error).__module__}.{type(error).__qualname__}\n"
-        f"message: {error}\n"
+        f"exception_type: {type(error).__module__}.{type(error).__qualname__}\nmessage: {error}\n"
     )
     return ExtractedProduct("txt", payload)
 
@@ -72,9 +71,7 @@ def _reused_kind(execution: object, row: object) -> str | None:
     for earlier in execution.runs:
         if earlier.parsed.name == reused:
             return earlier.parsed.kind
-    raise ConfigError(
-        f"run {row.parsed.name!r} reuses missing execution result {reused!r}."
-    )
+    raise ConfigError(f"run {row.parsed.name!r} reuses missing execution result {reused!r}.")
 
 
 def _extract(
@@ -125,9 +122,7 @@ def _materialize_run(
         files: list[ProductFile] = []
         for name, value in extracted.value.items():
             payload, array_metadata = deterministic_npz({"value": value})
-            path = (
-                f"runs/{encode_name(row.parsed.name)}/taps/{name}.npz"
-            )
+            path = f"runs/{encode_name(row.parsed.name)}/taps/{name}.npz"
             validate_relative_product_path(path, component_limit=component_limit)
             files.append(
                 ProductFile(

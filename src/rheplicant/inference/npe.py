@@ -43,7 +43,6 @@ Usage::
     draws = q.sample(observed, key=jax.random.key(3), n_samples=4000)
 """
 
-
 from collections.abc import Callable
 
 import jax
@@ -128,9 +127,7 @@ def simulate_pairs(
             "prior-free latent has no distribution to draw."
         )
     if n_simulations < 1:
-        raise StateValidationError(
-            f"n_simulations must be positive, got {n_simulations}."
-        )
+        raise StateValidationError(f"n_simulations must be positive, got {n_simulations}.")
     space.validate(pipeline)
 
     names = list(space.names)
@@ -139,9 +136,7 @@ def simulate_pairs(
 
     def one(index_key: jax.Array, draw_index: jax.Array):
         values = {
-            name: space.latent(name).prior.sample(
-                jax.random.fold_in(prior_keys[name], draw_index)
-            )
+            name: space.latent(name).prior.sample(jax.random.fold_in(prior_keys[name], draw_index))
             for name in names
         }
         prediction = space.bind(pipeline, values)(state_template).data

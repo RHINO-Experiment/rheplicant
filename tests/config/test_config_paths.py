@@ -77,8 +77,9 @@ class StaticShapes(AbstractOperator):
 
 @pytest.fixture
 def twin():
-    return Pipeline(Toy(gain=jnp.asarray(1.0)), Toy(gain=jnp.asarray(2.0)),
-                    names=["gain", "bandpass"])
+    return Pipeline(
+        Toy(gain=jnp.asarray(1.0)), Toy(gain=jnp.asarray(2.0)), names=["gain", "bandpass"]
+    )
 
 
 class TestParsing:
@@ -101,14 +102,10 @@ class TestParsing:
             ("inference.parameters.d-1.init", "inference.parameters"),
         ],
     )
-    def test_longest_legal_prefix_keeps_the_deepest_spellable_path(
-        self, label, expected
-    ):
+    def test_longest_legal_prefix_keeps_the_deepest_spellable_path(self, label, expected):
         assert path_syntax.longest_legal_prefix(label) == expected
 
-    def test_longest_legal_prefix_visits_each_segment_at_most_once(
-        self, monkeypatch
-    ):
+    def test_longest_legal_prefix_visits_each_segment_at_most_once(self, monkeypatch):
         """A long suffix after the first bad segment must not cause rescans."""
         real = path_syntax.PATH_STEP
         visited: list[str] = []
@@ -120,9 +117,7 @@ class TestParsing:
 
         monkeypatch.setattr(path_syntax, "PATH_STEP", CountingPattern())
         legal = ["root", *(f"step{index}" for index in range(256))]
-        label = ".".join(
-            [*legal, "bad-name", *(f"suffix{index}" for index in range(256))]
-        )
+        label = ".".join([*legal, "bad-name", *(f"suffix{index}" for index in range(256))])
 
         assert path_syntax.longest_legal_prefix(label) == ".".join(legal)
         assert visited == [*legal, "bad-name"]
@@ -454,11 +449,12 @@ class TestAgainstTheRealMachinery:
 #: (``kinds/projectors.py``); the shape is written ``["n_time", 12]`` rather
 #: than ``[16, 12]`` because a literal extent equal to ``n_time`` earns A41 and
 #: the finding would be noise in a test that is not about it.
-_SHARED_PROJECTOR = {"engine": "matrix", "matrix": {"zeros": ["n_time", 12]},
-                     "provenance": {"built_by": "the test suite",
-                                    "lat_deg": 0.0}}
-_SHARED_SKY_MODEL = {"kind": "uniform", "n_pix": 12,
-                     "amplitude": {"value": 200.0, "unit": "K"}}
+_SHARED_PROJECTOR = {
+    "engine": "matrix",
+    "matrix": {"zeros": ["n_time", 12]},
+    "provenance": {"built_by": "the test suite", "lat_deg": 0.0},
+}
+_SHARED_SKY_MODEL = {"kind": "uniform", "n_pix": 12, "amplitude": {"value": 200.0, "unit": "K"}}
 
 
 @pytest.fixture(scope="module")
@@ -478,19 +474,26 @@ def shared_projector_run():
     )
 
     document = preflight_document(
-        observation={**BASE_OBSERVATION,
-                     "pointing": {"mode": "baked",
-                                  "provenance": {"built_by": "a test"}}},
-        resources={"projectors": {"p": _SHARED_PROJECTOR},
-                   "sky_models": {"s": _SHARED_SKY_MODEL}},
-        model={**BASE_MODEL,
-               "observed_astro_sky": {
-                   "sky_model": {"ref": "resources.sky_models.s"},
-                   "projector": {"ref": "resources.projectors.p"}},
-               "filters": [{"type": "SkySpaceFilter",
-                            "projector": {"ref": "resources.projectors.p"},
-                            "regularization": {"value": 1e-3,
-                                               "unit": "dimensionless"}}]})
+        observation={
+            **BASE_OBSERVATION,
+            "pointing": {"mode": "baked", "provenance": {"built_by": "a test"}},
+        },
+        resources={"projectors": {"p": _SHARED_PROJECTOR}, "sky_models": {"s": _SHARED_SKY_MODEL}},
+        model={
+            **BASE_MODEL,
+            "observed_astro_sky": {
+                "sky_model": {"ref": "resources.sky_models.s"},
+                "projector": {"ref": "resources.projectors.p"},
+            },
+            "filters": [
+                {
+                    "type": "SkySpaceFilter",
+                    "projector": {"ref": "resources.projectors.p"},
+                    "regularization": {"value": 1e-3, "unit": "dimensionless"},
+                }
+            ],
+        },
+    )
     return load_document(document)
 
 
@@ -642,14 +645,12 @@ class TestB2TheShippedGraphIsATree:
                     continue
                 # `id` OR `attr`: `get_graph(...)` and `mod.get_graph(...)`
                 # are the same call and only the first is an `ast.Name`.
-                name = getattr(node.func, "id", None) or getattr(
-                    node.func, "attr", None)
+                name = getattr(node.func, "id", None) or getattr(node.func, "attr", None)
                 if name == "get_graph":
                     called.append(str(path.relative_to(config)))
         assert called == [], f"config/ now selects a graph in {called}"
 
-    def test_aliased_is_empty_on_a_built_twin_and_that_half_is_weak(
-            self, shared_projector_run):
+    def test_aliased_is_empty_on_a_built_twin_and_that_half_is_weak(self, shared_projector_run):
         """The half the plan named and then measured to be vacuous.
 
         Kept because it is the property ``refuse_aliased_target`` reads, and
@@ -686,8 +687,7 @@ class TestB7OneResourceIsOneObject:
     way it is.
     """
 
-    def test_both_references_reach_the_same_object(self,
-                                                   shared_projector_run):
+    def test_both_references_reach_the_same_object(self, shared_projector_run):
         """B7, stated: ``filters[].projector`` **is**
         ``observed_astro_sky.projector`` when they name one resource.
 

@@ -291,9 +291,7 @@ def test_flipped_agrees_with_read_s2p_flipped(tmp_path):
     )
     ts = read_touchstone(path, flipped=True)
 
-    assert_pairwise_distinct(
-        s11=flipped_s11, s12=flipped_s12, s21=flipped_s21, s22=flipped_s22
-    )
+    assert_pairwise_distinct(s11=flipped_s11, s12=flipped_s12, s21=flipped_s21, s22=flipped_s22)
 
     # The reversal actually moved something: without this, both sides agreeing
     # would be consistent with neither having flipped anything.

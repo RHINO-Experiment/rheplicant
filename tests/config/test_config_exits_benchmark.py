@@ -132,7 +132,6 @@ def test_pre_execute_receives_all_prepared_layers_not_one_configured_run():
 
 def test_benchmark_is_present_in_all_four_live_registries():
     assert all(
-        "benchmark" in registry
-        for registry in (PARSERS, PRE_EXECUTORS, EXECUTORS, DEFERRED_CHECKS)
+        "benchmark" in registry for registry in (PARSERS, PRE_EXECUTORS, EXECUTORS, DEFERRED_CHECKS)
     )
     assert DEFERRED_CHECKS["benchmark"] == ("benchmark.variants_available",)

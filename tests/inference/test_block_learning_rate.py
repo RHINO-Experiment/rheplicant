@@ -37,8 +37,7 @@ def _run_one_gradient_block_estimate(block):
             freq=jnp.linspace(60e6, 85e6, n_freq),
         )
     )
-    twin = assemble(SkyOperator(amplitude=jnp.array(10.0)),
-                    GainOperator(gain=jnp.array(1.0)))
+    twin = assemble(SkyOperator(amplitude=jnp.array(10.0)), GainOperator(gain=jnp.array(1.0)))
     observed = twin(state).data * 1.2
 
     space = ParameterSpace(
@@ -46,8 +45,7 @@ def _run_one_gradient_block_estimate(block):
         bindings=[Bind("gain", into=lambda p: p["gain"].gain)],
     )
     plan = SamplingPlan(space, block)
-    return plan.estimate(twin, state, observed,
-                         noise=HomoscedasticNoise(sigma=jnp.array(1.0)))
+    return plan.estimate(twin, state, observed, noise=HomoscedasticNoise(sigma=jnp.array(1.0)))
 
 
 def test_block_defaults_learning_rate_to_none():

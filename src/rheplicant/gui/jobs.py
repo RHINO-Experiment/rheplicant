@@ -282,25 +282,17 @@ class JobStore:
                 )
             except Exception as error:  # noqa: BLE001 -- the job records terminal errors
                 output = getattr(error, "gui_output", None)
-                exception_type = getattr(
-                    error, "job_exception_type", type(error).__name__
-                )
+                exception_type = getattr(error, "job_exception_type", type(error).__name__)
                 # Each part is bounded before the join, so no unbounded string
                 # is ever built here, and the join is bounded again after it.
                 finished = replace(
                     running,
                     status="error",
-                    result=(
-                        None if output is None else {"output": bounded_result(output)}
-                    ),
-                    message=bounded_text(
-                        f"{bounded_text(exception_type)}: {bounded_text(error)}"
-                    ),
+                    result=(None if output is None else {"output": bounded_result(output)}),
+                    message=bounded_text(f"{bounded_text(exception_type)}: {bounded_text(error)}"),
                 )
             else:
-                finished = replace(
-                    running, status="succeeded", result=bounded_result(result)
-                )
+                finished = replace(running, status="succeeded", result=bounded_result(result))
         finally:
             if finished is None:
                 finished = _stranded(running, sys.exc_info()[1])
@@ -331,9 +323,7 @@ class JobStore:
             current = self._jobs.get(job_id)
             if current is None or current.status != "queued":
                 return
-            self._jobs[job_id] = _terminal(
-                current, "the job was never started", failure
-            )
+            self._jobs[job_id] = _terminal(current, "the job was never started", failure)
             self._yaml.pop(job_id, None)
             self._evict()
 
@@ -393,9 +383,7 @@ def _stranded(running: JobRecord, failure: BaseException | None) -> JobRecord:
     return _terminal(running, "the job recorded no terminal result", failure)
 
 
-def _terminal(
-    row: JobRecord, summary: str, failure: BaseException | None
-) -> JobRecord:
+def _terminal(row: JobRecord, summary: str, failure: BaseException | None) -> JobRecord:
     """One terminal record for a job that will never produce its own.
 
     Describing the failure must not become a second way to strand the job, so
@@ -459,8 +447,6 @@ def _error_result(error: ConfigError) -> object | None:
     if output is not None:
         result["output"] = bounded_result(output)
     return result
-
-
 
 
 def _audit_path(stderr: str) -> str | None:
@@ -559,8 +545,7 @@ def _finding(row: object, layer: str) -> dict[str, object]:
 def _worker_frame(scan: _FrameScan) -> Mapping[str, object]:
     if scan.oversized:
         raise RuntimeError(
-            "GUI scientific worker result frame is larger than the "
-            f"{MAX_FRAME_BYTES}-byte limit"
+            f"GUI scientific worker result frame is larger than the {MAX_FRAME_BYTES}-byte limit"
         )
     if scan.payload is None:
         raise RuntimeError("GUI scientific worker returned no result frame")
@@ -570,29 +555,21 @@ def _worker_frame(scan: _FrameScan) -> Mapping[str, object]:
         "refused",
         "error",
     }:
-        raise RuntimeError(
-            "GUI scientific worker returned an invalid result frame"
-        )
+        raise RuntimeError("GUI scientific worker returned an invalid result frame")
     status = frame["status"]
     if status == "ok" and not isinstance(frame.get("result"), Mapping):
         raise RuntimeError("GUI scientific worker result must be a mapping")
     if status == "refused" and not isinstance(frame.get("message"), str):
-        raise RuntimeError(
-            "GUI scientific worker refusal must carry a message"
-        )
+        raise RuntimeError("GUI scientific worker refusal must carry a message")
     if status == "error" and (
         not isinstance(frame.get("exception_type"), str)
         or not isinstance(frame.get("message"), str)
     ):
-        raise RuntimeError(
-            "GUI scientific worker error must carry a type and message"
-        )
+        raise RuntimeError("GUI scientific worker error must carry a type and message")
     return frame
 
 
-def _child_stream(
-    answered: bytes | None, tail: _StreamTail, limit: int
-) -> bytes:
+def _child_stream(answered: bytes | None, tail: _StreamTail, limit: int) -> bytes:
     """Take one child stream's bounded tail without ever holding all of it.
 
     ``subprocess.run`` reports ``None`` for a stream it redirected, which is
@@ -613,9 +590,7 @@ def _child_frames(answered: bytes | None, scan: _FrameScan) -> _FrameScan:
     return replacement
 
 
-def _run_isolated_job(
-    kind: JobKind, yaml_text: str
-) -> Mapping[str, object]:
+def _run_isolated_job(kind: JobKind, yaml_text: str) -> Mapping[str, object]:
     frames = _FrameScan()
     errors = _StreamTail(limit=MAX_STREAM_BYTES)
     try:
@@ -638,9 +613,7 @@ def _run_isolated_job(
             "GUI scientific worker did not finish within "
             f"{MAX_WORKER_SECONDS} seconds and was ended"
         ) from None
-    stderr = bounded_stream_bytes(
-        _child_stream(completed.stderr, errors, MAX_STREAM_BYTES)
-    )
+    stderr = bounded_stream_bytes(_child_stream(completed.stderr, errors, MAX_STREAM_BYTES))
     for name, sink in (("stdout", frames), ("stderr", errors)):
         if sink.overflowed:
             raise RuntimeError(
@@ -651,21 +624,14 @@ def _run_isolated_job(
             )
         if sink.read_error is not None:
             raise RuntimeError(
-                bounded_text(
-                    f"GUI scientific worker {name} could not be read: "
-                    f"{sink.read_error}"
-                )
+                bounded_text(f"GUI scientific worker {name} could not be read: {sink.read_error}")
             )
     if completed.returncode != 0:
-        raise RuntimeError(
-            f"GUI scientific worker exited {completed.returncode}: {stderr}"
-        )
+        raise RuntimeError(f"GUI scientific worker exited {completed.returncode}: {stderr}")
     try:
         frame = _worker_frame(_child_frames(completed.stdout, frames))
     except (RuntimeError, UnicodeError, json.JSONDecodeError) as error:
-        raise RuntimeError(
-            f"{bounded_text(error)}; worker stderr: {stderr}"
-        ) from None
+        raise RuntimeError(f"{bounded_text(error)}; worker stderr: {stderr}") from None
     if frame["status"] == "refused":
         raise ConfigError(bounded_text(frame["message"]))
     if frame["status"] == "error":
@@ -742,17 +708,13 @@ def execute_job(
             "stderr": stderr_text,
         }
     if exit_code == 2:
-        error = ConfigError(
-            bounded_text(stderr_text.strip() or f"{kind} job was refused.")
-        )
+        error = ConfigError(bounded_text(stderr_text.strip() or f"{kind} job was refused."))
         output = _failure_audit(audit)
         if output is not None:
             error.gui_output = output
         raise error
     if exit_code != 0:
-        error = RuntimeError(
-            bounded_text(stderr_text.strip() or f"{kind} job failed.")
-        )
+        error = RuntimeError(bounded_text(stderr_text.strip() or f"{kind} job failed."))
         output = _failure_audit(audit)
         if output is not None:
             error.gui_output = output

@@ -132,9 +132,13 @@ def _alternating_solve(gain_scale: float, t_ant_scale: float) -> dict:
             params = {**params, name: value[name]}
             kappa = condition_estimate(block, noise_std=NOISE_STD, prior_std=prior_std)
 
-    predicted = pipeline.at(
-        {"t_ant": {"t_ant": params["t_ant"]}, "gain": {"gain": params["gain"]}}
-    )(template).data if hasattr(pipeline, "at") else None
+    predicted = (
+        pipeline.at({"t_ant": {"t_ant": params["t_ant"]}, "gain": {"gain": params["gain"]}})(
+            template
+        ).data
+        if hasattr(pipeline, "at")
+        else None
+    )
     return {
         "rms_error_kelvin": float(jnp.sqrt(jnp.mean((params["t_ant"] - T_ANT0) ** 2))),
         "max_error_kelvin": float(jnp.max(jnp.abs(params["t_ant"] - T_ANT0))),
@@ -176,9 +180,7 @@ class TestTheGuardsCannotSeeIt:
         is orders of magnitude above the floor and is held by ``rel``.
         """
         got = _alternating_solve(gain_scale, t_ant_scale)
-        assert got["rms_error_kelvin"] == pytest.approx(
-            expected_rms, rel=0.05, abs=1.0
-        ), got
+        assert got["rms_error_kelvin"] == pytest.approx(expected_rms, rel=0.05, abs=1.0), got
 
     @pytest.mark.parametrize(("gain_scale", "t_ant_scale", "expected_rms"), STARTS)
     def test_every_per_block_guard_reads_green_regardless(
@@ -241,9 +243,7 @@ class TestWhatDoesSeeIt:
         per-block numbers above are properties of a run; this is a property of
         the parameterization, which is the thing that is actually wrong.
         """
-        report = identifiability(
-            _bilinear_space(), make_pipeline(TONE_KELVIN), _template()
-        )
+        report = identifiability(_bilinear_space(), make_pipeline(TONE_KELVIN), _template())
         assert report.nullity > 0, report
         # And it names WHICH latents are degenerate, not merely that something
         # is: a verdict of "rank deficient" with no direction would leave the

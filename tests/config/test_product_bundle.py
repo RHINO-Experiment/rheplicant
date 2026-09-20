@@ -27,7 +27,7 @@ class FakeAssembly:
     instances = ()
     materialized = ()
     aliased = ()
-    placements = ((('antenna',), "antenna"),)
+    placements = ((("antenna",), "antenna"),)
 
     def to_svg(self, title=None, theme="light"):
         return f'<svg data-theme="{theme}"><title>{title}</title></svg>'
@@ -109,9 +109,7 @@ def test_bundle_filters_runs_encodes_names_and_records_omissions():
 
 
 def test_explicit_incompatible_or_unknown_run_is_a_refusal():
-    execution = record(
-        [row("forward", "forward", SimpleNamespace(data=np.array([1]), aux={}))]
-    )
+    execution = record([row("forward", "forward", SimpleNamespace(data=np.array([1]), aux={}))])
     for request, word in (
         (ProductRequest("parameters", "npz", ("forward",), ()), "not compatible"),
         (ProductRequest("arrays", "npz", ("missing",), ()), "missing"),
@@ -130,9 +128,7 @@ def test_compare_benchmark_refusals_layers_and_report_materialize_together():
         (
             BenchmarkVariant(
                 "base",
-                {
-                    "wall_time": BenchmarkMetric((10, 20), 10, 15.0, 15.0, "ns")
-                },
+                {"wall_time": BenchmarkMetric((10, 20), 10, 15.0, 15.0, "ns")},
             ),
         )
     )
@@ -184,12 +180,8 @@ def test_netcdf_chains_are_deterministic_when_the_optional_writer_is_present():
         ]
     )
     request = ProductRequest("chains", "netcdf", (), ())
-    first = build_product_bundle(
-        execution, requests=(request,), report=None, component_limit=255
-    )
-    second = build_product_bundle(
-        execution, requests=(request,), report=None, component_limit=255
-    )
+    first = build_product_bundle(execution, requests=(request,), report=None, component_limit=255)
+    second = build_product_bundle(execution, requests=(request,), report=None, component_limit=255)
     assert first.files[0].payload == second.files[0].payload
     assert first.files[0].payload.startswith(b"CDF")
     assert not first.files[0].payload.startswith(b"PK")
@@ -251,9 +243,7 @@ def test_fisher_prediction_is_a_band_but_not_a_posterior_predictive():
     with pytest.raises(ConfigError, match="posterior predictive"):
         build_product_bundle(
             execution,
-            requests=(
-                ProductRequest("posterior_predictives", "npz", ("width",), ()),
-            ),
+            requests=(ProductRequest("posterior_predictives", "npz", ("width",), ()),),
             report=None,
             component_limit=255,
         )

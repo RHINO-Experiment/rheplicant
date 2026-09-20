@@ -85,8 +85,7 @@ def test_the_0_3_surface_is_reachable():
         "the narrow catch is half of what 0.3 buys -- an `except "
         "StructureError` must keep catching it"
     )
-    payload = {"names", "at", "errors", "weighted", "rtol", "weighted_rtol",
-               "failed"}
+    payload = {"names", "at", "errors", "weighted", "rtol", "weighted_rtol", "failed"}
     missing = payload - set(inspect.signature(AffinityRefused).parameters)
     assert not missing, (
         f"AffinityRefused is missing {sorted(missing)}: the installed bayesmith "
@@ -349,6 +348,7 @@ def test_upstream_still_calls_its_descent_engine_experimental():
             "engines._adam rests on it; re-check by hand against the "
             "bayesmith release this venv installs"
         )
+
     def cells(line):
         return [cell.strip() for cell in line.strip().strip("|").split("|")]
 
@@ -403,14 +403,11 @@ def test_every_labelled_reference_implementation_is_here(target):
     module_name, _, attribute = target.partition(":")
     module = importlib.import_module(module_name)
     assert hasattr(module, attribute), (
-        f"docs/stability.md calls {target} a deliberate reference "
-        "implementation and it is gone"
+        f"docs/stability.md calls {target} a deliberate reference implementation and it is gone"
     )
 
 
-@pytest.mark.parametrize(
-    "crosscheck", sorted(set(REFERENCE_IMPLEMENTATIONS.values()))
-)
+@pytest.mark.parametrize("crosscheck", sorted(set(REFERENCE_IMPLEMENTATIONS.values())))
 def test_every_labelled_reference_implementation_is_still_crosschecked(crosscheck):
     """The far half, which is the half that makes the label mean anything.
 

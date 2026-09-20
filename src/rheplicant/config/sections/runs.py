@@ -23,10 +23,26 @@ from rheplicant.config.resolution_audit import ResolutionAudit
 __all__ = ["RunResult", "RunSpec", "parse_runs", "run_document"]
 
 _RUN_KEYS = frozenset({"name", "kind", "variant", "on", "reuse", "expect"})
-_KINDS = ("forward", "fisher", "optimize", "plan.estimate", "plan.sample",
-          "conjugate.wiener", "conjugate.gcr", "conjugate.gls", "condition",
-          "identifiability", "score_directions", "gradient", "mmodes",
-          "predict", "nuts", "npe", "compare", "benchmark")
+_KINDS = (
+    "forward",
+    "fisher",
+    "optimize",
+    "plan.estimate",
+    "plan.sample",
+    "conjugate.wiener",
+    "conjugate.gcr",
+    "conjugate.gls",
+    "condition",
+    "identifiability",
+    "score_directions",
+    "gradient",
+    "mmodes",
+    "predict",
+    "nuts",
+    "npe",
+    "compare",
+    "benchmark",
+)
 # Plan 2C's and Plan 2D's own deferral tuples are GONE rather than emptied:
 # `predict` was 2C's last member and `npe` was 2D's, and an empty one would
 # leave `if kind in ()` in `_one` below -- dead, green and forever, and read
@@ -84,22 +100,20 @@ def _one(
         raise ConfigError(f"{where}: kind: is required.")
     if kind not in _KINDS:
         raise ConfigError(
-            f"{where}: kind: {kind!r} is not an exit; this layer runs "
-            f"{list(_KINDS)}."
+            f"{where}: kind: {kind!r} is not an exit; this layer runs {list(_KINDS)}."
         )
     reuse = (
         entry["reuse"]
         if "reuse" in entry
-        else None if audit is None else audit.use_default("runs[].reuse", None)
+        else None
+        if audit is None
+        else audit.use_default("runs[].reuse", None)
     )
     if reuse is not None and not isinstance(reuse, str):
-        raise ConfigError(f"{where}: reuse: is an earlier run's name; got "
-                          f"{reuse!r}.")
+        raise ConfigError(f"{where}: reuse: is an earlier run's name; got {reuse!r}.")
     name = entry.get("name")
     if several and not isinstance(name, str):
-        raise ConfigError(
-            f"{where}: name: is required when there is more than one run."
-        )
+        raise ConfigError(f"{where}: name: is required when there is more than one run.")
     if name is not None and not isinstance(name, str):
         raise ConfigError(f"{where}: name: is a string; got {name!r}.")
     if name is None and audit is not None:
@@ -107,30 +121,40 @@ def _one(
     variant = (
         entry["variant"]
         if "variant" in entry
-        else None if audit is None else audit.use_default("runs[].variant", None)
+        else None
+        if audit is None
+        else audit.use_default("runs[].variant", None)
     )
     if variant is not None and not isinstance(variant, str):
         raise ConfigError(f"{where}: variant: is a name; got {variant!r}.")
     on = (
         entry["on"]
         if "on" in entry
-        else "primary" if audit is None else audit.use_default("runs[].on", "primary")
+        else "primary"
+        if audit is None
+        else audit.use_default("runs[].on", "primary")
     )
     if not isinstance(on, str):
         raise ConfigError(f"{where}: on: is an observed name; got {on!r}.")
     expect = (
         entry["expect"]
         if "expect" in entry
-        else "ok" if audit is None else audit.use_default("runs[].expect", "ok")
+        else "ok"
+        if audit is None
+        else audit.use_default("runs[].expect", "ok")
     )
     if expect not in ("ok", "refuse"):
-        raise ConfigError(f"{where}: expect: is ok or refuse; got "
-                          f"{expect!r}.")
-    options = {key: value for key, value in entry.items()
-               if key not in _RUN_KEYS}
-    return RunSpec(name=name if name is not None else kind, kind=kind,
-                   variant=variant, on=on, expect=expect, options=options,
-                   reuse=reuse)
+        raise ConfigError(f"{where}: expect: is ok or refuse; got {expect!r}.")
+    options = {key: value for key, value in entry.items() if key not in _RUN_KEYS}
+    return RunSpec(
+        name=name if name is not None else kind,
+        kind=kind,
+        variant=variant,
+        on=on,
+        expect=expect,
+        options=options,
+        reuse=reuse,
+    )
 
 
 def parse_runs(
@@ -142,12 +166,10 @@ def parse_runs(
     if isinstance(section, Mapping):
         section = [section]
     if not isinstance(section, list) or not section:
-        raise ConfigError(
-            "runs: is a list of exits (or one exit mapping); got "
-            f"{section!r}."
-        )
-    parsed = tuple(_one(index, entry, len(section) > 1, audit)
-                   for index, entry in enumerate(section))
+        raise ConfigError(f"runs: is a list of exits (or one exit mapping); got {section!r}.")
+    parsed = tuple(
+        _one(index, entry, len(section) > 1, audit) for index, entry in enumerate(section)
+    )
     names = [run.name for run in parsed]
     for name in names:
         if names.count(name) > 1:
@@ -155,8 +177,7 @@ def parse_runs(
     return parsed
 
 
-def run_document(document: Mapping, *,
-                 base_dir: str | None = None) -> dict[str, RunResult]:
+def run_document(document: Mapping, *, base_dir: str | None = None) -> dict[str, RunResult]:
     """Execute every run a document declares, in order, by name.
 
     A compatibility wrapper over the orchestration (Plan 4A Task 10): the
@@ -170,11 +191,9 @@ def run_document(document: Mapping, *,
 
     if not isinstance(document, Mapping):
         raise ConfigError(
-            f"A document is a mapping of sections; got "
-            f"{type(document).__name__} ({document!r})."
+            f"A document is a mapping of sections; got {type(document).__name__} ({document!r})."
         )
-    prepared = prepare_document(document, scope="all_layers",
-                                base_dir=base_dir)
+    prepared = prepare_document(document, scope="all_layers", base_dir=base_dir)
     record = execute_prepared(prepared)
     if record.status != "ok":
         raise record.error

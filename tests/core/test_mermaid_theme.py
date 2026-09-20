@@ -9,8 +9,7 @@ from rheplicant.radio.graph import RADIO_GRAPH
 
 @pytest.fixture
 def twin():
-    return assemble(SkyOperator(amplitude=jnp.array(1.0)),
-                    GainOperator(gain=jnp.array(1.0)))
+    return assemble(SkyOperator(amplitude=jnp.array(1.0)), GainOperator(gain=jnp.array(1.0)))
 
 
 def test_signal_graph_default_theme_is_light():

@@ -121,8 +121,7 @@ def _rhino_cal_jax():
 #: Every temperature leaf takes one of these, and the phrasing is shared by all
 #: four error messages so a caller sees the same list wherever they trip.
 _TEMPERATURE_SHAPES = (
-    "() scalar, (n_freq,) per channel, (n_time, 1) per time sample, or "
-    "(n_time, n_freq) per cell"
+    "() scalar, (n_freq,) per channel, (n_time, 1) per time sample, or (n_time, n_freq) per cell"
 )
 
 
@@ -218,8 +217,7 @@ class NoiseWaveOperator(AbstractOperator):
     def __check_init__(self):
         if self.gamma_src_re.ndim != 2:
             raise StateValidationError(
-                f"gamma_src_re must be 2D (n_source, n_freq), got "
-                f"ndim={self.gamma_src_re.ndim}."
+                f"gamma_src_re must be 2D (n_source, n_freq), got ndim={self.gamma_src_re.ndim}."
             )
         if self.gamma_src_re.shape != self.gamma_src_im.shape:
             raise StateValidationError(
@@ -300,7 +298,11 @@ class NoiseWaveOperator(AbstractOperator):
         )
         return state.with_data(
             rcj.system_temperature(
-                coup, t_src=state.data, t_unc=self.t_unc,
-                t_cos=self.t_cos, t_sin=self.t_sin, t_rx=self.t_rx,
+                coup,
+                t_src=state.data,
+                t_unc=self.t_unc,
+                t_cos=self.t_cos,
+                t_sin=self.t_sin,
+                t_rx=self.t_rx,
             )
         )

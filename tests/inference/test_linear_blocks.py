@@ -90,8 +90,11 @@ class TestLinearOperator:
         """A linear block is sized by what you infer, not by where it lands —
         the sky-alm case in miniature."""
         space = ParameterSpace.direct(
-            "amps", init=jnp.full((3,), SKY_A / 3.0),
-            into=lambda p: p["sum"]["sky_a"].amplitude, fn=jnp.sum, linear=True,
+            "amps",
+            init=jnp.full((3,), SKY_A / 3.0),
+            into=lambda p: p["sum"]["sky_a"].amplitude,
+            fn=jnp.sum,
+            linear=True,
         )
         block = linear_operator(space, twin, template_state)
         assert block.shape == (3,)
@@ -99,16 +102,17 @@ class TestLinearOperator:
         assert block.adjoint(jnp.ones_like(block.offset)).shape == (3,)
 
     def test_undeclared_latent_is_refused(self, twin, template_state):
-        space = ParameterSpace.direct(
-            "amp", init=SKY_A, into=lambda p: p["sum"]["sky_a"].amplitude
-        )
+        space = ParameterSpace.direct("amp", init=SKY_A, into=lambda p: p["sum"]["sky_a"].amplitude)
         with pytest.raises(ParameterSpaceError, match="linear=True"):
             linear_operator(space, twin, template_state)
 
     def test_a_false_declaration_is_refused_at_export(self, twin, template_state):
         space = ParameterSpace.direct(
-            "log_amp", init=jnp.log(SKY_A), into=lambda p: p["sum"]["sky_a"].amplitude,
-            fn=jnp.exp, linear=True,
+            "log_amp",
+            init=jnp.log(SKY_A),
+            into=lambda p: p["sum"]["sky_a"].amplitude,
+            fn=jnp.exp,
+            linear=True,
         )
         with pytest.raises(ParameterSpaceError, match="not affine"):
             linear_operator(space, twin, template_state)
@@ -150,8 +154,10 @@ class TestComplexLatents:
     @pytest.fixture
     def complex_space(self):
         return ParameterSpace.direct(
-            "coeffs", init=jnp.ones(3) + 0j,
-            into=lambda p: p["sky"].coeffs, linear=True,
+            "coeffs",
+            init=jnp.ones(3) + 0j,
+            into=lambda p: p["sky"].coeffs,
+            linear=True,
         )
 
     def test_a_complex_block_passes_the_linearity_check(
@@ -175,15 +181,11 @@ class TestComplexLatents:
         """
         block = linear_operator(complex_space, complex_twin, template_state)
         key = jax.random.key(7)
-        x = jax.random.normal(key, (3,)) + 1j * jax.random.normal(
-            jax.random.fold_in(key, 1), (3,)
-        )
+        x = jax.random.normal(key, (3,)) + 1j * jax.random.normal(jax.random.fold_in(key, 1), (3,))
         y = jax.random.normal(jax.random.fold_in(key, 2), block.offset.shape)
 
         paired = float(jnp.sum(block.forward(x) * y))
-        assert float(jnp.real(jnp.sum(x * block.adjoint(y)))) == pytest.approx(
-            paired, rel=1e-5
-        )
+        assert float(jnp.real(jnp.sum(x * block.adjoint(y)))) == pytest.approx(paired, rel=1e-5)
         assert float(jnp.real(jnp.sum(jnp.conj(x) * block.adjoint(y)))) != pytest.approx(
             paired, rel=1e-3
         )
@@ -230,8 +232,10 @@ class TestWienerSolve:
         n_time = template_state.coords.time.shape[0]
         wide = eqx.tree_at(lambda p: p["gain"].gain, twin, jnp.full((n_time,), GAIN))
         space = ParameterSpace.direct(
-            "gains", init=jnp.full((n_time,), GAIN),
-            into=lambda p: p["gain"].gain, linear=True,
+            "gains",
+            init=jnp.full((n_time,), GAIN),
+            into=lambda p: p["gain"].gain,
+            linear=True,
         )
         return linear_operator(space, wide, template_state)
 
@@ -262,8 +266,10 @@ class TestWienerSolve:
             names=("sky",),
         )
         space = ParameterSpace.direct(
-            "coeffs", init=jnp.ones(3) + 0j,
-            into=lambda p: p["sky"].coeffs, linear=True,
+            "coeffs",
+            init=jnp.ones(3) + 0j,
+            into=lambda p: p["sky"].coeffs,
+            linear=True,
         )
         block = linear_operator(space, complex_twin, template_state)
         truth = jnp.array([1.0 + 2.0j, -0.5 + 0.25j, 3.0 - 1.0j])
@@ -289,8 +295,10 @@ class TestWienerSolve:
             names=("sky",),
         )
         space = ParameterSpace.direct(
-            "coeffs", init=jnp.ones(3) + 0j,
-            into=lambda p: p["sky"].coeffs, linear=True,
+            "coeffs",
+            init=jnp.ones(3) + 0j,
+            into=lambda p: p["sky"].coeffs,
+            linear=True,
         )
         block = linear_operator(space, complex_twin, template_state)
         truth = jnp.array([1.0 + 2.0j, -0.5 - 1.25j, 3.0 + 0.75j])
@@ -311,7 +319,6 @@ class TestWienerSolve:
         observed = gain_block.offset + gain_block.forward(gain_truth)
         _, residual = wiener_solve(gain_block, observed, noise_std=1.0, prior_std=5.0)
         assert float(residual) < 1e-4
-
 
     def test_mismatched_data_shape_is_refused(self, gain_block, template_state):
         """Broadcasting a differently-shaped observation would solve a different
@@ -340,8 +347,11 @@ class TestCheckLinearity:
 
     def test_an_exponential_block_is_caught(self, twin, template_state):
         space = ParameterSpace.direct(
-            "log_amp", init=jnp.log(SKY_A), into=lambda p: p["sum"]["sky_a"].amplitude,
-            fn=jnp.exp, linear=True,
+            "log_amp",
+            init=jnp.log(SKY_A),
+            into=lambda p: p["sum"]["sky_a"].amplitude,
+            fn=jnp.exp,
+            linear=True,
         )
         with pytest.raises(ParameterSpaceError, match="not affine"):
             check_linearity(space, twin, template_state)
@@ -364,8 +374,11 @@ class TestCheckLinearity:
             return jnp.where(over, jnp.sign(x) * knee + 0.02 * (x - jnp.sign(x) * knee), x)
 
         return ParameterSpace.direct(
-            "amp", init=SKY_A, into=lambda p: p["sum"]["sky_a"].amplitude,
-            fn=clip, linear=True,
+            "amp",
+            init=SKY_A,
+            into=lambda p: p["sum"]["sky_a"].amplitude,
+            fn=clip,
+            linear=True,
         )
 
     def test_a_block_linear_only_at_small_scale_is_caught(
@@ -379,8 +392,13 @@ class TestCheckLinearity:
         """
         for seed in range(25):
             with pytest.raises(ParameterSpaceError, match="not affine"):
-                check_linearity(saturating_space, twin, template_state,
-                                scales=(1e2, 1e3, 1e4), key=jax.random.key(seed))
+                check_linearity(
+                    saturating_space,
+                    twin,
+                    template_state,
+                    scales=(1e2, 1e3, 1e4),
+                    key=jax.random.key(seed),
+                )
 
     def test_the_same_block_passes_when_only_small_scales_are_probed(
         self, twin, saturating_space, template_state
@@ -394,15 +412,15 @@ class TestCheckLinearity:
         """
         for seed in range(25):
             key = jax.random.key(seed)
-            check_linearity(saturating_space, twin, template_state,
-                            scales=(1e-3, 1e-2), key=key)     # below the knee
+            check_linearity(
+                saturating_space, twin, template_state, scales=(1e-3, 1e-2), key=key
+            )  # below the knee
             with pytest.raises(ParameterSpaceError, match="not affine"):
-                check_linearity(saturating_space, twin, template_state,
-                                scales=(1e2, 1e3, 1e4), key=key)
+                check_linearity(
+                    saturating_space, twin, template_state, scales=(1e2, 1e3, 1e4), key=key
+                )
 
-    def test_roundoff_at_a_tiny_probe_is_not_mistaken_for_curvature(
-        self, twin, template_state
-    ):
+    def test_roundoff_at_a_tiny_probe_is_not_mistaken_for_curvature(self, twin, template_state):
         """Regression: a linear block whose arithmetic genuinely rounds.
 
         The earlier version of this test used a block whose departure was
@@ -417,11 +435,13 @@ class TestCheckLinearity:
         # float64. Verified in both.
         big = 1e4
         space = ParameterSpace.direct(
-            "amp", init=SKY_A, into=lambda p: p["sum"]["sky_a"].amplitude,
-            fn=lambda x: (x + big) - big, linear=True,
+            "amp",
+            init=SKY_A,
+            into=lambda p: p["sum"]["sky_a"].amplitude,
+            fn=lambda x: (x + big) - big,
+            linear=True,
         )
-        errors = check_linearity(space, twin, template_state,
-                                 scales=(1e-9, 1e-7, 1e-5))
+        errors = check_linearity(space, twin, template_state, scales=(1e-9, 1e-7, 1e-5))
         # The point is that the RELATIVE measure alone would have rejected this
         # perfectly linear block — the floor is what saves it. Asserted against
         # the same rtol check_linearity uses, so it holds in both precisions
@@ -449,21 +469,25 @@ class TestCheckLinearity:
             names=("sum", "gain"),
         )
         space = ParameterSpace.direct(
-            "amp", init=1e-6, into=lambda p: p["sum"]["sky_a"].amplitude,
-            fn=lambda x: x + 1e6 * x**2, linear=True,   # wildly nonlinear
+            "amp",
+            init=1e-6,
+            into=lambda p: p["sum"]["sky_a"].amplitude,
+            fn=lambda x: x + 1e6 * x**2,
+            linear=True,  # wildly nonlinear
         )
         with pytest.raises(ParameterSpaceError, match="not affine"):
             check_linearity(space, tiny, template_state)
 
-    def test_a_bright_unrelated_component_does_not_disable_the_check(
-        self, template_state
-    ):
+    def test_a_bright_unrelated_component_does_not_disable_the_check(self, template_state):
         """The floor must not be set by the BASELINE alone: the baseline is what
         the other latents contribute, so scaling it up would otherwise exempt
         a nonlinear latent that contributes a small fraction of the signal."""
         space = ParameterSpace.direct(
-            "amp", init=1.0, into=lambda p: p["sum"]["sky_a"].amplitude,
-            fn=lambda x: x + 0.05 * x**2, linear=True,
+            "amp",
+            init=1.0,
+            into=lambda p: p["sum"]["sky_a"].amplitude,
+            fn=lambda x: x + 0.05 * x**2,
+            linear=True,
         )
         for bright in (1.0, 1e3, 1e6):
             loud = Pipeline(
@@ -482,8 +506,11 @@ class TestCheckLinearity:
         """`nan > rtol` is False, so a naive filter reads an unusable probe as
         evidence OF linearity. It must read as failure instead."""
         space = ParameterSpace.direct(
-            "amp", init=SKY_A, into=lambda p: p["sum"]["sky_a"].amplitude,
-            fn=lambda x: x + jnp.where(jnp.abs(x) > 1e4, jnp.nan, 0.0), linear=True,
+            "amp",
+            init=SKY_A,
+            into=lambda p: p["sum"]["sky_a"].amplitude,
+            fn=lambda x: x + jnp.where(jnp.abs(x) > 1e4, jnp.nan, 0.0),
+            linear=True,
         )
         with pytest.raises(ParameterSpaceError, match="not affine"):
             check_linearity(space, twin, template_state)
@@ -493,7 +520,9 @@ class TestCheckLinearity:
         probes fall back to absolute. Pinned because the docs' own examples use
         init=zeros."""
         space = ParameterSpace.direct(
-            "amp", init=0.0, into=lambda p: p["sum"]["sky_a"].amplitude,
+            "amp",
+            init=0.0,
+            into=lambda p: p["sum"]["sky_a"].amplitude,
             linear=True,
         )
         errors = check_linearity(space, twin, template_state)
@@ -524,8 +553,11 @@ class TestCheckLinearity:
     def exponential_space(self):
         """Nonlinear at every probe -- the simplest thing that refuses."""
         return ParameterSpace.direct(
-            "log_amp", init=jnp.log(SKY_A), into=lambda p: p["sum"]["sky_a"].amplitude,
-            fn=jnp.exp, linear=True,
+            "log_amp",
+            init=jnp.log(SKY_A),
+            into=lambda p: p["sum"]["sky_a"].amplitude,
+            fn=jnp.exp,
+            linear=True,
         )
 
     def test_the_refusal_is_a_parameter_space_error_and_stays_one(
@@ -585,8 +617,13 @@ class TestCheckLinearity:
         """
         for seed in range(6):
             with pytest.raises(LinearityRefused) as caught:
-                check_linearity(saturating_space, twin, template_state,
-                                scales=(1e-3, 1e2, 1e4), key=jax.random.key(seed))
+                check_linearity(
+                    saturating_space,
+                    twin,
+                    template_state,
+                    scales=(1e-3, 1e2, 1e4),
+                    key=jax.random.key(seed),
+                )
             refused = caught.value
             assert 1e-3 not in refused.failed
             assert set(refused.failed) == {1e2, 1e4}
@@ -661,8 +698,10 @@ class TestGCRSample:
         n_time = template_state.coords.time.shape[0]
         wide = eqx.tree_at(lambda p: p["gain"].gain, twin, jnp.full((n_time,), GAIN))
         space = ParameterSpace.direct(
-            "gains", init=jnp.full((n_time,), GAIN),
-            into=lambda p: p["gain"].gain, linear=True,
+            "gains",
+            init=jnp.full((n_time,), GAIN),
+            into=lambda p: p["gain"].gain,
+            linear=True,
         )
         return linear_operator(space, wide, template_state)
 
@@ -674,8 +713,9 @@ class TestGCRSample:
 
     def test_a_sample_is_not_the_mean(self, gain_block, observed):
         mean, _ = wiener_solve(gain_block, observed, noise_std=1.0, prior_std=5.0)
-        draw, _ = gcr_sample(gain_block, observed, noise_std=1.0, prior_std=5.0,
-                             key=jax.random.key(0))
+        draw, _ = gcr_sample(
+            gain_block, observed, noise_std=1.0, prior_std=5.0, key=jax.random.key(0)
+        )
         assert not jnp.allclose(draw, mean, atol=1e-3)
 
     def test_the_draw_is_deterministic_given_a_key(self, gain_block, observed):
@@ -685,42 +725,37 @@ class TestGCRSample:
         assert jnp.allclose(first, second)
 
     def test_different_keys_give_different_draws(self, gain_block, observed):
-        a, _ = gcr_sample(gain_block, observed, noise_std=1.0, prior_std=5.0,
-                          key=jax.random.key(0))
-        b, _ = gcr_sample(gain_block, observed, noise_std=1.0, prior_std=5.0,
-                          key=jax.random.key(1))
+        a, _ = gcr_sample(gain_block, observed, noise_std=1.0, prior_std=5.0, key=jax.random.key(0))
+        b, _ = gcr_sample(gain_block, observed, noise_std=1.0, prior_std=5.0, key=jax.random.key(1))
         assert not jnp.allclose(a, b)
 
     def test_the_sample_mean_converges_to_the_wiener_mean(self, gain_block, observed):
         mean, _ = wiener_solve(gain_block, observed, noise_std=1.0, prior_std=5.0)
         keys = jax.random.split(jax.random.key(0), 4000)
         draws = jax.vmap(
-            lambda k: gcr_sample(gain_block, observed, noise_std=1.0, prior_std=5.0,
-                                 key=k)[0]
+            lambda k: gcr_sample(gain_block, observed, noise_std=1.0, prior_std=5.0, key=k)[0]
         )(keys)
         _, _, cov = _dense_posterior(gain_block, 1.0, 5.0)
         # standard error of the mean, per component
         sem = jnp.sqrt(jnp.diag(cov) / keys.shape[0])
         assert jnp.all(jnp.abs(draws.mean(axis=0) - mean) < 4.0 * sem)
 
-    def test_the_sample_covariance_matches_the_posterior_covariance(
-        self, gain_block, observed
-    ):
+    def test_the_sample_covariance_matches_the_posterior_covariance(self, gain_block, observed):
         """The test that distinguishes a real constrained realization from a
         mean-plus-arbitrary-noise: the second moment has to be right too."""
         _, _, cov = _dense_posterior(gain_block, 1.0, 5.0)
         keys = jax.random.split(jax.random.key(7), 6000)
         draws = jax.vmap(
-            lambda k: gcr_sample(gain_block, observed, noise_std=1.0, prior_std=5.0,
-                                 key=k)[0]
+            lambda k: gcr_sample(gain_block, observed, noise_std=1.0, prior_std=5.0, key=k)[0]
         )(keys)
         empirical = jnp.cov(draws.T)
         relative = jnp.linalg.norm(empirical - cov) / jnp.linalg.norm(cov)
         assert float(relative) < 0.12, f"covariance off by {float(relative):.3f}"
 
     def test_a_vanishing_prior_pins_the_draw_at_zero(self, gain_block, observed):
-        draw, _ = gcr_sample(gain_block, observed, noise_std=1.0, prior_std=1e-6,
-                             key=jax.random.key(0))
+        draw, _ = gcr_sample(
+            gain_block, observed, noise_std=1.0, prior_std=1e-6, key=jax.random.key(0)
+        )
         assert jnp.allclose(draw, 0.0, atol=1e-4)
 
     def test_with_no_data_the_draw_follows_the_PRIOR(self, gain_block):
@@ -728,8 +763,9 @@ class TestGCRSample:
         IS the prior — the cleanest check that the fluctuation term is scaled right."""
         keys = jax.random.split(jax.random.key(11), 4000)
         draws = jax.vmap(
-            lambda k: gcr_sample(gain_block, gain_block.offset, noise_std=1e8,
-                                 prior_std=2.0, key=k)[0]
+            lambda k: gcr_sample(
+                gain_block, gain_block.offset, noise_std=1e8, prior_std=2.0, key=k
+            )[0]
         )(keys)
         assert float(draws.std()) == pytest.approx(2.0, rel=0.05)
         assert abs(float(draws.mean())) < 0.15
@@ -745,8 +781,10 @@ class TestGCRSample:
             names=("sky",),
         )
         space = ParameterSpace.direct(
-            "coeffs", init=jnp.ones(3) + 0j,
-            into=lambda p: p["sky"].coeffs, linear=True,
+            "coeffs",
+            init=jnp.ones(3) + 0j,
+            into=lambda p: p["sky"].coeffs,
+            linear=True,
         )
         block = linear_operator(space, twin, template_state)
         observed = block.offset + block.forward(jnp.array([1.0 + 2j, -0.5 + 0.25j, 3.0 - 1j]))
@@ -762,8 +800,7 @@ class TestGCRSample:
 
     def test_a_prior_is_required(self, gain_block, observed):
         with pytest.raises(ParameterSpaceError, match="prior_std"):
-            gcr_sample(gain_block, observed, noise_std=1.0, prior_std=None,
-                       key=jax.random.key(0))
+            gcr_sample(gain_block, observed, noise_std=1.0, prior_std=None, key=jax.random.key(0))
 
 
 class SpectralTiltOperator(AbstractOperator):
@@ -815,17 +852,16 @@ class TestConditioningOnOtherLatents:
             ],
         )
 
-    def test_default_uses_the_declared_initial_values(
-        self, tilted, mixed_space, template_state
-    ):
+    def test_default_uses_the_declared_initial_values(self, tilted, mixed_space, template_state):
         block = linear_operator(mixed_space, tilted, template_state, "amp")
         # alpha init = 0 -> no tilt, so offset is sky_b flat across frequency
         assert jnp.allclose(block.offset, SKY_B)
 
     def test_at_rebuilds_the_block_elsewhere(self, tilted, mixed_space, template_state):
         nu = template_state.coords.freq
-        block = linear_operator(mixed_space, tilted, template_state, "amp",
-                                at={"alpha": jnp.array(2.0)})
+        block = linear_operator(
+            mixed_space, tilted, template_state, "amp", at={"alpha": jnp.array(2.0)}
+        )
         expected = SKY_B * (nu / nu[0]) ** (-2.0)
         assert jnp.allclose(block.offset, jnp.broadcast_to(expected, block.offset.shape))
 
@@ -836,12 +872,12 @@ class TestConditioningOnOtherLatents:
 
     def test_at_rejects_an_unknown_name(self, tilted, mixed_space, template_state):
         with pytest.raises(ParameterSpaceError, match="not a latent"):
-            linear_operator(mixed_space, tilted, template_state, "amp",
-                            at={"nope": jnp.array(1.0)})
+            linear_operator(mixed_space, tilted, template_state, "amp", at={"nope": jnp.array(1.0)})
 
     def test_check_linearity_honours_at(self, tilted, mixed_space, template_state):
-        errors = check_linearity(mixed_space, tilted, template_state, "amp",
-                                 at={"alpha": jnp.array(2.0)})
+        errors = check_linearity(
+            mixed_space, tilted, template_state, "amp", at={"alpha": jnp.array(2.0)}
+        )
         assert all(err < 1e-4 for err in errors.values())
 
     def test_a_gibbs_sweep_recovers_both_blocks(self, tilted, mixed_space, template_state):
@@ -850,7 +886,8 @@ class TestConditioningOnOtherLatents:
         true_amp, true_alpha = 60.0, 1.8
         truth = eqx.tree_at(
             lambda p: (p["sum"]["sky_a"].amplitude, p["tilt"].alpha),
-            tilted, (jnp.array(true_amp), jnp.array(true_alpha)),
+            tilted,
+            (jnp.array(true_amp), jnp.array(true_alpha)),
         )
         observed = truth(template_state).data
         forward, _ = mixed_space.forward_fn(tilted, template_state)
@@ -863,10 +900,10 @@ class TestConditioningOnOtherLatents:
         key = jax.random.key(0)
         for _ in range(25):
             key, draw_key = jax.random.split(key)
-            block = linear_operator(mixed_space, tilted, template_state, "amp",
-                                    at=values, check=False)
-            amp, _ = gcr_sample(block, observed, noise_std=0.02, prior_std=500.0,
-                                key=draw_key)
+            block = linear_operator(
+                mixed_space, tilted, template_state, "amp", at=values, check=False
+            )
+            amp, _ = gcr_sample(block, observed, noise_std=0.02, prior_std=500.0, key=draw_key)
             values = {**values, "amp": amp}
             chi2 = jax.vmap(
                 lambda a, current=values: jnp.sum(
@@ -889,21 +926,25 @@ class TestPriorMean:
         n_time = template_state.coords.time.shape[0]
         wide = eqx.tree_at(lambda p: p["gain"].gain, twin, jnp.full((n_time,), GAIN))
         space = ParameterSpace.direct(
-            "gains", init=jnp.full((n_time,), GAIN),
-            into=lambda p: p["gain"].gain, linear=True,
+            "gains",
+            init=jnp.full((n_time,), GAIN),
+            into=lambda p: p["gain"].gain,
+            linear=True,
         )
         return linear_operator(space, wide, template_state)
 
     def test_with_no_data_the_mean_is_the_prior_mean(self, gain_block):
-        mean, _ = wiener_solve(gain_block, gain_block.offset, noise_std=1e8,
-                               prior_std=1.0, prior_mean=3.0)
+        mean, _ = wiener_solve(
+            gain_block, gain_block.offset, noise_std=1e8, prior_std=1.0, prior_mean=3.0
+        )
         assert jnp.allclose(mean, 3.0, rtol=1e-3)
 
     def test_with_no_data_draws_centre_on_the_prior_mean(self, gain_block):
         keys = jax.random.split(jax.random.key(2), 4000)
         draws = jax.vmap(
-            lambda k: gcr_sample(gain_block, gain_block.offset, noise_std=1e8,
-                                 prior_std=2.0, prior_mean=3.0, key=k)[0]
+            lambda k: gcr_sample(
+                gain_block, gain_block.offset, noise_std=1e8, prior_std=2.0, prior_mean=3.0, key=k
+            )[0]
         )(keys)
         assert float(draws.mean()) == pytest.approx(3.0, abs=0.15)
         assert float(draws.std()) == pytest.approx(2.0, rel=0.05)
@@ -917,31 +958,43 @@ class TestPriorMean:
         observed = wide(template_state).data
 
         shifted_prior = linear_operator(
-            ParameterSpace.direct("gains", init=jnp.full((n_time,), GAIN),
-                                  into=lambda p: p["gain"].gain, linear=True),
-            wide, template_state,
+            ParameterSpace.direct(
+                "gains", init=jnp.full((n_time,), GAIN), into=lambda p: p["gain"].gain, linear=True
+            ),
+            wide,
+            template_state,
         )
-        direct, _ = wiener_solve(shifted_prior, observed, noise_std=0.5,
-                                 prior_std=0.3, prior_mean=offset_value)
+        direct, _ = wiener_solve(
+            shifted_prior, observed, noise_std=0.5, prior_std=0.3, prior_mean=offset_value
+        )
 
         shifted_model = linear_operator(
-            ParameterSpace.direct("delta", init=jnp.zeros(n_time),
-                                  into=lambda p: p["gain"].gain,
-                                  fn=lambda d: offset_value + d, linear=True),
-            wide, template_state,
+            ParameterSpace.direct(
+                "delta",
+                init=jnp.zeros(n_time),
+                into=lambda p: p["gain"].gain,
+                fn=lambda d: offset_value + d,
+                linear=True,
+            ),
+            wide,
+            template_state,
         )
         via_fn, _ = wiener_solve(shifted_model, observed, noise_std=0.5, prior_std=0.3)
         assert jnp.allclose(direct, offset_value + via_fn, rtol=1e-4, atol=1e-5)
 
     def test_a_scalar_prior_mean_broadcasts(self, gain_block):
-        mean, _ = wiener_solve(gain_block, gain_block.offset, noise_std=1e8,
-                               prior_std=1.0, prior_mean=jnp.zeros(()) + 2.0)
+        mean, _ = wiener_solve(
+            gain_block,
+            gain_block.offset,
+            noise_std=1e8,
+            prior_std=1.0,
+            prior_mean=jnp.zeros(()) + 2.0,
+        )
         assert mean.shape == gain_block.shape
         assert jnp.allclose(mean, 2.0, rtol=1e-3)
 
     def test_default_is_still_zero_mean(self, gain_block):
-        mean, _ = wiener_solve(gain_block, gain_block.offset, noise_std=1e8,
-                               prior_std=1.0)
+        mean, _ = wiener_solve(gain_block, gain_block.offset, noise_std=1e8, prior_std=1.0)
         assert jnp.allclose(mean, 0.0, atol=1e-6)
 
 
@@ -963,9 +1016,7 @@ class OneLoadOperator(AbstractOperator):
     def __call__(self, state):
         n_time = state.coords.time.shape[0]
         n_freq = state.coords.freq.shape[0]
-        return state.with_data(
-            jnp.full((n_time, n_freq), jnp.sum(self.direction * self.coeffs))
-        )
+        return state.with_data(jnp.full((n_time, n_freq), jnp.sum(self.direction * self.coeffs)))
 
 
 # The one combination the data constrains, and one it is blind to.
@@ -992,12 +1043,12 @@ class TestUnderDeterminedBlocks:
 
     @pytest.fixture
     def one_load_block(self, template_state):
-        pipeline = Pipeline(
-            OneLoadOperator(coeffs=jnp.zeros(3), direction=SEEN), names=("load",)
-        )
+        pipeline = Pipeline(OneLoadOperator(coeffs=jnp.zeros(3), direction=SEEN), names=("load",))
         space = ParameterSpace.direct(
-            "coeffs", init=jnp.array([250.0, 5.0, -3.0]),
-            into=lambda p: p["load"].coeffs, linear=True,
+            "coeffs",
+            init=jnp.array([250.0, 5.0, -3.0]),
+            into=lambda p: p["load"].coeffs,
+            linear=True,
         )
         return linear_operator(space, pipeline, template_state)
 
@@ -1021,9 +1072,14 @@ class TestUnderDeterminedBlocks:
         ``bayesmith.exact.solve._conjugate_solve``, which spells the
         distinction the near side only documented."""
         with pytest.raises(RuntimeError, match="condition bound"):
-            gcr_sample(one_load_block, one_load_observed, noise_std=LOAD_NOISE,
-                       prior_std=LOAD_PRIOR, key=jax.random.key(0),
-                       require_convergence=1e-3)
+            gcr_sample(
+                one_load_block,
+                one_load_observed,
+                noise_std=LOAD_NOISE,
+                prior_std=LOAD_PRIOR,
+                key=jax.random.key(0),
+                require_convergence=1e-3,
+            )
 
     def test_the_mean_is_refused_once_the_prior_has_something_to_say(
         self, one_load_block, one_load_observed
@@ -1039,13 +1095,16 @@ class TestUnderDeterminedBlocks:
         solve returns ~1e-5 instead.
         """
         with pytest.raises(RuntimeError, match="condition bound"):
-            wiener_solve(one_load_block, one_load_observed, noise_std=LOAD_NOISE,
-                         prior_std=LOAD_PRIOR, prior_mean=250.0,
-                         require_convergence=1e-3)
+            wiener_solve(
+                one_load_block,
+                one_load_observed,
+                noise_std=LOAD_NOISE,
+                prior_std=LOAD_PRIOR,
+                prior_mean=250.0,
+                require_convergence=1e-3,
+            )
 
-    def test_the_zero_centred_mean_is_not_refused(
-        self, one_load_block, one_load_observed
-    ):
+    def test_the_zero_centred_mean_is_not_refused(self, one_load_block, one_load_observed):
         """The other half of that: κ being large is not itself a failure.
 
         The guard bounds the error by ``κ · residual``, and here the residual
@@ -1053,8 +1112,9 @@ class TestUnderDeterminedBlocks:
         resolve. A guard that fired on κ alone would reject this correct
         answer.
         """
-        mean, _ = wiener_solve(one_load_block, one_load_observed,
-                               noise_std=LOAD_NOISE, prior_std=LOAD_PRIOR)
+        mean, _ = wiener_solve(
+            one_load_block, one_load_observed, noise_std=LOAD_NOISE, prior_std=LOAD_PRIOR
+        )
         assert float(mean @ BLIND) == pytest.approx(0.0, abs=1e-3)
 
     def test_float32_is_refused_however_tight_the_tolerance(
@@ -1083,18 +1143,23 @@ class TestUnderDeterminedBlocks:
         if jax.config.read("jax_enable_x64"):
             pytest.skip("this is the single-precision floor")
 
-        bound = float(condition_bound(one_load_block, noise_std=LOAD_NOISE,
-                                      prior_std=LOAD_PRIOR))
+        bound = float(condition_bound(one_load_block, noise_std=LOAD_NOISE, prior_std=LOAD_PRIOR))
         epsilon = float(jnp.finfo(jnp.float32).eps)
         assert bound * epsilon > 1e-3, (bound, epsilon)
 
         refusals = []
         for seed in range(20):
             try:
-                gcr_sample(one_load_block, one_load_observed,
-                           noise_std=LOAD_NOISE, prior_std=LOAD_PRIOR,
-                           key=jax.random.key(seed), tol=1e-12, maxiter=5000,
-                           require_convergence=1e-3)
+                gcr_sample(
+                    one_load_block,
+                    one_load_observed,
+                    noise_std=LOAD_NOISE,
+                    prior_std=LOAD_PRIOR,
+                    key=jax.random.key(seed),
+                    tol=1e-12,
+                    maxiter=5000,
+                    require_convergence=1e-3,
+                )
             except RuntimeError as refused:
                 refusals.append(str(refused))
 
@@ -1104,8 +1169,7 @@ class TestUnderDeterminedBlocks:
             f"{bound * epsilon:.2f} against a target of 1e-3"
         )
         assert all("at this precision" in text for text in refusals), (
-            "a refusal here advised tightening tol, which cannot help below "
-            "the precision floor"
+            "a refusal here advised tightening tol, which cannot help below the precision floor"
         )
 
     def test_a_well_conditioned_block_is_not_refused(self, twin, template_state):
@@ -1131,18 +1195,17 @@ class TestUnderDeterminedBlocks:
         n_time = template_state.coords.time.shape[0]
         wide = eqx.tree_at(lambda p: p["gain"].gain, twin, jnp.full((n_time,), GAIN))
         block = linear_operator(
-            ParameterSpace.direct("gains", init=jnp.full((n_time,), GAIN),
-                                  into=lambda p: p["gain"].gain, linear=True),
-            wide, template_state,
+            ParameterSpace.direct(
+                "gains", init=jnp.full((n_time,), GAIN), into=lambda p: p["gain"].gain, linear=True
+            ),
+            wide,
+            template_state,
         )
         observed = block.offset + block.forward(jnp.full((n_time,), GAIN))
-        drawn, _ = gcr_sample(block, observed, noise_std=1.0, prior_std=5.0,
-                              key=jax.random.key(0))
+        drawn, _ = gcr_sample(block, observed, noise_std=1.0, prior_std=5.0, key=jax.random.key(0))
         assert jnp.all(jnp.isfinite(drawn))
 
-    def test_the_condition_estimate_matches_a_dense_eigenvalue_computation(
-        self, one_load_block
-    ):
+    def test_the_condition_estimate_matches_a_dense_eigenvalue_computation(self, one_load_block):
         """The measured κ, checked against LAPACK.
 
         NOT the number a caller picks a tolerance from -- that is
@@ -1157,22 +1220,21 @@ class TestUnderDeterminedBlocks:
         dense = A.T @ A / LOAD_NOISE**2 + jnp.eye(3) / LOAD_PRIOR**2
         expected = jnp.linalg.cond(dense)
 
-        estimated = condition_estimate(one_load_block, noise_std=LOAD_NOISE,
-                                       prior_std=LOAD_PRIOR)
+        estimated = condition_estimate(one_load_block, noise_std=LOAD_NOISE, prior_std=LOAD_PRIOR)
         assert float(estimated) == pytest.approx(float(expected), rel=0.1)
 
     def _healthy_block(self, twin, template_state):
         n_time = template_state.coords.time.shape[0]
         wide = eqx.tree_at(lambda p: p["gain"].gain, twin, jnp.full((n_time,), GAIN))
         return linear_operator(
-            ParameterSpace.direct("gains", init=jnp.full((n_time,), GAIN),
-                                  into=lambda p: p["gain"].gain, linear=True),
-            wide, template_state,
+            ParameterSpace.direct(
+                "gains", init=jnp.full((n_time,), GAIN), into=lambda p: p["gain"].gain, linear=True
+            ),
+            wide,
+            template_state,
         )
 
-    def test_the_bound_is_loose_by_five_decades_on_a_healthy_block(
-        self, twin, template_state
-    ):
+    def test_the_bound_is_loose_by_five_decades_on_a_healthy_block(self, twin, template_state):
         """The price of soundness, as a number rather than a caveat.
 
         This asserted ``< 10.0`` while κ was measured, and the measurement was
@@ -1191,9 +1253,7 @@ class TestUnderDeterminedBlocks:
         assert 1e5 < bound < 1e8, bound
         assert measured < 10.0, measured
 
-    def test_a_correct_answer_is_refused_once_the_guard_is_asked_for(
-        self, twin, template_state
-    ):
+    def test_a_correct_answer_is_refused_once_the_guard_is_asked_for(self, twin, template_state):
         """What being off by default buys, said out loud and with numbers.
 
         The solve below matches a dense reference to 1e-3 -- it is the same
@@ -1221,8 +1281,7 @@ class TestUnderDeterminedBlocks:
         block = self._healthy_block(twin, template_state)
         observed = block.offset + block.forward(truth)
 
-        solved, residual = wiener_solve(block, observed, noise_std=1.0,
-                                        prior_std=5.0)
+        solved, residual = wiener_solve(block, observed, noise_std=1.0, prior_std=5.0)
         bound = float(condition_bound(block, noise_std=1.0, prior_std=5.0))
         expected = _dense_reference(block, observed, 1.0, 5.0)
 
@@ -1231,8 +1290,7 @@ class TestUnderDeterminedBlocks:
         assert jnp.allclose(solved, expected, rtol=1e-3, atol=1e-3), solved
 
         with pytest.raises(RuntimeError, match="precision|condition number"):
-            wiener_solve(block, observed, noise_std=1.0, prior_std=5.0,
-                         require_convergence=1e-3)
+            wiener_solve(block, observed, noise_std=1.0, prior_std=5.0, require_convergence=1e-3)
 
     def test_x64_subprocess_recovers_the_prior_in_the_blind_directions(self):
         """The quantitative claim, at the precision that can support it.
@@ -1270,8 +1328,9 @@ print("blind-direction scatter:", scatter)
 assert 80.0 < scatter < 120.0, scatter
 """
         env = {**os.environ, "JAX_ENABLE_X64": "1"}
-        done = subprocess.run([sys.executable, "-c", script], env=env,
-                              capture_output=True, text=True)
+        done = subprocess.run(
+            [sys.executable, "-c", script], env=env, capture_output=True, text=True
+        )
         assert done.returncode == 0, done.stdout + done.stderr
 
 
@@ -1292,7 +1351,9 @@ class TestBothConditioningExitsRunTheSamePreconditions:
     def _block():
         operator = jax.random.normal(jax.random.key(0), (8, 3), dtype=jnp.float32)
         return LinearBlock(
-            name="x", shape=(3,), dtype=jnp.float32,
+            name="x",
+            shape=(3,),
+            dtype=jnp.float32,
             offset=jnp.zeros((8,), dtype=jnp.float32),
             forward=lambda x: operator @ x,
             adjoint=lambda y: operator.T @ y,
@@ -1381,7 +1442,7 @@ class TestTheTwoConditionNumbersDivideTheLabour:
         assert "upper bound" not in self._doc(condition_estimate)
 
     def test_the_estimate_names_its_own_bias_and_its_direction(self):
-        """"Biased" alone is not actionable; a reader needs the SIGN.
+        """ "Biased" alone is not actionable; a reader needs the SIGN.
 
         Low means the tolerance it suggests is too loose, which is the
         direction that certifies rather than refuses.
@@ -1395,9 +1456,7 @@ class TestTheTwoConditionNumbersDivideTheLabour:
         assert "condition_estimate" in self._doc(condition_bound)
         assert "condition_bound" in self._doc(condition_estimate)
 
-    def test_the_behaviour_the_prose_describes_is_the_behaviour_shipped(
-        self, twin, template_state
-    ):
+    def test_the_behaviour_the_prose_describes_is_the_behaviour_shipped(self, twin, template_state):
         """The anti-vacuity half: the sentences above are checked against the
         numbers, so a docstring pair that agreed with each other while both
         describing the wrong function would still fail here.
@@ -1410,9 +1469,11 @@ class TestTheTwoConditionNumbersDivideTheLabour:
         n_time = template_state.coords.time.shape[0]
         wide = eqx.tree_at(lambda p: p["gain"].gain, twin, jnp.full((n_time,), GAIN))
         block = linear_operator(
-            ParameterSpace.direct("gains", init=jnp.full((n_time,), GAIN),
-                                  into=lambda p: p["gain"].gain, linear=True),
-            wide, template_state,
+            ParameterSpace.direct(
+                "gains", init=jnp.full((n_time,), GAIN), into=lambda p: p["gain"].gain, linear=True
+            ),
+            wide,
+            template_state,
         )
         bound = float(condition_bound(block, noise_std=1.0, prior_std=5.0))
         measured = float(condition_estimate(block, noise_std=1.0, prior_std=5.0))

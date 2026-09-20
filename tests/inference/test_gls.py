@@ -96,11 +96,12 @@ def truth():
 
 @pytest.fixture
 def block(design):
-    twin = Pipeline(DesignOperator(design=design, coeffs=jnp.zeros(N_PAR)),
-                    names=("design",))
+    twin = Pipeline(DesignOperator(design=design, coeffs=jnp.zeros(N_PAR)), names=("design",))
     space = ParameterSpace.direct(
-        "coeffs", init=jnp.zeros(N_PAR),
-        into=lambda p: p["design"].coeffs, linear=True,
+        "coeffs",
+        init=jnp.zeros(N_PAR),
+        into=lambda p: p["design"].coeffs,
+        linear=True,
     )
     template = State(data=jnp.full((N_DATA,), OFFSET))
     return linear_operator(space, twin, template)
@@ -120,9 +121,7 @@ def observed(block, truth, noise, design):
 
 
 class TestAgainstHydraTod:
-    def test_the_solution_matches_the_numpy_reference(
-        self, block, observed, noise, design
-    ):
+    def test_the_solution_matches_the_numpy_reference(self, block, observed, noise, design):
         result = iterative_gls(block, observed, noise=noise, prior_std=PRIOR)
         reference, _ = _hydra_tod_iterative_gls(
             np.asarray(observed, dtype=np.float64),
@@ -130,13 +129,9 @@ class TestAgainstHydraTod:
             np.eye(N_DATA) / noise.fractional**2,
             mu=OFFSET,
         )
-        np.testing.assert_allclose(
-            np.asarray(result.solution), reference, rtol=2e-4
-        )
+        np.testing.assert_allclose(np.asarray(result.solution), reference, rtol=2e-4)
 
-    def test_the_covariance_matches_the_numpy_reference(
-        self, block, observed, noise, design
-    ):
+    def test_the_covariance_matches_the_numpy_reference(self, block, observed, noise, design):
         """The returned sigma IS the reference's Sigma, diagonally."""
         result = iterative_gls(block, observed, noise=noise, prior_std=PRIOR)
         _, sigma_inv = _hydra_tod_iterative_gls(
@@ -160,9 +155,7 @@ class TestConvergence:
     def test_the_result_is_a_fixed_point(self, block, observed, noise):
         """Re-weighting at the answer must return the answer."""
         result = iterative_gls(block, observed, noise=noise, prior_std=PRIOR)
-        again, _ = wiener_solve(
-            block, observed, noise_std=result.noise_std, prior_std=PRIOR
-        )
+        again, _ = wiener_solve(block, observed, noise_std=result.noise_std, prior_std=PRIOR)
         assert jnp.allclose(again, result.solution, rtol=1e-4)
 
     def test_constant_noise_needs_no_reweighting_at_all(self, block, observed):
@@ -173,18 +166,19 @@ class TestConvergence:
         assert int(result.iterations) == 1
         assert jnp.allclose(result.solution, direct, rtol=1e-5)
 
-    def test_stopping_early_is_reported_rather_than_hidden(
-        self, block, observed, noise
-    ):
+    def test_stopping_early_is_reported_rather_than_hidden(self, block, observed, noise):
         result = iterative_gls(
-            block, observed, noise=noise, prior_std=PRIOR,
-            min_reweights=1, max_reweights=2, reweight_tol=1e-15,
+            block,
+            observed,
+            noise=noise,
+            prior_std=PRIOR,
+            min_reweights=1,
+            max_reweights=2,
+            reweight_tol=1e-15,
         )
         assert not bool(result.converged)
 
-    def test_a_tolerance_below_the_epsilon_never_converges(
-        self, block, observed, noise
-    ):
+    def test_a_tolerance_below_the_epsilon_never_converges(self, block, observed, noise):
         """Why the default cannot be a fixed number.
 
         float32's epsilon is 1.2e-7, so a relative step of 1e-8 is rounding
@@ -203,9 +197,7 @@ class TestConvergence:
         thing that was ever true; the CI triage of 2026-08-28 met the same
         arm64/x86-64 split on a sibling fixture and reached the same reading.
         """
-        stuck = iterative_gls(
-            block, observed, noise=noise, prior_std=PRIOR, reweight_tol=1e-12
-        )
+        stuck = iterative_gls(block, observed, noise=noise, prior_std=PRIOR, reweight_tol=1e-12)
         # The claim is that the REQUESTED step is below what the dtype can
         # measure, so asking for it tells you nothing. That is what is
         # asserted, and it holds however the loop then exits.
@@ -218,9 +210,7 @@ class TestConvergence:
         assert jnp.allclose(derived.solution, stuck.solution, rtol=1e-5)
 
     def test_it_is_jittable(self, block, observed, noise):
-        run = jax.jit(
-            lambda d: iterative_gls(block, d, noise=noise, prior_std=PRIOR).solution
-        )
+        run = jax.jit(lambda d: iterative_gls(block, d, noise=noise, prior_std=PRIOR).solution)
         assert jnp.allclose(
             run(observed),
             iterative_gls(block, observed, noise=noise, prior_std=PRIOR).solution,
@@ -236,22 +226,22 @@ class TestConvergence:
         an infinite ``lax.while_loop`` under jit cannot be interrupted."""
         with pytest.raises(ParameterSpaceError, match="min_reweights"):
             iterative_gls(
-                block, observed, noise=noise, prior_std=PRIOR,
-                min_reweights=8, max_reweights=2,
+                block,
+                observed,
+                noise=noise,
+                prior_std=PRIOR,
+                min_reweights=8,
+                max_reweights=2,
             )
 
 
 class TestFlagsSurviveTheReweighting:
-    def test_a_flagged_sample_stays_weightless_throughout(
-        self, block, observed, noise
-    ):
+    def test_a_flagged_sample_stays_weightless_throughout(self, block, observed, noise):
         flags = jnp.zeros(N_DATA, bool).at[:8].set(True)
         ruined = observed.at[:8].set(1e6)
         wrapped = FlaggedNoise(noise, flags)
         result = iterative_gls(block, ruined, noise=wrapped, prior_std=PRIOR)
-        clean = iterative_gls(
-            block, observed, noise=wrapped, prior_std=PRIOR
-        )
+        clean = iterative_gls(block, observed, noise=wrapped, prior_std=PRIOR)
         # The flagged samples were replaced by garbage; the answer must not move.
         assert jnp.allclose(result.solution, clean.solution, rtol=1e-5)
         assert jnp.all(jnp.isinf(result.noise_std[:8]))
@@ -265,8 +255,11 @@ class TestTheDrawAtTheFoundCovariance:
         keys = jax.random.split(jax.random.key(0), 600)
         draws = jax.vmap(
             lambda k: gcr_sample(
-                block, observed, noise_std=result.noise_std,
-                prior_std=PRIOR, key=k,
+                block,
+                observed,
+                noise_std=result.noise_std,
+                prior_std=PRIOR,
+                key=k,
             )[0]
         )(keys)
         scatter = draws.std(axis=0) / jnp.sqrt(draws.shape[0])
@@ -279,8 +272,11 @@ class TestTheDrawAtTheFoundCovariance:
         keys = jax.random.split(jax.random.key(1), 4000)
         draws = jax.vmap(
             lambda k: gcr_sample(
-                block, observed, noise_std=result.noise_std,
-                prior_std=PRIOR, key=k,
+                block,
+                observed,
+                noise_std=result.noise_std,
+                prior_std=PRIOR,
+                key=k,
             )[0]
         )(keys)
         weight = 1.0 / np.asarray(result.noise_std, dtype=np.float64) ** 2
@@ -321,8 +317,10 @@ class TestASquareSystemMovesOnlyTheWidth:
             names=("design",),
         )
         space = ParameterSpace.direct(
-            "coeffs", init=jnp.zeros(self.SIZE),
-            into=lambda p: p["design"].coeffs, linear=True,
+            "coeffs",
+            init=jnp.zeros(self.SIZE),
+            into=lambda p: p["design"].coeffs,
+            linear=True,
         )
         template = State(data=jnp.full((self.SIZE,), 50.0))
         return linear_operator(space, twin, template), design
@@ -340,8 +338,10 @@ class TestASquareSystemMovesOnlyTheWidth:
         observed, noise = square_data
         found = iterative_gls(block, observed, noise=noise, prior_std=PRIOR)
         flat, _ = wiener_solve(
-            block, observed,
-            noise_std=float(jnp.mean(observed) * noise.fractional), prior_std=PRIOR,
+            block,
+            observed,
+            noise_std=float(jnp.mean(observed) * noise.fractional),
+            prior_std=PRIOR,
         )
         assert jnp.allclose(found.solution, flat, rtol=1e-3)
 
@@ -357,9 +357,7 @@ class TestASquareSystemMovesOnlyTheWidth:
             return np.sqrt(np.diag(np.linalg.inv(U.T @ (weight[:, None] * U) + eye)))
 
         reweighted = width(found.noise_std)
-        frozen = width(
-            np.full(self.SIZE, float(jnp.mean(observed) * noise.fractional))
-        )
+        frozen = width(np.full(self.SIZE, float(jnp.mean(observed) * noise.fractional)))
         assert np.max(np.abs(frozen / reweighted - 1.0)) > 0.05
 
 
@@ -390,15 +388,13 @@ class TestWhyItIsNeeded:
         more favourable than the physics warrants.
         """
         ramp = jnp.logspace(0.0, 2.0, N_DATA)
-        design = ramp[:, None] * jnp.abs(
-            jax.random.normal(jax.random.key(11), (N_DATA, N_PAR))
-        )
-        twin = Pipeline(
-            DesignOperator(design=design, coeffs=jnp.zeros(N_PAR)), names=("design",)
-        )
+        design = ramp[:, None] * jnp.abs(jax.random.normal(jax.random.key(11), (N_DATA, N_PAR)))
+        twin = Pipeline(DesignOperator(design=design, coeffs=jnp.zeros(N_PAR)), names=("design",))
         space = ParameterSpace.direct(
-            "coeffs", init=jnp.zeros(N_PAR),
-            into=lambda p: p["design"].coeffs, linear=True,
+            "coeffs",
+            init=jnp.zeros(N_PAR),
+            into=lambda p: p["design"].coeffs,
+            linear=True,
         )
         template = State(data=jnp.full((N_DATA,), 10.0))
         return linear_operator(space, twin, template)
@@ -417,8 +413,10 @@ class TestWhyItIsNeeded:
             observed = clean * (1.0 + w)
             found = iterative_gls(steep, observed, noise=noise, prior_std=PRIOR)
             frozen, _ = wiener_solve(
-                steep, observed,
-                noise_std=jnp.mean(observed) * noise.fractional, prior_std=PRIOR,
+                steep,
+                observed,
+                noise_std=jnp.mean(observed) * noise.fractional,
+                prior_std=PRIOR,
             )
             return (
                 jnp.linalg.norm(found.solution - self.TRUTH),
@@ -461,9 +459,7 @@ class TestABareSigmaIsRefusedByName:
         assert "HomoscedasticNoise" in message, message
         assert "wiener_solve" in message, message
 
-    def test_the_wrapped_constant_is_accepted_and_converges_at_once(
-        self, block, observed
-    ):
+    def test_the_wrapped_constant_is_accepted_and_converges_at_once(self, block, observed):
         """The remedy the message offers has to work, and to do the right thing.
 
         A constant sigma has no fixed point to find, so the honest answer is
@@ -511,13 +507,9 @@ class TestTheKnobsReachTheFarSideExactlyAsWritten:
         monkeypatch.setattr(gls_module, "_far_iterative_gls", spy)
         return seen
 
-    def test_an_explicit_reweight_tol_arrives_unchanged(
-        self, monkeypatch, block, observed, noise
-    ):
+    def test_an_explicit_reweight_tol_arrives_unchanged(self, monkeypatch, block, observed, noise):
         seen = self._spy(monkeypatch)
-        iterative_gls(
-            block, observed, noise=noise, prior_std=PRIOR, reweight_tol=3.7e-09
-        )
+        iterative_gls(block, observed, noise=noise, prior_std=PRIOR, reweight_tol=3.7e-09)
         assert seen["reweight_tol"] == 3.7e-09
 
     def test_no_declared_tolerance_forwards_none_rather_than_a_local_default(
@@ -532,8 +524,13 @@ class TestTheKnobsReachTheFarSideExactlyAsWritten:
 
     @pytest.mark.parametrize(
         "knob,value",
-        [("min_reweights", 3), ("max_reweights", 7), ("tol", 1e-5),
-         ("maxiter", 11), ("require_convergence", 1e-1)],
+        [
+            ("min_reweights", 3),
+            ("max_reweights", 7),
+            ("tol", 1e-5),
+            ("maxiter", 11),
+            ("require_convergence", 1e-1),
+        ],
     )
     def test_every_other_knob_arrives_unchanged(
         self, monkeypatch, block, observed, noise, knob, value
@@ -544,9 +541,7 @@ class TestTheKnobsReachTheFarSideExactlyAsWritten:
         rather than through whichever fixture happens to notice."""
         seen = self._spy(monkeypatch)
         try:
-            iterative_gls(
-                block, observed, noise=noise, prior_std=PRIOR, **{knob: value}
-            )
+            iterative_gls(block, observed, noise=noise, prior_std=PRIOR, **{knob: value})
         except Exception:  # noqa: BLE001 -- see below
             # Deliberately tolerated. The spy records the keywords BEFORE the
             # far side runs, so a value the far side then refuses -- which

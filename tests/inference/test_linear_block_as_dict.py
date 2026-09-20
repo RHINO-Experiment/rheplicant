@@ -41,9 +41,7 @@ def twin():
 
 @pytest.fixture
 def space():
-    return ParameterSpace.direct(
-        "gain", init=GAIN, into=lambda p: p["gain"].gain, linear=True
-    )
+    return ParameterSpace.direct("gain", init=GAIN, into=lambda p: p["gain"].gain, linear=True)
 
 
 @pytest.fixture
@@ -53,9 +51,7 @@ def observed(space, twin, template_state):
 
 
 class TestAsDict:
-    def test_wraps_the_bare_answer_of_a_singular_block(
-        self, space, twin, template_state, observed
-    ):
+    def test_wraps_the_bare_answer_of_a_singular_block(self, space, twin, template_state, observed):
         block = linear_operator(space, twin, template_state, "gain")
         solved, _ = wiener_solve(block, observed, noise_std=NOISE, prior_std=10.0)
         assert not isinstance(solved, dict)
@@ -66,9 +62,7 @@ class TestAsDict:
         solved, _ = wiener_solve(block, observed, noise_std=NOISE, prior_std=PRIOR)
         assert block.as_dict(solved) == solved
 
-    def test_the_two_spellings_agree_once_wrapped(
-        self, space, twin, template_state, observed
-    ):
+    def test_the_two_spellings_agree_once_wrapped(self, space, twin, template_state, observed):
         """The whole point: one call, correct whichever way the block was built."""
         singular = linear_operator(space, twin, template_state, "gain")
         grouped = linear_operator(space, twin, template_state, names=("gain",))
@@ -137,22 +131,22 @@ class TestWhyTheWrapIsNeeded:
         block, solved = bare
         with pytest.raises(TypeError):
             linear_operator(space, twin, template_state, "gain", at=solved)
-        rebuilt = linear_operator(
-            space, twin, template_state, "gain", at=block.as_dict(solved)
-        )
+        rebuilt = linear_operator(space, twin, template_state, "gain", at=block.as_dict(solved))
         assert rebuilt.name == "gain"
 
-    def test_conditional_potential_rejects_it(
-        self, space, twin, template_state, observed, bare
-    ):
+    def test_conditional_potential_rejects_it(self, space, twin, template_state, observed, bare):
         from rheplicant.inference.engines import Conditioning
         from rheplicant.inference.noise import HomoscedasticNoise
 
         block, solved = bare
         forward, values0 = space.forward_fn(twin, template_state)
         cond = Conditioning(
-            space, twin, template_state, observed,
-            HomoscedasticNoise(jnp.array(NOISE)), forward,
+            space,
+            twin,
+            template_state,
+            observed,
+            HomoscedasticNoise(jnp.array(NOISE)),
+            forward,
         )
         potential = conditional_potential(cond, ("gain",), values0)
         with pytest.raises(TypeError):

@@ -140,9 +140,7 @@ def parallel_origins(document: object, origins: OriginNode) -> OriginNode:
 def _runtime_json(value: object) -> JsonValue:
     """Project an already-earned runtime scalar/array into detached JSON."""
     if static_isinstance(value, Mapping):
-        return to_json_value(
-            {str(key): _runtime_json(child) for key, child in value.items()}
-        )
+        return to_json_value({str(key): _runtime_json(child) for key, child in value.items()})
     if type(value) in (list, tuple):
         return to_json_value(tuple(_runtime_json(child) for child in value))
     tolist = getattr(value, "tolist", None)
@@ -181,8 +179,7 @@ def layer_audit_row(
     truth = _runtime_json(inference.truth)
     truth_omitted = inference.truth_omitted
     truth_omissions = tuple(
-        {"name": name, "reason": reason}
-        for name, reason in truth_omitted.items()
+        {"name": name, "reason": reason} for name, reason in truth_omitted.items()
     )
     x64_required_by = tuple(
         row.destination.document_path

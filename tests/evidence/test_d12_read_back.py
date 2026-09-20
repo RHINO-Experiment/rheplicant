@@ -69,10 +69,7 @@ class TestTheFixtureIsActuallyThere:
         sharpest on -- ``None`` and a length-zero array are the same claim to a
         reader and different pytrees to equinox.
         """
-        described = [
-            json.loads((FIXTURES / name).read_text())["terms"][0]
-            for name in MANIFESTS
-        ]
+        described = [json.loads((FIXTURES / name).read_text())["terms"][0] for name in MANIFESTS]
         assert described[0]["n_template_projections"] == 2
         assert described[1]["n_template_projections"] is None
         assert described[0]["template_names"] == ["gain_ripple", "ground_pickup"]
@@ -116,9 +113,7 @@ class TestTheStaticFieldsComeBackFromTheManifest:
     @pytest.mark.parametrize(("name", "_shape"), ARCHIVES)
     def test_the_arrays(self, name, _shape):
         term = self._term(name)
-        assert np.allclose(
-            np.asarray(term.info.factor), [[1.5, 0.25], [0.0, 0.75]]
-        )
+        assert np.allclose(np.asarray(term.info.factor), [[1.5, 0.25], [0.0, 0.75]])
         assert np.allclose(np.asarray(term.info.target), [0.5, -0.25])
         assert float(term.info.offset) == pytest.approx(-3.25)
         assert float(term.residual_chi2) == pytest.approx(7.5)
@@ -235,9 +230,7 @@ class TestTheManifestIsNotBOUNDToItsBinary:
         ``template_projections`` being the last leaf -- any manifest that
         under-describes its binary is caught, wherever the shortfall is.
         """
-        path = self._paired(
-            "d12_with_templates.rhep", "d12_without_templates.json", tmp_path
-        )
+        path = self._paired("d12_with_templates.rhep", "d12_without_templates.json", tmp_path)
         with pytest.raises(StateValidationError, match="were never read"):
             load_memory(path, factorization())
 
@@ -247,9 +240,7 @@ class TestTheManifestIsNotBOUNDToItsBinary:
         Without it the message is "these do not match", which is true of every
         mispairing and actionable for none.
         """
-        path = self._paired(
-            "d12_with_templates.rhep", "d12_without_templates.json", tmp_path
-        )
+        path = self._paired("d12_with_templates.rhep", "d12_without_templates.json", tmp_path)
         with pytest.raises(StateValidationError) as caught:
             load_memory(path, factorization())
         assert "144 bytes" in str(caught.value), str(caught.value)
@@ -386,9 +377,7 @@ class TestTheManifestIsNotBOUNDToItsBinary:
         """
         import json
 
-        path = self._paired(
-            "d12_with_templates.rhep", "d12_with_templates.json", tmp_path
-        )
+        path = self._paired("d12_with_templates.rhep", "d12_with_templates.json", tmp_path)
         manifest = tmp_path / "x.json"
         spec = json.loads(manifest.read_text())
         spec["format_version"] = spec["format_version"] - 1
@@ -408,9 +397,7 @@ class TestTheManifestIsNotBOUNDToItsBinary:
         old to open would send them in a circle."""
         import json
 
-        path = self._paired(
-            "d12_with_templates.rhep", "d12_with_templates.json", tmp_path
-        )
+        path = self._paired("d12_with_templates.rhep", "d12_with_templates.json", tmp_path)
         manifest = tmp_path / "x.json"
         spec = json.loads(manifest.read_text())
         spec["format_version"] = spec["format_version"] + 1
@@ -425,9 +412,7 @@ class TestTheManifestIsNotBOUNDToItsBinary:
     def test_the_matched_pair_still_loads(self, tmp_path):
         """ANTI-VACUITY. A check that refused every archive would pass the two
         cases above and destroy the format."""
-        path = self._paired(
-            "d12_with_templates.rhep", "d12_with_templates.json", tmp_path
-        )
+        path = self._paired("d12_with_templates.rhep", "d12_with_templates.json", tmp_path)
         term = load_memory(path, factorization()).archive[0]
         assert term.template_projections is not None
         assert term.template_names != ()
@@ -439,9 +424,7 @@ class TestTheManifestIsNotBOUNDToItsBinary:
     def test_a_templated_spec_on_a_plain_binary_DOES_fail(self, tmp_path):
         """The other direction, and it is the one that behaves: a spec
         expecting one more leaf than the file holds runs off the end."""
-        path = self._paired(
-            "d12_without_templates.rhep", "d12_with_templates.json", tmp_path
-        )
+        path = self._paired("d12_without_templates.rhep", "d12_with_templates.json", tmp_path)
         with pytest.raises(Exception, match="template_projections|TreePath"):
             load_memory(path, factorization())
 

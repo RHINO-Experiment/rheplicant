@@ -291,9 +291,7 @@ class TestColumn:
 class TestNormalize:
     @pytest.mark.parametrize("kind", ["mean1", "pixel_sum", "max1"])
     def test_normalization_emits_dimensionless_metadata(self, kind, context):
-        got = resolve_value(
-            {"list": [1.0, 2.0], "unit": "K", "normalize": kind}, context
-        )
+        got = resolve_value({"list": [1.0, 2.0], "unit": "K", "normalize": kind}, context)
         assert got.modifiers["unit"] == "dimensionless"
 
     @pytest.mark.parametrize(

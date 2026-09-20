@@ -45,11 +45,15 @@ from tests.config.exit_helpers import (
 NO_WIDTH = {key: value for key, value in WIENER.items() if key != "width"}
 
 
-LINEARITY_DECLINED = {"linearity": {"mode": "skip",
-                      "reason": "this fixture declares linear: true on a "
-                                "latent the prediction is not affine in, on "
-                                "purpose, so that the exit-level check: has "
-                                "a lever"}}
+LINEARITY_DECLINED = {
+    "linearity": {
+        "mode": "skip",
+        "reason": "this fixture declares linear: true on a "
+        "latent the prediction is not affine in, on "
+        "purpose, so that the exit-level check: has "
+        "a lever",
+    }
+}
 
 
 def _declined(document):
@@ -124,8 +128,9 @@ class TestTheSolve:
         # Measured: dep = 0.9999954 against a truth of 1.0, c = 0.0199999
         # against 0.02.  Two latents whose scales differ by 50x, so a prior
         # or a solution filed under the wrong member shows up here.
-        product = run_product(two_latent_document(
-            {**WIENER, "names": ["dep", "c"], "require_convergence": None}))
+        product = run_product(
+            two_latent_document({**WIENER, "names": ["dep", "c"], "require_convergence": None})
+        )
         assert float(product["mean"]["dep"]) == pytest.approx(1.0, abs=1e-3)
         assert float(product["mean"]["c"]) == pytest.approx(0.02, abs=1e-4)
 
@@ -141,8 +146,9 @@ class TestTheSolve:
         #                          space.names and cannot see sorted().
         # Only the block's own order satisfies both.
         for names in (["dep", "c"], ["c", "dep"]):
-            product = run_product(two_latent_document(
-                {**WIENER, "names": names, "require_convergence": None}))
+            product = run_product(
+                two_latent_document({**WIENER, "names": names, "require_convergence": None})
+            )
             assert list(product["mean"]) == names
 
     def test_names_selects_a_sub_block(self):
@@ -150,11 +156,11 @@ class TestTheSolve:
         # measurably so: dep comes back -2.9279 here against 0.9999954 when
         # the block holds both.  Asserting only the key set would pass
         # against an executor that solved the whole space and then sliced.
-        product = run_product(two_latent_document(
-            {**WIENER, "names": ["dep"], "require_convergence": None}))
+        product = run_product(
+            two_latent_document({**WIENER, "names": ["dep"], "require_convergence": None})
+        )
         assert sorted(product["mean"]) == ["dep"]
-        assert float(product["mean"]["dep"]) == pytest.approx(-2.9279,
-                                                              rel=1e-3)
+        assert float(product["mean"]["dep"]) == pytest.approx(-2.9279, rel=1e-3)
 
     def test_require_convergence_null_reaches_the_solve(self):
         # The two-latent block is ill-conditioned enough that the guard fires
@@ -168,21 +174,24 @@ class TestTheSolve:
         # 1e-3 is DECLARED rather than defaulted: the shipped default became
         # null when kappa became a bound (inference/linear.py::condition_bound),
         # so leaving it out would make both halves of this pair the same call.
-        with pytest.raises(eqx.EquinoxRuntimeError,
-                           match="wiener_solve/gcr_sample"):
-            run_document(two_latent_document(
-                {**WIENER, "names": ["dep", "c"], "require_convergence": 1e-3}))
-        product = run_product(two_latent_document(
-            {**WIENER, "names": ["dep", "c"], "require_convergence": None}))
+        with pytest.raises(eqx.EquinoxRuntimeError, match="wiener_solve/gcr_sample"):
+            run_document(
+                two_latent_document({**WIENER, "names": ["dep", "c"], "require_convergence": 1e-3})
+            )
+        product = run_product(
+            two_latent_document({**WIENER, "names": ["dep", "c"], "require_convergence": None})
+        )
         assert float(product["mean"]["dep"]) == pytest.approx(1.0, abs=1e-3)
 
     def test_maxiter_reaches_the_solve(self):
         # One CG iteration on the two-latent block leaves dep at -2.7e-05
         # where the converged answer is 0.9999954, so a maxiter: that never
         # arrived is a four-order-of-magnitude difference, not a rounding one.
-        product = run_product(two_latent_document(
-            {**WIENER, "names": ["dep", "c"], "require_convergence": None,
-             "maxiter": 1}))
+        product = run_product(
+            two_latent_document(
+                {**WIENER, "names": ["dep", "c"], "require_convergence": None, "maxiter": 1}
+            )
+        )
         assert abs(float(product["mean"]["dep"])) < 0.01
         # The residual's VALUE, not just its type.  Measured 8.36e-05 here
         # against 8.9e-08 converged, 1.4e-07 for the sub-block and 0.0 for
@@ -211,9 +220,11 @@ class TestTheSolve:
         # to < in jax's stopping rule would drop this test into that branch,
         # where it fails AND stops being distinguishable from its neighbour.
         # boundary-validation.md: do not park a lever on the boundary.
-        product = run_product(two_latent_document(
-            {**WIENER, "names": ["dep", "c"], "require_convergence": None,
-             "tol": 2.0}))
+        product = run_product(
+            two_latent_document(
+                {**WIENER, "names": ["dep", "c"], "require_convergence": None, "tol": 2.0}
+            )
+        )
         assert float(product["mean"]["dep"]) == pytest.approx(0.0, abs=1e-6)
         assert float(product["mean"]["c"]) == pytest.approx(0.0, abs=1e-6)
         assert product["residual"] == pytest.approx(1.0, rel=1e-3)
@@ -223,10 +234,11 @@ class TestTheSolve:
         # TypeErrors, breaking the layer's single-ConfigError contract.  All
         # THREE knobs, because _SOLVER_KNOBS is a table and a member dropped
         # from it forwards raw.
-        for options, key in (({"maxiter": "many"}, "maxiter"),
-                             ({"tol": True}, "tol"),
-                             ({"require_convergence": "loose"},
-                              "require_convergence")):
+        for options, key in (
+            ({"maxiter": "many"}, "maxiter"),
+            ({"tol": True}, "tol"),
+            ({"require_convergence": "loose"}, "require_convergence"),
+        ):
             with pytest.raises(ConfigError, match=f"{key}: is a number"):
                 run_document(wiener_document({**WIENER, **options}))
 
@@ -270,8 +282,7 @@ class TestWidth:
         # above it.  A run NAMED apart from its kind separates three
         # spellings that agree under WIENER: the name, the kind, and
         # "runs[0]".
-        document = wiener_document({**WIENER, "name": "posterior",
-                                    "width": "covariance"})
+        document = wiener_document({**WIENER, "name": "posterior", "width": "covariance"})
         with pytest.raises(ConfigError) as caught:
             run_document(document)
         assert str(caught.value).startswith("runs['posterior']: width:")
@@ -315,12 +326,12 @@ class TestWidth:
         # 0.01587247 and reports kind "covariance".  Both assertions kill
         # "space= was never passed"; the sigma also kills "the covariance is
         # the Fisher un-inverted".
-        product = run_product(wiener_document(
-            {**WIENER, "width": "fisher"}, parameters={"g": TIGHT_GAIN}))
+        product = run_product(
+            wiener_document({**WIENER, "width": "fisher"}, parameters={"g": TIGHT_GAIN})
+        )
         assert product["width"] == "fisher"
         assert product["covariance"].kind == "posterior_covariance"
-        assert float(product["covariance"].sigma("g")) == \
-            pytest.approx(0.00476898, rel=1e-3)
+        assert float(product["covariance"].sigma("g")) == pytest.approx(0.00476898, rel=1e-3)
         # The mean is still the product's: a width is bought BESIDE it, not
         # instead of it.  Under this prior the mean is pulled well off the
         # truth (1.0451 measured), which is the point of the tight prior.
@@ -333,9 +344,11 @@ class TestWidth:
         # under this run's name -- a wider number that reads as this block's
         # own width.
         with pytest.raises(ConfigError, match="width: fisher") as caught:
-            run_document(two_latent_document(
-                {**WIENER, "width": "fisher", "names": ["dep"],
-                 "require_convergence": None}))
+            run_document(
+                two_latent_document(
+                    {**WIENER, "width": "fisher", "names": ["dep"], "require_convergence": None}
+                )
+            )
         message = str(caught.value)
         # Which side is which: the difference taken the other way round is
         # empty here, so an implementation that computed it backwards would
@@ -372,10 +385,9 @@ class TestWidth:
         jax.config.update("jax_enable_x64", True)
         try:
             document = two_latent_document(
-                {**WIENER, "width": "fisher", "names": ["dep", "c"],
-                 "require_convergence": None})
-            document["runtime"] = {**document["runtime"],
-                                   "jax_enable_x64": True}
+                {**WIENER, "width": "fisher", "names": ["dep", "c"], "require_convergence": None}
+            )
+            document["runtime"] = {**document["runtime"], "jax_enable_x64": True}
             product = run_product(document)
             covariance = product["covariance"]
             # Read INSIDE the block too.  `sigma()` is arithmetic on the
@@ -412,12 +424,17 @@ class TestWidth:
         # the point moves.  _gaussian_width's docstring is right that no test
         # pins the point; a task that ever needs one must find a curved
         # latent whose Jacobian actually differs between init and mean.
-        product = run_product(_declined(wiener_document(
-            {**WIENER, "names": ["c"], "width": "fisher", "check": False},
-            parameters={"c": CENTRE_LATENT}, at={"c": 76.0})))
+        product = run_product(
+            _declined(
+                wiener_document(
+                    {**WIENER, "names": ["c"], "width": "fisher", "check": False},
+                    parameters={"c": CENTRE_LATENT},
+                    at={"c": 76.0},
+                )
+            )
+        )
         assert product["covariance"].kind == "posterior_covariance"
-        assert float(product["covariance"].sigma("c")) == pytest.approx(
-            10.0, rel=1e-3)
+        assert float(product["covariance"].sigma("c")) == pytest.approx(10.0, rel=1e-3)
 
     def test_width_fisher_needs_the_prior_declared_not_supplied(self):
         # prior_std: drives the SOLVE; fisher_information reads the
@@ -425,9 +442,11 @@ class TestWidth:
         # the package refuses in its own voice rather than returning a matrix
         # that is part likelihood and part posterior.
         with pytest.raises(ParameterSpaceError, match="declares no prior"):
-            run_document(wiener_document(
-                {**WIENER, "width": "fisher", "prior_std": 10.0},
-                parameters=PRIOR_FREE))
+            run_document(
+                wiener_document(
+                    {**WIENER, "width": "fisher", "prior_std": 10.0}, parameters=PRIOR_FREE
+                )
+            )
 
 
 class TestTheNoiseSeam:
@@ -467,9 +486,11 @@ class TestThePrior:
         # see the block's member count and must refuse first, because the
         # package only gets its turn after the whole document is built.
         with pytest.raises(ConfigError, match="prior_std") as caught:
-            run_document(two_latent_document(
-                {**WIENER, "names": ["dep", "c"], "prior_std": 0.1,
-                 "require_convergence": None}))
+            run_document(
+                two_latent_document(
+                    {**WIENER, "names": ["dep", "c"], "prior_std": 0.1, "require_convergence": None}
+                )
+            )
         assert "check A51" in str(caught.value)
 
     def test_a_scalar_prior_std_over_a_block_of_one_is_broadcast(self):
@@ -480,8 +501,7 @@ class TestThePrior:
         # PRIOR_FREE is what makes the width OBSERVABLE: against a latent
         # that declares its own prior:, _reconcile (linear.py::check_linearity) refuses a
         # disagreeing keyword and accepts an agreeing one in silence.
-        product = run_product(wiener_document(
-            {**WIENER, "prior_std": 10.0}, parameters=PRIOR_FREE))
+        product = run_product(wiener_document({**WIENER, "prior_std": 10.0}, parameters=PRIOR_FREE))
         assert float(product["mean"]["g"]) == pytest.approx(TRUTH_G, abs=1e-4)
 
     def test_no_prior_anywhere_is_the_packages_own_refusal(self):
@@ -515,18 +535,30 @@ class TestCheckReachesLinearOperator:
         # declare an uncertainty that reaches the curvature it exists to
         # exhibit. That helper's comment carries the measurement.
         with pytest.raises(ParameterSpaceError, match="JOINTLY"):
-            run_document(_declined(wiener_document(
-                {**WIENER, "names": ["c"]},
-                parameters={"c": CURVED_CENTRE_LATENT}, at={"c": 76.0})))
+            run_document(
+                _declined(
+                    wiener_document(
+                        {**WIENER, "names": ["c"]},
+                        parameters={"c": CURVED_CENTRE_LATENT},
+                        at={"c": 76.0},
+                    )
+                )
+            )
 
     def test_check_false_reaches_linear_operator(self):
         # Measured: the same document with check: false solves and lands at
         # c = 75.000008.  An executor that dropped check: from its sweep set
         # refuses the key outright; one that sent it to wiener_solve -- which
         # has no such parameter -- raises TypeError.  Neither produces this.
-        product = run_product(_declined(wiener_document(
-            {**WIENER, "names": ["c"], "check": False},
-            parameters={"c": CENTRE_LATENT}, at={"c": 76.0})))
+        product = run_product(
+            _declined(
+                wiener_document(
+                    {**WIENER, "names": ["c"], "check": False},
+                    parameters={"c": CENTRE_LATENT},
+                    at={"c": 76.0},
+                )
+            )
+        )
         assert float(product["mean"]["c"]) == pytest.approx(75.0, abs=1e-3)
 
 
@@ -602,8 +634,7 @@ class TestTheCheapChecksComeFirst:
         # Both keys wrong at once: _width runs before _knobs, so the width is
         # what comes back and the message says nothing about maxiter.
         with pytest.raises(ConfigError, match="width:") as caught:
-            run_document(wiener_document({**WIENER, "width": "covariance",
-                                          "maxiter": "many"}))
+            run_document(wiener_document({**WIENER, "width": "covariance", "maxiter": "many"}))
         assert "maxiter" not in str(caught.value)
 
     def test_a_missing_width_is_heard_before_check_linearity(self):
@@ -612,17 +643,23 @@ class TestTheCheapChecksComeFirst:
         # the operator is built, and a run that never named a width has a
         # grammar error the layer can see without building anything.
         with pytest.raises(ConfigError, match="width: is required"):
-            run_document(_declined(wiener_document(
-                {**NO_WIDTH, "names": ["c"]},
-                parameters={"c": CENTRE_LATENT}, at={"c": 76.0})))
+            run_document(
+                _declined(
+                    wiener_document(
+                        {**NO_WIDTH, "names": ["c"]},
+                        parameters={"c": CENTRE_LATENT},
+                        at={"c": 76.0},
+                    )
+                )
+            )
 
     def test_a_missing_seed_is_heard_before_check_linearity(self):
         # The same guarantee for the draw, and the reason A29 lives in
         # _gcr_plan rather than in _gcr_product: the two halves of the
         # executor must be equally cheap to refuse.
-        document = gcr_document({"names": ["c"]}, prior=None,
-                                parameters={"c": CENTRE_LATENT},
-                                at={"c": 76.0})
+        document = gcr_document(
+            {"names": ["c"]}, prior=None, parameters={"c": CENTRE_LATENT}, at={"c": 76.0}
+        )
         del document["runs"][0]["seed"]
         with pytest.raises(ConfigError, match="A29"):
             run_document(document)
@@ -635,15 +672,13 @@ def _explode(*args, **kwargs):
 class TestRefusalsPrecedeTheOperator:
     """Plan 4A Task 8: a grammar refusal used to wait for the operator."""
 
-    def test_a_bad_prior_shape_speaks_before_the_operator_is_built(
-            self, monkeypatch):
+    def test_a_bad_prior_shape_speaks_before_the_operator_is_built(self, monkeypatch):
         import rheplicant.inference as inference
 
         monkeypatch.setattr(inference, "linear_operator", _explode)
         monkeypatch.setattr(inference, "wiener_solve", _explode)
         with pytest.raises(ConfigError, match="block-diagonal"):
-            run_document(wiener_document({**WIENER,
-                                         "prior_std": {"ghost": 1.0}}))
+            run_document(wiener_document({**WIENER, "prior_std": {"ghost": 1.0}}))
 
 
 class TestConditionDefaultsAreThePackagesOwn:
@@ -653,20 +688,16 @@ class TestConditionDefaultsAreThePackagesOwn:
     def test_an_undeclared_iterations_is_the_packages_twelve(self):
         run = {"kind": "condition", "names": ["g"]}
         implicit = run_product(conjugate_document(run), "condition")
-        explicit = run_product(conjugate_document({**run, "iterations": 12}),
-                               "condition")
+        explicit = run_product(conjugate_document({**run, "iterations": 12}), "condition")
         assert float(implicit) == float(explicit)
 
     def test_the_seed_is_optional_and_reproducible_by_name(self):
-        run = {"kind": "condition", "names": ["g"],
-               "seed": {"from": "runtime.seeds.kappa"}}
-        first = run_product(conjugate_document(run, seeds={"kappa": 5}),
-                            "condition")
-        again = run_product(conjugate_document(run, seeds={"kappa": 5}),
-                            "condition")
+        run = {"kind": "condition", "names": ["g"], "seed": {"from": "runtime.seeds.kappa"}}
+        first = run_product(conjugate_document(run, seeds={"kappa": 5}), "condition")
+        again = run_product(conjugate_document(run, seeds={"kappa": 5}), "condition")
         assert float(first) == float(again)
         # ...and the unseeded run runs at all: A29 makes no demand here.
         unseeded = run_product(
-            conjugate_document({"kind": "condition", "names": ["g"]}),
-            "condition")
+            conjugate_document({"kind": "condition", "names": ["g"]}), "condition"
+        )
         assert float(unseeded) > 0.0

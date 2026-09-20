@@ -28,11 +28,7 @@ def _on_disk() -> set[pathlib.Path]:
     project's own glob -- the suite uses neither today, and the two sides must
     keep agreeing by construction rather than by luck.
     """
-    return {
-        path.resolve()
-        for path in _E2E.rglob("*.ts")
-        if "node_modules" not in path.parts
-    }
+    return {path.resolve() for path in _E2E.rglob("*.ts") if "node_modules" not in path.parts}
 
 
 class TestTheE2ETypecheckIsClosed:
@@ -56,9 +52,7 @@ class TestTheE2ETypecheckIsClosed:
         it would quietly retune the check while reading as a tidy-up.
         """
         project = _project()
-        assert "extends" not in project, (
-            "the flags below would stop being the whole truth"
-        )
+        assert "extends" not in project, "the flags below would stop being the whole truth"
         assert project["compilerOptions"] == {
             "noEmit": True,
             "strict": True,

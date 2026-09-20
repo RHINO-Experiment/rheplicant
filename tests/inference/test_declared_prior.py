@@ -120,18 +120,14 @@ class TestDeclaredPriorReachesTheSolvers:
         ("mean", "std"),
         [(1.0, 0.05), (9.9, 1e-4), (-4.0, 2.0)],
     )
-    def test_wiener_solve_uses_the_declaration(
-        self, twin, template_state, observed, mean, std
-    ):
+    def test_wiener_solve_uses_the_declaration(self, twin, template_state, observed, mean, std):
         block = gain_block(twin, template_state, dist.Normal(mean, std))
         estimate, _ = wiener_solve(block, observed, noise_std=WEAK_SIGMA)
         assert float(estimate) == pytest.approx(
             wiener_by_hand(block, observed, mean=mean, std=std), rel=1e-4
         )
 
-    def test_three_declarations_give_three_different_answers(
-        self, twin, template_state, observed
-    ):
+    def test_three_declarations_give_three_different_answers(self, twin, template_state, observed):
         """The exact table the hearing measured as bit-identical."""
         tight = gain_block(twin, template_state, dist.Normal(1.0, 0.05))
         far = gain_block(twin, template_state, dist.Normal(9.9, 1e-4))
@@ -139,9 +135,7 @@ class TestDeclaredPriorReachesTheSolvers:
 
         a = float(wiener_solve(tight, observed, noise_std=WEAK_SIGMA)[0])
         b = float(wiener_solve(far, observed, noise_std=WEAK_SIGMA)[0])
-        c = float(
-            wiener_solve(free, observed, noise_std=WEAK_SIGMA, prior_std=1.0)[0]
-        )
+        c = float(wiener_solve(free, observed, noise_std=WEAK_SIGMA, prior_std=1.0)[0])
 
         # N(1.0, 0.05): the prior dominates a nearly flat likelihood.
         assert a == pytest.approx(1.00002, rel=1e-3)
@@ -157,9 +151,9 @@ class TestDeclaredPriorReachesTheSolvers:
         the check the ``gcr_sample`` docstring itself names."""
         block = gain_block(twin, template_state, dist.Normal(2.5, 0.4))
         keys = jax.random.split(jax.random.key(0), 512)
-        draws = jax.vmap(
-            lambda k: gcr_sample(block, observed, noise_std=WEAK_SIGMA, key=k)[0]
-        )(keys)
+        draws = jax.vmap(lambda k: gcr_sample(block, observed, noise_std=WEAK_SIGMA, key=k)[0])(
+            keys
+        )
         assert float(jnp.mean(draws)) == pytest.approx(2.5, abs=0.06)
         assert float(jnp.std(draws)) == pytest.approx(0.4, rel=0.1)
 
@@ -192,17 +186,13 @@ class TestTheReweightingLoopReadsTheDeclaration:
         assert bool(found.converged)
         # The closed form at the covariance the run actually converged to.
         assert float(found.solution) == pytest.approx(
-            wiener_by_hand(
-                block, observed, mean=2.5, std=0.4, noise_std=found.noise_std
-            ),
+            wiener_by_hand(block, observed, mean=2.5, std=0.4, noise_std=found.noise_std),
             rel=1e-3,
         )
         # And the prior is doing work: strictly between the data and the prior.
         assert 2.5 < float(found.solution) < TRUE_GAIN
 
-    @pytest.mark.parametrize(
-        ("mean", "std"), [(9.9, 1e-4), (1.0, 5e-4), (-4.0, 1e-3)]
-    )
+    @pytest.mark.parametrize(("mean", "std"), [(9.9, 1e-4), (1.0, 5e-4), (-4.0, 1e-3)])
     def test_the_declaration_is_what_the_loop_converges_to(
         self, twin, template_state, observed, mean, std
     ):
@@ -213,16 +203,12 @@ class TestTheReweightingLoopReadsTheDeclaration:
         assert bool(found.converged)
         assert float(found.solution) == pytest.approx(mean, rel=1e-3)
 
-    def test_a_contradicting_keyword_is_still_refused_here(
-        self, twin, template_state, observed
-    ):
+    def test_a_contradicting_keyword_is_still_refused_here(self, twin, template_state, observed):
         """Weakening the reconciliation so the loop can run must not weaken the
         refusal: these two numbers still disagree, concretely."""
         block = gain_block(twin, template_state, dist.Normal(2.5, 0.4))
         with pytest.raises(ParameterSpaceError, match="prior_std"):
-            iterative_gls(
-                block, observed, noise=BALANCED_RADIOMETER, prior_std=1.0
-            )
+            iterative_gls(block, observed, noise=BALANCED_RADIOMETER, prior_std=1.0)
 
     def test_condition_estimate_uses_the_declaration(self, twin, template_state):
         """κ is what the docstrings tell you to choose ``tol`` from, so it has
@@ -240,8 +226,12 @@ class TestVectorLatents:
     def amps_block_for(self, twin, template_state):
         def build(prior):
             space = ParameterSpace.direct(
-                "amps", init=jnp.zeros(3), into=lambda p: p["sum"]["sky_a"].amplitude,
-                prior=prior, fn=jnp.sum, linear=True,
+                "amps",
+                init=jnp.zeros(3),
+                into=lambda p: p["sum"]["sky_a"].amplitude,
+                prior=prior,
+                fn=jnp.sum,
+                linear=True,
             )
             return linear_operator(space, twin, template_state)
 
@@ -256,9 +246,7 @@ class TestVectorLatents:
         ],
         ids=["plain", "independent", "expanded"],
     )
-    def test_a_per_element_gaussian_is_read_through_its_wrapper(
-        self, amps_block_for, wrap
-    ):
+    def test_a_per_element_gaussian_is_read_through_its_wrapper(self, amps_block_for, wrap):
         """``Independent`` and ``expand`` only re-shape a Normal, so both are
         still the diagonal ``S`` these solves take."""
         declared = wrap(dist.Normal(jnp.full((3,), 2.0), jnp.full((3,), 0.5)))
@@ -273,25 +261,19 @@ class TestVectorLatents:
         # The likelihood is nearly flat, so the answer is essentially the prior.
         assert jnp.allclose(from_declaration, 2.0, atol=1e-3)
 
-    def test_a_keyword_of_the_wrong_shape_is_a_disagreement_not_a_crash(
-        self, amps_block_for
-    ):
+    def test_a_keyword_of_the_wrong_shape_is_a_disagreement_not_a_crash(self, amps_block_for):
         """``jnp.equal`` raises on shapes that do not broadcast. That is still
         a keyword contradicting a declaration, and it gets the message that
         says so rather than a broadcasting TypeError from inside the solver."""
         block = amps_block_for(dist.Normal(jnp.zeros(3), jnp.ones(3)))
         observed = block.offset + block.forward(jnp.full((3,), 1.0))
         with pytest.raises(ParameterSpaceError, match="prior_std"):
-            wiener_solve(
-                block, observed, noise_std=WEAK_SIGMA, prior_std=jnp.ones(5)
-            )
+            wiener_solve(block, observed, noise_std=WEAK_SIGMA, prior_std=jnp.ones(5))
 
     def test_a_truncated_normal_is_not_unwrapped(self, amps_block_for):
         """It also carries ``.base_dist``, and that base IS a Normal — but the
         truncation is the whole point of declaring it."""
-        block = amps_block_for(
-            dist.TruncatedNormal(jnp.zeros(3), jnp.ones(3), low=jnp.zeros(3))
-        )
+        block = amps_block_for(dist.TruncatedNormal(jnp.zeros(3), jnp.ones(3), low=jnp.zeros(3)))
         observed = block.offset + block.forward(jnp.full((3,), 1.0))
         with pytest.raises(ParameterSpaceError, match="conjugate"):
             wiener_solve(block, observed, noise_std=WEAK_SIGMA)
@@ -394,35 +376,30 @@ class TestSeveralLatents:
         assert float(agrees) == pytest.approx(7.0, rel=1e-3)
 
         with pytest.raises(ParameterSpaceError, match="amp_b"):
-            wiener_solve(
-                amp_b, observed, noise_std=WEAK_SIGMA, prior_std=0.01, prior_mean=7.0
-            )
+            wiener_solve(amp_b, observed, noise_std=WEAK_SIGMA, prior_std=0.01, prior_mean=7.0)
 
 
 class TestContradictionIsRefused:
     """One of the two would silently win. Neither may."""
 
-    def test_prior_std_contradicting_the_declaration_raises(
-        self, twin, template_state, observed
-    ):
+    def test_prior_std_contradicting_the_declaration_raises(self, twin, template_state, observed):
         block = gain_block(twin, template_state, dist.Normal(1.0, 0.05))
         with pytest.raises(ParameterSpaceError, match="prior_std"):
             wiener_solve(block, observed, noise_std=WEAK_SIGMA, prior_std=1.0)
 
-    def test_prior_mean_contradicting_the_declaration_raises(
-        self, twin, template_state, observed
-    ):
+    def test_prior_mean_contradicting_the_declaration_raises(self, twin, template_state, observed):
         block = gain_block(twin, template_state, dist.Normal(1.0, 0.05))
         with pytest.raises(ParameterSpaceError, match="prior_mean"):
             wiener_solve(block, observed, noise_std=WEAK_SIGMA, prior_mean=0.0)
 
-    def test_gcr_sample_refuses_the_contradiction_too(
-        self, twin, template_state, observed
-    ):
+    def test_gcr_sample_refuses_the_contradiction_too(self, twin, template_state, observed):
         block = gain_block(twin, template_state, dist.Normal(1.0, 0.05))
         with pytest.raises(ParameterSpaceError, match="prior_std"):
             gcr_sample(
-                block, observed, noise_std=WEAK_SIGMA, prior_std=1.0,
+                block,
+                observed,
+                noise_std=WEAK_SIGMA,
+                prior_std=1.0,
                 key=jax.random.key(0),
             )
 
@@ -452,9 +429,7 @@ class TestContradictionIsRefused:
             solve(jnp.array(0.05))
 
     @pytest.mark.parametrize("wrap", [jax.jit, eqx.filter_jit], ids=["jax", "equinox"])
-    def test_a_concrete_agreeing_keyword_survives_jit(
-        self, twin, template_state, observed, wrap
-    ):
+    def test_a_concrete_agreeing_keyword_survives_jit(self, twin, template_state, observed, wrap):
         """0.05 is 0.05 whether or not a trace is open.
 
         Both numbers here are Python floats closed over by the traced function;
@@ -469,9 +444,9 @@ class TestContradictionIsRefused:
 
         @wrap
         def solve(data):
-            return wiener_solve(
-                block, data, noise_std=WEAK_SIGMA, prior_std=0.05, prior_mean=1.0
-            )[0]
+            return wiener_solve(block, data, noise_std=WEAK_SIGMA, prior_std=0.05, prior_mean=1.0)[
+                0
+            ]
 
         assert float(solve(observed)) == pytest.approx(
             float(wiener_solve(block, observed, noise_std=WEAK_SIGMA)[0]), rel=1e-6
@@ -488,9 +463,7 @@ class TestContradictionIsRefused:
         refuses a caller who passed exactly the declared number. The comparison
         has to happen in the working precision, which is what the solve uses.
         """
-        block = gain_block(
-            twin, template_state, dist.Normal(jnp.asarray(1.0), jnp.asarray(0.05))
-        )
+        block = gain_block(twin, template_state, dist.Normal(jnp.asarray(1.0), jnp.asarray(0.05)))
         with_keywords, _ = wiener_solve(
             block, observed, noise_std=WEAK_SIGMA, prior_std=0.05, prior_mean=1.0
         )
@@ -502,9 +475,9 @@ class TestContradictionIsRefused:
         # this class pins would have to be caught together.
         @jax.jit
         def solve(data):
-            return wiener_solve(
-                block, data, noise_std=WEAK_SIGMA, prior_std=0.05, prior_mean=1.0
-            )[0]
+            return wiener_solve(block, data, noise_std=WEAK_SIGMA, prior_std=0.05, prior_mean=1.0)[
+                0
+            ]
 
         assert float(solve(observed)) == pytest.approx(float(without), rel=1e-6)
 
@@ -537,9 +510,7 @@ class TestContradictionIsRefused:
 
         @jax.jit
         def solve(std):
-            return wiener_solve(
-                block, observed, noise_std=WEAK_SIGMA, prior_std=wrap_in(std)
-            )[0]
+            return wiener_solve(block, observed, noise_std=WEAK_SIGMA, prior_std=wrap_in(std))[0]
 
         with pytest.raises(ParameterSpaceError, match="traced"):
             solve(jnp.array(0.05))
@@ -585,16 +556,18 @@ class TestNonConjugateIsRefused:
     def test_wiener_solve_refuses(self, twin, template_state, observed, prior):
         init = jnp.zeros(1) if prior.shape() == (1,) else 1.0
         space = ParameterSpace.direct(
-            "gain", init=init, into=lambda p: p["gain"].gain,
-            prior=prior, fn=jnp.sum, linear=True,
+            "gain",
+            init=init,
+            into=lambda p: p["gain"].gain,
+            prior=prior,
+            fn=jnp.sum,
+            linear=True,
         )
         block = linear_operator(space, twin, template_state)
         with pytest.raises(ParameterSpaceError, match="conjugate"):
             wiener_solve(block, observed, noise_std=WEAK_SIGMA)
 
-    def test_the_message_names_the_exits_that_do_support_it(
-        self, twin, template_state, observed
-    ):
+    def test_the_message_names_the_exits_that_do_support_it(self, twin, template_state, observed):
         block = gain_block(twin, template_state, dist.HalfNormal(1.0))
         with pytest.raises(ParameterSpaceError) as caught:
             wiener_solve(block, observed, noise_std=WEAK_SIGMA)
@@ -602,9 +575,7 @@ class TestNonConjugateIsRefused:
         assert "HalfNormal" in message
         assert "to_numpyro_model" in message
 
-    def test_a_lognormal_is_not_mistaken_for_a_gaussian(
-        self, twin, template_state, observed
-    ):
+    def test_a_lognormal_is_not_mistaken_for_a_gaussian(self, twin, template_state, observed):
         """It holds ``.loc`` and ``.scale``, so attribute duck-typing would take
         it for a Normal and return a finite, confident, wrong posterior."""
         prior = dist.LogNormal(0.0, 1.0)
@@ -617,9 +588,7 @@ class TestNonConjugateIsRefused:
 class TestKeywordOnlyUsageIsUnchanged:
     """The escape hatch for prior-free latents, and the guard on it."""
 
-    def test_a_prior_free_latent_still_solves_from_keywords(
-        self, twin, template_state, observed
-    ):
+    def test_a_prior_free_latent_still_solves_from_keywords(self, twin, template_state, observed):
         block = gain_block(twin, template_state, None)
         estimate, _ = wiener_solve(
             block, observed, noise_std=WEAK_SIGMA, prior_std=2.0, prior_mean=-1.0
@@ -635,9 +604,7 @@ class TestKeywordOnlyUsageIsUnchanged:
         with pytest.raises(ParameterSpaceError, match="needs prior_std"):
             wiener_solve(block, observed, noise_std=WEAK_SIGMA)
 
-    def test_shape_mismatch_is_still_caught_first(
-        self, twin, template_state, observed
-    ):
+    def test_shape_mismatch_is_still_caught_first(self, twin, template_state, observed):
         block = gain_block(twin, template_state, dist.Normal(1.0, 0.05))
         with pytest.raises(ParameterSpaceError, match="different problem"):
             wiener_solve(block, observed[:2], noise_std=WEAK_SIGMA)

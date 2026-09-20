@@ -379,9 +379,7 @@ def _maps_for(name: str, fmt: str, spec: dict, context: ResolutionContext, nside
         # built here -- so the maps carry the origin of `path:`. Looking up
         # `<beam>.maps` refused every npy/npz beam on the command line with
         # "audit: no origin for 'resources.beams.<name>.maps'".
-        record_resolved_delivery(
-            context, destination, resolved.unit, authority=f"{name}.path"
-        )
+        record_resolved_delivery(context, destination, resolved.unit, authority=f"{name}.path")
         return maps
     if fmt == "inline":
         if "maps" not in spec:
@@ -713,9 +711,7 @@ def _horizon_keys(keys: list[str]) -> str:
     return " and ".join(f"horizon.{key}" for key in keys)
 
 
-def _unread_angle_remedy(
-    written: list[str], inherited: Mapping[str, str] | None
-) -> str:
+def _unread_angle_remedy(written: list[str], inherited: Mapping[str, str] | None) -> str:
     """Where to delete the unread angles, as far as the caller can tell.
 
     ``None`` is ``build_beam``'s answer: it sees the spec after ``extends:``
@@ -806,10 +802,7 @@ def _unread_horizon_angles(
         )
         tip = "For a taper, set apod_deg on the projector."
     else:
-        why = (
-            "Under horizon.mode: none, which is also the default, nothing "
-            "cuts this beam."
-        )
+        why = "Under horizon.mode: none, which is also the default, nothing cuts this beam."
         tip = "To cut the beam instead, set horizon.mode: truncate_map."
     return (
         f"{name}: {_horizon_keys(written)} {verb} read only by horizon.mode: "

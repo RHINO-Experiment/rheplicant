@@ -53,14 +53,12 @@ _ROOT = pathlib.Path(__file__).resolve().parents[2]
 MINE = frozenset({"A43", "B9"})
 
 #: Twelve values a document key may hold that are not what a check expects.
-HOSTILE = ([], {}, set(), None, 3, [[1, 2], [3]], "text", (1, 2),
-           {"a": [1]}, [{"b": 2}], True, 0.5)
+HOSTILE = ([], {}, set(), None, 3, [[1, 2], [3]], "text", (1, 2), {"a": [1]}, [{"b": 2}], True, 0.5)
 
 
 def mine(document, **kwargs) -> frozenset[str]:
     """The ids from THIS module that fired on ``document``."""
-    return frozenset(one.check
-                     for one in built_findings(document, **kwargs)) & MINE
+    return frozenset(one.check for one in built_findings(document, **kwargs)) & MINE
 
 
 # --- the documents ---------------------------------------------------------
@@ -68,17 +66,23 @@ def mine(document, **kwargs) -> frozenset[str]:
 #: A 5000 K tone, 3.6 MHz wide, on the base document's 60-85 MHz band.  Its
 #: peak channel weight is 0.888945, so the protection cut sits at
 #: ``0.01 x 5000 x 0.888945 = 44.4472 K``.
-TONE = {"amplitude": {"value": 5000.0, "unit": "K"},
-        "tone_freq": {"value": 70.0, "unit": "MHz"},
-        "line_width": {"value": 3.6, "unit": "MHz"}}
+TONE = {
+    "amplitude": {"value": 5000.0, "unit": "K"},
+    "tone_freq": {"value": 70.0, "unit": "MHz"},
+    "line_width": {"value": 3.6, "unit": "MHz"},
+}
 
 #: The same tone drifting in BOTH frequency and level.  This is the document
 #: on which "max over the frequency axis" and "max over the flat array" give
 #: different answers -- 177.159 against 196.844, 11 % apart -- which is what
 #: makes the axis choice testable at all.  With a level that does not drift
 #: the two are algebraically equal and no document can tell them apart.
-DRIFTING = {**TONE, "tone_freq": {"value": 62.0, "unit": "MHz"},
-            "drift_rate": 6.0e5, "amplitude_drift_rate": 0.1}
+DRIFTING = {
+    **TONE,
+    "tone_freq": {"value": 62.0, "unit": "MHz"},
+    "drift_rate": 6.0e5,
+    "amplitude_drift_rate": 0.1,
+}
 
 #: A tone whose LEVEL drifts and whose CENTRE does not -- an ordinary
 #: document, and the only shape in which the second leg of
@@ -93,42 +97,49 @@ AMPLITUDE_ONLY = {**TONE, "amplitude_drift_rate": 0.1}
 #: the one that decides.  Its cut is **49.2109** against the 28.0445 a check
 #: that treated it as static would compute (the tone sitting at its t=0 centre
 #: of 62 MHz for the whole run), so a threshold of 35 separates them.
-CENTRE_ONLY = {**TONE, "tone_freq": {"value": 62.0, "unit": "MHz"},
-               "drift_rate": 6.0e5}
+CENTRE_ONLY = {**TONE, "tone_freq": {"value": 62.0, "unit": "MHz"}, "drift_rate": 6.0e5}
 
 #: The same tone with the drift removed -- what the one-legged check computes
 #: on :data:`CENTRE_ONLY`.  Bound so the test can assert the mutant's verdict
 #: rather than describe it.
 CENTRE_ONLY_FROZEN = {**TONE, "tone_freq": {"value": 62.0, "unit": "MHz"}}
 
-GENERAL_POINTING = {"engine": "general_pointing",
-                    "beam": {"ref": "resources.beams.horn"},
-                    "lmax": 8, "nside": 4,
-                    "lat_deg": {"value": 53.2367, "unit": "deg"},
-                    "normalize_beam": True,
-                    "acknowledge_float32_sky": True}
+GENERAL_POINTING = {
+    "engine": "general_pointing",
+    "beam": {"ref": "resources.beams.horn"},
+    "lmax": 8,
+    "nside": 4,
+    "lat_deg": {"value": 53.2367, "unit": "deg"},
+    "normalize_beam": True,
+    "acknowledge_float32_sky": True,
+}
 
 
 def tone_and_flagger(threshold=3.0, tone=None, **model):
     """A ``cw_tone`` and a ``FlaggingOperator`` on the base document."""
     return preflight_document(
-        model={**BASE_MODEL, "cw_tone": tone or TONE,
-               "flagging": {"type": "FlaggingOperator",
-                            "threshold": {
-                                "value": threshold, "unit": "adc_count",
-                            }},
-               **model})
+        model={
+            **BASE_MODEL,
+            "cw_tone": tone or TONE,
+            "flagging": {
+                "type": "FlaggingOperator",
+                "threshold": {
+                    "value": threshold,
+                    "unit": "adc_count",
+                },
+            },
+            **model,
+        }
+    )
 
 
 def two_projectors(tmp_path, first=None, second=None):
     """One beam and two projectors over it, written under ``tmp_path``."""
     sections = projector_sections(tmp_path)
     if first is None:
-        sections["projectors"]["second"] = dict(sections["projectors"]["drift"],
-                                                **(second or {}))
+        sections["projectors"]["second"] = dict(sections["projectors"]["drift"], **(second or {}))
     else:
-        sections["projectors"] = {"one": dict(first),
-                                  "two": dict(first, **(second or {}))}
+        sections["projectors"] = {"one": dict(first), "two": dict(first, **(second or {}))}
     return preflight_document(resources=sections)
 
 
@@ -161,8 +172,8 @@ def a43_message(threshold, cut, floor, scale="1"):
         "unprotected version of this at twelve flagged samples -- 'That is "
         f"the calibrator, gone.' Raise model.flagging.threshold above {cut}, "
         "or lower model.cw_tone.protect_floor so the protected set reaches "
-        f"down past it ({floor} or less does it at this amplitude)."
-        + _A43_TAIL)
+        f"down past it ({floor} or less does it at this amplitude)." + _A43_TAIL
+    )
 
 
 A43_MESSAGE = a43_message("3", "44.4472", "0.000674957")
@@ -207,8 +218,7 @@ B9_GENERAL_POINTING = (
     "two beam_alms are not the same array -- so the identical spherical "
     "harmonic transform ran 2 times. Write beam_alms: {ref: "
     "resources.projectors.one.beam_alms} on the second entry: measured, that "
-    "route analyses the beam once and hands both projectors the same array."
-    + _B9_TAIL
+    "route analyses the beam once and hands both projectors the same array." + _B9_TAIL
 )
 
 
@@ -229,13 +239,21 @@ class TestTheRegistry:
         the check absent for every user.
         """
         done = subprocess.run(
-            [sys.executable, "-c",
-             "from rheplicant.config.inflight import BUILT_CHECKS\n"
-             "assert {'A43', 'B9'} <= set(BUILT_CHECKS), sorted(BUILT_CHECKS)\n"],
-            capture_output=True, text=True, cwd=str(_ROOT), check=False)
+            [
+                sys.executable,
+                "-c",
+                "from rheplicant.config.inflight import BUILT_CHECKS\n"
+                "assert {'A43', 'B9'} <= set(BUILT_CHECKS), sorted(BUILT_CHECKS)\n",
+            ],
+            capture_output=True,
+            text=True,
+            cwd=str(_ROOT),
+            check=False,
+        )
         assert done.returncode == 0, (
             "A43/B9 are decorated but not wired: importing the package does "
-            "not import inflight/optics.py.\n" + done.stdout + done.stderr)
+            "not import inflight/optics.py.\n" + done.stdout + done.stderr
+        )
 
     def test_the_module_name_collides_with_no_entry_point(self):
         """R13: ``optics`` is not a name ``inflight/__init__.py`` binds, so the
@@ -286,17 +304,26 @@ class TestA43:
         assert load_document(fixed) is not None
 
     def test_a_tone_with_no_flagger_earns_nothing(self):
-        assert mine(preflight_document(
-            model={**BASE_MODEL, "cw_tone": TONE})) == frozenset()
+        assert mine(preflight_document(model={**BASE_MODEL, "cw_tone": TONE})) == frozenset()
 
     def test_a_flagger_with_no_tone_earns_nothing(self):
-        assert mine(preflight_document(
-            model={**BASE_MODEL, "flagging": {"type": "FlaggingOperator",
-                                              "threshold": {
-                                                  "value": 3.0,
-                                                  "unit": "adc_count",
-                                              }}})) \
+        assert (
+            mine(
+                preflight_document(
+                    model={
+                        **BASE_MODEL,
+                        "flagging": {
+                            "type": "FlaggingOperator",
+                            "threshold": {
+                                "value": 3.0,
+                                "unit": "adc_count",
+                            },
+                        },
+                    }
+                )
+            )
             == frozenset()
+        )
 
     def test_NO_ADC_LIT_is_a_real_document_and_not_a_crash(self):
         """§0.3 E.6 ruling 4, as a test.
@@ -312,8 +339,7 @@ class TestA43:
         assert "adc" not in run.twin.lit
         with pytest.raises(KeyError, match="No node named 'adc'"):
             run.twin["adc"]
-        assert "x adc.scale 1)" in built_only(tone_and_flagger(),
-                                              "A43").message
+        assert "x adc.scale 1)" in built_only(tone_and_flagger(), "A43").message
 
     def test_the_adc_scale_is_multiplied_in(self):
         """``adc.scale`` carries adc_count/K and is the ONLY leaf between the
@@ -323,13 +349,13 @@ class TestA43:
         message says so, which is what a mutant dropping the multiplication
         dies on.
         """
-        document = tone_and_flagger(threshold=3.0,
-                                    adc={"scale": {"value": 10.0,
-                                                    "unit": "adc_count/K"},
-                                         "n_bits": 12})
+        document = tone_and_flagger(
+            threshold=3.0, adc={"scale": {"value": 10.0, "unit": "adc_count/K"}, "n_bits": 12}
+        )
         document["inference"]["noise"]["sigma"]["unit"] = "adc_count"
         assert built_only(document, "A43").message == a43_message(
-            "3", "444.472", "6.74957e-05", scale="10")
+            "3", "444.472", "6.74957e-05", scale="10"
+        )
 
     def test_bandpass_and_gain_are_NOT_multiplied_in(self):
         """The TRAP, and the base document is what makes it testable.
@@ -357,10 +383,8 @@ class TestA43:
         they are **177.159 and 196.844**, and a threshold between them fires
         one implementation and not the other.
         """
-        assert mine(tone_and_flagger(threshold=185.0, tone=DRIFTING)) \
-            == frozenset()
-        found = built_only(tone_and_flagger(threshold=170.0, tone=DRIFTING),
-                           "A43")
+        assert mine(tone_and_flagger(threshold=185.0, tone=DRIFTING)) == frozenset()
+        found = built_only(tone_and_flagger(threshold=170.0, tone=DRIFTING), "A43")
         assert found.message == A43_DRIFTING
 
     def test_a_tone_whose_LEVEL_alone_drifts_is_still_DRIFTING(self):
@@ -374,19 +398,15 @@ class TestA43:
         of 100 the shipped code refuses and the mutant stands down silently
         while the flagger eats the calibrator's shoulders.
         """
-        assert "A43" in mine(tone_and_flagger(threshold=100.0,
-                                              tone=AMPLITUDE_ONLY))
-        assert built_only(tone_and_flagger(threshold=100.0,
-                                           tone=AMPLITUDE_ONLY),
-                          "A43").message == a43_message(
-            "100", "177.789", "0.00562465")
+        assert "A43" in mine(tone_and_flagger(threshold=100.0, tone=AMPLITUDE_ONLY))
+        assert built_only(
+            tone_and_flagger(threshold=100.0, tone=AMPLITUDE_ONLY), "A43"
+        ).message == a43_message("100", "177.789", "0.00562465")
         # and above it, silence -- so the number really is the discriminator
-        assert mine(tone_and_flagger(threshold=200.0,
-                                     tone=AMPLITUDE_ONLY)) == frozenset()
+        assert mine(tone_and_flagger(threshold=200.0, tone=AMPLITUDE_ONLY)) == frozenset()
         # ... while the STATIC tone at the same threshold is silent either way,
         # which is what makes the drifting one the only witness.
-        assert mine(tone_and_flagger(threshold=100.0, tone=TONE)) \
-            == frozenset()
+        assert mine(tone_and_flagger(threshold=100.0, tone=TONE)) == frozenset()
 
     def test_a_tone_whose_CENTRE_alone_drifts_is_still_DRIFTING(self):
         """The FIRST leg of the same ``or``, and the twin of the test above.
@@ -403,19 +423,16 @@ class TestA43:
         frozen tone is loaded here as its own document, so the mutant's
         verdict is asserted rather than described.
         """
-        assert "A43" in mine(tone_and_flagger(threshold=35.0,
-                                              tone=CENTRE_ONLY))
-        assert built_only(tone_and_flagger(threshold=35.0, tone=CENTRE_ONLY),
-                          "A43").message == a43_message(
-            "35", "49.2109", "0.00711224")
+        assert "A43" in mine(tone_and_flagger(threshold=35.0, tone=CENTRE_ONLY))
+        assert built_only(
+            tone_and_flagger(threshold=35.0, tone=CENTRE_ONLY), "A43"
+        ).message == a43_message("35", "49.2109", "0.00711224")
         # what the one-legged check would have compared: the same tone with
         # the drift taken out, which is silent at this threshold.
-        assert mine(tone_and_flagger(threshold=35.0,
-                                     tone=CENTRE_ONLY_FROZEN)) == frozenset()
+        assert mine(tone_and_flagger(threshold=35.0, tone=CENTRE_ONLY_FROZEN)) == frozenset()
         # ... and above the real cut, the drifting one is silent too, so 35 is
         # a discriminator rather than a floor.
-        assert mine(tone_and_flagger(threshold=60.0,
-                                     tone=CENTRE_ONLY)) == frozenset()
+        assert mine(tone_and_flagger(threshold=60.0, tone=CENTRE_ONLY)) == frozenset()
 
     def test_the_comparison_is_INCLUSIVE_at_the_cut(self):
         """The dispatch boundary, tested at the boundary itself.
@@ -427,8 +444,7 @@ class TestA43:
         this class.
         """
         run = built_run(tone_and_flagger())
-        cut = _protection_cut(run.twin["cw_tone"], run.context.freq,
-                              run.context.time)
+        cut = _protection_cut(run.twin["cw_tone"], run.context.freq, run.context.time)
         assert cut == pytest.approx(44.4472, rel=1e-5)
         assert mine(tone_and_flagger(threshold=cut)) == frozenset()
         assert "A43" in mine(tone_and_flagger(threshold=cut * (1 - 1e-12)))
@@ -460,11 +476,8 @@ class TestA43:
         assert hasattr(FlaggingOperator(threshold=1.0), "threshold")
         run = built_run(tone_and_flagger())
         assert list(_tone_survives_flagging(run))[0].check == "A43"
-        swapped = run.twin.replace_node("flagging",
-                                        MomentRFIFlaggingOperator())
-        run = dc.replace(
-            run, twin=swapped,
-            inference=run.inference._replace(fit_twin=swapped))
+        swapped = run.twin.replace_node("flagging", MomentRFIFlaggingOperator())
+        run = dc.replace(run, twin=swapped, inference=run.inference._replace(fit_twin=swapped))
         assert list(_tone_survives_flagging(run)) == []
 
     def test_the_INFERENCE_TWIN_REPLACE_route_is_walked(self):
@@ -476,21 +489,31 @@ class TestA43:
         ``inference.twin.replace.flagging``.
         """
         document = preflight_document(
-            model={**BASE_MODEL, "cw_tone": TONE,
-                   "flagging": {"type": "FlaggingOperator",
-                                "threshold": {"value": 1000.0,
-                                               "unit": "adc_count"}}},
-            inference={"twin": {"without": ["noise"],
-                                "replace": {"flagging": {
-                                "type": "FlaggingOperator",
-                                "threshold": {"value": 3.0,
-                                               "unit": "adc_count"}}}}})
+            model={
+                **BASE_MODEL,
+                "cw_tone": TONE,
+                "flagging": {
+                    "type": "FlaggingOperator",
+                    "threshold": {"value": 1000.0, "unit": "adc_count"},
+                },
+            },
+            inference={
+                "twin": {
+                    "without": ["noise"],
+                    "replace": {
+                        "flagging": {
+                            "type": "FlaggingOperator",
+                            "threshold": {"value": 3.0, "unit": "adc_count"},
+                        }
+                    },
+                }
+            },
+        )
         run = built_run(document)
         assert run.inference.replaced == ("flagging",)
         found = built_only(document, "A43")
         assert found.where == "inference.twin.replace.flagging"
-        assert found.message.startswith(
-            "inference.twin.replace.flagging.threshold is 3 and")
+        assert found.message.startswith("inference.twin.replace.flagging.threshold is 3 and")
 
     def test_the_FIT_twins_adc_scale_is_the_one_compared(self):
         """A ``replace:`` that rebuilds only the ADC still moves the verdict.
@@ -511,24 +534,32 @@ class TestA43:
         beside it in ``optics.py``, not defended by a test that cannot exist.
         """
         document = preflight_document(
-            model={**BASE_MODEL, "cw_tone": TONE,
-                   "flagging": {"type": "FlaggingOperator",
-                                "threshold": {"value": 100.0,
-                                               "unit": "adc_count"}},
-                   "adc": {"scale": {"value": 1.0,
-                                      "unit": "adc_count/K"},
-                           "n_bits": 12}},
-            inference={"twin": {"without": ["noise"],
-                                "replace": {"adc": {"scale": {"value": 10.0,
-                                                               "unit": "adc_count/K"},
-                                                    "n_bits": 12}}}})
+            model={
+                **BASE_MODEL,
+                "cw_tone": TONE,
+                "flagging": {
+                    "type": "FlaggingOperator",
+                    "threshold": {"value": 100.0, "unit": "adc_count"},
+                },
+                "adc": {"scale": {"value": 1.0, "unit": "adc_count/K"}, "n_bits": 12},
+            },
+            inference={
+                "twin": {
+                    "without": ["noise"],
+                    "replace": {
+                        "adc": {"scale": {"value": 10.0, "unit": "adc_count/K"}, "n_bits": 12}
+                    },
+                }
+            },
+        )
         document["inference"]["noise"]["sigma"]["unit"] = "adc_count"
         run = built_run(document)
         assert run.inference.replaced == ("adc",)
         assert float(run.twin["adc"].scale) == 1.0
         assert float(run.inference.fit_twin["adc"].scale) == 10.0
         assert built_only(document, "A43").message == a43_message(
-            "100", "444.472", "0.00224986", scale="10")
+            "100", "444.472", "0.00224986", scale="10"
+        )
 
     def test_the_pair_is_reported_ONCE_when_nothing_was_replaced(self):
         """The de-duplication, as a property.
@@ -553,10 +584,15 @@ class TestA43:
         """
         document = preflight_document(
             resources=UNREADABLE_BEAM,
-            model={**BASE_MODEL, "cw_tone": TONE,
-                   "flagging": {"type": "FlaggingOperator",
-                                "threshold": {"value": 3.0,
-                                               "unit": "adc_count"}}})
+            model={
+                **BASE_MODEL,
+                "cw_tone": TONE,
+                "flagging": {
+                    "type": "FlaggingOperator",
+                    "threshold": {"value": 3.0, "unit": "adc_count"},
+                },
+            },
+        )
         with pytest.raises(ConfigError) as raised:
             load_document(document)
         assert "no_such_beam.npy" in str(raised.value)
@@ -571,27 +607,28 @@ class TestB9:
         pytest.importorskip("limtod_jax")
 
     def test_it_fires_as_a_WARN_and_names_the_second_entry(self, tmp_path):
-        found = built_only(two_projectors(tmp_path), "B9",
-                           base_dir=str(tmp_path))
+        found = built_only(two_projectors(tmp_path), "B9", base_dir=str(tmp_path))
         assert found.severity == WARN
         assert found.where == "resources.projectors.second"
 
     def test_the_whole_driftscan_message(self, tmp_path):
-        assert built_only(two_projectors(tmp_path), "B9",
-                          base_dir=str(tmp_path)).message == B9_DRIFTSCAN
+        assert (
+            built_only(two_projectors(tmp_path), "B9", base_dir=str(tmp_path)).message
+            == B9_DRIFTSCAN
+        )
 
     def test_a_WARN_does_not_stop_the_load(self, tmp_path):
         """``built_only`` reads all three severities (§0.3 C.4) and a WARN
         counts as the one; the document still loads."""
-        assert load_document(two_projectors(tmp_path),
-                             base_dir=str(tmp_path)) is not None
+        assert load_document(two_projectors(tmp_path), base_dir=str(tmp_path)) is not None
 
     def test_one_projector_earns_nothing(self, tmp_path):
-        assert mine(preflight_document(resources=projector_sections(tmp_path)),
-                    base_dir=str(tmp_path)) == frozenset()
+        assert (
+            mine(preflight_document(resources=projector_sections(tmp_path)), base_dir=str(tmp_path))
+            == frozenset()
+        )
 
-    def test_a_DIFFERENT_lmax_is_different_work_and_earns_nothing(self,
-                                                                 tmp_path):
+    def test_a_DIFFERENT_lmax_is_different_work_and_earns_nothing(self, tmp_path):
         document = two_projectors(tmp_path, second={"lmax": 7})
         assert mine(document, base_dir=str(tmp_path)) == frozenset()
 
@@ -617,15 +654,13 @@ class TestB9:
         criterion naming it could never fire on the engine B9 is mostly about.
         """
         with pytest.raises(ConfigError, match="nside is not written for"):
-            load_document(two_projectors(tmp_path, second={"nside": 4}),
-                          base_dir=str(tmp_path))
+            load_document(two_projectors(tmp_path, second={"nside": 4}), base_dir=str(tmp_path))
         specs = _analysing(two_projectors(tmp_path))
         assert len(specs) == 2
         for _ref, _lmax, _iterations, _engine in specs.values():
             assert (_ref, _lmax, _iterations) == ("resources.beams.horn", 8, 3)
 
-    def test_two_general_pointing_projectors_differing_ONLY_in_nside_still_fire(
-            self, tmp_path):
+    def test_two_general_pointing_projectors_differing_ONLY_in_nside_still_fire(self, tmp_path):
         """The half of "drop nside" that a driftscan document cannot show.
 
         On ``engine: driftscan`` the key is refused outright, so including it
@@ -637,8 +672,7 @@ class TestB9:
         identical transform twice, and a criterion carrying nside would put
         them in different groups and say nothing.
         """
-        document = two_projectors(tmp_path, first=GENERAL_POINTING,
-                                  second={"nside": 8})
+        document = two_projectors(tmp_path, first=GENERAL_POINTING, second={"nside": 8})
         run = built_run(document, base_dir=str(tmp_path))
         one = run.resources.resources["resources.projectors.one"]
         two = run.resources.resources["resources.projectors.two"]
@@ -667,8 +701,10 @@ class TestB9:
         which is the thing bitwise equality could never have told apart.
         """
         document = two_projectors(
-            tmp_path, first=GENERAL_POINTING,
-            second={"beam_alms": {"ref": "resources.projectors.one.beam_alms"}})
+            tmp_path,
+            first=GENERAL_POINTING,
+            second={"beam_alms": {"ref": "resources.projectors.one.beam_alms"}},
+        )
         run = built_run(document, base_dir=str(tmp_path))
         one = run.resources.resources["resources.projectors.one"]
         two = run.resources.resources["resources.projectors.two"]
@@ -695,10 +731,13 @@ class TestB9:
         So: apply the advice the message now gives, and assert it builds and
         shares.
         """
-        document = two_projectors(tmp_path, second={
-            "beam_alms": {"ref": "resources.projectors.drift.beam_alms"},
-            "nside": 4,
-        })
+        document = two_projectors(
+            tmp_path,
+            second={
+                "beam_alms": {"ref": "resources.projectors.drift.beam_alms"},
+                "nside": 4,
+            },
+        )
         run = built_run(document, base_dir=str(tmp_path))
         first = run.resources.resources["resources.projectors.drift"]
         second = run.resources.resources["resources.projectors.second"]
@@ -707,8 +746,7 @@ class TestB9:
         # ... and with one analysis shared, B9 has nothing left to report.
         assert mine(document, base_dir=str(tmp_path)) == frozenset()
 
-    def test_the_driftscan_advice_says_what_the_alms_route_additionally_needs(
-            self, tmp_path):
+    def test_the_driftscan_advice_says_what_the_alms_route_additionally_needs(self, tmp_path):
         """The one asymmetry that survives: alms carry no pixel count.
 
         Applying the remedy WITHOUT ``nside:`` is refused, which is why the
@@ -719,13 +757,14 @@ class TestB9:
         """
         with pytest.raises(ConfigError, match="nside"):
             load_document(
-                two_projectors(tmp_path, second={
-                    "beam_alms": {"ref": "resources.projectors.drift.beam_alms"}}),
-                base_dir=str(tmp_path))
+                two_projectors(
+                    tmp_path, second={"beam_alms": {"ref": "resources.projectors.drift.beam_alms"}}
+                ),
+                base_dir=str(tmp_path),
+            )
         assert "write nside: too" in B9_DRIFTSCAN
 
-    def test_an_entry_supplying_its_OWN_beam_alms_analyses_nothing(self,
-                                                                  tmp_path):
+    def test_an_entry_supplying_its_OWN_beam_alms_analyses_nothing(self, tmp_path):
         """An entry carrying ``beam_alms:`` is excluded from the grouping.
 
         The mutant this kills is dropping that filter: with a beam_alms taken
@@ -738,18 +777,19 @@ class TestB9:
         alms = np.zeros((2, 45), dtype=np.complex64)
         np.save(tmp_path / "alms.npy", alms)
         document = two_projectors(
-            tmp_path, first=GENERAL_POINTING,
-            second={"beam_alms": {"file": {"path": "alms.npy",
-                                           "format": "npy"},
-                                  "dtype": "complex64"}})
+            tmp_path,
+            first=GENERAL_POINTING,
+            second={
+                "beam_alms": {"file": {"path": "alms.npy", "format": "npy"}, "dtype": "complex64"}
+            },
+        )
         run = built_run(document, base_dir=str(tmp_path))
         one = run.resources.resources["resources.projectors.one"]
         two = run.resources.resources["resources.projectors.two"]
         assert one.beam_alms is not two.beam_alms
         assert mine(document, base_dir=str(tmp_path)) == frozenset()
 
-    def test_two_entries_that_really_DO_share_one_array_earn_nothing(
-            self, tmp_path):
+    def test_two_entries_that_really_DO_share_one_array_earn_nothing(self, tmp_path):
         """The identity suppression, killed by a payload rather than a document.
 
         No document reaches this state today -- the ``{ref:}`` route is
@@ -763,10 +803,8 @@ class TestB9:
         run = built_run(document, base_dir=str(tmp_path))
         assert list(_beam_analysed_twice(run))[0].check == "B9"
         shared = dict(run.resources.resources)
-        shared["resources.projectors.second"] = \
-            shared["resources.projectors.drift"]
-        run = dataclasses.replace(
-            run, resources=run.resources._replace(resources=shared))
+        shared["resources.projectors.second"] = shared["resources.projectors.drift"]
+        run = dataclasses.replace(run, resources=run.resources._replace(resources=shared))
         assert list(_beam_analysed_twice(run)) == []
 
     def test_bitwise_equality_is_NOT_the_criterion(self, tmp_path):
@@ -784,8 +822,7 @@ class TestB9:
         one = run.resources.resources["resources.projectors.drift"]
         two = run.resources.resources["resources.projectors.second"]
         assert one.beam_alms is not two.beam_alms
-        assert np.array_equal(np.asarray(one.beam_alms),
-                              np.asarray(two.beam_alms))
+        assert np.array_equal(np.asarray(one.beam_alms), np.asarray(two.beam_alms))
 
     def test_a_MIXED_engine_group_takes_the_driftscan_sentence(self, tmp_path):
         """A mixed group is advised on the member the warning attaches to.
@@ -827,8 +864,7 @@ class TestB9:
         sections["projectors"]["second"] = dict(sections["projectors"]["drift"])
         sections["beams"] = dict(UNREADABLE_BEAM["beams"])
         with pytest.raises(ConfigError) as raised:
-            load_document(preflight_document(resources=sections),
-                          base_dir=str(tmp_path))
+            load_document(preflight_document(resources=sections), base_dir=str(tmp_path))
         assert "no_such_beam.npy" in str(raised.value)
         assert "check B9" not in str(raised.value)
 
@@ -862,29 +898,25 @@ class TestTheChecksSurviveAValueThatIsTheWrongPythonType:
     @pytest.mark.parametrize("value", HOSTILE)
     @pytest.mark.parametrize("key", ["model", "resources", "inference"])
     def test_a_hostile_section(self, payload, key, value):
-        run = dataclasses.replace(payload,
-                                  document={**payload.document, key: value})
+        run = dataclasses.replace(payload, document={**payload.document, key: value})
         assert isinstance(list(_tone_survives_flagging(run)), list)
         assert isinstance(list(_beam_analysed_twice(run)), list)
 
     @pytest.mark.parametrize("value", HOSTILE)
-    @pytest.mark.parametrize(
-        "key", ["engine", "beam", "lmax", "beam_iterations", "beam_alms"])
+    @pytest.mark.parametrize("key", ["engine", "beam", "lmax", "beam_iterations", "beam_alms"])
     def test_a_hostile_projector_key(self, payload, key, value):
         """Every key B9 reads off a resolved spec, including the three it puts
         in a grouping key."""
-        spec = {"engine": "driftscan",
-                "beam": {"ref": "resources.beams.horn"}, "lmax": 8}
-        document = {**payload.document,
-                    "resources": {"projectors": {"p": {**spec, key: value},
-                                                 "q": {**spec, key: value}}}}
+        spec = {"engine": "driftscan", "beam": {"ref": "resources.beams.horn"}, "lmax": 8}
+        document = {
+            **payload.document,
+            "resources": {"projectors": {"p": {**spec, key: value}, "q": {**spec, key: value}}},
+        }
         run = dataclasses.replace(payload, document=document)
         assert isinstance(list(_beam_analysed_twice(run)), list)
 
-    @pytest.mark.parametrize("field", ["twin", "inference", "context",
-                                       "resources", "document"])
-    def test_a_payload_field_that_is_not_what_it_should_be(self, payload,
-                                                           field):
+    @pytest.mark.parametrize("field", ["twin", "inference", "context", "resources", "document"])
+    def test_a_payload_field_that_is_not_what_it_should_be(self, payload, field):
         """``document`` is on this list, and it is the one that bites here.
 
         ``_analysing`` calls ``document.get("resources")``, so a payload whose
@@ -930,8 +962,8 @@ class TestTheCostOfTheseTwoRows:
         calls = []
         original = Assembly.__call__
         monkeypatch.setattr(
-            Assembly, "__call__",
-            lambda self, state: (calls.append(1), original(self, state))[1])
+            Assembly, "__call__", lambda self, state: (calls.append(1), original(self, state))[1]
+        )
         assert "A43" in built(run).checks()
         assert calls == []
 
@@ -943,8 +975,7 @@ class TestTheCostOfTheseTwoRows:
 
         run = built_run(tone_and_flagger())
         calls = []
-        monkeypatch.setattr(CWCalibrationOperator, "__call__",
-                            lambda self, state: calls.append(1))
+        monkeypatch.setattr(CWCalibrationOperator, "__call__", lambda self, state: calls.append(1))
         assert "A43" in built(run).checks()
         assert calls == []
 
@@ -957,8 +988,7 @@ class TestTheCostOfTheseTwoRows:
 
         run = built_run(two_projectors(tmp_path), base_dir=str(tmp_path))
         calls = []
-        monkeypatch.setattr(projectors, "_analyse",
-                            lambda *a, **k: calls.append(1))
+        monkeypatch.setattr(projectors, "_analyse", lambda *a, **k: calls.append(1))
         assert "B9" in built(run).checks()
         assert calls == []
 
@@ -982,16 +1012,21 @@ class TestTheCostOfTheseTwoRows:
         sections["projectors"]["second"] = dict(sections["projectors"]["drift"])
         document = preflight_document(
             resources=sections,
-            model={**BASE_MODEL, "cw_tone": TONE,
-                   "flagging": {"type": "FlaggingOperator",
-                                "threshold": {"value": 3.0,
-                                               "unit": "adc_count"}}})
+            model={
+                **BASE_MODEL,
+                "cw_tone": TONE,
+                "flagging": {
+                    "type": "FlaggingOperator",
+                    "threshold": {"value": 3.0, "unit": "adc_count"},
+                },
+            },
+        )
         run = built_run(document, base_dir=str(tmp_path))
         opened = []
         original = builtins.open
         monkeypatch.setattr(
-            builtins, "open",
-            lambda *a, **k: (opened.append(a[0]), original(*a, **k))[1])
+            builtins, "open", lambda *a, **k: (opened.append(a[0]), original(*a, **k))[1]
+        )
         fired = built(run).checks()
         assert {"A43", "B9"} <= fired, fired
         assert opened == []
@@ -1006,5 +1041,5 @@ class TestTheCostOfTheseTwoRows:
         slowdown must go red, and it does at six.
         """
         run = built_run(tone_and_flagger(threshold=1000.0))
-        built(run)                                        # warm
+        built(run)  # warm
         assert best_ms(lambda: built(run), repeats=30) < 0.7 * machine_factor()

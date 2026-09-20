@@ -272,8 +272,7 @@ class Priced:
                 "mapping of check name to Gate, cardinality three whatever "
                 f"the document says; got {self.gates!r}."
             )
-        object.__setattr__(self, "gates",
-                           MappingProxyType(dict(self.gates)))
+        object.__setattr__(self, "gates", MappingProxyType(dict(self.gates)))
 
 
 #: One post-flight check: a :class:`Priced` in, findings out, nothing raised.
@@ -325,8 +324,7 @@ def _reserved() -> frozenset[str]:
     return frozenset(name for name in globals() if not name.startswith("__"))
 
 
-def _discoverable(path: Iterable[str],
-                  reserved: frozenset[str] | None = None) -> tuple[str, ...]:
+def _discoverable(path: Iterable[str], reserved: frozenset[str] | None = None) -> tuple[str, ...]:
     """Every module stem under ``path``, sorted -- or a refusal for a shadow.
 
     Split out from the loop below so that the refusal is reachable from a
@@ -360,7 +358,7 @@ def _discoverable(path: Iterable[str],
             "an attribute of its package -- so `from "
             "rheplicant.config.postflight import priced` would bind a MODULE "
             "and the hook in document.py would raise \"'module' object is not "
-            "callable\". Rename the module; the reserved names are "
+            'callable". Rename the module; the reserved names are '
             f"{sorted(reserved)}."
         )
     return found
@@ -415,8 +413,7 @@ def priced(run: Priced) -> Report:
     ``dict(sorted(...))`` and not a second runner: see this module's docstring
     for why insertion order is the import graph's here.
     """
-    return sweep(dict(sorted(CHECKS.items())), run, label=_LABEL,
-                 sections=_DOCUMENT_SECTIONS)
+    return sweep(dict(sorted(CHECKS.items())), run, label=_LABEL, sections=_DOCUMENT_SECTIONS)
 
 
 # Importing the check modules is what registers their ids -- and unlike

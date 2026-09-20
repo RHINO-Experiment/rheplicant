@@ -112,9 +112,7 @@ def _epoch_weights(
     return sigma, seen, weight, int(jnp.sum(seen))
 
 
-def _reject_bad_templates(
-    templates: Mapping[str, jax.Array], seen: jax.Array
-) -> None:
+def _reject_bad_templates(templates: Mapping[str, jax.Array], seen: jax.Array) -> None:
     """A template is model input, and this is the one place it is checked.
 
     Shape and finiteness together, because they are the same guard: both say
@@ -345,12 +343,8 @@ def compress_linear(
         )
 
     noise = as_noise_model(noise_std)
-    prediction = (
-        jnp.zeros_like(observed) if offset_prediction is None else offset_prediction
-    )
-    sigma, seen, weight, n_observed = _epoch_weights(
-        noise, prediction, observed, "compress_linear"
-    )
+    prediction = jnp.zeros_like(observed) if offset_prediction is None else offset_prediction
+    sigma, seen, weight, n_observed = _epoch_weights(noise, prediction, observed, "compress_linear")
 
     # SELECT on `seen`, never multiply by a zero weight. A flagged sample is
     # exactly where a NaN lives -- that is usually why it was flagged -- and
@@ -369,8 +363,7 @@ def compress_linear(
     fitted_block = global_block
     if nuisance_names:
         nuisance_block = (
-            jnp.where(seen[:, None], _stack(nuisance_design, nuisance_names), 0.0)
-            * weight[:, None]
+            jnp.where(seen[:, None], _stack(nuisance_design, nuisance_names), 0.0) * weight[:, None]
         )
         # Every column the epoch fits, for section 9.3's projector. A nuisance
         # marginalised here is part of this night's best fit, so leaving it out
@@ -381,18 +374,14 @@ def compress_linear(
         for name in nuisance_names:
             size = int(jnp.zeros(nuisance_shapes.get(name, ())).size) or 1
             std = jnp.broadcast_to(jnp.asarray(nuisance_prior_std[name]), (size,))
-            mean = jnp.broadcast_to(
-                jnp.asarray(nuisance_prior_mean.get(name, 0.0)), (size,)
-            )
+            mean = jnp.broadcast_to(jnp.asarray(nuisance_prior_mean.get(name, 0.0)), (size,))
             prior_rows.append(jnp.diag(1.0 / std))
             prior_target.append(mean / std)
             prior_log_std.append(jnp.sum(jnp.log(std)))
         prior_block = jax.scipy.linalg.block_diag(*prior_rows)
         augmented = jnp.concatenate(
             [
-                jnp.concatenate(
-                    [nuisance_block, global_block, residual[:, None]], axis=1
-                ),
+                jnp.concatenate([nuisance_block, global_block, residual[:, None]], axis=1),
                 jnp.concatenate(
                     [
                         prior_block,
@@ -553,9 +542,7 @@ def _frozen_noise_residual(
         live = RawLikelihood(
             predict=basis.predict,
             observed=observed,
-            sigma=jnp.broadcast_to(
-                noise.std(basis.predict(probe)), jnp.shape(observed)
-            ),
+            sigma=jnp.broadcast_to(noise.std(basis.predict(probe)), jnp.shape(observed)),
             names=tuple(values),
             epoch_id=epoch_id,
         )
@@ -855,22 +842,14 @@ def compress_reduced_basis(
                 ],
                 axis=0,
             ),
-            target=jnp.concatenate(
-                [upper[:, n_nuisance + width], jnp.concatenate(targets)]
-            ),
-            offset=(
-                normalisation
-                - sum(log_std)
-                - 0.5 * n_nuisance * jnp.log(2.0 * jnp.pi)
-            ),
+            target=jnp.concatenate([upper[:, n_nuisance + width], jnp.concatenate(targets)]),
+            offset=(normalisation - sum(log_std) - 0.5 * n_nuisance * jnp.log(2.0 * jnp.pi)),
             names=(*nuisance_names, COEFFICIENTS),
             shapes=(*shapes, (width,)),
         )
         info = marginalise(joint, nuisance_names)
     else:
-        upper = jnp.linalg.qr(
-            jnp.concatenate([design, residual[:, None]], axis=1), mode="r"
-        )
+        upper = jnp.linalg.qr(jnp.concatenate([design, residual[:, None]], axis=1), mode="r")
         keep = min(upper.shape[0], width)
         # The corner is the part of the residual no coefficient can reach. It is
         # a constant in theta, so leaving it out changes no gradient and no
@@ -922,8 +901,7 @@ def compress_reduced_basis(
 
     gradient = jax.grad(_fidelity_residual)(dict(values))
     chi2, dof, template_names, projections = _residual_summary(
-        design if nuisance_block is None
-        else jnp.concatenate([design, nuisance_block], axis=1),
+        design if nuisance_block is None else jnp.concatenate([design, nuisance_block], axis=1),
         residual,
         seen,
         weight,
@@ -940,9 +918,7 @@ def compress_reduced_basis(
         nuisance_shapes=tuple(shapes),
         noise_frozen_at=noise_frozen_at,
         frozen_noise_residual=frozen_residual,
-        bias_gradient=jnp.concatenate(
-            [jnp.ravel(gradient[name]) for name in bias_names]
-        ),
+        bias_gradient=jnp.concatenate([jnp.ravel(gradient[name]) for name in bias_names]),
         bias_names=bias_names,
         residual_chi2=chi2,
         template_projections=projections,

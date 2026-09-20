@@ -51,20 +51,27 @@ DEPTH = 0.5
 
 #: ``d chi2 / dg`` at the declared ``init:`` -- the number three classes
 #: below are anchored on.  Negative: the fit wants a larger gain.
-CHI2_AT_INIT = -2.0 * (TRUTH - INIT) * SUM_SQ_SIGNAL / SIGMA ** 2  # -3969.27
+CHI2_AT_INIT = -2.0 * (TRUTH - INIT) * SUM_SQ_SIGNAL / SIGMA**2  # -3969.27
 
-PARAMETERS = {"g": {"init": INIT, "linear": True, "into": "gain.gain",
-                    "prior": {"normal": {"loc": 1.0, "scale": 0.05}}}}
+PARAMETERS = {
+    "g": {
+        "init": INIT,
+        "linear": True,
+        "into": "gain.gain",
+        "prior": {"normal": {"loc": 1.0, "scale": 0.05}},
+    }
+}
 HOMOSCEDASTIC = {
     "parameters": PARAMETERS,
-    "noise": {"kind": "homoscedastic", "sigma": {"value": SIGMA,
-                                                 "unit": "K"}},
+    "noise": {"kind": "homoscedastic", "sigma": {"value": SIGMA, "unit": "K"}},
     "observed": {"from": "simulation", "at": {"g": TRUTH}},
 }
 # f = 1/sqrt(channel_width * integration_time) = 1 exactly, which is what
 # puts the log-determinant term and the weighted sum on the same scale.
-RADIOMETER_FACTS = {"channel_width": {"value": 0.5, "unit": "Hz"},
-                    "integration_time": {"value": 2.0, "unit": "s"}}
+RADIOMETER_FACTS = {
+    "channel_width": {"value": 0.5, "unit": "Hz"},
+    "integration_time": {"value": 2.0, "unit": "s"},
+}
 
 
 def quarter_mse(prediction, observed):
@@ -79,14 +86,12 @@ def needs_three(prediction, observed, weight):
 
 def gradient_document(run, inference=None):
     """The shared diagnostics document, carrying one gradient run."""
-    return diagnostic_document(
-        run, inference=HOMOSCEDASTIC if inference is None else inference)
+    return diagnostic_document(run, inference=HOMOSCEDASTIC if inference is None else inference)
 
 
 def gradient_of(options, inference=None, path="gain.gain"):
     """One gradient run, executed, and the named path's derivative."""
-    results = run_document(gradient_document({"kind": "gradient", **options},
-                                             inference))
+    results = run_document(gradient_document({"kind": "gradient", **options}, inference))
     return float(results["gradient"].product[path])
 
 
@@ -111,7 +116,7 @@ class TestTheNumberIsTheDerivative:
         # Differentiating the unbound fit_twin gives -3175.42; binding the
         # latents at their inits gives -3969.27.  Both are finite, negative
         # and correctly shaped, so only the number tells them apart.
-        wrong = -2.0 * (TRUTH - MODEL_GAIN) * SUM_SQ_SIGNAL / SIGMA ** 2
+        wrong = -2.0 * (TRUTH - MODEL_GAIN) * SUM_SQ_SIGNAL / SIGMA**2
         measured = gradient_of({"objective": "chi2", "of": "gain.gain"})
         assert measured == pytest.approx(CHI2_AT_INIT, rel=1e-4)
         assert measured != pytest.approx(wrong, rel=1e-2)
@@ -121,12 +126,9 @@ class TestTheNumberIsTheDerivative:
         # exact negatives of each other about the truth.  A run that drops
         # at: -- or that merges the overrides UNDER the inits rather than
         # over them -- returns the same number three times.
-        below = gradient_of({"objective": "chi2", "of": "gain.gain",
-                             "at": {"g": 1.0}})
-        truth = gradient_of({"objective": "chi2", "of": "gain.gain",
-                             "at": {"g": TRUTH}})
-        above = gradient_of({"objective": "chi2", "of": "gain.gain",
-                             "at": {"g": 2.0}})
+        below = gradient_of({"objective": "chi2", "of": "gain.gain", "at": {"g": 1.0}})
+        truth = gradient_of({"objective": "chi2", "of": "gain.gain", "at": {"g": TRUTH}})
+        above = gradient_of({"objective": "chi2", "of": "gain.gain", "at": {"g": 2.0}})
         assert below == pytest.approx(CHI2_AT_INIT, rel=1e-4)
         assert above == pytest.approx(-CHI2_AT_INIT, rel=1e-4)
         assert truth == pytest.approx(0.0, abs=1e-2)
@@ -141,30 +143,30 @@ class TestTheNumberIsTheDerivative:
         keep passing with this branch deleted.
         """
         with pytest.raises(
-                ConfigError,
-                match=r"at: names \['h'\], which inference.parameters does "
-                      r"not declare") as caught:
-            gradient_of({"objective": "chi2", "of": "gain.gain",
-                         "at": {"h": 1.0}})
+            ConfigError,
+            match=r"at: names \['h'\], which inference.parameters does "
+            r"not declare",
+        ) as caught:
+            gradient_of({"objective": "chi2", "of": "gain.gain", "at": {"h": 1.0}})
         assert "it declares ['g']" in str(caught.value)
 
     def test_at_without_parameters_is_refused_naming_the_alternative(self):
         """The other half of the pair, matched on what only it says."""
         with pytest.raises(
-                ConfigError,
-                match="this document declares no inference.parameters"
-                ) as caught:
-            gradient_of({"objective": "sum_squares", "of": "gain.gain",
-                         "at": {"g": 1.0}}, inference={})
+            ConfigError, match="this document declares no inference.parameters"
+        ) as caught:
+            gradient_of(
+                {"objective": "sum_squares", "of": "gain.gain", "at": {"g": 1.0}}, inference={}
+            )
         assert "what dropping at: asks for" in str(caught.value)
         assert "does not declare" not in str(caught.value)
 
     def test_without_parameters_the_twins_own_leaves_are_the_point(self):
         # No latents, so nothing is bound: the point is the model's own
         # gain: 1.1, and d/dg sum((g s)^2) = 2 g sum(s^2).
-        assert gradient_of({"objective": "sum_squares", "of": "gain.gain"},
-                           inference={}) == pytest.approx(
-            2.0 * MODEL_GAIN * SUM_SQ_SIGNAL, rel=1e-4)
+        assert gradient_of(
+            {"objective": "sum_squares", "of": "gain.gain"}, inference={}
+        ) == pytest.approx(2.0 * MODEL_GAIN * SUM_SQ_SIGNAL, rel=1e-4)
 
 
 class TestEachObjectiveIsItsOwnNumber:
@@ -181,11 +183,12 @@ class TestEachObjectiveIsItsOwnNumber:
     MSE = 2.0 * (INIT - TRUTH) * SUM_SQ_SIGNAL / N_SAMPLES
 
     def test_the_four_objectives_disagree_on_one_document(self):
-        measured = {name: gradient_of({"objective": name, "of": "gain.gain"})
-                    for name in ("chi2", "sum_squares", "mean", "mse")}
+        measured = {
+            name: gradient_of({"objective": name, "of": "gain.gain"})
+            for name in ("chi2", "sum_squares", "mean", "mse")
+        }
         assert measured["chi2"] == pytest.approx(self.CHI2, rel=1e-4)
-        assert measured["sum_squares"] == pytest.approx(self.SUM_SQUARES,
-                                                        rel=1e-4)
+        assert measured["sum_squares"] == pytest.approx(self.SUM_SQUARES, rel=1e-4)
         assert measured["mean"] == pytest.approx(self.MEAN, rel=1e-4)
         assert measured["mse"] == pytest.approx(self.MSE, rel=1e-4)
 
@@ -198,10 +201,12 @@ class TestEachObjectiveIsItsOwnNumber:
         decades and both signs, and the closest pair (mean and mse) is 2.8x
         apart, which is far outside every rel=1e-4 above.
         """
-        values = [gradient_of({"objective": name, "of": "gain.gain"})
-                  for name in ("chi2", "sum_squares", "mean", "mse")]
+        values = [
+            gradient_of({"objective": name, "of": "gain.gain"})
+            for name in ("chi2", "sum_squares", "mean", "mse")
+        ]
         for index, one in enumerate(values):
-            for other in values[index + 1:]:
+            for other in values[index + 1 :]:
                 assert abs(one - other) > 0.5 * min(abs(one), abs(other))
 
     def test_sum_squares_and_mean_read_no_data(self):
@@ -209,32 +214,37 @@ class TestEachObjectiveIsItsOwnNumber:
         # still differentiates them.  An executor that resolves observed
         # for every objective refuses here instead.
         bare = {"parameters": PARAMETERS}
-        assert gradient_of({"objective": "sum_squares", "of": "gain.gain"},
-                           bare) == pytest.approx(self.SUM_SQUARES, rel=1e-4)
-        assert gradient_of({"objective": "mean", "of": "gain.gain"},
-                           bare) == pytest.approx(self.MEAN, rel=1e-4)
+        assert gradient_of({"objective": "sum_squares", "of": "gain.gain"}, bare) == pytest.approx(
+            self.SUM_SQUARES, rel=1e-4
+        )
+        assert gradient_of({"objective": "mean", "of": "gain.gain"}, bare) == pytest.approx(
+            self.MEAN, rel=1e-4
+        )
 
     def test_chi2_without_a_noise_declaration_is_refused(self):
-        with pytest.raises(ConfigError,
-                           match="weighs residuals with inference.noise"):
-            gradient_of({"objective": "chi2", "of": "gain.gain"},
-                        {"parameters": PARAMETERS})
+        with pytest.raises(ConfigError, match="weighs residuals with inference.noise"):
+            gradient_of({"objective": "chi2", "of": "gain.gain"}, {"parameters": PARAMETERS})
 
     def test_mse_without_observed_is_refused(self):
-        with pytest.raises(ConfigError,
-                           match="compares against inference.observed"):
-            gradient_of({"objective": "mse", "of": "gain.gain"},
-                        {"parameters": PARAMETERS,
-                         "noise": {"kind": "homoscedastic",
-                                   "sigma": {"value": SIGMA, "unit": "K"}}})
+        with pytest.raises(ConfigError, match="compares against inference.observed"):
+            gradient_of(
+                {"objective": "mse", "of": "gain.gain"},
+                {
+                    "parameters": PARAMETERS,
+                    "noise": {"kind": "homoscedastic", "sigma": {"value": SIGMA, "unit": "K"}},
+                },
+            )
 
     def test_a_python_objective_is_the_one_differentiated(self):
         # quarter_mse scores exactly a quarter of mse everywhere, so the
         # gradient is a quarter of mse's.  A run that quietly falls back to
         # a named objective cannot produce the ratio.
-        quarter = gradient_of({"objective": {
-            "python": "tests.config.test_config_exits_gradient:quarter_mse"},
-            "of": "gain.gain"})
+        quarter = gradient_of(
+            {
+                "objective": {"python": "tests.config.test_config_exits_gradient:quarter_mse"},
+                "of": "gain.gain",
+            }
+        )
         assert quarter == pytest.approx(0.25 * self.MSE, rel=1e-4)
         assert quarter != pytest.approx(self.MSE, rel=1e-2)
 
@@ -246,12 +256,10 @@ class TestEachObjectiveIsItsOwnNumber:
             gradient_of({"of": "gain.gain"})
 
     def test_an_unknown_objective_names_the_four(self):
-        with pytest.raises(ConfigError,
-                           match="objective: is one of") as caught:
+        with pytest.raises(ConfigError, match="objective: is one of") as caught:
             gradient_of({"objective": "chisq", "of": "gain.gain"})
         message = str(caught.value)
-        assert all(name in message
-                   for name in ("chi2", "mean", "mse", "sum_squares"))
+        assert all(name in message for name in ("chi2", "mean", "mse", "sum_squares"))
         assert "chisq" in message
 
 
@@ -285,11 +293,12 @@ class TestThePythonSeamRefusesInThisLayersCurrency:
     """
 
     def test_a_one_argument_objective_is_refused_naming_the_signature(self):
-        with pytest.raises(ConfigError,
-                           match="cannot be called as "
-                                 r"\(prediction, observed\)") as caught:
-            gradient_of({"objective": {"python": "math:sqrt"},
-                         "of": "gain.gain"})
+        with pytest.raises(
+            ConfigError,
+            match="cannot be called as "
+            r"\(prediction, observed\)",
+        ) as caught:
+            gradient_of({"objective": {"python": "math:sqrt"}, "of": "gain.gain"})
         message = str(caught.value)
         assert "runs['gradient']: " in message
         assert "math:sqrt" in message
@@ -297,10 +306,12 @@ class TestThePythonSeamRefusesInThisLayersCurrency:
 
     def test_a_three_argument_objective_is_refused_by_the_same_clause(self):
         with pytest.raises(ConfigError, match="cannot be called as"):
-            gradient_of({"objective": {
-                "python": "tests.config.test_config_exits_gradient:"
-                          "needs_three"},
-                "of": "gain.gain"})
+            gradient_of(
+                {
+                    "objective": {"python": "tests.config.test_config_exits_gradient:needs_three"},
+                    "of": "gain.gain",
+                }
+            )
 
     def test_an_objective_that_does_not_reduce_is_refused(self):
         """The shape jax.grad needs, said in this layer's currency.
@@ -308,10 +319,8 @@ class TestThePythonSeamRefusesInThisLayersCurrency:
         ``jnp.add`` takes the pair happily and returns the (16, 8) grid, so
         the arity guard passes it and only the output check can refuse it.
         """
-        with pytest.raises(ConfigError,
-                           match=r"returned shape \(16, 8\)") as caught:
-            gradient_of({"objective": {"python": "jax.numpy:add"},
-                         "of": "gain.gain"})
+        with pytest.raises(ConfigError, match=r"returned shape \(16, 8\)") as caught:
+            gradient_of({"objective": {"python": "jax.numpy:add"}, "of": "gain.gain"})
         assert "SCALAR score" in str(caught.value)
         assert "runs['gradient']: " in str(caught.value)
 
@@ -323,10 +332,12 @@ class TestThePythonSeamRefusesInThisLayersCurrency:
         pair -- no ``/``, no defaults -- passes the arity check rather than
         being caught by an over-eager one.
         """
-        assert gradient_of({"objective": {
-            "python": "tests.config.test_config_exits_gradient:quarter_mse"},
-            "of": "gain.gain"}) == pytest.approx(0.25 * (
-                2.0 * (INIT - TRUTH) * SUM_SQ_SIGNAL / N_SAMPLES), rel=1e-4)
+        assert gradient_of(
+            {
+                "objective": {"python": "tests.config.test_config_exits_gradient:quarter_mse"},
+                "of": "gain.gain",
+            }
+        ) == pytest.approx(0.25 * (2.0 * (INIT - TRUTH) * SUM_SQ_SIGNAL / N_SAMPLES), rel=1e-4)
 
     def test_a_python_objective_declared_beside_another_key_is_refused(self):
         """``{python: ..., loss: ...}`` is not the hatch, and says so.
@@ -337,16 +348,19 @@ class TestThePythonSeamRefusesInThisLayersCurrency:
         whole suite until this test.
         """
         with pytest.raises(ConfigError, match="objective: is one of"):
-            gradient_of({"objective": {
-                "python": "tests.config.test_config_exits_gradient:"
-                          "quarter_mse", "loss": "mse"},
-                "of": "gain.gain"})
+            gradient_of(
+                {
+                    "objective": {
+                        "python": "tests.config.test_config_exits_gradient:quarter_mse",
+                        "loss": "mse",
+                    },
+                    "of": "gain.gain",
+                }
+            )
 
-    def test_a_target_that_imports_nothing_is_still_the_hatch_s_own_refusal(
-            self):
+    def test_a_target_that_imports_nothing_is_still_the_hatch_s_own_refusal(self):
         with pytest.raises(ConfigError, match="no.such.module"):
-            gradient_of({"objective": {"python": "no.such.module:fn"},
-                         "of": "gain.gain"})
+            gradient_of({"objective": {"python": "no.such.module:fn"}, "of": "gain.gain"})
 
 
 class TestOfNamesTheLeaves:
@@ -363,15 +377,21 @@ class TestOfNamesTheLeaves:
         # satisfied by an executor that re-sorts either one -- which is the
         # bug sections/diagnostics.py::_at_values warns about for score_directions, and
         # which survived the whole suite until this line stopped sorting.
-        results = run_document(gradient_document(
-            {"kind": "gradient", "objective": "chi2",
-             "of": ["global_signal.depth", "gain.gain"]}))
+        results = run_document(
+            gradient_document(
+                {
+                    "kind": "gradient",
+                    "objective": "chi2",
+                    "of": ["global_signal.depth", "gain.gain"],
+                }
+            )
+        )
         product = results["gradient"].product
         assert list(product) == ["global_signal.depth", "gain.gain"]
-        assert float(product["gain.gain"]) == pytest.approx(CHI2_AT_INIT,
-                                                            rel=1e-4)
+        assert float(product["gain.gain"]) == pytest.approx(CHI2_AT_INIT, rel=1e-4)
         assert float(product["global_signal.depth"]) == pytest.approx(
-            (INIT / DEPTH) * CHI2_AT_INIT, rel=1e-4)
+            (INIT / DEPTH) * CHI2_AT_INIT, rel=1e-4
+        )
 
     def test_a_repeated_path_is_refused_the_way_names_is(self):
         """One key for a two-path ask, and no refusal -- measured, before
@@ -382,11 +402,11 @@ class TestOfNamesTheLeaves:
         was closed on ``names:`` and open on ``of:``.
         """
         with pytest.raises(
-                ConfigError,
-                match=r"of: lists \['gain.gain'\] more than once") as caught:
-            gradient_of({"objective": "chi2",
-                         "of": ["gain.gain", "global_signal.depth",
-                                "gain.gain"]})
+            ConfigError, match=r"of: lists \['gain.gain'\] more than once"
+        ) as caught:
+            gradient_of(
+                {"objective": "chi2", "of": ["gain.gain", "global_signal.depth", "gain.gain"]}
+            )
         assert "off by one" in str(caught.value)
 
     def test_of_alone_decides_which_leaf_a_single_run_differentiates(self):
@@ -398,12 +418,15 @@ class TestOfNamesTheLeaves:
         product carries that key and the depth number -- twice the gain's,
         and nothing else in this module.
         """
-        product = run_document(gradient_document(
-            {"kind": "gradient", "objective": "chi2",
-             "of": "global_signal.depth"}))["gradient"].product
+        product = run_document(
+            gradient_document(
+                {"kind": "gradient", "objective": "chi2", "of": "global_signal.depth"}
+            )
+        )["gradient"].product
         assert list(product) == ["global_signal.depth"]
         assert float(product["global_signal.depth"]) == pytest.approx(
-            (INIT / DEPTH) * CHI2_AT_INIT, rel=1e-4)
+            (INIT / DEPTH) * CHI2_AT_INIT, rel=1e-4
+        )
 
     def test_of_is_required(self):
         with pytest.raises(ConfigError, match="of: is required"):
@@ -411,8 +434,7 @@ class TestOfNamesTheLeaves:
 
     def test_of_is_a_path_or_a_list_of_paths(self):
         for bad in (7, [], ["gain.gain", 7], {"gain.gain": 1}):
-            with pytest.raises(ConfigError,
-                               match="of: is a path or a non-empty list"):
+            with pytest.raises(ConfigError, match="of: is a path or a non-empty list"):
                 gradient_of({"objective": "chi2", "of": bad})
 
     def test_a_path_that_stops_short_of_a_leaf_is_refused(self):
@@ -420,10 +442,8 @@ class TestOfNamesTheLeaves:
             gradient_of({"objective": "chi2", "of": "gain"})
 
     def test_unknown_keys_are_swept(self):
-        with pytest.raises(ConfigError,
-                           match=r"does not take \['objectives'\]") as caught:
-            gradient_of({"objective": "chi2", "of": "gain.gain",
-                         "objectives": "chi2"})
+        with pytest.raises(ConfigError, match=r"does not take \['objectives'\]") as caught:
+            gradient_of({"objective": "chi2", "of": "gain.gain", "objectives": "chi2"})
         assert "it takes ['at', 'objective', 'of']" in str(caught.value)
 
     def test_gradient_takes_neither_of_optimize_s_two_required_knobs(self):
@@ -434,10 +454,8 @@ class TestOfNamesTheLeaves:
         executor copied from ``optimize`` would produce.
         """
         for knob, value in (("learning_rate", 0.01), ("n_steps", 10)):
-            with pytest.raises(ConfigError,
-                               match=f"does not take \\['{knob}'\\]"):
-                gradient_of({"objective": "chi2", "of": "gain.gain",
-                             knob: value})
+            with pytest.raises(ConfigError, match=f"does not take \\['{knob}'\\]"):
+                gradient_of({"objective": "chi2", "of": "gain.gain", knob: value})
 
 
 class TestIncludeLogdetGetsItsFirstConsumer:
@@ -465,18 +483,16 @@ class TestIncludeLogdetGetsItsFirstConsumer:
     """
 
     def _radiometer(self, include_logdet):
-        return {**HOMOSCEDASTIC,
-                "noise": {"kind": "radiometer", **RADIOMETER_FACTS,
-                          "include_logdet": include_logdet}}
+        return {
+            **HOMOSCEDASTIC,
+            "noise": {"kind": "radiometer", **RADIOMETER_FACTS, "include_logdet": include_logdet},
+        }
 
     def test_the_declared_include_logdet_changes_the_number_and_its_sign(self):
-        without = gradient_of({"objective": "chi2", "of": "gain.gain"},
-                              self._radiometer(False))
-        with_it = gradient_of({"objective": "chi2", "of": "gain.gain"},
-                              self._radiometer(True))
+        without = gradient_of({"objective": "chi2", "of": "gain.gain"}, self._radiometer(False))
+        with_it = gradient_of({"objective": "chi2", "of": "gain.gain"}, self._radiometer(True))
         assert without == pytest.approx(-1.5 * N_SAMPLES, rel=1e-3)
-        assert with_it == pytest.approx(-1.5 * N_SAMPLES + 2 * N_SAMPLES,
-                                        rel=1e-3)
+        assert with_it == pytest.approx(-1.5 * N_SAMPLES + 2 * N_SAMPLES, rel=1e-3)
         assert without < 0.0 < with_it
 
     def test_the_undeclared_state_keeps_the_packages_own_term(self):
@@ -491,24 +507,25 @@ class TestIncludeLogdetGetsItsFirstConsumer:
         drops 128 * log(2 pi sigma^2) = -531.66 from a weighted sum of
         992.32, which is a 2.2x change in the value the closure returns.
         """
-        built = load_document(gradient_document(
-            {"kind": "gradient", "objective": "chi2", "of": "gain.gain"}))
+        built = load_document(
+            gradient_document({"kind": "gradient", "objective": "chi2", "of": "gain.gain"})
+        )
         assert built.inference.noise.include_logdet is None
         space = built.inference.space
-        bound = space.bind(built.inference.fit_twin,
-                           dict(space.initial_values()))
+        bound = space.bind(built.inference.fit_twin, dict(space.initial_values()))
         prediction = bound(built.state).data
         observed = built.inference.observed.entries["primary"]
         weighted = float(jnp.sum(((observed - prediction) / SIGMA) ** 2))
-        logdet = N_SAMPLES * math.log(2.0 * math.pi * SIGMA ** 2)
+        logdet = N_SAMPLES * math.log(2.0 * math.pi * SIGMA**2)
         measured = float(_chi2(spec("gradient"), built)(prediction))
         assert weighted == pytest.approx(992.318, rel=1e-4)
         assert measured == pytest.approx(weighted + logdet, rel=1e-4)
         assert measured != pytest.approx(weighted, rel=1e-2)
 
     def test_an_undeclared_include_logdet_still_lands_on_its_number(self):
-        assert gradient_of({"objective": "chi2", "of": "gain.gain"}) == \
-            pytest.approx(CHI2_AT_INIT, rel=1e-4)
+        assert gradient_of({"objective": "chi2", "of": "gain.gain"}) == pytest.approx(
+            CHI2_AT_INIT, rel=1e-4
+        )
 
     def test_a_frozen_sigma_weighs_without_a_noise_model(self):
         # radiometer_frozen decides an ARRAY, not a NoiseModel, so
@@ -516,12 +533,13 @@ class TestIncludeLogdetGetsItsFirstConsumer:
         # (frozen off the observed data with f = 1), which cancels the
         # signal out of the weighted sum entirely:
         #     chi2 = N (1.5 - g)^2 / 1.5^2  ->  d/dg = -2 N (1.5 - g)/2.25
-        frozen = {**HOMOSCEDASTIC,
-                  "noise": {"kind": "radiometer_frozen", "source": "observed",
-                            **RADIOMETER_FACTS}}
-        assert gradient_of({"objective": "chi2", "of": "gain.gain"},
-                           frozen) == pytest.approx(
-            -2.0 * N_SAMPLES * (TRUTH - INIT) / TRUTH ** 2, rel=1e-3)
+        frozen = {
+            **HOMOSCEDASTIC,
+            "noise": {"kind": "radiometer_frozen", "source": "observed", **RADIOMETER_FACTS},
+        }
+        assert gradient_of({"objective": "chi2", "of": "gain.gain"}, frozen) == pytest.approx(
+            -2.0 * N_SAMPLES * (TRUTH - INIT) / TRUTH**2, rel=1e-3
+        )
 
 
 class TestTheSharedFixturesDiscriminate:
@@ -547,13 +565,15 @@ class TestTheSharedFixturesDiscriminate:
     """
 
     def test_the_diagnostics_document_differentiates_the_fit_twin(self):
-        built = load_document(gradient_document(
-            {"kind": "gradient", "objective": "chi2", "of": "gain.gain"}))
+        built = load_document(
+            gradient_document({"kind": "gradient", "objective": "chi2", "of": "gain.gain"})
+        )
         assert built.twin is not built.inference.fit_twin
         with pytest.raises(ParameterSpaceError, match="NoiseOperator"):
             build_forward_fn(built.twin, built.state)
-        assert gradient_of({"objective": "chi2", "of": "gain.gain"}) == \
-            pytest.approx(CHI2_AT_INIT, rel=1e-4)
+        assert gradient_of({"objective": "chi2", "of": "gain.gain"}) == pytest.approx(
+            CHI2_AT_INIT, rel=1e-4
+        )
 
     def test_the_simulated_data_still_comes_off_the_fit_twin(self):
         """The other half of the repair, and the half that pins numbers.
@@ -565,13 +585,12 @@ class TestTheSharedFixturesDiscriminate:
         the exact deterministic forward at the truth, and obs/pred is 1.5 to
         float32 roundoff rather than scattered.
         """
-        built = load_document(gradient_document(
-            {"kind": "gradient", "objective": "chi2", "of": "gain.gain"}))
+        built = load_document(
+            gradient_document({"kind": "gradient", "objective": "chi2", "of": "gain.gain"})
+        )
         space = built.inference.space
-        bound = space.bind(built.inference.fit_twin,
-                           dict(space.initial_values()))
-        ratio = (built.inference.observed.entries["primary"]
-                 / bound(built.state).data)
+        bound = space.bind(built.inference.fit_twin, dict(space.initial_values()))
+        ratio = built.inference.observed.entries["primary"] / bound(built.state).data
         assert float(jnp.max(jnp.abs(ratio - TRUTH))) < 1.0e-5
 
     def test_the_conjugate_document_keeps_the_two_twins_apart_too(self):
@@ -587,16 +606,21 @@ class TestTheSharedFixturesDiscriminate:
         space = built.inference.space
         truth = built.inference.observed.at["primary"]
         assert float(truth["g"]) == pytest.approx(TRUTH_G)
-        at_truth = space.bind(built.inference.fit_twin,
-                              {**space.initial_values(), **truth})
-        assert float(jnp.max(jnp.abs(
-            built.inference.observed.entries["primary"]
-            - at_truth(built.state).data))) < 1.0e-5
+        at_truth = space.bind(built.inference.fit_twin, {**space.initial_values(), **truth})
+        assert (
+            float(
+                jnp.max(
+                    jnp.abs(
+                        built.inference.observed.entries["primary"] - at_truth(built.state).data
+                    )
+                )
+            )
+            < 1.0e-5
+        )
 
     def test_the_repair_is_supplied_when_the_block_says_nothing(self):
         """Both keys default, which is what "cannot drop the repair" means."""
-        repaired = _repaired({"parameters": {},
-                              "observed": {"from": "simulation"}})
+        repaired = _repaired({"parameters": {}, "observed": {"from": "simulation"}})
         assert repaired["twin"] == {"without": ["noise"]}
         assert repaired["observed"] == {"from": "simulation", "twin": "fit"}
 
@@ -610,16 +634,16 @@ class TestTheSharedFixturesDiscriminate:
         caller reaching for one of these is not hypothetical.  Measured
         before this change: both declarations were discarded in silence.
         """
-        mine = _repaired({"twin": {"without": ["gain"]},
-                          "observed": {"from": "simulation", "twin": "full"}})
+        mine = _repaired(
+            {"twin": {"without": ["gain"]}, "observed": {"from": "simulation", "twin": "full"}}
+        )
         assert mine["twin"] == {"without": ["gain"]}
         assert mine["observed"]["twin"] == "full"
 
     def test_the_repair_never_mutates_the_block_it_is_handed(self):
         block = {"parameters": {}, "observed": {"from": "simulation"}}
         _repaired(block)
-        assert block == {"parameters": {},
-                         "observed": {"from": "simulation"}}
+        assert block == {"parameters": {}, "observed": {"from": "simulation"}}
 
 
 class TestTheExecutorReadsOnlyTheParsedView:
@@ -633,13 +657,15 @@ class TestTheExecutorReadsOnlyTheParsedView:
         )
         from rheplicant.config.sections.runs import parse_runs
 
-        doc = gradient_document({"kind": "gradient", "objective": "mean",
-                                 "of": ["gain.gain"]})
+        doc = gradient_document({"kind": "gradient", "objective": "mean", "of": ["gain.gain"]})
         built = load_document(doc)
         (spec,) = parse_runs(doc["runs"])
-        parsed = parse_run(spec, built, index=0,
-                           layer=LayerRef(kind="base", name=None, prefix="",
-                                          document={}, declared_runs=None))
+        parsed = parse_run(
+            spec,
+            built,
+            index=0,
+            layer=LayerRef(kind="base", name=None, prefix="", document={}, declared_runs=None),
+        )
         spec.options["of"] = ["global_signal.depth"]  # poison AFTER parse
         product = handler_for("gradient").execute(parsed, built, {})
         assert list(product) == ["gain.gain"]

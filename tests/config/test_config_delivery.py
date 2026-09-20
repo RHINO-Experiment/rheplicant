@@ -98,14 +98,12 @@ class TestDeliveryOrigin:
         assert origin_for_delivery(context, self.destination) == expected
 
     def test_only_an_explicit_default_gets_the_default_origin(self):
-        assert origin_for_delivery(
-            ResolutionContext(), self.destination, defaulted=True
-        ) == Origin("rheplicant-default")
+        assert origin_for_delivery(ResolutionContext(), self.destination, defaulted=True) == Origin(
+            "rheplicant-default"
+        )
 
     def test_orchestration_uses_the_terminal_origin_for_a_scalar(self):
-        base = initial_merge(
-            {"runtime": {"seed": 1}}, origin=Origin("preset", "factory")
-        )
+        base = initial_merge({"runtime": {"seed": 1}}, origin=Origin("preset", "factory"))
         merged = merge_with_origins(
             base, {"runtime": {"seed": 4}}, origin=Origin("variant", "cold")
         )
@@ -114,13 +112,7 @@ class TestDeliveryOrigin:
 
     def test_orchestration_uses_the_form_key_not_its_unit_sibling(self):
         base = initial_merge(
-            {
-                "model": {
-                    "adc": {
-                        "scale": {"value": 1, "unit": "adc_count/K"}
-                    }
-                }
-            },
+            {"model": {"adc": {"scale": {"value": 1, "unit": "adc_count/K"}}}},
             origin=Origin("preset", "factory"),
         )
         merged = merge_with_origins(

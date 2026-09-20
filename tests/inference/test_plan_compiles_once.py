@@ -92,22 +92,19 @@ def mixed():
     correctly, and it is not what this test is about.
     """
     state = State(
-        coords=Coordinates(time=jnp.arange(float(N_TIME)),
-                           freq=jnp.linspace(60e6, 85e6, N_FREQ)),
+        coords=Coordinates(time=jnp.arange(float(N_TIME)), freq=jnp.linspace(60e6, 85e6, N_FREQ)),
         key=jax.random.key(0),
         meta={"telescope": "compile-count"},
     )
     twin = assemble(
-        ForegroundOperator(amplitude=jnp.array(1e3), spectral_index=jnp.array(2.5),
-                           ref_freq=70e6),
+        ForegroundOperator(amplitude=jnp.array(1e3), spectral_index=jnp.array(2.5), ref_freq=70e6),
         GainOperator(gain=jnp.array(1.1)),
         NoiseOperator(sigma=jnp.array(0.5)),
     )
     observed = twin(state).data
     space = ParameterSpace(
         latents=[
-            Latent("gain", init=jnp.array(1.0), linear=True,
-                   prior=dist.Normal(1.0, 0.3)),
+            Latent("gain", init=jnp.array(1.0), linear=True, prior=dist.Normal(1.0, 0.3)),
             Latent("beta", init=jnp.array(2.3), prior=dist.Normal(2.3, 0.3)),
         ],
         bindings=[
@@ -122,8 +119,13 @@ def mixed():
 def _sample(mixed, n_sweeps):
     plan, fit, state, observed = mixed
     return lambda: plan.sample(
-        fit, state, observed, noise=0.5, key=jax.random.key(1),
-        n_sweeps=n_sweeps, warmup=n_sweeps // 2,
+        fit,
+        state,
+        observed,
+        noise=0.5,
+        key=jax.random.key(1),
+        n_sweeps=n_sweeps,
+        warmup=n_sweeps // 2,
     )
 
 
@@ -170,7 +172,12 @@ def test_the_transition_is_compiled_once_per_run(mixed) -> None:
 def _estimate(mixed, max_iter):
     plan, fit, state, observed = mixed
     return lambda: plan.estimate(
-        fit, state, observed, noise=0.5, max_iter=max_iter, tol=None,
+        fit,
+        state,
+        observed,
+        noise=0.5,
+        max_iter=max_iter,
+        tol=None,
     )
 
 
