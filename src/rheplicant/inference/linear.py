@@ -1629,7 +1629,7 @@ def wiener_solve(
         guard says so in its own words.
 
         **It is OFF by default, and that is a recent, deliberate retreat.** The
-        guard shipped on, against a κ that :func:`_condition_estimate` has since
+        guard shipped on, against a κ that ``_condition_estimate`` has since
         been shown to under-report by up to a factor of 700 — so what was on by
         default was a promise to bound the error that did not bound it. The κ
         here is now a rigorous UPPER bound, and the same measurement that made
@@ -1750,7 +1750,7 @@ def condition_estimate(
     at 1e7 over 50 points the factor was ~700 and 2000 iterations did not
     close it. A ``tol`` computed from it is too LOOSE by that factor, which is
     the direction that certifies an answer it should have refused. See
-    :func:`_condition_estimate` for where those numbers came from.
+    ``_condition_estimate`` for where those numbers came from.
 
     **What it is good for is the thing a bound cannot do: it can SEE a
     degeneracy.** A near-degenerate partition shows up entirely in ``λ_min``,

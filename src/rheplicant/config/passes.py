@@ -57,7 +57,7 @@ from rheplicant.config.paths import parse_path
 
 __all__ = ["SLOT", "Check", "Registry", "binder", "check_where", "sweep"]
 
-#: One check: a payload in, findings out, nothing raised.  The payload is the
+#: One check -- a payload in, findings out, nothing raised.  The payload is the
 #: document for the text pass, an ``Axes`` for the axes pass and a ``Built``
 #: for the built pass, which is why this is ``Any`` rather than a mapping --
 #: the registries are separate precisely so a check cannot be bound in a slot
@@ -67,7 +67,7 @@ Check = Callable[[Any], Iterable[Finding]]
 #: id -> the function.  **Insertion order IS run order** in every pass.
 Registry = dict[str, Check]
 
-#: A registry SLOT: a schema §6 id, optionally with a dotted suffix.  Moved
+#: A registry SLOT -- a schema §6 id, optionally with a dotted suffix.  Moved
 #: from ``_T2_SLOT`` unchanged.  It already admits ``B``
 #: and ``C`` ids, which is why the two new passes need no widening of it --
 #: measured, ``"C1"``, ``"C2.time"`` and ``"A13.grid"`` all ``fullmatch`` and

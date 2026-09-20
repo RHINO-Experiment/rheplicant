@@ -218,7 +218,7 @@ def auto_blocks(
             cannot be settled without it: taking logs simplifies a
             multiplicative noise and merely restates an additive one, the
             first-order equivalence holds only up to
-            :data:`~rheplicant.inference.loglinear.FIRST_ORDER_MAX_FRACTIONAL`,
+            ``FIRST_ORDER_MAX_FRACTIONAL``,
             and a declared ``RadiometerNoise.floor`` makes sigma constant
             wherever it binds. Given one, those refusals
             (:func:`~rheplicant.inference.loglinear.log_route_refusal`) are

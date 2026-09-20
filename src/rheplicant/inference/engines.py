@@ -17,7 +17,7 @@ first-order caveat live. Anything else has only a gradient, so its point
 estimate is a descent and its draw is NUTS.
 
 The first two share every line of their update but one, so they share a
-function: :func:`_conjugate_update` takes which transition to build, and the
+function: ``_conjugate_update`` takes which transition to build, and the
 difference between them is exactly that a log block does not re-evaluate sigma.
 
 **Conditioning is one function, used by both.** :class:`Conditioning` closes
@@ -105,7 +105,7 @@ DEFAULT_LEARNING_RATE: float = 1e-2
 
 #: The tag that keeps a cached estimate transition's key apart from every other
 #: key in a plan's ``programs`` dict. :func:`gradient_draw` keys on
-#: ``(names, steps, adapting)`` and :func:`_conjugate_update` on a 6-tuple of
+#: ``(names, steps, adapting)`` and ``_conjugate_update`` on a 6-tuple of
 #: ``names`` and solver settings; a 4-tuple opening with this string cannot
 #: equal either.
 _ESTIMATE_TAG: str = "estimate"
@@ -161,7 +161,7 @@ class Conditioning:
     def chi2(self, values: dict[str, jax.Array]) -> jax.Array:
         """The JOINT chi-squared at the current parameter tuple.
 
-        Reported by both exits, and the trace :meth:`SamplingPlan.sample`
+        Reported by both exits, and the trace ``SamplingPlan.sample``
         tests mixing on; a point estimate's stop rule reads
         :meth:`neg_log_posterior` instead (T-002 A5-1). It is here rather than
         in a block because it is computed from the whole parameter tuple
@@ -504,7 +504,7 @@ def _log_conjugate_transition(
     the same class of statement as
     :func:`gradient_draw`'s Metropolis-within-Gibbs downgrade: still a usable
     sampler, no longer the exact one a pure-conjugate plan is.
-    :data:`~rheplicant.inference.loglinear.FIRST_ORDER_MAX_FRACTIONAL` bounds
+    ``FIRST_ORDER_MAX_FRACTIONAL`` bounds
     the discrepancy — at the ``f = 4.05e-3`` of a 61 kHz channel at 1 s the
     variance the two disagree on is 4e-5 of itself.
     """
@@ -592,7 +592,7 @@ def conjugate_estimate(cond, names, values, **kwargs):
 
 
 def log_conjugate_estimate(cond, names, values, **kwargs):
-    """The same mean, solved in log space. See :func:`_log_conjugate_transition`."""
+    """The same mean, solved in log space. See ``_log_conjugate_transition``."""
     return _conjugate_update(cond, names, values, key=None, engine=LOG_CONJUGATE, **kwargs)
 
 
@@ -602,7 +602,7 @@ def log_conjugate_draw(cond, names, values, *, key, **kwargs):
     Exact for that conditional, which is the multiplicative model's own only to
     first order in ``f`` — the one qualification a
     :data:`CONJUGATE` block does not carry. See
-    :func:`_log_conjugate_transition` for the size of it.
+    ``_log_conjugate_transition`` for the size of it.
     """
     return _conjugate_update(cond, names, values, key=key, engine=LOG_CONJUGATE, **kwargs)
 

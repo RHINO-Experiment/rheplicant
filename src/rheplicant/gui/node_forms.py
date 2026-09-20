@@ -149,7 +149,7 @@ class NodeFieldSet:
     #: knows which key belongs to which class, and a confirmation that names
     #: the wrong keys is worse than no confirmation at all.
     removed_by_type: dict[str, tuple[str, ...]]
-    #: Where these settings live inside the node's own settings: empty for a
+    #: Where these settings live inside the node's own settings -- empty for a
     #: single-slot node, ``("0",)`` for a list entry, ``("hot",)`` for a FAN
     #: label, ``("stages", "0")`` for a compose stage. A PATH rather than one
     #: key so the browser is handed the address instead of re-deriving it,
@@ -365,7 +365,7 @@ def project_node_fields(
     have to import the module the document names in order to disagree.
 
     Args:
-        node_id: a node of :data:`~rheplicant.radio.graph.RADIO_GRAPH`.
+        node_id: a node of ``RADIO_GRAPH``.
         settings: that node's settings exactly as written, or ``None``.
         catalog: a built widget catalog. Build it ONCE per projection pass --
             it is the whole census, and one per node would rebuild it 33
@@ -473,7 +473,7 @@ def from_route_fields(
     that names a route no node offers gets the refusal it already had rather
     than a form for something that cannot be built.
 
-    The route table is :data:`~rheplicant.config.sections.model.FROM_ROUTES`,
+    The route table is ``FROM_ROUTES``,
     which is what ``_from_route`` itself reads, so a form here cannot offer a
     key that function would refuse. Two of the five keys -- ``t_ground`` and
     ``coeff`` -- are the shipped operator's own fields and come out of the

@@ -625,7 +625,7 @@ class NpeProduct(NamedTuple):
     """What a ``kind: npe`` run returns.
 
     ``samples`` and ``n_draw`` are not free choices and carry the same
-    contract :class:`~rheplicant.config.sections.nuts.NutsProduct` does, for
+    contract ``NutsProduct`` does, for
     the same reason: 2C's shipped ``predict`` reads a samples product as
     ``product.n_draw`` (an int) and ``product.samples`` (a mapping of latent
     name -> stack with a leading draw axis), ``sections/diagnostics.py::_a39_predict_takes_no_from``

@@ -1,4 +1,6 @@
-:orphan:
+---
+orphan: true
+---
 
 # Agentic UI design
 

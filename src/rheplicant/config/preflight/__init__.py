@@ -242,7 +242,7 @@ def preflight(document: Mapping[str, Any]) -> Report:
 
     One pass constructs one canonical base layer and one effective layer per
     declared variant.  Every registered check is then swept layer-major with
-    one :class:`LayerAttributor`; no check applies or replays a variant.
+    one ``LayerAttributor``; no check applies or replays a variant.
 
     **It goes through the FOOT ALIAS, and that is not a style choice.**  A
     function-local ``from rheplicant.config.preflight import document`` also

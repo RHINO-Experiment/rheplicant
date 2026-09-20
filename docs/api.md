@@ -65,6 +65,11 @@ it.
 .. automodule:: rheplicant.core.errors
    :members:
    :show-inheritance:
+.. automodule:: rheplicant.core.capability
+   :members:
+
+.. automodule:: rheplicant.core
+   :members: BASIS_KINDS
 ```
 
 ## rheplicant.radio
@@ -200,6 +205,11 @@ it.
 .. automodule:: rheplicant.radio.surrogate
    :members:
    :show-inheritance:
+.. automodule:: rheplicant.radio.census
+   :members:
+
+.. automodule:: rheplicant.radio.site
+   :members:
 ```
 
 ## Ingestion
@@ -227,6 +237,9 @@ coefficients the noise-wave model consumes.
 
 ```{eval-rst}
 .. automodule:: rheplicant.inference.linear
+   :members:
+
+.. automodule:: rheplicant.inference.graph_bridge
    :members:
 
 .. automodule:: rheplicant.inference.loglinear
@@ -353,6 +366,50 @@ prose; these are the signatures.
 .. automodule:: rheplicant.config.values
    :members:
    :show-inheritance:
+.. automodule:: rheplicant.config.document
+   :members:
+
+.. automodule:: rheplicant.config.inflight
+   :members:
+
+.. automodule:: rheplicant.config.passes
+   :members:
+
+.. automodule:: rheplicant.config.sections.noise
+   :members:
+
+.. automodule:: rheplicant.config.sections.observation
+   :members:
+
+.. automodule:: rheplicant.config.sections.ingest
+   :members:
+
+.. automodule:: rheplicant.config.sections.npe
+   :members:
+
+.. automodule:: rheplicant.config.sections.observed
+   :members:
+
+.. automodule:: rheplicant.config.sections.runtime
+   :members:
+
+.. automodule:: rheplicant.config.findings
+   :members:
+
+.. automodule:: rheplicant.config.gating
+   :members:
+
+.. automodule:: rheplicant.config.dimensions
+   :members:
+
+.. automodule:: rheplicant.config.preflight
+   :members:
+
+.. automodule:: rheplicant.config.sections.inference
+   :members:
+
+.. automodule:: rheplicant.config.sections.runs
+   :members:
 ```
 
 ```{eval-rst}
@@ -420,3 +477,58 @@ prose; these are the signatures.
 .. automodule:: rheplicant.config.kinds.s_params
    :members:
 ```
+
+## rheplicant.gui
+
+The editor's server side: the projections a browser reads, the session that
+holds one document's revisions, and the job store that runs one. It is a
+public namespace like the other five -- `docs/stability.md` counts its names
+with the rest -- while the HTTP API it is reached through is **internal** and
+versioned with the client bundled beside it.
+
+```{eval-rst}
+.. automodule:: rheplicant.gui.document
+   :members:
+
+.. automodule:: rheplicant.gui.node_forms
+   :members:
+
+.. automodule:: rheplicant.gui.document_edits
+   :members:
+
+.. automodule:: rheplicant.gui.forms
+   :members:
+
+.. automodule:: rheplicant.gui.jobs
+   :members:
+
+.. automodule:: rheplicant.gui.outputs
+   :members:
+
+.. automodule:: rheplicant.gui.previews
+   :members:
+
+.. automodule:: rheplicant.gui.session
+   :members:
+
+.. automodule:: rheplicant.gui.validation
+   :members:
+```
+
+## The JAX-free bootstrap
+
+Two names in `rheplicant.config`'s public surface are defined in
+`_rheplicant_bootstrap`, which is private by name and by intent: it is read
+before `rheplicant` is importable, so it cannot depend on it. They are
+documented here because the names are public where they are re-exported, and
+a reference page that omitted them would be describing a smaller surface than
+the one `docs/stability.md` counts.
+
+```{eval-rst}
+.. automodule:: _rheplicant_bootstrap.layering
+   :members: recursive_update
+
+.. automodule:: _rheplicant_bootstrap.layering_variants
+   :members: apply_variant
+```
+

@@ -75,7 +75,7 @@ class NodeInstance:
     instance_id: str
     label: str
     settings: object
-    #: Where these settings live inside the node's own: ``("0",)`` for a list
+    #: Where these settings live inside the node's own value. ``("0",)`` for a list
     #: entry, ``("hot",)`` for a FAN label, ``("stages", "0")`` for a stage.
     #: Sent rather than re-derived, so the browser never has to decide again
     #: whether a key is an index or a label.

@@ -24,7 +24,7 @@ Two methods, not a mode flag. ``key=None | k`` is the right *implementation* and
 the wrong *interface*: a caller's intent is "give me the best fit" or "give me
 draws", not "here is a PRNG key". Making them two methods also makes the invalid
 combinations unrepresentable rather than validated — ``key`` is required on
-:meth:`~SamplingPlan.sample` and absent from :meth:`~SamplingPlan.estimate`, so
+``SamplingPlan.sample`` and absent from :meth:`~SamplingPlan.estimate`, so
 "asked for samples and forgot the key" cannot be written down; ``n_sweeps`` and
 ``warmup`` belong to one and ``max_iter`` and ``tol`` to the other because they
 mean nothing to the other. And the layer below already names the two exits
@@ -70,7 +70,7 @@ is precisely the number that read ~1e-7 on an answer thousands of kelvin wrong.
 For :meth:`SamplingPlan.estimate` that quantity is the joint negative log
 posterior (:meth:`~rheplicant.inference.engines.Conditioning.neg_log_posterior`),
 the objective every block update descends; the joint chi-squared is recorded
-beside it, and :meth:`SamplingPlan.sample` tests its mixing on the chi-squared
+beside it, and ``SamplingPlan.sample`` tests its mixing on the chi-squared
 trace.
 
 **The identifiability check costs a dense Jacobian and a dense SVD**, ``n_data x
@@ -130,7 +130,7 @@ observation site is a ``Normal`` whose ``log_prob`` carries ``-log scale``
 automatically -- so the ``nuts`` exit sampled the full density while a
 gradient block sampled the GLS-flavoured one, from the same declared model.
 It is the same distinction
-:class:`~rheplicant.inference.compressed.BayesMemory` refuses to mix under its
+:class:`~rheplicant.inference.memory.BayesMemory` refuses to mix under its
 ``estimator`` field, which is why it was written down here rather than left to
 be discovered.
 
@@ -297,9 +297,10 @@ DEFAULT_CHI2_TOL: float = 1e-8
 #:
 #: **What decides and what only schedules.** The decrement is one gradient
 #: and a conjugate-gradient solve on Hessian-vector products
-#: (:func:`~rheplicant.inference.engines._decrement_program`). It runs only
+#: (one of the two programs
+#: ``_monitor_programs`` returns). It runs only
 #: on a sweep that passes the cheap tests: the change within ``tol``, and a
-#: gap pre-screen (:func:`_gap_step`) that extrapolates the decreases at their
+#: gap pre-screen (``_gap_step``) that extrapolates the decreases at their
 #: estimated contraction, or a decrease below what the arithmetic resolves.
 #: Those tests pick the candidate; they cannot certify, because the
 #: contraction read from decreases is the fastest mode still moving, and the
@@ -340,7 +341,7 @@ _SETTLED_CHANGES: int = certify.SETTLED_CHANGES
 #: The first sweep at which :meth:`SamplingPlan.estimate` can report
 #: converged, whatever ``min_sweeps`` says below it. The changes are counted
 #: between sweep OUTPUTS, never from the starting values, so
-#: :data:`_SETTLED_CHANGES` changes need one more sweep than that. A run with
+#: ``_SETTLED_CHANGES`` changes need one more sweep than that. A run with
 #: a ``tol`` and a ``max_iter`` below this always refuses; the config
 #: layer's pre-flight check A25 refuses such a document before it runs.
 EARLIEST_CONVERGED_SWEEP: int = _SETTLED_CHANGES + 1
@@ -348,7 +349,7 @@ EARLIEST_CONVERGED_SWEEP: int = _SETTLED_CHANGES + 1
 #: The resolution of a sweep-to-sweep change of the objective, in units of
 #: machine epsilon: ``RESOLUTION_EPS * eps * sqrt(sum (s0 + s1)**2)`` over the
 #: objective's terms, where ``s`` is each term's rounding magnitude (see
-#: :func:`~rheplicant.inference.engines._monitor_programs`). The gap
+#: ``_monitor_programs``). The gap
 #: pre-screen treats a change below it as no change; nothing certifies on it.
 #:
 #: The change is taken as a sum of per-term differences, so the constant parts
@@ -375,7 +376,7 @@ _DIRECTIONS_SHOWN: int = 4
 
 #: The stop rule's two halves, from
 #: :mod:`~bayesmith.optimize.certify`: whether the objective's last
-#: :data:`_SETTLED_CHANGES` changes are within a tolerance, and that
+#: ``_SETTLED_CHANGES`` changes are within a tolerance, and that
 #: tolerance floored at the dtype's resolution. The changes counted are
 #: between sweep OUTPUTS, never from the starting values, so the earliest a
 #: trace can settle is :data:`EARLIEST_CONVERGED_SWEEP`.
@@ -385,7 +386,7 @@ _effective_tol = certify.effective_tol
 
 #: The gap PRE-SCREEN, from :mod:`~bayesmith.optimize.certify`: it picks
 #: the sweeps at which the Newton decrement is computed and certifies
-#: nothing. :func:`_certify` is what decides.
+#: nothing. ``_certify`` is what decides.
 _GapState = certify.GapState
 _gap_step = certify.gap_step
 
@@ -441,7 +442,7 @@ def _certify(
     inexact solve can only make it refuse — see
     :func:`~bayesmith.optimize.certify.decrement`.
 
-    ``floor`` is :meth:`SamplingPlan._curvature_floor`'s, and matters only
+    ``floor`` is ``_curvature_floor``'s, and matters only
     for a model with more latents than
     :data:`~bayesmith.optimize.certify.DENSE_MAX`, where the Hessian is not
     formed and its smallest eigenvalue has to come from somewhere.
@@ -467,7 +468,7 @@ def _at_this_size(measured: Any) -> str:
     eigenvalue, and this package certifies only where that number is a proof:
     the formed Hessian's own eigenvalue below
     :data:`~bayesmith.optimize.certify.DENSE_MAX` latents, or the prior
-    precision where :meth:`SamplingPlan._curvature_floor`'s conditions hold.
+    precision where ``_curvature_floor``'s conditions hold.
     Above that limit and outside those conditions the floor is a Lanczos
     probe's, which is an estimate — measured, it sits ABOVE the smallest
     eigenvalue for about one random spectrum in fifty — so the run refuses
@@ -519,7 +520,7 @@ def _not_converged_message(
     The headline changes for one case. A model whose decrement has no proven
     curvature floor (above
     :data:`~bayesmith.optimize.certify.DENSE_MAX` latents, outside
-    :meth:`SamplingPlan._curvature_floor`'s conditions) has not failed to
+    ``_curvature_floor``'s conditions) has not failed to
     converge — nothing here can say whether it has. The refusal says that
     instead, and :func:`_at_this_size` says what would change it.
     """
@@ -641,7 +642,7 @@ def split_rhat(trace: Any) -> float:
     and stopped.
 
     **A trace too short to halve is refused, not answered.**
-    :meth:`SamplingPlan.sample` enforces :data:`MIN_DRAWS` on the draws it keeps
+    ``SamplingPlan.sample`` enforces :data:`MIN_DRAWS` on the draws it keeps
     and this function is public and exported, so it enforces the same minimum
     rather than trusting its one in-package caller. What it refuses used to be
     returned: two halves of one have no within-half variance, so ``ddof=1`` gave
@@ -697,7 +698,7 @@ class Block:
         names: the latents in this block, in the caller's own order.
         steps: inner steps for a **gradient** block — Adam steps at
             :meth:`SamplingPlan.estimate`, NUTS steps at
-            :meth:`SamplingPlan.sample`. ``None`` takes
+            ``SamplingPlan.sample``. ``None`` takes
             :data:`~rheplicant.inference.engines.DEFAULT_GRADIENT_STEPS`.
 
             This reads as a performance knob and it is a **statistical
@@ -717,7 +718,7 @@ class Block:
             It sets how far the Adam steps travel in a sweep; the Newton steps
             that follow them set the precision, so the answer does not carry
             a floor proportional to it.
-            It has no meaning at :meth:`SamplingPlan.sample`, where NUTS adapts
+            It has no meaning at ``SamplingPlan.sample``, where NUTS adapts
             its own step size, and none for a conjugate block, which has no
             iterate to step. Giving it to a conjugate block is an error rather
             than an ignored argument, for the same reason ``steps`` is.
@@ -808,7 +809,7 @@ class PlanDiagnostics:
         chi2: the JOINT chi-squared, one entry per sweep, the first at the
             starting values. For :meth:`SamplingPlan.estimate` it is reported
             data and not the stop rule: with a prior it can RISE as the run
-            approaches the MAP. For :meth:`SamplingPlan.sample` it fluctuates
+            approaches the MAP. For ``SamplingPlan.sample`` it fluctuates
             around a stationary value, which is what :attr:`rhat` tests.
         sweeps: sweeps actually run.
         converged: for a point estimate, whether the Newton decrement at the
@@ -844,11 +845,11 @@ class PlanDiagnostics:
             (see :data:`OBJECTIVE_FLOOR_EPS`). ``None`` for a draw and for a
             point estimate run with ``tol=None``.
         contraction: the per-sweep contraction of the objective's decrease the
-            gap pre-screen used at the last sweep (see :func:`_gap_step`), or
+            gap pre-screen used at the last sweep (see ``_gap_step``), or
             ``None`` when it had none. ``None`` for a draw.
         distance_bound: the last Newton decrement's upper bound, in posterior
             sigma: ``sqrt(g^T H^-1 g)`` at the returned point plus the error
-            its solve may have left (see :func:`_certify`), so
+            its solve may have left (see ``_certify``), so
             at most ``sqrt(2 gap_tol)`` when :attr:`converged` is ``True``.
             ``inf`` when the residual could not bound it; ``None`` when no
             decrement was computed, and for a draw.
@@ -864,7 +865,7 @@ class PlanDiagnostics:
         floor_source: where the last certificate's curvature floor came from —
             ``"dense"`` (the formed Hessian's own smallest eigenvalue),
             ``"supplied"`` (this plan's prior-precision floor, see
-            :meth:`SamplingPlan._curvature_floor`), ``"probe"`` (a Lanczos
+            ``_curvature_floor``), ``"probe"`` (a Lanczos
             estimate, which never certifies) or ``"none"``. ``None`` as for
             :attr:`distance_bound`.
 
@@ -1479,13 +1480,13 @@ class SamplingPlan:
         * **the certificate**: the Newton decrement of ``f`` over every
           latent, ``sqrt(g^T H^-1 g)``, at most ``sqrt(2 gap_tol)`` posterior
           sigma (0.1 by default) once the error its conjugate gradients may
-          have left is added (see :data:`DEFAULT_GAP_TOL` and :func:`_certify`).
+          have left is added (see :data:`DEFAULT_GAP_TOL` and ``_certify``).
           It does not grow with the number of data, and it sees every mode,
           the slow ones included.
         * **the schedule**: the decrement is computed only on a sweep whose
           last two changes of ``f`` are within the effective tolerance
           ``max(tol, OBJECTIVE_FLOOR_EPS * eps)``, relative to ``|f|``, and
-          whose decrease passes the gap pre-screen (:func:`_gap_step`) or is
+          whose decrease passes the gap pre-screen (``_gap_step``) or is
           below what the arithmetic resolves. After a refusal the next
           candidate waits twice as many candidates as the last, so a run
           pays O(log max_iter) decrements.

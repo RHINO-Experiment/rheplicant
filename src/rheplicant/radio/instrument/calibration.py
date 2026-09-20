@@ -664,7 +664,7 @@ def width_floor_rtol(freq, spacing: float) -> float:
     with ``WIDTH_FLOOR_ULPS = 4``, where ``eps`` is the machine epsilon of the
     grid's STORED dtype and ``spacing`` the median channel gap the floor is
     measured in. One definition for the two places the
-    floor is checked: :meth:`CWCalibrationOperator._validate_over_the_run` and
+    floor is checked: ``_validate_over_the_run`` and
     the config layer's in-flight grid check, A13.
 
     Each stored channel is rounded by at most half a unit in the last place,

@@ -44,7 +44,7 @@ conditional is affine in.
 ``E[log(1 + f w)] = -f^2 / 2`` to leading order, and ``Var`` exceeds ``f^2``.
 Both are corrected or bounded here rather than left implicit —
 :func:`to_log_space` adds the ``f^2 / 2`` back, and ``f`` above
-:data:`FIRST_ORDER_MAX_FRACTIONAL` is refused. Measured, over 2e7 draws:
+``FIRST_ORDER_MAX_FRACTIONAL`` is refused. Measured, over 2e7 draws:
 
 ======  ==================  ==============================
 ``f``   ``Var / f^2 - 1``   ``mean / (-f^2 / 2)``
@@ -111,7 +111,7 @@ from rheplicant.inference.parameters import ParameterSpace
 
 #: Probe magnitudes for the log-space affinity check, as multiples of the
 #: latent's own scale. Deliberately NOT
-#: :data:`~rheplicant.inference.linear.DEFAULT_SCALES`, whose top entry is
+#: ``DEFAULT_SCALES``, whose top entry is
 #: ``1e3``: here the probe is fed through an exponential before the log is
 #: taken, and ``exp`` overflows above about 88 in float32. A probe 1000x a
 #: log-latent's scale therefore measures the dtype, not the model — the map is
@@ -618,7 +618,7 @@ def to_log_space(observed: jax.Array, noise: NoiseModel) -> tuple[jax.Array, jax
 
     Raises:
         ParameterSpaceError: if the noise is not multiplicative; if its ``f`` is
-            above :data:`FIRST_ORDER_MAX_FRACTIONAL`; if it declares a
+            above ``FIRST_ORDER_MAX_FRACTIONAL``; if it declares a
             ``floor``; or if an unflagged sample is non-positive.
     """
     fractional, flags = _fraction_and_flags(noise)

@@ -105,6 +105,39 @@ nitpick_ignore = [
     ("py:mod", "rheplicant.inference"),
 ]
 
+# Two whole CLASSES of target that a nitpicky build can never resolve, stated
+# as rules rather than as a list, because a list of several hundred entries is
+# a list nobody reads and nobody prunes.
+#
+# **Private names.** A cross-reference to `_something` cannot land: a private
+# has no page. The references are still worth writing -- they tell a reader of
+# the SOURCE where to look -- so the fix is to stop demanding a link, not to
+# delete the pointer. What this does NOT silence is a reference to a public
+# name that does not resolve, which is a documented promise pointing at
+# nothing and is still an error.
+#
+# **bayesmith.** Measured 2026-09-20: bayesmith's documentation is a
+# hand-built HTML site (`site/` in its repository), not Sphinx, so there is no
+# `objects.inv` anywhere in that checkout to point intersphinx at. Stage 4.3
+# allowed either an inventory or this, with a reason; this is the reason. It
+# goes away the day upstream publishes an inventory, and the entry is worded
+# so the next reader knows what to look for.
+nitpick_ignore_regex = [
+    (r"py:.*", r"(^|.*\.)_[A-Za-z0-9_]+$"),
+    (r"py:.*", r"^bayesmith(\.|$).*"),
+    (r"py:.*", r"^limTOD(\.|$).*"),
+    # The JAX-free bootstrap is private by name and by intent, and only the
+    # two names `rheplicant.config` re-exports from it are in the reference.
+    (r"py:.*", r"^_rheplicant_bootstrap(\.|$).*"),
+    # A Sphinx rendering quirk rather than anything in this package: a nested
+    # `Callable[[dict[str, X]], Y]` annotation is split on the inner bracket
+    # and the fragment `'dict[str` is looked up as a class. The annotation is
+    # correct Python and renders correctly; only the cross-reference attempt
+    # is wrong. Anchored so it cannot silence a real `dict` target.
+    (r"py:class", r"^'dict\[str$"),
+]
+
+
 html_theme = "furo"
 html_title = "RHEPLICANT — a differentiable replica of a radio antenna"
 html_static_path = ["_static"]

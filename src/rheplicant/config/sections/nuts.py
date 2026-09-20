@@ -43,7 +43,7 @@ still compiling:
 site ``"prediction"``, whose per-sample shape is the whole TOD -- measured on
 this layer's own one-latent document, ``g (200,)`` against
 ``prediction (200, 16, 8)``, 128 times the latent's footprint on a toy.
-:class:`NutsProduct` carries ``space.names`` and nothing else.
+``NutsProduct`` carries ``space.names`` and nothing else.
 
 **Ownership -- this file is written by THREE tasks, so here is who binds
 what.**  Plan §3.1 pins the shared shapes; this block is the full inventory,
@@ -54,7 +54,7 @@ names came to be bound twice in ``npe.py``.
 imports -- ``annotations`` (the ``__future__`` import), ``Any``,
 ``NamedTuple``, ``ConfigError``, ``_noise``, ``_number``, ``_observed``,
 ``_sweep``, ``_draw_key``, ``_sampled_space`` -- and five are defined here:
-``__all__``, :data:`_NUTS_KEYS`, ``_COUNTS``, :class:`NutsProduct` and
+``__all__``, :data:`_NUTS_KEYS`, ``_COUNTS``, ``NutsProduct`` and
 :func:`_run_nuts`.  (Task 9 later dropped the ``_draw_key`` import: the
 parser resolves the seed to its reportable integer, so the executor builds
 the key itself and nothing here calls ``_draw_key`` any more.)
@@ -81,7 +81,7 @@ parser raises it without building the strategy) and :func:`_parse_nuts`
 The three ``chain_method`` words numpyro takes stay a LOCAL, now inside
 :func:`_parse_nuts`, so this inventory stays exhaustive.
 
-Tasks 5 and 6 GROW :data:`_NUTS_KEYS` and :class:`NutsProduct` rather than
+Tasks 5 and 6 GROW :data:`_NUTS_KEYS` and ``NutsProduct`` rather than
 rebinding them, and Task 5 added the ``@register("nuts")`` decorator to
 :func:`_run_nuts`.
 """
@@ -331,7 +331,7 @@ def _parse_nuts(options, context):
 
 @register("nuts", parse=_parse_nuts)
 def _run_nuts(run: ParsedRun, built: Any, previous: Any = None) -> Any:
-    """One ``kind: nuts`` run -> a :class:`NutsProduct`."""
+    """One ``kind: nuts`` run -> a ``NutsProduct``."""
     import jax
     import numpyro
     from numpyro.diagnostics import summary

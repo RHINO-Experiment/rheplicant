@@ -71,7 +71,7 @@ INTERNAL_NAMES: frozenset[str] = frozenset({PREDICTION, OBSERVATION})
 class SeamRefusal(ParameterSpaceError):
     """A bayesmith refusal with no counterpart class on this side.
 
-    A SUBCLASS of :class:`ParameterSpaceError` for the reason
+    A SUBCLASS of ``ParameterSpaceError`` for the reason
     :class:`~rheplicant.core.errors.LinearityRefused` is one: every
     ``except ParameterSpaceError`` already written keeps catching it, and the
     caller who wants to know it came from across the seam can ask.

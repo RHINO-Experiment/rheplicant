@@ -79,7 +79,7 @@ class WidgetMetadata:
     visible_when: FormRule | None = None
     dimension: str | None = None
     unit_policy: str | None = None
-    #: Every spelling the alphabet accepts for :attr:`dimension`, canonical
+    #: Every spelling the alphabet accepts for ``dimension``, canonical
     #: first, or empty when it has no second spelling to offer or refuses a
     #: unit outright. Derived in the builder; never written at a call site.
     units: tuple[str, ...] = ()

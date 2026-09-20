@@ -107,8 +107,8 @@ OFF: str = "off"
 #: reason is generated rather than written.  NOT in :data:`MODES` either.
 AUTO_SKIP: str = "auto_skip"
 
-#: Every effective state, in the order §2.3's table gives them.  SIX: the four
-#: writable ones, then the two that are not.
+#: Every effective state, in the order §2.3's table gives them -- SIX of
+#: them, the four writable ones and then the two that are not.
 STATES: tuple[str, ...] = ("refuse", "warn", "report", "skip", OFF, AUTO_SKIP)
 
 #: Schema §11.15's defaults.  ``linearity`` is the ONLY check on by default
@@ -131,8 +131,8 @@ CHECK_ID: dict[str, str] = {
     "prior_sensitivity": "C19",
 }
 
-#: The id an auto-skip reports under.  Never a registry slot: :func:`verdict`
-#: binds it, so a user grepping the record for C14 finds every check that was
+#: The id an auto-skip reports under, and never a registry slot --
+#: :func:`verdict` binds it, so a user grepping the record for C14 finds every check that was
 #: asked for and could not be decided.
 AUTO_SKIP_ID: str = "C14"
 

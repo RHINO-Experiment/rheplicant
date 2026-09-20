@@ -143,7 +143,7 @@ def _atom(token: str) -> _Atom:
 
 
 def canonical_unit(token: str) -> Unit:
-    """Parse a unit token into a :class:`Unit`.
+    """Parse a unit token into a ``Unit``.
 
     Args:
         token: an atom (``"MHz"``), a product (``"K*s"``) or a quotient with at

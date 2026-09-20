@@ -117,7 +117,7 @@ class Axes:
 class Built:
     """What exists when ``load_document`` is ready to return.
 
-    **The field names and their order are** :class:`ConfiguredRun`'s, exactly,
+    **The field names and their order are** ``ConfiguredRun``'s, exactly,
     so that ``Built(*run)`` is the whole constructor and no test keeps two
     field lists in step by hand.
     ``test_config_inflight.py::TestThePayloads.test_the_two_field_tuples_are_equal`` pins the
@@ -143,7 +143,7 @@ class Built:
     resources: Any
     #: ``ResolutionContext``, now carrying the built resources and the ingest.
     context: Any
-    #: Everything this document has earned SO FAR: the pre-flight pass then
+    #: Everything this document has earned SO FAR -- the pre-flight pass then
     #: the axes pass, in run order.  Not this pass's own findings -- the pass
     #: has not run yet -- so a built check reads what text and the grids
     #: already said and need not restate it.

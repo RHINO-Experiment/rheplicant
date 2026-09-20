@@ -193,7 +193,7 @@ def power(value: DimensionSignature, exponent: int) -> DimensionSignature:
 
 
 def dimension_of(unit: Unit | str) -> DimensionSignature:
-    """Compute a signature from the existing six-field :class:`Unit`."""
+    """Compute a signature from the existing six-field ``Unit``."""
     parsed = canonical_unit(unit) if isinstance(unit, str) else unit
     result = DimensionSignature(())
     for atom in parsed.numerator:

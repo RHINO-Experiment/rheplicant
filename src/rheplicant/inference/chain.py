@@ -480,7 +480,7 @@ def smooth(
     limit a freezing chain must reach -- rather than comparing the two sides,
     so it keeps its teeth now that only one implementation is left.
 
-    :func:`_zeta_joint` stays because :func:`_joint_covariance` still uses it
+    ``_zeta_joint`` stays because ``_joint_covariance`` still uses it
     and the far side has no counterpart to that. Both are checked against
     ``chain_bank``'s dense oracle rather than against each other, so the
     remaining near-side copy is a reference the tests hold, not a second
