@@ -150,6 +150,7 @@ const GAIN: NodeCard = {
   reserved: false,
   many: false,
   segment: "forward",
+  composition: "cascade",
   lit: true,
   count: 1,
   configuration: "single",
@@ -301,6 +302,7 @@ function fullyDistinctSession(): EditorSession {
     label: "accepted backend node",
     explanation: "Accepted backend explanation.",
     segment: "processing",
+    composition: "cascade",
     settings: { snapshot_before: "accepted-raw" },
   };
   const baseDiagram: GraphDiagram = {

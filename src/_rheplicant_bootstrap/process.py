@@ -19,7 +19,13 @@ from _rheplicant_bootstrap.presets import PresetRequest
 
 _RUNTIME_KEYS = frozenset({"jax_enable_x64", "platform", "seed", "seeds"})
 _PLATFORMS = ("auto", "cpu", "gpu", "tpu")
-_PROCESS_SECTIONS = ("defaults", "plugins", "outputs")
+#: The sections the PROCESS owns rather than the document's science.
+#:
+#: Public, and that is the point: this tuple had three spellings in ``src/``
+#: (here, ``variants.mutable_document`` and ``gui/validation``) and two more
+#: in the tests, so adding a fourth process-owned section meant finding all
+#: of them. A10-2. Ordered as a document writes them.
+PROCESS_SECTIONS = ("defaults", "plugins", "outputs")
 _DEFAULTS_FORM_ERROR = (
     "defaults: must be a list whose entries are preset names or mappings "
     "with exactly 'from' and optional 'only'."
@@ -691,7 +697,7 @@ def validate_variant_process_sections(
             if not static_isinstance(raw_key, str):
                 continue
             keys.add(str.__str__(raw_key))
-        for section in _PROCESS_SECTIONS:
+        for section in PROCESS_SECTIONS:
             if section in keys or f"~{section}" in keys:
                 raise ConfigError(
                     f"variants.{name}.{section}: variants may not change "
@@ -902,6 +908,7 @@ def parse_effective_process_mapping(
 
 
 __all__ = [
+    "PROCESS_SECTIONS",
     "SCHEMA_VERSION",
     "EffectiveProcessEntry",
     "OutputGrammarParser",

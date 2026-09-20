@@ -49,6 +49,7 @@ const GAIN: NodeCard = {
   reserved: false,
   many: false,
   segment: "forward",
+  composition: "cascade",
   lit: false,
   count: 0,
   configuration: "single",
@@ -72,6 +73,7 @@ const FILTERS: NodeCard = {
   explanation: "CHAIN list; order is execution order.",
   many: true,
   segment: "processing",
+  composition: "cascade",
   lit: true,
   count: 2,
   configuration: "chain",
@@ -89,6 +91,7 @@ const FLAGGING: NodeCard = {
   description: "RFI flags",
   explanation: "Destructive processing stage.",
   segment: "processing",
+  composition: "cascade",
   lit: true,
   count: 1,
   settings: { type: "FlaggingOperator", threshold: 4.0 },
@@ -730,10 +733,12 @@ describe("graph-guided instrument editor", () => {
     fireEvent.click(screen.getByRole("button", { name: "Refresh accepted graph" }));
     expect(stages).toHaveValue(raw);
     fireEvent.click(screen.getByRole("button", { name: "Apply cascade" }));
+    // No "cascade" argument: the server derives the composition from the
+    // node's kind. The browser used to pass it, computed from its own copy of
+    // the rule (A10-3), and this assertion is what said so.
     await waitFor(() => expect(composeNode).toHaveBeenCalledWith(
       "session-1",
       "flagging",
-      "cascade",
       [{ name: "draft-stage", scale: 7 }],
       4,
       "low_gain",
@@ -1095,7 +1100,6 @@ describe("graph-guided instrument editor", () => {
     expect(api.composeNode).toHaveBeenCalledWith(
       "session-1",
       "gain",
-      "cascade",
       [{ name: "lna" }, { name: "post" }],
       4,
       null,

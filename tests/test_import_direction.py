@@ -472,3 +472,50 @@ def test_the_package_root_costs_nothing_at_import():
         "its entry points defer, which is what lets the foundation import the "
         "root without paying for the command half"
     )
+
+
+def test_no_document_section_set_is_spelled_twice():
+    """A10-2: one constant per rule, asserted over the literal COLLECTIONS.
+
+    The process-owned sections had three spellings in ``src/`` and the preset
+    sections two -- in different orders and different container types, which
+    is how two copies of one rule stop looking like one rule. Both are public
+    constants in the bootstrap now, and this keeps a fourth from appearing.
+
+    Matched by ``ast`` on tuple, list and set literals whose members are
+    exactly the set, NOT by looking for the member strings in the file. The
+    first version did the latter and named six modules, every one a false
+    positive: a file that mentions every document section for some other
+    reason contains all five words without restating the rule. Grepping a
+    name answers "does this string appear", never "is this the same rule".
+    """
+    from _rheplicant_bootstrap.presets import PRESET_SECTIONS
+    from _rheplicant_bootstrap.process import PROCESS_SECTIONS
+
+    owners = {
+        "PROCESS_SECTIONS": (frozenset(PROCESS_SECTIONS), f"{BOOTSTRAP}/process.py"),
+        "PRESET_SECTIONS": (frozenset(PRESET_SECTIONS), f"{BOOTSTRAP}/presets.py"),
+    }
+    offenders: dict[str, list[str]] = {}
+    for path in sorted(SRC.rglob("*.py")):
+        relative = str(path.relative_to(SRC))
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            if not isinstance(node, (ast.Tuple, ast.List, ast.Set)):
+                continue
+            members = [
+                element.value
+                for element in node.elts
+                if isinstance(element, ast.Constant) and isinstance(element.value, str)
+            ]
+            if len(members) != len(node.elts):
+                continue
+            for name, (expected, home) in owners.items():
+                if relative != home and frozenset(members) == expected:
+                    offenders.setdefault(name, []).append(
+                        f"{relative}:{node.lineno}"
+                    )
+    assert not offenders, (
+        f"these modules write out a section set instead of importing it: "
+        f"{offenders}. Import the constant -- two copies of one rule is how a "
+        "new section reaches one of them and not the other"
+    )

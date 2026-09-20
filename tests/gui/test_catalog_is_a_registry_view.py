@@ -17,6 +17,8 @@ offered and disabled.
 
 from __future__ import annotations
 
+import pathlib
+
 import pytest
 
 from _rheplicant_bootstrap.capability import REGISTRY, Maturity, Surface
@@ -126,3 +128,66 @@ def test_no_disabled_widget_invents_a_capability_sentence(catalog):
         node_id = widget.path.removeprefix("model.")
         assert node_id in RADIO_GRAPH.nodes, widget.path
         assert widget.reason == RADIO_GRAPH.nodes[node_id].doc
+
+
+def test_the_composition_rule_is_not_respelled_anywhere():
+    """A10-3: "sources add, everything else chains", written once.
+
+    It had three spellings -- the refusals in
+    ``config/sections/compose.py``, a ternary in ``gui/document_edits``, and a
+    second ternary in the React client's ``NodeInspector.tsx``. The browser's
+    was the one that mattered: the HTTP route took ``compose`` FROM the
+    client, so the rule was being applied where it could not be tested with
+    the rest of it, and a client that decided wrongly sent a value the server
+    then refused.
+
+    The server derives it now and the route does not accept it. This is what
+    stops a fourth spelling arriving: any source or TypeScript file that pairs
+    the two words with a kind test fails, apart from the one function that
+    owns the rule.
+    """
+    import re
+
+    from rheplicant.config.sections import compose as owner
+
+    root = pathlib.Path(__file__).resolve().parents[2]
+    home = pathlib.Path(owner.__file__).resolve()
+    pattern = re.compile(r'"sum"\s*:\s*"cascade"|"cascade"\s*:\s*"sum"')
+    offenders = []
+    for folder in ("src", "tests"):
+        for path in sorted((root / folder).rglob("*")):
+            if path.suffix not in {".py", ".ts", ".tsx"} or path.resolve() == home:
+                continue
+            if "node_modules" in path.parts:
+                continue
+            for number, line in enumerate(
+                path.read_text(encoding="utf-8").splitlines(), 1
+            ):
+                if pattern.search(line):
+                    offenders.append(f"{path.relative_to(root)}:{number}")
+    assert not offenders, (
+        f"these decide a composition from a node kind: {offenders}. Ask "
+        "rheplicant.config.sections.compose.composition_for -- the rule is "
+        "the config layer's, and a copy in a browser is a copy nothing here "
+        "can test"
+    )
+
+
+def test_the_rule_and_its_refusal_cannot_disagree():
+    """Both directions of ``composition_for``, against the refusal it feeds."""
+    from rheplicant.config.sections.compose import (
+        COMPOSITIONS,
+        composition_for,
+        composition_problem,
+    )
+    from rheplicant.radio.graph import RADIO_GRAPH
+
+    kinds = {node.kind for node in RADIO_GRAPH.nodes.values()}
+    assert "source" in kinds and len(kinds) > 1, sorted(kinds)
+    for kind in sorted(kinds):
+        right = composition_for(kind)
+        assert right in COMPOSITIONS
+        assert composition_problem("n", kind, right) is None
+        wrong = next(other for other in COMPOSITIONS if other != right)
+        assert composition_problem("n", kind, wrong) is not None
+        assert composition_problem("n", kind, "neither") is not None

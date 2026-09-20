@@ -189,7 +189,10 @@ def test_compose_preserves_stage_order_and_sibling_routes():
         {"name": "first", "type": "GainOperator", "gain": 0.75},
         {"name": "second", "type": "GainOperator", "gain": 1.25},
     ]
-    found = compose_node(GRAPH_DOCUMENT, "gain", "cascade", stages)
+    # No composition argument: `gain` is a transform node, so the server
+    # derives "cascade" from its kind. A10-3 removed the third spelling of
+    # that rule, which was the browser's.
+    found = compose_node(GRAPH_DOCUMENT, "gain", stages)
     parsed = yaml.safe_load(found.yaml_text)
 
     assert [stage["name"] for stage in parsed["model"]["gain"]["stages"]] == [

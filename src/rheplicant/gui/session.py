@@ -191,18 +191,20 @@ def move_session_node_instance(
 def compose_session_node(
     session: EditorSession,
     node_id: str,
-    compose: str,
     stages: Sequence[Mapping[str, object]],
     *,
     expected_revision: int,
     variant: str | None = None,
 ) -> EditorSession:
-    """Commit an ordered multi-stage composition at one node."""
+    """Commit an ordered multi-stage composition at one node.
+
+    The composition itself is derived from the node, not taken here -- see
+    :func:`~rheplicant.gui.document_edits.compose_node`.
+    """
     _expect(session, expected_revision)
     found = compose_node(
         session.yaml_text,
         node_id,
-        compose,
         stages,
         variant=variant,
     )

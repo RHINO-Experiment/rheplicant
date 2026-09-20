@@ -584,7 +584,6 @@ runs: []
         f"/api/sessions/{session_id}/nodes/gain/compose",
         json={
             "expected_revision": 2,
-            "compose": "cascade",
             "stages": [
                 {"name": "lna", "type": "GainOperator", "gain": 0.5},
                 {"name": "post", "type": "GainOperator", "gain": 2.0},

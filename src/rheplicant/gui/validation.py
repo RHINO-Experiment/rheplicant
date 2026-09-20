@@ -18,19 +18,23 @@ from _rheplicant_bootstrap.errors import ConfigError
 from _rheplicant_bootstrap.layering import layer_presets
 from _rheplicant_bootstrap.output.manager import parse_output_grammar
 from _rheplicant_bootstrap.prepare import PreparedConfig, prepare_config
-from _rheplicant_bootstrap.presets import read_installed_preset
-from _rheplicant_bootstrap.types import SourceInput
-from rheplicant.config.findings import Finding, Report
-from rheplicant.gui.forms import FormProjection, project_forms
 
 # The lax twin of this used to live here and answered differently on
 # numeric mapping keys; see yaml_values.py for the measurement.
+from _rheplicant_bootstrap.presets import PRESET_SECTIONS, read_installed_preset
+from _rheplicant_bootstrap.process import PROCESS_SECTIONS
+from _rheplicant_bootstrap.types import SourceInput
+from rheplicant.config.findings import Finding, Report
+from rheplicant.gui.forms import FormProjection, project_forms
 from rheplicant.gui.yaml_values import plain as _plain
 from rheplicant.gui.yaml_values import same_value as _same
 from rheplicant.radio.graph import RADIO_GRAPH
 
-_PROCESS_SECTIONS = frozenset(("defaults", "plugins", "outputs"))
-_PRESET_SECTIONS = ("runtime", "observation", "resources", "model", "inference")
+# Both taken from the bootstrap rather than restated. They were a frozenset
+# here and a tuple there, in a different order, which is how two copies of one
+# rule stop being visibly the same rule (A10-2).
+_PROCESS_SECTIONS = frozenset(PROCESS_SECTIONS)
+_PRESET_SECTIONS = PRESET_SECTIONS
 _DIRECT_SECTIONS = frozenset(
     ("runtime", "observation", "variants", "inference", "runs", "outputs", "campaign")
 )

@@ -24,6 +24,9 @@ __all__ = [
     "cal_load_order_problem",
     "compose_shape_problem",
     "double_count_problem",
+    "COMPOSITIONS",
+    "composition_for",
+    "composition_problem",
     "many_shape_problem",
     "node_placement_problems",
     "node_specs",
@@ -207,6 +210,48 @@ def pipeline_shape_problem(section: Mapping) -> str | None:
     return None
 
 
+#: The two compositions a document may ask for, in the order the refusal
+#: above names them.
+COMPOSITIONS = ("cascade", "sum")
+
+
+def composition_for(node_kind: str) -> str:
+    """Which composition a node of this kind takes -- the rule, once.
+
+    It had three spellings (A10-3): the two refusals in
+    :func:`compose_shape_problem` below, a ternary in
+    ``gui/document_edits.compose_node``, and a second ternary in the React
+    client's ``NodeInspector.tsx``. The browser one is the one that mattered:
+    the HTTP API took ``compose`` FROM the client, so a client that decided
+    wrongly sent a value the server then refused, and the rule was being
+    applied in a place that cannot be tested with the rest of it.
+
+    Sources add; everything else chains. The refusals below say why in the
+    words a document author needs, and read the answer from here so the
+    sentence and the rule cannot disagree.
+    """
+    return "sum" if node_kind == "source" else "cascade"
+
+
+def composition_problem(node_id: str, node_kind: str, how: object) -> str | None:
+    """The refusal for a composition that does not match the node's kind."""
+    if how not in COMPOSITIONS:
+        return f"model.{node_id}: compose: is 'cascade' or 'sum'; got {how!r}."
+    if how == composition_for(node_kind):
+        return None
+    if node_kind == "source":
+        return (
+            f"model.{node_id}: compose: cascade chains transforms, and this "
+            "is a source node -- sources add, they do not chain; use "
+            "compose: sum."
+        )
+    return (
+        f"model.{node_id}: compose: sum adds source contributions, and "
+        "this is a transform node -- transforms chain; use "
+        "compose: cascade."
+    )
+
+
 def compose_shape_problem(
     node_id: str,
     spec: Mapping,
@@ -217,20 +262,9 @@ def compose_shape_problem(
     if unknown:
         return f"model.{node_id}: compose: takes stages: and nothing else; got {unknown} too."
     how = spec["compose"]
-    if how not in ("cascade", "sum"):
-        return f"model.{node_id}: compose: is 'cascade' or 'sum'; got {how!r}."
-    if how == "cascade" and node_kind == "source":
-        return (
-            f"model.{node_id}: compose: cascade chains transforms, and this "
-            "is a source node -- sources add, they do not chain; use "
-            "compose: sum."
-        )
-    if how == "sum" and node_kind != "source":
-        return (
-            f"model.{node_id}: compose: sum adds source contributions, and "
-            "this is a transform node -- transforms chain; use "
-            "compose: cascade."
-        )
+    mismatch = composition_problem(node_id, node_kind, how)
+    if mismatch is not None:
+        return mismatch
     stages = spec.get("stages")
     if not isinstance(stages, list) or len(stages) < 2:
         return (

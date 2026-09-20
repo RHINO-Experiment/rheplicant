@@ -98,7 +98,6 @@ class SessionMovePayload(RevisionPayload):
 
 
 class SessionComposePayload(RevisionPayload):
-    compose: str
     stages: list[dict[str, object]]
     variant: str | None = None
 
@@ -446,7 +445,6 @@ def create_app(
             lambda current: compose_session_node(
                 current,
                 node_id,
-                payload.compose,
                 payload.stages,
                 expected_revision=payload.expected_revision,
                 variant=payload.variant,

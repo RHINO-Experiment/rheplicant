@@ -62,6 +62,7 @@ function card(overrides: Partial<NodeCard> = {}): NodeCard {
     reserved: false,
     many: false,
     segment: "forward",
+    composition: "cascade",
     lit: true,
     count: 1,
     configuration: "single",

@@ -19,9 +19,11 @@ from _rheplicant_bootstrap.yaml import safe_load_document
 _PRESET_RESOURCES = {
     "rhino_v1": "rheplicant/config/presets/rhino_v1.yaml",
 }
-_PRESET_SECTIONS = frozenset(
-    {"runtime", "observation", "resources", "model", "inference"}
-)
+#: The sections a PRESET may carry. Public for the reason
+#: :data:`~_rheplicant_bootstrap.process.PROCESS_SECTIONS` is: the GUI had its
+#: own copy, in a different order and a different container type, and nothing
+#: rendered the two side by side. A10-2.
+PRESET_SECTIONS = ("runtime", "observation", "resources", "model", "inference")
 _MAXIMUM_PRESET_BYTES = 16 * 1024 * 1024
 _MAXIMUM_EXPANDED_NODES = 250_000
 
@@ -218,11 +220,11 @@ def validate_preset_document(name: str, loaded: object) -> dict[str, object]:
                 "canonicalization."
             )
         canonical[exact_key] = value
-    forbidden = sorted(set(canonical) - _PRESET_SECTIONS)
+    forbidden = sorted(set(canonical) - set(PRESET_SECTIONS))
     if forbidden:
         raise ConfigError(
             f"preset:{name}: package presets may contain only scientific base "
-            f"sections {sorted(_PRESET_SECTIONS)}; got {forbidden}."
+            f"sections {sorted(PRESET_SECTIONS)}; got {forbidden}."
         )
     return canonical
 

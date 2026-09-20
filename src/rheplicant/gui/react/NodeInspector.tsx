@@ -351,12 +351,10 @@ export function NodeInspector({
       )) {
         throw new Error("Composition stages JSON must be a list of objects.");
       }
-      const compose = node.kind === "source" ? "sum" : "cascade";
       void run(
         () => transport.composeNode(
           session.session_id,
           node.node_id,
-          compose,
           stages as Record<string, unknown>[],
           graphRevision(draftPath),
           activeVariant,
@@ -710,7 +708,7 @@ export function NodeInspector({
                       aria-describedby={graphControlDisabled(stagesPath) ? disabledReason ?? undefined : undefined}
                       onClick={applyComposition}
                     >
-                      Apply {selected.kind === "source" ? "sum" : "cascade"}
+                      Apply {selected.composition}
                     </button>
                   </fieldset>
                 )}

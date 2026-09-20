@@ -145,12 +145,11 @@ export const sessionTransport: SessionTransport = {
       }),
     });
   },
-  composeNode(sessionId, nodeId, compose, stages, expectedRevision, variant) {
+  composeNode(sessionId, nodeId, stages, expectedRevision, variant) {
     return requestJson<EditorSession>(nodePath(sessionId, nodeId, "/compose"), {
       method: "PUT",
       body: JSON.stringify({
         expected_revision: expectedRevision,
-        compose,
         stages,
         variant,
       }),

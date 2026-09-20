@@ -27,6 +27,7 @@ from rheplicant.gui.document import (
     _project,
     _same_value,
 )
+from rheplicant.gui.form_catalog import composition_for
 from rheplicant.radio.graph import RADIO_GRAPH
 
 
@@ -203,18 +204,24 @@ def move_node_instance(
 def compose_node(
     yaml_text: str,
     node_id: str,
-    compose: str,
     stages: Sequence[Mapping[str, object]],
     *,
     variant: str | None = None,
 ) -> EditorSnapshot:
-    """Replace one single slot with an ordered cascade or sum of named stages."""
+    """Replace one single slot with an ordered cascade or sum of named stages.
+
+    **The composition is DERIVED, not passed in.** It used to be an argument,
+    checked here against a ternary that restated the rule, and the HTTP route
+    took it from the browser -- where the React client computed it with a
+    ternary of its own. Three spellings of "sources add, everything else
+    chains" (A10-3), and the one furthest from the rule was the one deciding.
+    A caller cannot now send a composition that disagrees with the node,
+    because a caller does not send one.
+    """
     node = RADIO_GRAPH.nodes.get(node_id)
     if node is None or node.kind in _COMPOSITION_KINDS or node.many:
         raise ConfigError(f"{node_id!r} is not a single operator slot.")
-    expected = "sum" if node.kind == "source" else "cascade"
-    if compose != expected:
-        raise ConfigError(f"model.{node_id}: {node.kind} nodes compose with {expected!r}.")
+    compose = composition_for(node.kind)
     if (
         isinstance(stages, str | bytes)
         or len(stages) < 2

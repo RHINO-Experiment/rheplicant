@@ -24,7 +24,7 @@ from _rheplicant_bootstrap.layering import (
     apply_variant,
 )
 from _rheplicant_bootstrap.path_syntax import longest_legal_prefix
-from _rheplicant_bootstrap.process import validate_variant_process_sections
+from _rheplicant_bootstrap.process import PROCESS_SECTIONS, validate_variant_process_sections
 from _rheplicant_bootstrap.types import LayerIdentity
 
 
@@ -126,7 +126,7 @@ class LayerRef:
         mutable = thaw(self.document)
         if not isinstance(mutable, dict):
             raise ConfigError("layer document did not thaw to a mapping.")
-        for section in ("defaults", "plugins", "outputs"):
+        for section in PROCESS_SECTIONS:
             mutable.pop(section, None)
         return mutable
 

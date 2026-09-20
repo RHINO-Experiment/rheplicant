@@ -10,6 +10,9 @@ export interface NodeCard extends TypedFields {
   reserved: boolean;
   many: boolean;
   segment: "forward" | "processing";
+  /** Which composition this node takes. Derived server-side from the node's
+   *  kind; the client renders it and never decides it (A10-3). */
+  composition: "cascade" | "sum";
   lit: boolean;
   count: number;
   configuration:
@@ -361,10 +364,12 @@ export interface SessionTransport {
     expectedRevision: number,
     variant: string | null,
   ): Promise<EditorSession>;
+  // No `compose` argument: the server derives it from the node's kind.
+  // The browser used to decide with its own copy of "sources add, everything
+  // else chains", which is a rule the config layer owns (A10-3).
   composeNode(
     sessionId: string,
     nodeId: string,
-    compose: "cascade" | "sum",
     stages: Record<string, unknown>[],
     expectedRevision: number,
     variant: string | null,

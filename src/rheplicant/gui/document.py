@@ -23,6 +23,7 @@ from _rheplicant_bootstrap.errors import ConfigError
 from _rheplicant_bootstrap.layering import apply_variant
 from _rheplicant_bootstrap.yaml import safe_load_document
 from rheplicant.core.graph import SignalGraph
+from rheplicant.gui.form_catalog import composition_for
 from rheplicant.gui.forms import (
     FormCatalog,
     FormProjection,
@@ -110,6 +111,12 @@ class NodeCard:
     reserved: bool
     many: bool
     segment: str
+    #: Which composition this node takes, derived from its kind by the config
+    #: layer. It is here so the browser can LABEL the button without deciding
+    #: the rule: the client used to write ``kind === "source" ? "sum" :
+    #: "cascade"`` twice, once to send and once to render (A10-3), and a rule
+    #: applied in a browser is one nothing in this suite can test.
+    composition: str
     lit: bool
     count: int
     configuration: Literal[
@@ -411,6 +418,7 @@ def _node_cards(
             reserved=spec.reserved,
             many=spec.many,
             segment=spec.segment,
+            composition=composition_for(spec.kind),
             lit=node_id in lit,
             count=(
                 len(model[node_id]) if spec.many and node_id in model else int(node_id in model)

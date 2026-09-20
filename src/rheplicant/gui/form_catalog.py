@@ -34,7 +34,7 @@ from rheplicant.config.sections.benchmark import _BENCHMARK_DEFAULTS, _BENCHMARK
 from rheplicant.config.sections.benchmark import _METRICS as BENCHMARK_METRICS
 from rheplicant.config.sections.comparison import _COMPARE_KEYS
 from rheplicant.config.sections.comparison import _METRICS as COMPARE_METRICS
-from rheplicant.config.sections.compose import many_shape_problem
+from rheplicant.config.sections.compose import composition_for, many_shape_problem
 from rheplicant.config.sections.conjugate import (
     _CONDITION_KEYS,
     _GCR_KEYS,
@@ -905,6 +905,7 @@ def catalog_drift(catalog: FormCatalog) -> tuple[str, ...]:
 #: ``form_catalog_finalize`` takes the same route for the same reason.
 __all__ = [
     "FROM_ROUTES",
+    "composition_for",
     "_object_fields",
     "SHORTHAND",
     "_instance_prefix",
