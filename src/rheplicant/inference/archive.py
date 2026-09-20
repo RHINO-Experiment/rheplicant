@@ -318,6 +318,21 @@ def load_memory(path: str | Path, factorization: Factorization):
         )
     manifest = json.loads(manifest_path.read_text())
 
+    # Type-exact, and checked BEFORE the `<` below: `3.0 != 3` is False and
+    # `True != 1` is False, so a manifest storing either would be read as this
+    # version and the binary parsed against a byte layout nothing verified --
+    # which is the one failure this version exists to prevent. A non-integer
+    # also has no meaningful ordering against `_FORMAT_VERSION`, so asking
+    # `older` about it would raise a TypeError instead of a refusal.
+    if type(manifest["format_version"]) is not int:
+        raise StateValidationError(
+            f"Archive format version is {manifest['format_version']!r}, which "
+            f"is {type(manifest['format_version']).__name__} and not an "
+            "integer. This reader will not guess whether it means "
+            f"{_FORMAT_VERSION}: the versions differ in BYTE LAYOUT, so "
+            "reading the binary on a guess runs off the end or reads leaves "
+            "at the wrong offset."
+        )
     if manifest["format_version"] != _FORMAT_VERSION:
         older = manifest["format_version"] < _FORMAT_VERSION
         raise StateValidationError(

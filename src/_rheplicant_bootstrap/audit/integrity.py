@@ -140,9 +140,16 @@ def verify_tree(published: Mapping[str, bytes]) -> tuple[str, ...]:
         manifest = json.loads(payload)
     except Exception:
         return (f"{INTEGRITY_NAME} is not JSON.",)
+    # `type(...) is not int` rather than `!=` alone, and rather than
+    # `isinstance`, for the two reasons this module already uses the exact
+    # form for `dict` and `list` above. `1.0 != 1` is False and `True != 1` is
+    # False, so a manifest storing either would be accepted as version 1 and
+    # verified against a shape nothing checked; and `isinstance(True, int)` is
+    # True, so it would not catch the bool.
     if (
         type(manifest) is not dict
-        or manifest.get("format_version") != INTEGRITY_FORMAT_VERSION
+        or type(manifest.get("format_version")) is not int
+        or manifest["format_version"] != INTEGRITY_FORMAT_VERSION
     ):
         return (
             f"{INTEGRITY_NAME} is not format_version "
