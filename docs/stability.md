@@ -105,6 +105,26 @@ thing to do — the contract, the ordering and the differentiability are real,
 which is what makes the pipeline worth assembling before the physics arrives.
 What you must not do is read its numbers as a prediction.
 
+## The plugin registration protocol is not public yet
+
+`config/` has five registration hooks — `register_kind`, `register_reader`,
+`register_form`, `register_derivation` and `register_formula_checked`. **None
+of them is on any `__all__`.**
+
+That is the honest status rather than an oversight being papered over. A
+protocol with no public surface has nothing to version, so there is no
+`PLUGIN_API_VERSION`: publishing one would declare a contract that no
+supported import reaches. Which registries should become public is an open
+question for after this baseline.
+
+If you are writing something that calls one of these, you are reaching into
+internals, and they may move in a minor release. `docs/config-resources.md`
+mentions `register_reader(..., array=False)` while describing how the shipped
+readers are built; that is a description of internals, not an invitation.
+
+`tests/config/test_plugin_protocol.py` pins the five as private, so making one
+public becomes a decision someone takes rather than a line that slips through.
+
 ## External contract versions
 
 | Contract | Version | Where |
