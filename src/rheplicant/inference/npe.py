@@ -79,13 +79,6 @@ from rheplicant.inference.parameters import ParameterSpace
 MIN_SCALE: float = 1e-3
 
 
-def _standardize(values: jax.Array) -> tuple[jax.Array, jax.Array]:
-    """Per-feature mean and a strictly positive scale."""
-    mean = jnp.mean(values, axis=0)
-    scale = jnp.std(values, axis=0)
-    return mean, jnp.where(scale > 0.0, scale, 1.0)
-
-
 def simulate_pairs(
     pipeline: AbstractOperator,
     state_template: State,

@@ -41,12 +41,6 @@ from bayesmith.marginal.diagnostics import tightest_direction as _far_tightest_d
 
 from rheplicant.core.errors import StateValidationError
 
-_PRIOR_REMEDY = (
-    "pass prior_fisher over the same latents in the same column order -- "
-    "section 2.2 says a single epoch legitimately constrains only a subspace, "
-    "so the leave-one-out information is singular at small N without one."
-)
-
 
 @dataclass(frozen=True)
 class EpochResidual:
@@ -372,64 +366,6 @@ def held_out_z(
         )
         for term, row in zip(terms, scored, strict=True)
     )
-
-
-def _shrinkage_table(sigmas: Mapping[int, Any]) -> tuple[np.ndarray, np.ndarray]:
-    """``(log N, log sigma)`` as two flat arrays, with every trap refused first.
-
-    Three of them, and each is here because the failure it prevents is a finite,
-    plausible number rather than a crash:
-
-    * fewer than two campaign sizes -- one point admits every slope, so a fitted
-      power would be an invention;
-    * a non-finite or non-positive sigma -- ``np.log`` maps those to ``nan`` and
-      ``-inf``, and a ``nan`` power loses every comparison a caller could make
-      about it, exactly as a ``nan`` z-score does;
-    * a ragged table -- a pooled fit over two parameters at one size and three at
-      another is not one fit, and its slope silently weights the sizes unequally.
-    """
-    sizes = sorted(sigmas)
-    if len(sizes) < 2:
-        raise ValueError(
-            f"shrinkage_power needs at least two campaign sizes; got {sizes}. A "
-            "single point admits every slope, so any number returned here would "
-            "be the caller's assumption rather than a measurement."
-        )
-    bad_sizes = [n for n in sizes if not (int(n) > 0)]
-    if bad_sizes:
-        raise ValueError(
-            f"These campaign sizes are not positive: {bad_sizes}. The fit is in "
-            "log N, and log of a non-positive size is -inf or nan, which would "
-            "make the returned power finite-looking or nan rather than refused."
-        )
-    columns = [np.atleast_1d(np.asarray(sigmas[n], dtype=float)) for n in sizes]
-    widths = {column.shape for column in columns}
-    if len(widths) > 1:
-        raise ValueError(
-            f"These campaign sizes report different numbers of widths: "
-            f"{ {n: column.shape for n, column in zip(sizes, columns, strict=True)} }. "
-            "A pooled power is one fit over the same latents at every size; a "
-            "ragged table weights the sizes unequally without saying so. Fit the "
-            "shared latents, or fit each size's set separately."
-        )
-    stacked = np.concatenate(columns)
-    # `not (x > 0)` rather than `x <= 0`: NaN is False for both comparisons, and
-    # NaN is the case that has to be caught. `np.isfinite` alone would let a
-    # negative sigma through to `np.log`, which returns nan with a warning.
-    if not np.all(np.isfinite(stacked)) or not np.all(stacked > 0.0):
-        offenders = [
-            (n, column.tolist())
-            for n, column in zip(sizes, columns, strict=True)
-            if not (np.all(np.isfinite(column)) and np.all(column > 0.0))
-        ]
-        raise ValueError(
-            f"Every sigma must be finite and strictly positive; these are not: "
-            f"{offenders}. A posterior width of zero, inf or nan is a broken "
-            "covariance, not a very tight measurement -- check the campaign that "
-            "produced it rather than fitting its logarithm."
-        )
-    log_size = np.repeat(np.log(np.asarray(sizes, dtype=float)), stacked.size // len(sizes))
-    return log_size, np.log(stacked)
 
 
 def shrinkage_power(sigmas: Mapping[int, Any]) -> float:

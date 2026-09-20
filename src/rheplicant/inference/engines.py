@@ -634,6 +634,22 @@ def _adam(
 
     ``step_sizes`` is per latent, in the latent's own units. See
     :data:`DEFAULT_LEARNING_RATE`.
+
+    **Not delegated to bayesmith, decided 2026-09-20, and the reason is
+    upstream's own stability page rather than a preference.** bayesmith 0.10's
+    ``minimize`` grew ``step_sizes=``, ``certify=``, ``floor=`` and
+    ``polish=``, so delegation became technically possible -- and that
+    release's ``docs/stability.md`` declares the descent engine INSIDE
+    ``minimize`` **Experimental (reference implementation)**. Delegating would
+    put this package's gradient engine, which every non-conjugate block's point
+    estimate runs through, on a surface upstream does not promise to keep.
+
+    Whether delegation would preserve the A5-2 behaviour -- state carried
+    across sweeps, a different step and stop rule -- is unmeasured, and
+    measuring it is work that only pays off if the level is raised first.
+    ``tests/test_bayesmith_floor.py`` watches for that: it fails when upstream
+    stops calling this surface Experimental, which is the moment to reopen the
+    question rather than a date in the future.
     """
     beta1, beta2, floor = 0.9, 0.999, 1e-8
     zeros = jax.tree.map(jnp.zeros_like, x0)

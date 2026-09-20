@@ -65,12 +65,6 @@ MIN_REWEIGHTS: int = 5
 #: so through ``converged`` rather than spinning.
 MAX_REWEIGHTS: int = 100
 
-#: Multiple of the working precision's epsilon used as the default
-#: ``reweight_tol``. See :func:`iterative_gls` for why the default cannot be a
-#: fixed number.
-REWEIGHT_TOL_EPS: float = 8.0
-
-
 class GLSResult(NamedTuple):
     """What a reweighting run produced.
 

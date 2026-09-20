@@ -300,3 +300,148 @@ def test_the_declared_range_covers_the_floor_and_closes_at_the_next_minor():
         f"not at {high[0]}.{high[1]}: a pre-1.0 bayesmith minor may move the "
         "deep module paths this package imports"
     )
+
+
+def test_the_delegation_surface_for_the_gradient_engine_exists():
+    """``engines._adam`` is NOT delegated, and this is half of why.
+
+    The reason recorded in that function is a LEVEL, not a capability gap:
+    bayesmith 0.10's ``minimize`` grew every keyword the delegation would
+    need, and upstream's own stability page calls the descent engine inside it
+    Experimental (reference implementation). Both halves of that sentence are
+    facts about another package, and a decision resting on facts nobody checks
+    is a decision that quietly stops matching its reason.
+
+    This half is checkable from the installed wheel and always runs. The other
+    half needs upstream's prose and is below.
+    """
+    import inspect
+
+    from bayesmith.optimize import minimize
+
+    accepted = set(inspect.signature(minimize).parameters)
+    assert {"step_sizes", "certify", "floor", "polish"} <= accepted, (
+        "engines._adam's docstring says delegation is technically possible "
+        f"because minimize accepts these; it accepts {sorted(accepted)}"
+    )
+
+
+def test_upstream_still_calls_its_descent_engine_experimental():
+    """The other half, and the trigger to reopen the question.
+
+    If upstream raises this surface to Maintained, the objection to delegating
+    ``engines._adam`` is gone and someone should measure whether delegation
+    preserves the A5-2 behaviour. Nothing else in this checkout would notice,
+    which is why the watch is here rather than in a comment.
+
+    It needs the sibling checkout, because the wheel ships no documentation --
+    checked 2026-09-20, ``importlib.metadata.files("bayesmith")`` lists no
+    markdown at all. A skipping guard is not a passing one, so the message
+    says what it stood down on rather than disappearing into a dot.
+    """
+    from tests.config.wheel_support import BAYESMITH_CHECKOUT
+
+    page = BAYESMITH_CHECKOUT / "docs" / "stability.md"
+    if not page.is_file():
+        pytest.skip(
+            f"{page} is absent, so upstream's declared level for the descent "
+            "engine cannot be read here. The decision not to delegate "
+            "engines._adam rests on it; re-check by hand against the "
+            "bayesmith release this venv installs"
+        )
+    def cells(line):
+        return [cell.strip() for cell in line.strip().strip("|").split("|")]
+
+    # Matched on the SUBJECT cell, not on the line. Two rows of that page
+    # contain the phrase "descent engine inside" -- one is the summary row
+    # whose second cell is a LIST OF SURFACES -- and taking the first match
+    # read that list as the level. It then failed for the wrong reason, which
+    # is the better of the two ways a mis-aimed matcher can go.
+    rows = [
+        row
+        for row in page.read_text(encoding="utf-8").splitlines()
+        if len(cells(row)) >= 2 and "descent engine inside" in cells(row)[0]
+    ]
+    assert len(rows) == 1, (
+        f"{page} has {len(rows)} rows whose subject is the descent engine "
+        "inside minimize; engines._adam's recorded reason names exactly one"
+    )
+    # The LEVEL CELL, not the row. Searching the whole line for "Experimental"
+    # is what this assertion did first, and the row's own prose says "Treat it
+    # as a working reference" and "the ENGINE being a reference" -- so a row
+    # whose level had been raised to Maintained still contained the word, and
+    # the guard stayed green on exactly the change it exists to catch.
+    level = cells(rows[0])[1]
+    assert "Experimental" in level, (
+        "upstream now calls the descent engine inside minimize "
+        f"{level!r} rather than Experimental. engines._adam declined to "
+        "delegate because of that level -- reopen the question"
+    )
+
+
+#: What `docs/stability.md` calls a deliberate reference implementation, and
+#: the cross-check in BAYESMITH's repository that holds each one in agreement.
+#:
+#: Written here rather than only on the page because a table of promises with
+#: nothing checking it is the shape this repository keeps paying for: the
+#: local symbol can be deleted or renamed, and the far-side file can be
+#: retired when its module switches, and the page would go on saying both are
+#: there.
+REFERENCE_IMPLEMENTATIONS = {
+    "rheplicant.inference.sqrtinfo:SqrtInfo": "test_sqrtinfo_agrees.py",
+    "rheplicant.inference.sqrtinfo:marginalise": "test_sqrtinfo_agrees.py",
+    "rheplicant.inference.linear:_worse": "test_linear.py",
+    "rheplicant.inference.chain:_zeta_joint": "test_provenance.py",
+}
+
+
+@pytest.mark.parametrize("target", sorted(REFERENCE_IMPLEMENTATIONS))
+def test_every_labelled_reference_implementation_is_here(target):
+    """The near half: the symbol the page names exists and is importable."""
+    import importlib
+
+    module_name, _, attribute = target.partition(":")
+    module = importlib.import_module(module_name)
+    assert hasattr(module, attribute), (
+        f"docs/stability.md calls {target} a deliberate reference "
+        "implementation and it is gone"
+    )
+
+
+@pytest.mark.parametrize(
+    "crosscheck", sorted(set(REFERENCE_IMPLEMENTATIONS.values()))
+)
+def test_every_labelled_reference_implementation_is_still_crosschecked(crosscheck):
+    """The far half, which is the half that makes the label mean anything.
+
+    A copy kept "because a cross-check holds it" and no cross-check is just a
+    copy. Needs the sibling checkout; skips loudly without it, because a
+    thinner environment is not a passing one.
+    """
+    from tests.config.wheel_support import BAYESMITH_CHECKOUT
+
+    directory = BAYESMITH_CHECKOUT / "tests" / "crosscheck"
+    if not directory.is_dir():
+        pytest.skip(
+            f"{directory} is absent, so the cross-checks that hold this "
+            "package's deliberate reference implementations in agreement "
+            "cannot be seen from here"
+        )
+    assert (directory / crosscheck).is_file(), (
+        f"docs/stability.md names {crosscheck} as what holds a reference "
+        "implementation in agreement, and it is not in the cross-check suite"
+    )
+
+
+def test_the_page_lists_exactly_the_labelled_reference_implementations():
+    """Both directions, so the page and this table cannot drift apart."""
+    root = pathlib.Path(__file__).resolve().parents[1]
+    page = (root / "docs" / "stability.md").read_text(encoding="utf-8")
+    section = page.split("## Deliberate reference implementations", 1)
+    assert len(section) == 2, "docs/stability.md no longer has that section"
+    body = section[1].split("## ", 1)[0]
+    for crosscheck in set(REFERENCE_IMPLEMENTATIONS.values()):
+        assert crosscheck in body, f"the page does not name {crosscheck}"
+    for target in REFERENCE_IMPLEMENTATIONS:
+        module_name, _, attribute = target.partition(":")
+        assert attribute in body or module_name in body, target

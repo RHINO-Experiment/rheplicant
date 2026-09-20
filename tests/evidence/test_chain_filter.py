@@ -458,7 +458,14 @@ def test_the_fold_corner_is_carried(monkeypatch):
     growing with the campaign, invisible in the posterior's shape.
     """
     base = _filtered(bank.PROBES[1])
-    real = chain._fold
+    # The function actually being wrapped, taken from the module the patch
+    # below replaces it in. It used to be `chain._fold` -- this package's own
+    # copy of the same arithmetic -- so the wrapper computed with one
+    # implementation while the filter ran another, and the two agreeing was
+    # what made it look right. A4-7 filed exactly that shape; the copy was
+    # deleted on 2026-09-20 (A4-8) and this line is why the deletion was not
+    # silent.
+    real = arithmetic._fold
 
     def without_corner(factor, target, offset, block, width):
         new_factor, new_target, new_offset = real(factor, target, offset, block, width)

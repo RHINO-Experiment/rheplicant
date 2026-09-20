@@ -216,6 +216,40 @@ Python and so is `True != 1`, so a manifest storing either would otherwise be
 accepted as a version it is not — and the archive's version guards a byte
 layout, where being wrong returns numbers rather than an error.
 
+## Deliberate reference implementations
+
+Some arithmetic exists on both sides of the bayesmith seam. That is a
+decision, not a leftover, and the copies are kept rather than deleted for the
+stable baseline: an independent second implementation is the strongest oracle
+either package has, and bayesmith's `tests/crosscheck/` runs the same inputs
+through both and compares the outputs, so "they agree" is a measurement on
+every run rather than an intention.
+
+| Here | Held in agreement by |
+|---|---|
+| `rheplicant.inference.sqrtinfo` — `SqrtInfo`, `marginalise` | `tests/crosscheck/test_sqrtinfo_agrees.py` |
+| `rheplicant.inference.linear` — the affinity criterion and the linear solve | `tests/crosscheck/test_linear.py` |
+| `rheplicant.inference.chain._zeta_joint` — the joint covariance | `tests/crosscheck/test_provenance.py` |
+
+Those paths are in **bayesmith's** repository, because the comparison belongs
+to whichever side is checking the other and running it here would be this
+package against itself.
+
+The cost of the arrangement is real and worth stating: a copy can drift, and
+one had. `linear.py`'s `_worse` had lost a case its far side kept (A4-5). What
+makes the decision defensible is not that drift cannot happen, but that a
+cross-check makes it a failing test somewhere rather than two answers nobody
+compares.
+
+`rheplicant.inference.engines._adam` is a separate case and is **not**
+delegated. bayesmith 0.10's `minimize` accepts every keyword the delegation
+would need, and upstream's own stability page calls the descent engine inside
+it *Experimental (reference implementation)* — so delegating would put this
+package's gradient engine on a surface upstream does not promise to keep.
+`tests/test_bayesmith_floor.py` watches both halves of that reason: it asserts
+the keywords still exist, and it fails if upstream raises the level, which is
+the moment to reopen the question.
+
 ## Compatibility policy
 
 This package is pre-1.0 and says so: `Development Status :: 3 - Alpha`.

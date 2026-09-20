@@ -131,9 +131,6 @@ LARGE: dict[str, tuple[str, str]] = {
     "rheplicant/inference/parameters.py": (
         SINGLE, "what is inferred and how it enters the model are two sides of "
         "one declaration and are read together"),
-    "rheplicant/inference/diagnostics.py": (
-        SINGLE, "each diagnostic is short and they share the stored-terms "
-        "contract; the contract is the module"),
     "rheplicant/inference/reduced_basis.py": (
         SINGLE, "a basis over PARAMETER space, with the selection strategies "
         "that only apply to it"),
