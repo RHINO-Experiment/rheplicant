@@ -753,9 +753,9 @@ def test_a_block_too_wide_to_form_a_hessian_certifies_on_its_prior_floor():
     assert diagnostics.converged is True
     assert distance < MAHALANOBIS_MAX, (distance, diagnostics.sweeps)
     assert distance * (1.0 - 1e-6) <= diagnostics.distance_bound <= MAHALANOBIS_MAX
-    # Measured: 14 Hessian-vector products, against the 1201 forming the
-    # Hessian would take and the 33 a probe of the spectrum needs before the
-    # first conjugate-gradient step.
+    # Measured: 2 Hessian-vector products -- the iteration stops as soon as
+    # its bound is inside the threshold -- against the 1201 that forming the
+    # Hessian would take and the 34 that probing the spectrum does.
     assert diagnostics.certificate_iterations <= 20, diagnostics.certificate_iterations
 
 

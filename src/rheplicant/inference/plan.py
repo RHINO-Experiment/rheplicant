@@ -1551,7 +1551,9 @@ class SamplingPlan:
         attempt, attempts, wait, backoff = None, 0, 0, 1
         tightened = solve_tol
         closed = any(engine in CLOSED_FORM for _, engine in self._assign)
-        floor = self._curvature_floor(cond)
+        # Named apart from the sweep's `floor`, which is the CG TOLERANCE's:
+        # the two are both floors and neither is the other's.
+        curvature = self._curvature_floor(cond)
         converged = None if tol is None else False
         # "once" is "due now, and never again"; "each_sweep" is "due every time".
         due, repeat = check_identifiability is not False, (
@@ -1601,7 +1603,7 @@ class SamplingPlan:
             if wait > 0:
                 wait -= 1
                 continue
-            attempt = _certify(programs, cond, values, gap_tol, sweep, floor)
+            attempt = _certify(programs, cond, values, gap_tol, sweep, curvature)
             attempts += 1
             if attempt.certified:
                 converged = True
