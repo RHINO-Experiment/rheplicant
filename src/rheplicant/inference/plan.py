@@ -232,7 +232,7 @@ from rheplicant.inference.identifiability import (
     identifiability,
 )
 from rheplicant.inference.likelihood import check_observed_shape
-from rheplicant.inference.linear import check_linearity
+from rheplicant.inference.linear import _gaussian_parameters, check_linearity
 from rheplicant.inference.loglinear import check_log_linearity, to_log_space
 from rheplicant.inference.parameters import ParameterSpace
 from rheplicant.inference.uncertainty import as_noise_model
@@ -424,28 +424,57 @@ class _Attempt:
 
 
 def _certify(programs: dict[Any, Any], cond: Any, values: dict[str, jax.Array],
-             gap_tol: float, sweep: int) -> _Attempt:
+             gap_tol: float, sweep: int, floor: float | None = None) -> _Attempt:
     """The Newton decrement at ``values``, and whether it certifies ``gap_tol``.
 
     The objective is :meth:`Conditioning.neg_log_posterior` over every
     latent, so the decrement is the distance to the MAP of the model the
     sweep is descending, in posterior sigma; ``gap_tol`` nats stands for
     ``sqrt(2 gap_tol)`` of them. The verdict reads the upper bound the solve's
-    residual allows and never the estimate alone, so an inexact solve can
-    only make it refuse — see
+    residual and the curvature floor allow, never the estimate alone, so an
+    inexact solve can only make it refuse — see
     :func:`~rheplicant.inference.certify.decrement`.
+
+    ``floor`` is :meth:`SamplingPlan._curvature_floor`'s, and matters only
+    for a model with more latents than
+    :data:`~rheplicant.inference.certify.DENSE_MAX`, where the Hessian is not
+    formed and its smallest eigenvalue has to come from somewhere.
 
     The program is built once per run and cached in ``programs`` beside the
     block transitions, because compiling it every candidate stop would cost
     more than the solve.
     """
+    limit = math.sqrt(2.0 * gap_tol)
     program = programs.get(_DECREMENT_TAG)
     if program is None:
         program = programs[_DECREMENT_TAG] = certify.decrement_program(
-            cond.neg_log_posterior, values
+            cond.neg_log_posterior, values, floor=floor, limit=limit
         )
     measured = certify.decrement(None, values, program=program)
-    return _Attempt(sweep, measured, measured.certifies(math.sqrt(2.0 * gap_tol)))
+    return _Attempt(sweep, measured, measured.certifies(limit))
+
+
+def _at_this_size(measured: Any) -> str:
+    """What a decrement solved by conjugate gradients adds to the refusal.
+
+    Above :data:`~rheplicant.inference.certify.DENSE_MAX` latents the Hessian
+    is not formed, so the bound needs a curvature floor the model can prove:
+    one conjugate block over Normal priors under a sigma that does not depend
+    on the prediction (:meth:`SamplingPlan._curvature_floor`). Without one the
+    floor is a probe's, the residual a certificate needs is much smaller, and
+    in float32 it is usually out of reach.
+    """
+    if measured.dense:
+        return ""
+    return (
+        f"This model has more than {certify.DENSE_MAX} latents, so the decrement is "
+        "solved by conjugate gradients rather than formed, and certifying there needs "
+        f"a residual small against the curvature floor (it reached {measured.residual:.3g} "
+        f"relative, over {measured.products} products). A floor this plan can prove — "
+        "ONE conjugate block, a Normal prior on every latent, a sigma that does not "
+        "depend on the prediction — is what makes that cheap; float64 is what makes it "
+        "possible. "
+    )
 
 
 def _not_converged_message(
@@ -465,10 +494,27 @@ def _not_converged_message(
     way it names the last rise of the objective beyond its resolution if the
     last ten sweeps had one: an inner solve's noise, which an exact block
     update does not make.
+
+    The headline changes for one case. A model with more latents than
+    :data:`~rheplicant.inference.certify.DENSE_MAX` has its decrement solved
+    by conjugate gradients, and when those do not reach a conclusive bound
+    the run has not failed to converge — it cannot say, at this size and
+    precision, whether it has. The refusal says that instead.
     """
     limit = math.sqrt(2.0 * gap_tol)
+    unsure = (
+        attempt is not None
+        and not attempt.measured.dense
+        and attempt.measured.status == certify.UNREACHED
+    )
+    headline = (
+        "SamplingPlan.estimate cannot certify this estimate at this size and "
+        "precision"
+        if unsure
+        else "SamplingPlan.estimate did not converge"
+    )
     opening = (
-        f"SamplingPlan.estimate did not converge: after {max_iter} sweeps the JOINT "
+        f"{headline}: after {max_iter} sweeps the JOINT "
         f"negative log posterior is still changing by "
         f"{objective[-1] - objective[-2]:.3g} per sweep (objective = "
         f"{objective[-1]:.6g}, chi2 = {chi2[-1]:.6g}). "
@@ -499,7 +545,8 @@ def _not_converged_message(
             f"blocks ended at solve_tol = {solve_tol:g}), when sigma depends on the "
             "prediction and a conjugate block freezes it, when a block is solved in "
             f"log space, or in {np.dtype(dtype).name} when the objective's gradient "
-            "is below its rounding. Run in float64 (JAX_ENABLE_X64=1), group the "
+            "is below its rounding. " + _at_this_size(measured)
+            + "Run in float64 (JAX_ENABLE_X64=1), group the "
             "correlated latents into ONE Block, raise max_iter, or pass tol=None to "
             "accept an unconverged answer."
         )
@@ -1134,6 +1181,44 @@ class SamplingPlan:
 
     # -------------------------------------------------------------- running --
 
+    def _curvature_floor(self, cond: Conditioning) -> float | None:
+        """A VERIFIED lower bound on the joint Hessian's smallest eigenvalue, or
+        ``None`` when this plan's model gives none.
+
+        For a model the prediction is affine in, under a noise that does not
+        depend on it, the joint objective is
+        ``0.5 |N^-1/2 (d - J x)|^2 + 0.5 (x - m)^T P (x - m)`` plus constants,
+        so ``H = J^T N^-1 J + P`` and ``H >= P >= min(1 / sigma_prior^2)``:
+        the prior precision is a floor, whatever the data. The conditions are
+        each checked rather than assumed — ONE conjugate block, so the
+        linearity :meth:`_prepare` verifies is joint and not per block (two
+        conjugate blocks over a bilinear model are each linear and jointly
+        are not); a prediction-independent sigma, so the log-determinant is
+        constant; and a Normal prior on every latent, since a prior that is
+        not Gaussian has no constant curvature to floor with.
+
+        It is consulted only above
+        :data:`~rheplicant.inference.certify.DENSE_MAX` latents, where the
+        Hessian is not formed and its smallest eigenvalue would otherwise be
+        a probe's estimate. Returning ``None`` is not a failure: it means a
+        certificate at that size has to say so (see :func:`_certify`).
+        """
+        if bool(cond.noise.depends_on_prediction):
+            return None
+        if len(self._assign) != 1 or self._assign[0][1] != CONJUGATE:
+            return None
+        floor = math.inf
+        for name in self.space.names:
+            gaussian = _gaussian_parameters(self.space.latent(name).prior)
+            if gaussian is None:
+                return None
+            widest = float(jnp.max(jnp.abs(jnp.asarray(gaussian[1]))))
+            if not math.isfinite(widest) or widest <= 0.0:
+                return None
+            floor = min(floor, 1.0 / widest**2)
+        return None if not math.isfinite(floor) else floor
+
+
     def _prepare(
         self,
         pipeline: AbstractOperator,
@@ -1466,6 +1551,7 @@ class SamplingPlan:
         attempt, attempts, wait, backoff = None, 0, 0, 1
         tightened = solve_tol
         closed = any(engine in CLOSED_FORM for _, engine in self._assign)
+        floor = self._curvature_floor(cond)
         converged = None if tol is None else False
         # "once" is "due now, and never again"; "each_sweep" is "due every time".
         due, repeat = check_identifiability is not False, (
@@ -1515,7 +1601,7 @@ class SamplingPlan:
             if wait > 0:
                 wait -= 1
                 continue
-            attempt = _certify(programs, cond, values, gap_tol, sweep)
+            attempt = _certify(programs, cond, values, gap_tol, sweep, floor)
             attempts += 1
             if attempt.certified:
                 converged = True

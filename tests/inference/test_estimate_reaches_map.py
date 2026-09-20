@@ -26,6 +26,7 @@ spectral index at 4096 channels and 0.01 K is 1.7e-7, finer than float32
 resolves a number near 2.55.
 """
 
+import math
 from typing import ClassVar
 
 import equinox as eqx
@@ -663,3 +664,183 @@ def test_an_inexact_inner_solve_is_tightened_until_the_decrement_certifies(noise
     distance = basis._posterior_sigmas_from(estimate, exact, precision)
     assert distance < MAHALANOBIS_MAX, (distance, diagnostics.sweeps)
     assert diagnostics.solve_tol < 1e-6
+
+
+# ------------------- (vii) more latents than the decrement forms a Hessian for --
+
+WIDE_COEFFICIENTS = 1200
+WIDE_SHAPE = (40, 100)
+WIDE_TAU = 10.0
+
+
+class _Wide(AbstractOperator):
+    """``data = design @ theta`` for one vector latent: a block whose size
+    puts the decrement on its iterative path."""
+
+    requires: ClassVar[tuple[str, ...]] = ("coords.time", "coords.freq")
+    provides: ClassVar[tuple[str, ...]] = ("data",)
+    design: jax.Array
+    theta: jax.Array
+
+    def __call__(self, state: State) -> State:
+        n_time, n_freq = state.coords.time.shape[0], state.coords.freq.shape[0]
+        return state.with_data((self.design @ self.theta).reshape(n_time, n_freq))
+
+
+class _Split(AbstractOperator):
+    """:class:`_Wide` with its coefficients in two latents, so a plan over it
+    has two blocks and no claim to joint linearity from either."""
+
+    requires: ClassVar[tuple[str, ...]] = ("coords.time", "coords.freq")
+    provides: ClassVar[tuple[str, ...]] = ("data",)
+    design: jax.Array
+    theta: jax.Array
+    phi: jax.Array
+
+    def __call__(self, state: State) -> State:
+        n_time, n_freq = state.coords.time.shape[0], state.coords.freq.shape[0]
+        whole = jnp.concatenate([self.theta, self.phi])
+        return state.with_data((self.design @ whole).reshape(n_time, n_freq))
+
+
+def _wide_plan(seed=3):
+    """One conjugate block of :data:`WIDE_COEFFICIENTS` coefficients, its data,
+    and the exact MAP and posterior precision of that linear-Gaussian model."""
+    rng = np.random.default_rng(seed)
+    size = int(np.prod(WIDE_SHAPE))
+    design = rng.standard_normal((size, WIDE_COEFFICIENTS)) / np.sqrt(WIDE_COEFFICIENTS)
+    truth = rng.standard_normal(WIDE_COEFFICIENTS)
+    observed = design @ truth + rng.standard_normal(size)
+    precision = design.T @ design + np.eye(WIDE_COEFFICIENTS) / WIDE_TAU**2
+    exact = np.linalg.solve(precision, design.T @ observed)
+    space = ParameterSpace(
+        latents=[
+            Latent("theta", init=jnp.zeros(WIDE_COEFFICIENTS),
+                   prior=dist.Normal(jnp.zeros(WIDE_COEFFICIENTS), WIDE_TAU),
+                   linear=True),
+        ],
+        bindings=[Bind("theta", into=lambda p: p["wide"].theta)],
+    )
+    pipeline = Pipeline(
+        _Wide(design=jnp.asarray(design), theta=jnp.zeros(WIDE_COEFFICIENTS)),
+        names=("wide",),
+    )
+    plan = SamplingPlan(space, Block("theta"))
+    return plan, pipeline, jnp.asarray(observed.reshape(WIDE_SHAPE)), exact, precision
+
+
+def test_a_block_too_wide_to_form_a_hessian_certifies_on_its_prior_floor():
+    """Above :data:`~rheplicant.inference.certify.DENSE_MAX` latents the
+    decrement cannot form the Hessian, so its bound needs a lower bound on
+    the smallest eigenvalue. This plan can prove one: a single conjugate
+    block is linear in every latent jointly, the noise does not depend on the
+    prediction, and every prior is Normal, so ``H = J^T N^-1 J + P`` is
+    bounded below by the prior precision. The run must certify with that, in
+    a handful of Hessian-vector products rather than a probe of the
+    spectrum."""
+    plan, pipeline, observed, exact, precision = _wide_plan()
+    state = _grid_state(*WIDE_SHAPE)
+    noise = HomoscedasticNoise(sigma=jnp.array(1.0))
+    cond, _ = plan._prepare(pipeline, state, observed, noise, False, "probe")
+    assert plan._curvature_floor(cond) == pytest.approx(1.0 / WIDE_TAU**2)
+    estimate = plan.estimate(
+        pipeline, state, observed, noise=noise, max_iter=30,
+        check_identifiability=False,
+    )
+    diagnostics = estimate.diagnostics
+    got = np.asarray(estimate.values["theta"], np.float64)
+    distance = _mahalanobis(got, exact, precision)
+    assert diagnostics.converged is True
+    assert distance < MAHALANOBIS_MAX, (distance, diagnostics.sweeps)
+    assert distance * (1.0 - 1e-6) <= diagnostics.distance_bound <= MAHALANOBIS_MAX
+    # Measured: 14 Hessian-vector products, against the 1201 forming the
+    # Hessian would take and the 33 a probe of the spectrum needs before the
+    # first conjugate-gradient step.
+    assert diagnostics.certificate_iterations <= 20, diagnostics.certificate_iterations
+
+
+def test_without_a_floor_that_block_says_so_rather_than_guessing():
+    """The same model, its latent split across two blocks so the plan can no
+    longer claim joint linearity from one block's check. With no floor to
+    prove, the decrement probes the spectrum instead, and what it cannot
+    bound it refuses -- naming the size, not a failure to converge."""
+    plan, pipeline, observed, _, _ = _wide_plan()
+    state = _grid_state(*WIDE_SHAPE)
+    noise = HomoscedasticNoise(sigma=jnp.array(1.0))
+    cond, _ = plan._prepare(pipeline, state, observed, noise, False, "probe")
+    from rheplicant.inference import certify
+    from rheplicant.inference.plan import _Attempt, _not_converged_message
+
+    measured = certify.Decrement(
+        estimate=0.3, distance=math.inf, lambda2=0.09, residual=1e-3,
+        reach=math.inf, kappa=math.nan, products=1000, dense=False,
+        status=certify.UNREACHED,
+    )
+    message = _not_converged_message(
+        max_iter=50, tol=1e-8, gap_tol=0.005, effective=1e-8, changed=True,
+        objective=[1.0, 1.0], chi2=[1.0, 1.0], contraction=0.5, gap=1e-9,
+        rise=None, attempt=_Attempt(50, measured, False), solve_tol=1e-6,
+        dtype=np.float32, hidden="",
+    )
+    assert "cannot certify this estimate at this size and precision" in message
+    assert f"more than {certify.DENSE_MAX} latents" in message
+    assert "JAX_ENABLE_X64=1" in message
+
+
+@pytest.mark.parametrize(
+    "variation, floored",
+    [("plain", True), ("two blocks", False), ("no prior", False),
+     ("gradient block", False), ("sigma from the prediction", False)],
+)
+def test_the_floor_is_claimed_only_where_the_model_proves_it(variation, floored):
+    """``H >= P`` needs every one of: a prediction the model is affine in
+    JOINTLY (one conjugate block, since two blocks are each checked alone and
+    a bilinear model passes both), a Normal prior on every latent, and a
+    sigma that does not depend on the prediction. Drop any one and the plan
+    claims no floor, which is what sends a model above
+    :data:`~rheplicant.inference.certify.DENSE_MAX` to the probe."""
+    from rheplicant.inference.noise import RadiometerNoise
+
+    size, width = 8, 4.0
+    rng = np.random.default_rng(0)
+    design = rng.standard_normal((int(np.prod(DENSE_SHAPE)), size))
+    observed = jnp.asarray((design @ rng.standard_normal(size)).reshape(DENSE_SHAPE))
+    prior = None if variation == "no prior" else dist.Normal(jnp.zeros(size), width)
+    linear = variation != "gradient block"
+    space = ParameterSpace(
+        latents=[Latent("theta", init=jnp.zeros(size), prior=prior, linear=linear)],
+        bindings=[Bind("theta", into=lambda p: p["wide"].theta)],
+    )
+    pipeline = Pipeline(
+        _Wide(design=jnp.asarray(design), theta=jnp.zeros(size)), names=("wide",)
+    )
+    blocks = (Block("theta"),)
+    if variation == "two blocks":
+        # the same latent cannot be in two blocks, so split the model instead
+        space = ParameterSpace(
+            latents=[
+                Latent(name, init=jnp.zeros(size // 2),
+                       prior=dist.Normal(jnp.zeros(size // 2), width), linear=True)
+                for name in ("theta", "phi")
+            ],
+            bindings=[Bind("theta", into=lambda p: p["wide"].theta),
+                      Bind("phi", into=lambda p: p["wide"].phi)],
+        )
+        pipeline = Pipeline(
+            _Split(design=jnp.asarray(design), theta=jnp.zeros(size // 2),
+                   phi=jnp.zeros(size // 2)),
+            names=("wide",),
+        )
+        blocks = (Block("theta"), Block("phi"))
+    noise = (
+        RadiometerNoise(1e3, 1.0) if variation == "sigma from the prediction"
+        else HomoscedasticNoise(sigma=jnp.array(1.0))
+    )
+    plan = SamplingPlan(space, *blocks)
+    cond, _ = plan._prepare(
+        pipeline, _grid_state(*DENSE_SHAPE), observed, noise, False, "probe"
+    )
+    floor = plan._curvature_floor(cond)
+    assert (floor is not None) is floored, (variation, floor)
+    if floored:
+        assert floor == pytest.approx(1.0 / width**2)

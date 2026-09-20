@@ -62,12 +62,17 @@ def _objective(hessian, minimum):
     return objective
 
 
-def _measure(hessian, minimum, point):
+def _measure(hessian, minimum, point, **options):
     """:func:`certify.decrement` at ``point``, and the exact answer."""
     objective = _objective(hessian, minimum)
-    measured = certify.decrement(objective, {"x": jnp.asarray(point)})
+    measured = certify.decrement(objective, {"x": jnp.asarray(point)}, **options)
     slope = hessian @ (point - minimum)
     return measured, slope @ np.linalg.solve(hessian, slope)
+
+
+def _floor_of(hessian):
+    """The smallest eigenvalue: what a caller of the iterative path must know."""
+    return float(np.linalg.eigvalsh(hessian)[0])
 
 
 class TestTheNewtonDecrement:
@@ -79,31 +84,29 @@ class TestTheNewtonDecrement:
         self, monkeypatch, path, seed
     ):
         """30 parameters at condition number 1e6 before a scaling of up to
-        e^3 each, so the scaling the dense path undoes is real. The
-        decrement's error must lie inside the spread its own residual and
-        condition number allow; the dense path's ``kappa`` is the scaled
-        Hessian's own, the iterative one's a Lanczos estimate that can only
-        be low."""
+        e^3 each, so the scaling the dense path undoes is real. The estimate
+        is a lower bound on the true decrement and the reported distance an
+        upper one, on both paths; the dense path measures the curvature floor
+        the bound needs, the iterative one is given it."""
+        floor = None
+        hessian, minimum, point = _quadratic(seed)
         if path == "conjugate_gradients":
             monkeypatch.setattr(certify, "DENSE_MAX", 0)
-        hessian, minimum, point = _quadratic(seed)
-        measured, exact = _measure(hessian, minimum, point)
+            floor = _floor_of(hessian)
+        measured, exact = _measure(hessian, minimum, point, floor=floor)
         assert exact == pytest.approx(0.105**2, rel=1e-6)
         assert measured.status == certify.CONVERGED
-        spread = (measured.residual * np.sqrt(measured.kappa)
-                  + np.finfo(np.float64).eps * measured.kappa)
-        assert abs(measured.lambda2 - exact) <= spread * exact
+        assert measured.lambda2 <= exact * (1 + 1e-7)
         assert exact <= measured.distance**2
         assert not measured.certifies(LIMIT), "0.105 sigma is outside 0.1"
-        root = np.sqrt(np.diag(hessian))
-        scaled = np.linalg.eigvalsh(hessian / np.outer(root, root))
         if path == "dense":
+            root = np.sqrt(np.diag(hessian))
+            scaled = np.linalg.eigvalsh(hessian / np.outer(root, root))
             assert measured.kappa == pytest.approx(scaled[-1] / scaled[0], rel=1e-6)
-            assert measured.products == 31
+            assert measured.products == 31 and measured.dense
             assert abs(measured.lambda2 - exact) <= 1e-10 * exact
         else:
-            plain = np.linalg.eigvalsh(hessian)
-            assert measured.kappa <= plain[-1] / plain[0] * (1 + 1e-6)
+            assert not measured.dense
             assert measured.products <= 4 * 30 + 20 + 1
 
     def test_a_point_inside_the_threshold_certifies(self):
@@ -130,7 +133,7 @@ class TestTheNewtonDecrement:
         monkeypatch.setattr(certify, "DENSE_MAX", 0)
         monkeypatch.setattr(certify, "MAXITER", 3)
         hessian, minimum, point = _quadratic(0, distance=1e-3)
-        measured, _ = _measure(hessian, minimum, point)
+        measured, _ = _measure(hessian, minimum, point, floor=_floor_of(hessian))
         assert measured.status == certify.UNREACHED
         assert measured.estimate < LIMIT and not measured.certifies(LIMIT)
 
@@ -188,14 +191,14 @@ class TestTheNewtonDecrement:
         assert inside, "no seed's estimate fell inside the threshold: vacuous"
 
     @pytest.mark.parametrize(
-        "lambda2, rho, kappa, dtype, status, certified",
+        "lambda2, reach, kappa, dtype, status, certified",
         [
-            # spread 1e-5 * 100 = 1e-3: 0.0099 / 0.999 is inside 0.01
-            (0.0099, 1e-5, 1e4, jnp.float64, certify.CONVERGED, True),
-            # spread 0.1: the same estimate could be 0.011, outside
-            (0.0099, 1e-3, 1e4, jnp.float64, certify.CONVERGED, False),
-            # spread >= 1: no upper bound at all
-            (1e-6, 2e-2, 1e4, jnp.float64, certify.CONVERGED, False),
+            # reach 1e-3 on an estimate of 0.09899: the bound is 0.09949
+            (0.0098, 1e-3, 1e4, jnp.float64, certify.CONVERGED, True),
+            # the same estimate with a residual ten times larger: 0.1045
+            (0.0099, 1e-2, 1e4, jnp.float64, certify.CONVERGED, False),
+            # a residual that bounds nothing at all
+            (1e-6, float("inf"), 1e4, jnp.float64, certify.CONVERGED, False),
             # 4-byte floats at kappa 1e7: eps * kappa = 1.19, all rounding
             (1e-6, 0.0, 1e7, jnp.float32, certify.CONVERGED, False),
             # a solve that did not reach its residual, or met non-positive
@@ -206,19 +209,112 @@ class TestTheNewtonDecrement:
         ],
     )
     def test_it_passes_only_on_the_upper_bound(
-        self, lambda2, rho, kappa, dtype, status, certified
+        self, lambda2, reach, kappa, dtype, status, certified
     ):
-        """The rule on hand-made programs, at the 0.1 threshold
-        (``lambda2 <= 0.01``): an estimate inside it whose error bound
-        reaches outside it is refused."""
+        """The rule on hand-made programs, at the 0.1 threshold: an estimate
+        inside it whose residual reaches outside it is refused."""
 
         def program(values):
-            return (jnp.asarray(lambda2, dtype), jnp.asarray(rho, dtype), 5, status,
-                    jnp.asarray(kappa, dtype))
+            return (jnp.asarray(lambda2, dtype), jnp.asarray(0.0, dtype),
+                    jnp.asarray(reach, dtype), 5, status, jnp.asarray(kappa, dtype))
 
         measured = certify.decrement(None, {}, program=program)
         assert measured.certifies(LIMIT) is certified
         assert measured.products == 5 and measured.status == status
+
+    @pytest.mark.parametrize("dtype", [jnp.float32, jnp.float64])
+    @pytest.mark.parametrize("tiny", [1e-6, 1e-8])
+    def test_an_eigenvalue_the_iteration_barely_reaches_is_not_certified_away(
+        self, monkeypatch, dtype, tiny
+    ):
+        """The third review's HIGH, above :data:`certify.DENSE_MAX`.
+
+        300 parameters, the spectrum clustered at 1 with one eigenvalue at
+        ``tiny``, and the gradient's component along that direction just
+        under the iteration's own residual: the conjugate gradients stop
+        with a residual that looks small and an error that is not, and a
+        condition number read off their Lanczos matrix says 1.2 where the
+        truth is 1e8. Reported that way, a bound of 0.04998 stood for a true
+        0.0673 (float32, measured). The floor the bound divides by is now
+        the probe's Ritz interval, which reaches below the cluster or says it
+        cannot: the distance reported must cover the truth, whether or not
+        the point certifies.
+        """
+        monkeypatch.setattr(certify, "DENSE_MAX", 0)  # 300 parameters are dense now
+        n, rng = 300, np.random.default_rng(2)
+        rtol = certify.RTOL[jnp.finfo(dtype).dtype.itemsize]
+        spectrum = np.concatenate([1.0 + 0.01 * rng.standard_normal(n - 1), [tiny]])
+        rotation, _ = np.linalg.qr(rng.standard_normal((n, n)))
+        hessian = (rotation * spectrum) @ rotation.T
+        hessian = 0.5 * (hessian + hessian.T)
+        bulk = rotation[:, : n - 1] @ rng.standard_normal(n - 1)
+        bulk = bulk / np.linalg.norm(bulk) * 0.05
+        slope = bulk + 0.9 * rtol * np.linalg.norm(bulk) * rotation[:, -1]
+        point = np.linalg.solve(hessian, slope)
+        exact = float(slope @ point)
+        matrix = jnp.asarray(hessian, dtype)
+
+        def objective(values):
+            return 0.5 * jnp.sum(values["x"] * (matrix @ values["x"]))
+
+        measured = certify.decrement(objective, {"x": jnp.asarray(point, dtype)})
+        assert measured.lambda2 <= exact * (1 + 1e-6), "the estimate is a lower bound"
+        assert math.sqrt(exact) <= measured.distance, (
+            f"{measured} reported a bound below the true {math.sqrt(exact):.4g}"
+        )
+        assert not measured.dense and measured.products >= certify.PROBE_STEPS
+
+    @pytest.mark.parametrize("path", ["dense", "conjugate_gradients"])
+    def test_the_two_paths_agree_on_what_is_not_a_minimum(self, monkeypatch, path):
+        """The third review's second HIGH. Above :data:`certify.DENSE_MAX` the
+        Hessian is not formed, and a zero gradient used to be read as a
+        converged solve whatever the curvature, so a saddle certified at
+        distance zero while the dense path refused the same matrix. Both
+        paths now refuse an indefinite Hessian, at a saddle or away from it,
+        and a singular one whose gradient happens to avoid the null
+        direction."""
+        n = 300
+        if path == "conjugate_gradients":
+            monkeypatch.setattr(certify, "DENSE_MAX", 0)
+        rng = np.random.default_rng(1)
+        rotation, _ = np.linalg.qr(rng.standard_normal((n, n)))
+        spectrum = np.linspace(1.0, 10.0, n)
+
+        def refuses(eigenvalues, point):
+            hessian = (rotation * eigenvalues) @ rotation.T
+            measured, _ = _measure(hessian, np.zeros(n), point)
+            return measured
+
+        indefinite, singular = spectrum.copy(), spectrum.copy()
+        indefinite[0], singular[0] = -1.0, 0.0
+        point = rng.standard_normal(n) * 1e-3
+        assert refuses(spectrum, point).certifies(LIMIT), "the fixture must be usable"
+        for eigenvalues, where in ((indefinite, point), (indefinite, np.zeros(n)),
+                                   (singular, point)):
+            measured = refuses(eigenvalues, where)
+            assert measured.status == certify.NONCONVEX, (path, measured)
+            assert not measured.certifies(LIMIT)
+
+    def test_a_verified_floor_makes_a_large_model_cheap_to_certify(self):
+        """What a caller's ``floor`` buys above :data:`certify.DENSE_MAX`: the
+        iteration stops as soon as its bound is inside the limit, instead of
+        probing the spectrum and driving the residual down. Measured on 2000
+        parameters: two products against 35."""
+        n, rng = 2000, np.random.default_rng(5)
+        spectrum = np.linspace(1.0, 50.0, n)
+        matrix = jnp.asarray(np.diag(spectrum))
+
+        def objective(values):
+            return 0.5 * jnp.sum(values["x"] * (matrix @ values["x"]))
+
+        point = rng.standard_normal(n)
+        point = point / np.sqrt(point @ (spectrum * point)) * 0.05
+        at = {"x": jnp.asarray(point)}
+        floored = certify.decrement(objective, at, floor=1.0, limit=LIMIT)
+        probed = certify.decrement(objective, at, limit=LIMIT)
+        assert floored.certifies(LIMIT) and probed.certifies(LIMIT)
+        assert floored.products < probed.products
+        assert floored.products <= 4 and probed.products >= certify.PROBE_STEPS
 
     def test_a_program_is_built_once_and_reused(self):
         """The program is the expensive half: a caller holds it across points."""

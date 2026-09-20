@@ -366,37 +366,61 @@ would return:
 numerics are in `rheplicant.inference.certify`, which knows nothing about
 models: it takes a callable and a pytree, and the plan supplies the joint
 objective. `H` is never formed from the model: every product is `jax.jvp` of
-`jax.grad` of `f`.
-Up to 256 latents the decrement takes `n` such products, assembles the Hessian,
-scales it by its diagonal and solves by eigendecomposition; above that it runs
-conjugate gradients on the products alone. Either way the solve is inexact, and
-the verdict is never `gᵀx` as it stands. With `r = g − Hx` the true residual —
-recomputed with one more product, because a recursive one drifts — `ρ` its size
-relative to `g` and `κ` the condition number,
+`jax.grad` of `f`. Up to 1024 latents the decrement takes `n` such products,
+assembles the Hessian, scales it by its diagonal and solves by
+eigendecomposition; above that it runs conjugate gradients on the products
+alone. Either way the solve is inexact, and the verdict is never `gᵀx` as it
+stands. With `r = g − Hx` the true residual — recomputed with one more
+product, because a recursive one drifts — and `μ` a **lower bound on the
+smallest eigenvalue** of `H`,
 
 ```text
-gᵀH⁻¹g  ≤  gᵀx / (1 − ρ sqrt(κ) − ε κ)
+λ  ≤  (R + sqrt(R² + 4 gᵀx)) / 2,      R = |r| / sqrt(μ)
 ```
 
-by Cauchy–Schwarz in the `H⁻¹` inner product, the last term covering the
-rounding of `g` and `H` themselves. The run certifies on that upper bound and
-records it, so stopping the solve early can only make it refuse. On the dense
-path `κ` is the scaled Hessian's own; on the conjugate-gradient path it is a
-Lanczos estimate that can only be low, which is the one place the bound is an
-estimate rather than an inequality. A direction of non-positive curvature, an
-iteration that does not reach its residual within its cap, or a residual too
-large to bound the decrement at all certify nothing: the run keeps sweeping and
-says which at `max_iter`.
+by Cauchy–Schwarz in the `H⁻¹` inner product, inflated by `1/sqrt(1 − ε κ)`
+for the rounding of `g` and `H` themselves. The run certifies on that upper
+bound and records it, so stopping the solve early can only make it refuse.
+
+**Where the lower bound comes from.** Below 1024 latents it is measured: the
+scaled Hessian's own smallest eigenvalue, which also decides positive
+definiteness, so an indefinite or numerically singular Hessian is refused
+rather than certified. Above it, the plan proves one where it can — for a
+model the prediction is affine in, under a sigma that does not depend on it,
+`H = JᵀN⁻¹J + P` is bounded below by the prior precision `P`, so a **single
+conjugate block with a Normal prior on every latent** hands the certificate
+`min(1/σ_prior²)` and the solve stops as soon as its bound is inside the
+threshold. Failing that (two blocks, a gradient block, a prior-free latent, a
+prediction-dependent sigma) the decrement takes a 32-step Lanczos probe of
+`H` and uses its Ritz interval, which is an estimate and says so: where the
+probe cannot bound the spectrum the run refuses at `max_iter` with "cannot
+certify this estimate at this size and precision", naming the latent count
+and `JAX_ENABLE_X64=1` — a different sentence from "did not converge",
+because it is a different thing. A probe that finds non-positive curvature
+refuses outright, as the dense path does.
+
+The T-002 third review found both halves of that by construction: a spectrum
+clustered at 1 with one eigenvalue at 1e-8 and a gradient whose component
+along it sat just under the iteration's residual, where a condition number
+read off the iteration's own Lanczos matrix said 1.2 against a true 1e8 and
+turned a true 0.067 σ into a reported 0.050; and an indefinite Hessian at a
+zero gradient, which the iterative path certified at distance zero while the
+dense path refused it.
 
 What it costs, measured on this machine in float64 against one sweep of the
 same plan:
 
 | model | latents | products | one decrement | in sweeps |
 |---|---|---|---|---|
-| power law, 4096 channels | 2 | 3 | 0.2 ms | 0.14 |
-| two collinear blocks, `N = 1e6` | 2 | 3 | 1.0 ms | 1.5 |
-| one conjugate block of 256 coefficients | 256 | 257 | 32 ms | 7.2 |
-| one conjugate block of 512 coefficients | 512 | 14 | 39 ms | 3.9 |
+| power law, 4096 channels | 2 | 3 | 0.2 ms | 0.13 |
+| two collinear blocks, `N = 1e6` | 2 | 3 | 0.8 ms | 1.4 |
+| one conjugate block of 256 coefficients | 256 | 257 | 28 ms | 10 |
+| one conjugate block of 1024 coefficients | 1024 | 1025 | 322 ms | 16 |
+| one conjugate block of 2000 coefficients | 2000 | 2 | 7.5 ms | 0.17 |
+
+The last row is the prior floor paying for itself: above 1024 latents the
+Hessian is not formed, and a floor the model proves lets the iteration stop
+at the second product instead of probing the spectrum.
 
 When it has not converged, the refusal names what failed and what the per-block
 numbers were doing at the time:
@@ -486,10 +510,11 @@ both exhaust 3000 sweeps and refuse. A model that certifies at the caller's
 
 **What is left.** The decrement is a statement about the quadratic model of `f`
 at the returned point: where the curvature changes over a posterior σ it is
-local, and on the conjugate-gradient path (above 256 latents) a direction of
-negative curvature the Krylov space never meets is not seen. In float32 a model
-whose posterior σ is small against its latents' magnitudes has a gradient that
-is mostly rounding, and no solve recovers it — those runs refuse, naming
+local. Above 1024 latents with no floor the model can prove, the curvature
+comes from a probe rather than a proof, and a direction of negative curvature
+that neither the probe nor the Krylov space meets is not seen. In float32 a
+model whose posterior σ is small against its latents' magnitudes has a gradient
+that is mostly rounding, and no solve recovers it — those runs refuse, naming
 float64. Grouping the correlated latents into one `Block` removes the slowness
 rather than the symptom.
 
