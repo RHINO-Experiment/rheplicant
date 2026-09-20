@@ -1,0 +1,218 @@
+"""Which package may import which, for every package, in both directions.
+
+``tests/core/test_layering.py`` guards one rule -- core stays domain-agnostic
+-- by scanning core's own files for four forbidden prefixes. It is the right
+rule and it covers one package out of six; nothing said what the other five
+may do, and nothing said that ``_rheplicant_bootstrap``, which sits under all
+of them, may import none of them.
+
+Measured by AST over ``src/``, including function-local imports, which matter
+here: several modules import lazily to break a cycle at module scope, and an
+edge that exists only inside a function is still an edge. A text scan would
+also see the four prefixes inside a docstring; this does not.
+
+The stack, measured rather than declared:
+
+    _rheplicant_bootstrap      imports nothing from this project
+    rheplicant.core            -> bootstrap
+    rheplicant.radio           -> core
+    rheplicant.inference       -> core
+    rheplicant.config          -> bootstrap, core, radio, inference
+    rheplicant.gui             -> bootstrap, core, config, radio
+
+Two properties of that shape are worth naming because they are easy to lose
+and nothing else asserts them:
+
+* **radio and inference do not import each other.** A forward model and a
+  likelihood layer are siblings; the moment one reaches for the other, the
+  only way to use either is to have both.
+* **gui does not import inference.** It reaches config, and config reaches
+  inference. A GUI that imported the likelihood layer directly would pull the
+  sampler into a web server for the sake of a form.
+
+**Asserted in both directions**, like the config boundary and the private-name
+allowlist. An allowed edge nobody uses is deleted, because a standing
+permission is how a dependency arrives with nothing in the review to say it
+began.
+"""
+
+from __future__ import annotations
+
+import ast
+import collections
+import pathlib
+
+import pytest
+
+SRC = pathlib.Path(__file__).resolve().parents[1] / "src"
+
+#: The bottom of the stack. It is read before the package is importable, so it
+#: may not depend on the package at all -- that is what makes it the bottom
+#: rather than merely the first.
+BOOTSTRAP = "_rheplicant_bootstrap"
+
+#: package -> the packages it may import. Both directions are asserted, so
+#: this is the whole truth and not a ceiling.
+ALLOWED: dict[str, frozenset[str]] = {
+    BOOTSTRAP: frozenset(),
+    "rheplicant": frozenset({"rheplicant.core"}),
+    "rheplicant.core": frozenset({BOOTSTRAP}),
+    "rheplicant.radio": frozenset({"rheplicant.core"}),
+    "rheplicant.inference": frozenset({"rheplicant.core"}),
+    "rheplicant.config": frozenset({
+        BOOTSTRAP, "rheplicant.core", "rheplicant.radio", "rheplicant.inference",
+    }),
+    "rheplicant.gui": frozenset({
+        BOOTSTRAP, "rheplicant.core", "rheplicant.config", "rheplicant.radio",
+    }),
+}
+
+#: Edges that are allowed and carry a cost worth stating at the edge itself.
+NOTED = {
+    ("rheplicant.core", BOOTSTRAP):
+        "core.errors and core.capability re-export from the bootstrap so the "
+        "layers above import them the ordinary way; two edges, and DESIGN.md's "
+        "'core graduates by moving one directory' means moving these two with it",
+    ("rheplicant.gui", "rheplicant.radio"):
+        "the GUI server loads JAX through this edge (A1-10). It is allowed and "
+        "it is not free: a form that needs operator vocabulary pays for the "
+        "array library to answer it",
+}
+
+
+def _package_of(module: str) -> str:
+    parts = [part for part in module.split(".") if part != "__init__"]
+    if not parts:
+        return ""
+    if parts[0] == BOOTSTRAP:
+        return BOOTSTRAP
+    if parts[0] == "rheplicant":
+        return f"rheplicant.{parts[1]}" if len(parts) > 1 else "rheplicant"
+    return ""
+
+
+def _edges() -> dict[str, frozenset[str]]:
+    """``package -> the packages it imports``, over every module in ``src/``."""
+    found: dict[str, set[str]] = collections.defaultdict(set)
+    for path in sorted(SRC.rglob("*.py")):
+        relative = str(path.relative_to(SRC))
+        here = _package_of(relative[:-3].replace("/", "."))
+        if not here:
+            continue
+        found.setdefault(here, set())
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            modules: list[str] = []
+            if isinstance(node, ast.ImportFrom) and node.module and not node.level:
+                modules = [node.module]
+            elif isinstance(node, ast.Import):
+                modules = [alias.name for alias in node.names]
+            for module in modules:
+                there = _package_of(module)
+                if there and there != here:
+                    found[here].add(there)
+    return {key: frozenset(value) for key, value in found.items()}
+
+
+def test_the_bottom_of_the_stack_depends_on_nothing_above_it():
+    """``_rheplicant_bootstrap`` imports no part of this project.
+
+    Asserted on its own rather than folded into the table below, because it is
+    the property the whole stack rests on: the CLI entry point reads it before
+    ``rheplicant`` is importable, and ``tests/config/test_entry_order.py``
+    depends on that being true to keep JAX out of a bare ``--help``.
+    """
+    reached = sorted(_edges().get(BOOTSTRAP, frozenset()))
+    assert not reached, (
+        f"{BOOTSTRAP} now imports {reached}. It is read before the package is "
+        "importable, so this is not a layering preference -- it is what makes "
+        "the entry point work at all"
+    )
+
+
+@pytest.mark.parametrize("package", sorted(ALLOWED), ids=sorted(ALLOWED))
+def test_each_package_imports_exactly_what_it_is_allowed_to(package):
+    """Both directions: no new edge, and no allowance nobody uses."""
+    live = _edges().get(package, frozenset())
+    allowed = ALLOWED[package]
+    new = sorted(live - allowed)
+    unused = sorted(allowed - live)
+    assert not new, (
+        f"{package} now imports {new}, which the stack does not allow. If the "
+        "dependency is right, the layering changed and this table should say "
+        "so in the same commit"
+    )
+    assert not unused, (
+        f"{package} is allowed to import {unused} and does not. Delete the "
+        "allowance: a permission nobody uses is how a dependency arrives with "
+        "nothing in the review to say it began"
+    )
+
+
+def test_no_two_packages_import_each_other():
+    """A cycle makes two packages one, whatever the directory listing says.
+
+    Checked separately from the table because the table could allow one by
+    accident -- two entries, each naming the other, each looking reasonable
+    alone.
+    """
+    live = _edges()
+    cycles = sorted(
+        {tuple(sorted((here, there)))
+         for here, reached in live.items()
+         for there in reached
+         if here in live.get(there, frozenset())}
+    )
+    assert not cycles, f"these packages import each other: {cycles}"
+
+
+def test_the_two_domain_layers_stay_siblings():
+    """radio and inference do not import each other.
+
+    A forward model and a likelihood layer are siblings. The moment one
+    reaches for the other, using either means having both -- and the seam this
+    package is built around, an instrument model that a Bayesian layer can be
+    pointed at, stops being a seam.
+    """
+    live = _edges()
+    assert "rheplicant.inference" not in live.get("rheplicant.radio", frozenset()), (
+        "rheplicant.radio now imports rheplicant.inference. The forward model "
+        "must be usable without the likelihood layer; this edge means it is not"
+    )
+    assert "rheplicant.radio" not in live.get("rheplicant.inference", frozenset()), (
+        "rheplicant.inference now imports rheplicant.radio. The likelihood "
+        "layer must be pointable at any instrument model, and an import of "
+        "this one says it is pointable at exactly one"
+    )
+
+
+def test_every_noted_edge_is_real_and_allowed():
+    """A note on an edge that no longer exists is worse than no note.
+
+    It reads as a live cost and sends a reader looking for something that is
+    not there.
+    """
+    live = _edges()
+    for (here, there), reason in NOTED.items():
+        assert there in ALLOWED.get(here, frozenset()), (
+            f"{here} -> {there} carries a note but is not an allowed edge"
+        )
+        assert there in live.get(here, frozenset()), (
+            f"{here} -> {there} carries a note and no longer exists"
+        )
+        assert len(reason) > 40, f"{here} -> {there} needs a reason, not a label"
+
+
+def test_the_table_covers_every_package_that_exists():
+    """A package absent from the table is a package with no rule.
+
+    Without this, a new subpackage would be governed by nothing and the suite
+    would stay green -- the same shape as a census that picks its own
+    population.
+    """
+    live = sorted(_edges())
+    missing = sorted(set(live) - set(ALLOWED))
+    assert not missing, (
+        f"{missing} exist in src/ and have no entry in the table, so nothing "
+        "says what they may import"
+    )
