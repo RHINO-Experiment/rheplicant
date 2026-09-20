@@ -29,6 +29,7 @@ import equinox as eqx
 import jax
 import jax.numpy as jnp
 
+from rheplicant.core.capability import Maturity
 from rheplicant.core.errors import StateValidationError
 from rheplicant.core.frozen import FrozenMapping
 from rheplicant.core.operator import AbstractOperator
@@ -67,6 +68,7 @@ class FlaggingOperator(AbstractOperator):
     requires: ClassVar[tuple[str, ...]] = ("data",)
     provides: ClassVar[tuple[str, ...]] = ("aux.flags",)
     graph_node: ClassVar[str] = "flagging"
+    maturity: ClassVar[Maturity] = Maturity.PLACEHOLDER
 
     threshold: float = eqx.field(static=True)
 
@@ -119,6 +121,7 @@ class MomentRFIFlaggingOperator(AbstractOperator):
     requires: ClassVar[tuple[str, ...]] = ("data",)
     provides: ClassVar[tuple[str, ...]] = ("aux.flags",)
     graph_node: ClassVar[str] = "flagging"
+    maturity: ClassVar[Maturity] = Maturity.EXPERIMENTAL
 
     config: FrozenMapping = eqx.field(
         static=True, converter=FrozenMapping, default_factory=FrozenMapping

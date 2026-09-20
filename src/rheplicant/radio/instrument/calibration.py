@@ -108,6 +108,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
+from rheplicant.core.capability import Maturity
 from rheplicant.core.coordinates import (
     MAX_TIME_RESOLUTION_IN_SAMPLES as _MAX_TIME_RESOLUTION_IN_SAMPLES,
 )
@@ -354,6 +355,7 @@ class CWCalibrationOperator(AbstractOperator):
         "(delta P_cw ~ g(nu_cw, t)); injected after the gain its response is "
         "exactly 1.0 and it monitors nothing at all."
     )
+    maturity: ClassVar[Maturity] = Maturity.MAINTAINED
 
     amplitude: float = eqx.field(static=True, converter=_static_amplitude)
     tone_freq: float = eqx.field(static=True, converter=_named_setting("tone_freq"))
@@ -801,6 +803,7 @@ class CalLoadOperator(AbstractOperator):
     requires: ClassVar[tuple[str, ...]] = ("coords.time", "coords.freq")
     provides: ClassVar[tuple[str, ...]] = ("data",)
     graph_node: ClassVar[str] = "cal_loads"
+    maturity: ClassVar[Maturity] = Maturity.PLACEHOLDER
 
     t_load: jax.Array
 
@@ -861,6 +864,7 @@ class ApplyCalibrationOperator(AbstractOperator):
     requires: ClassVar[tuple[str, ...]] = ("data",)
     provides: ClassVar[tuple[str, ...]] = ("data",)
     graph_node: ClassVar[str] = "apply_cal"
+    maturity: ClassVar[Maturity] = Maturity.PLACEHOLDER
 
     gain: jax.Array
 

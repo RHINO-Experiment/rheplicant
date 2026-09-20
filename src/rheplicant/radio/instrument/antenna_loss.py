@@ -43,6 +43,7 @@ import equinox as eqx
 import jax
 import jax.numpy as jnp
 
+from rheplicant.core.capability import Maturity
 from rheplicant.core.errors import StateValidationError
 from rheplicant.core.operator import AbstractOperator
 from rheplicant.core.state import State
@@ -62,6 +63,7 @@ class AntennaLossOperator(AbstractOperator):
     requires: ClassVar[tuple[str, ...]] = ("data",)
     provides: ClassVar[tuple[str, ...]] = ("data",)
     graph_node: ClassVar[str] = "antenna_loss"
+    maturity: ClassVar[Maturity] = Maturity.MAINTAINED
 
     efficiency: jax.Array = eqx.field(converter=jnp.asarray)
     t_physical: jax.Array = eqx.field(converter=jnp.asarray)

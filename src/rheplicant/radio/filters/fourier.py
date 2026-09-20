@@ -34,6 +34,7 @@ import equinox as eqx
 import jax
 import jax.numpy as jnp
 
+from rheplicant.core.capability import Maturity
 from rheplicant.core.errors import StateValidationError
 from rheplicant.core.state import State
 from rheplicant.radio.filters.base import AbstractLinearFilter
@@ -57,6 +58,7 @@ class FourierBandFilter(AbstractLinearFilter):
 
     requires: ClassVar[tuple[str, ...]] = ("data",)
     provides: ClassVar[tuple[str, ...]] = ("data",)
+    maturity: ClassVar[Maturity] = Maturity.MAINTAINED
 
     axis: int = eqx.field(static=True)
     low: float = eqx.field(static=True)

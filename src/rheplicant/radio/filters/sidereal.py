@@ -18,6 +18,7 @@ import equinox as eqx
 import jax
 import jax.numpy as jnp
 
+from rheplicant.core.capability import Maturity
 from rheplicant.core.errors import StateValidationError
 from rheplicant.core.state import State
 from rheplicant.radio.filters.base import AbstractLinearFilter
@@ -34,6 +35,7 @@ class SiderealFilter(AbstractLinearFilter):
 
     requires: ClassVar[tuple[str, ...]] = ("data",)
     provides: ClassVar[tuple[str, ...]] = ("data",)
+    maturity: ClassVar[Maturity] = Maturity.MAINTAINED
 
     n_days: int = eqx.field(static=True)
     mode: str = eqx.field(static=True, default="remove")

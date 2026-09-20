@@ -16,6 +16,7 @@ import equinox as eqx
 import jax
 import jax.numpy as jnp
 
+from rheplicant.core.capability import Maturity
 from rheplicant.core.errors import StateValidationError
 from rheplicant.core.operator import AbstractOperator
 from rheplicant.core.state import State
@@ -151,6 +152,7 @@ class BackendOperator(AbstractOperator):
         f"aux.{PROTECTED_KEY}",
     )
     graph_node: ClassVar[str] = "averaging"
+    maturity: ClassVar[Maturity] = Maturity.PLACEHOLDER
 
     n_chunk: int = eqx.field(static=True)
 

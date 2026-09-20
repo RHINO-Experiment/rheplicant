@@ -18,6 +18,7 @@ from typing import ClassVar
 import equinox as eqx
 import jax
 
+from rheplicant.core.capability import Maturity
 from rheplicant.core.errors import StateValidationError
 from rheplicant.core.operator import AbstractOperator
 from rheplicant.core.state import State
@@ -54,6 +55,7 @@ class NoiseOperator(AbstractOperator):
     requires: ClassVar[tuple[str, ...]] = ("data", "key")
     provides: ClassVar[tuple[str, ...]] = ("data",)
     graph_node: ClassVar[str] = "noise"
+    maturity: ClassVar[Maturity] = Maturity.PLACEHOLDER
 
     sigma: jax.Array
 
@@ -88,6 +90,7 @@ class RadiometerNoiseOperator(AbstractOperator):
     requires: ClassVar[tuple[str, ...]] = ("data", "key")
     provides: ClassVar[tuple[str, ...]] = ("data",)
     graph_node: ClassVar[str] = "noise"
+    maturity: ClassVar[Maturity] = Maturity.MAINTAINED
 
     channel_width: float = eqx.field(static=True)
     integration_time: float = eqx.field(static=True)

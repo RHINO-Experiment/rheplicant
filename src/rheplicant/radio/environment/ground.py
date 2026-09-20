@@ -19,6 +19,7 @@ from typing import ClassVar
 import jax
 import jax.numpy as jnp
 
+from rheplicant.core.capability import Maturity
 from rheplicant.core.errors import StateValidationError
 from rheplicant.core.operator import AbstractOperator
 from rheplicant.core.state import State
@@ -50,6 +51,7 @@ class GroundPickupOperator(AbstractOperator):
     requires: ClassVar[tuple[str, ...]] = ("coords.time", "coords.freq", "env.temperature")
     provides: ClassVar[tuple[str, ...]] = ("data",)
     graph_node: ClassVar[str] = "ground_pickup"
+    maturity: ClassVar[Maturity] = Maturity.MAINTAINED
 
     coupling: jax.Array
     t_ground: jax.Array

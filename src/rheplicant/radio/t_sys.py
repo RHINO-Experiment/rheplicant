@@ -77,6 +77,7 @@ import jax
 import jax.numpy as jnp
 
 from rheplicant.core.basis import SeparableBasis
+from rheplicant.core.capability import Maturity
 from rheplicant.core.errors import StateValidationError
 from rheplicant.core.operator import AbstractOperator
 from rheplicant.core.state import State
@@ -105,6 +106,7 @@ class BasisTemperatureOperator(AbstractOperator):
     requires: ClassVar[tuple[str, ...]] = ("coords.time", "coords.freq")
     provides: ClassVar[tuple[str, ...]] = ("data",)
     graph_node: ClassVar[str] = "t_sys_extra"
+    maturity: ClassVar[Maturity] = Maturity.MAINTAINED
 
     coeff: jax.Array = eqx.field(converter=jnp.asarray)
     time_basis: jax.Array = eqx.field(converter=jnp.asarray)

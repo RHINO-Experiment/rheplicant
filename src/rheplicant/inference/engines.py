@@ -53,12 +53,12 @@ from typing import Any
 import equinox as eqx
 import jax
 import jax.numpy as jnp
+from bayesmith.optimize import certify
 from jax import lax
 
 from rheplicant.core.errors import ParameterSpaceError
 from rheplicant.core.operator import AbstractOperator
 from rheplicant.core.state import State
-from bayesmith.optimize import certify
 from rheplicant.inference.linear import (
     _magnitude,
     gcr_sample,

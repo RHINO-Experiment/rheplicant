@@ -99,6 +99,7 @@ import equinox as eqx
 import jax
 import jax.numpy as jnp
 
+from rheplicant.core.capability import Maturity
 from rheplicant.core.errors import StateValidationError
 from rheplicant.core.operator import AbstractOperator
 from rheplicant.core.state import State
@@ -202,6 +203,7 @@ class NoiseWaveOperator(AbstractOperator):
     requires: ClassVar[tuple[str, ...]] = ("data", "coords.extra")
     provides: ClassVar[tuple[str, ...]] = ("data",)
     graph_node: ClassVar[str] = "noise_wave"
+    maturity: ClassVar[Maturity] = Maturity.MAINTAINED
 
     t_unc: jax.Array = eqx.field(converter=jnp.asarray)
     t_cos: jax.Array = eqx.field(converter=jnp.asarray)

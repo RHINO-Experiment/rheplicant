@@ -16,6 +16,7 @@ from typing import ClassVar
 import equinox as eqx
 import jax
 
+from rheplicant.core.capability import Maturity
 from rheplicant.core.errors import StateValidationError
 from rheplicant.core.operator import AbstractOperator
 from rheplicant.core.state import State
@@ -36,6 +37,7 @@ class RFIOperator(AbstractOperator):
     requires: ClassVar[tuple[str, ...]] = ("coords.time", "coords.freq", "key")
     provides: ClassVar[tuple[str, ...]] = ("data",)
     graph_node: ClassVar[str] = "rfi_field"
+    maturity: ClassVar[Maturity] = Maturity.PLACEHOLDER
 
     amplitude: jax.Array
     occupancy: float = eqx.field(static=True)

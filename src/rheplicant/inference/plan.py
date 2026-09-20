@@ -204,11 +204,11 @@ from typing import Any, Protocol
 import jax
 import jax.numpy as jnp
 import numpy as np
+from bayesmith.optimize import certify
 
 from rheplicant.core.errors import LinearityRefused, ParameterSpaceError
 from rheplicant.core.operator import AbstractOperator
 from rheplicant.core.state import State
-from bayesmith.optimize import certify
 from rheplicant.inference.engines import (
     CLOSED_FORM,
     CONJUGATE,

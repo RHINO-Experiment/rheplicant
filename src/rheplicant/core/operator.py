@@ -23,6 +23,7 @@ from typing import Any, ClassVar
 
 import equinox as eqx
 
+from rheplicant.core.capability import Maturity
 from rheplicant.core.state import State
 
 
@@ -86,6 +87,18 @@ class AbstractOperator(eqx.Module):
 
     requires: ClassVar[tuple[str, ...]] = ()
     provides: ClassVar[tuple[str, ...]] = ()
+
+    # How far this operator's implementation has been taken. Annotated with NO
+    # value on purpose: a default here would quietly label every operator
+    # anyone adds, and the one label that must never be assumed is the one
+    # claiming the physics is real. Without a default, a class that forgets it
+    # raises AttributeError the first time anything reads the level, and
+    # `tests/core/test_capability_registry.py` reads the level of every
+    # shipped operator. A ClassVar is excluded from the dataclass fields, so
+    # this does not become a pytree leaf the way `PointSourceOperator.level`
+    # (a real, differentiable field) is -- which is also why the name is
+    # `maturity` and not `level`.
+    maturity: ClassVar[Maturity]
 
     # Home node on a SignalGraph template (graph-guided assembly); resolved
     # through the MRO so subclasses inherit their base's slot. Documented in

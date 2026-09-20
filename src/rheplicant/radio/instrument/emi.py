@@ -15,6 +15,7 @@ import equinox as eqx
 import jax
 import jax.numpy as jnp
 
+from rheplicant.core.capability import Maturity
 from rheplicant.core.errors import StateValidationError
 from rheplicant.core.operator import AbstractOperator
 from rheplicant.core.state import State
@@ -51,6 +52,7 @@ class EMIOperator(AbstractOperator):
     requires: ClassVar[tuple[str, ...]] = ("data",)
     provides: ClassVar[tuple[str, ...]] = ("data",)
     graph_node: ClassVar[str] = "emi"
+    maturity: ClassVar[Maturity] = Maturity.PLACEHOLDER
 
     amplitude: jax.Array
     period: int = eqx.field(static=True)

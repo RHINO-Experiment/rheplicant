@@ -13,6 +13,7 @@ from typing import ClassVar
 import jax
 import jax.numpy as jnp
 
+from rheplicant.core.capability import Maturity
 from rheplicant.core.errors import StateValidationError
 from rheplicant.core.operator import AbstractOperator
 from rheplicant.core.state import State
@@ -28,6 +29,7 @@ class PointSourceOperator(AbstractOperator):
     requires: ClassVar[tuple[str, ...]] = ("coords.time", "coords.freq")
     provides: ClassVar[tuple[str, ...]] = ("data",)
     graph_node: ClassVar[str] = "point_sources"
+    maturity: ClassVar[Maturity] = Maturity.PLACEHOLDER
 
     level: jax.Array
 

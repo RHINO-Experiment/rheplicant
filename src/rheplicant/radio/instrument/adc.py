@@ -13,6 +13,7 @@ import equinox as eqx
 import jax
 import jax.numpy as jnp
 
+from rheplicant.core.capability import Maturity
 from rheplicant.core.errors import StateValidationError
 from rheplicant.core.operator import AbstractOperator
 from rheplicant.core.state import State
@@ -50,6 +51,7 @@ class ADCOperator(AbstractOperator):
     requires: ClassVar[tuple[str, ...]] = ("data",)
     provides: ClassVar[tuple[str, ...]] = ("data",)
     graph_node: ClassVar[str] = "adc"
+    maturity: ClassVar[Maturity] = Maturity.PLACEHOLDER
 
     scale: jax.Array
     n_bits: int = eqx.field(static=True)

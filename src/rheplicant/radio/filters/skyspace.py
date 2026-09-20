@@ -43,6 +43,7 @@ import equinox as eqx
 import jax
 import jax.numpy as jnp
 
+from rheplicant.core.capability import Maturity
 from rheplicant.core.conditioning import (
     POWER_ITERATIONS,
     largest_eigenvalue,
@@ -72,6 +73,7 @@ class SkySpaceFilter(AbstractLinearFilter):
 
     requires: ClassVar[tuple[str, ...]] = ("data", "coords")
     provides: ClassVar[tuple[str, ...]] = ("data",)
+    maturity: ClassVar[Maturity] = Maturity.MAINTAINED
 
     projector: AbstractSkyProjector
     regularization: jax.Array

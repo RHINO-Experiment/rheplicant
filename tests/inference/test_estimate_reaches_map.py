@@ -816,6 +816,7 @@ def test_without_a_proof_that_block_refuses_and_says_what_would_prove_it():
     certified however small the distance looks. The run refuses at max_iter,
     and the refusal names the three things that would make a proof."""
     from bayesmith.optimize import certify
+
     from rheplicant.inference.plan import _Attempt, _not_converged_message
 
     probed = certify.Decrement(
