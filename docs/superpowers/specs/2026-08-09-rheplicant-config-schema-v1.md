@@ -1280,6 +1280,7 @@ The **axes** pass is the one the letters have no name for, and it is the only la
 | A50 | `beams.horizon.mode: truncate_map` + any `beam_spill.from: projector` referencing that beam → refuse, naming the ≈1.0 fraction it would have produced; likewise `from: projector` against a `cache_beam_rotation` projector | the ground term silently vanishes / the call raises |
 | A51 | `conjugate.*` over a multi-latent block requires the mapping form of `prior_std` | block-diagonal S, no residual signature |
 | A52 | `pointing.mode: none` refused when `model` lights `observed_astro_sky` or any projector is referenced; `site.lat_deg` required iff a projector reads `{from: site}` | §4.1 |
+| A53 | a `model` node whose operator declares a capability level other than Maintained → **report** (never refuse, never warn), naming the class and the level | a placeholder's numbers read as a prediction |
 
 ### B. Needs the assembled twin
 

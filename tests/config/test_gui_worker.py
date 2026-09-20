@@ -71,10 +71,16 @@ def test_validate_worker_establishes_runtime_before_plugins_in_order(tmp_path):
     completed, frame = _invoke_worker("validate", text, trace=trace)
 
     assert completed.returncode == 0
-    assert frame == {
-        "status": "ok",
-        "result": {"findings": [], "layers": 2},
-    }
+    # The worker reports A53 because this document places placeholder
+    # operators, which is what the GUI should be showing its user: the
+    # contract is real, the numbers are a stand-in. Asserted by shape rather
+    # than by the whole message, so a reworded sentence is not a red test here
+    # -- `test_preflight_capability.py` is where the wording is pinned.
+    assert frame["status"] == "ok"
+    assert frame["result"]["layers"] == 2
+    assert [
+        (one["check"], one["severity"]) for one in frame["result"]["findings"]
+    ] == [("A53", "report")]
     assert trace.read_text(encoding="utf-8").splitlines() == [
         "a:x64=True",
         "b:x64=True",

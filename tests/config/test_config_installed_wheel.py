@@ -230,10 +230,15 @@ def test_fresh_gui_wheel_contains_and_runs_the_scientific_worker(
     prefix = b"\x1eRHEPLICANT_GUI_JOB "
     encoded = completed.stdout.rsplit(prefix, 1)[1].split(b"\n", 1)[0]
     frame = json.loads(encoded.decode("utf-8", "strict"))
-    assert frame == {
-        "status": "ok",
-        "result": {"findings": [], "layers": 2},
-    }
+    # A53 rides along because the fixture places placeholder operators, and an
+    # INSTALLED wheel reporting it is the point of checking here: the
+    # capability levels are ClassVars on shipped classes, so a wheel that
+    # dropped them would answer differently from the source tree.
+    assert frame["status"] == "ok"
+    assert frame["result"]["layers"] == 2
+    assert [
+        (one["check"], one["severity"]) for one in frame["result"]["findings"]
+    ] == [("A53", "report")]
 
 
 def test_wheel_and_editable_preset_discovery_are_byte_identical(

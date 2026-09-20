@@ -515,8 +515,12 @@ def test_api_serializes_the_complete_attributed_ledger_and_preset_diff(client):
 
     assert response.status_code == 201
     validation = response.json()["document"]["validation"]
+    # A53 is attributed to the base layer, between the two A2s. The ledger
+    # this test is about serializes every finding with its attribution, so the
+    # notice belongs in the expectation rather than being filtered out of it.
     assert [(row["check"], row["attribution"]) for row in validation["findings"]] == [
         ("A2", "base"),
+        ("A53", "base"),
         ("A2", "variant:bad"),
     ]
     assert validation["selected_presets"] == ["rhino_v1"]

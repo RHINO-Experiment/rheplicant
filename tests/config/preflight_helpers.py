@@ -449,8 +449,20 @@ def refusals(document) -> tuple[Finding, ...]:
 
 
 def ids(document) -> frozenset[str]:
-    """The check ids that fired -- what an "and nothing else" assertion reads."""
-    return preflight(document).checks()
+    """The VERDICT ids that fired -- what an "and nothing else" assertion reads.
+
+    Verdicts, not every finding. Since A53 a document placing a placeholder
+    operator earns an informational notice per node on every run, so
+    ``checks()`` is never empty for a document using the shipped physics and
+    an ``ids(...) == {"A30"}`` assertion would inherit A53 everywhere. The
+    accessor this reads is ``Report.verdict_checks``, which excludes by
+    SEVERITY rather than by id, so a second informational check needs no edit
+    here.
+
+    ``preflight(document).checks()`` is still the way to ask what FIRED,
+    including the notices.
+    """
+    return preflight(document).verdict_checks()
 
 
 def only(document, check: str) -> Finding:

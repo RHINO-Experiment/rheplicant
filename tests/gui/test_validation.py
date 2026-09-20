@@ -31,14 +31,18 @@ def test_every_valid_projection_calls_public_preflight_and_keeps_all_findings(mo
     found = snapshot(yaml.safe_dump(document, sort_keys=False)).validation
 
     assert len(calls) == 1
+    # A53 rides in the middle: the base layer earns it, then the variant's A2
+    # follows. This test is about KEEPING ALL findings, so the notice belongs
+    # in the assertion rather than being filtered out of it.
     assert tuple((row.check, row.severity) for row in found.findings) == (
         ("A2", "refuse"),
+        ("A53", "report"),
         ("A2", "refuse"),
     )
     assert found.findings[0].where == "model"
     assert found.findings[0].attribution == "base"
-    assert found.findings[1].where == "variants.bad.model"
-    assert found.findings[1].attribution == "variant:bad"
+    assert found.findings[-1].where == "variants.bad.model"
+    assert found.findings[-1].attribution == "variant:bad"
     assert found.run_blocked is True
     assert _badge(found, "variants").refuse == 1
 

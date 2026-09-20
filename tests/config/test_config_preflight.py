@@ -158,7 +158,7 @@ def registry():
 #: without parsing 172 KB of Markdown, and because having both is what makes
 #: the comparison mean something.
 _SCHEMA_IDS: tuple[str, ...] = (
-    tuple(f"A{n}" for n in range(1, 53))
+    tuple(f"A{n}" for n in range(1, 54))
     + tuple(f"B{n}" for n in range(1, 10))
     + tuple(f"C{n}" for n in range(1, 20))
 )
@@ -1121,9 +1121,9 @@ class TestTheRegistry:
         instead of standing down. A guard that skips is not a guard that
         passes."""
         found = _schema_ids()
-        assert len(found) == 80, found[:5]
+        assert len(found) == 81, found[:5]
         assert len(set(found)) == len(found), "an id is declared twice"
-        assert found[0] == "A1" and "A52" in found and "C17" in found
+        assert found[0] == "A1" and "A53" in found and "C17" in found
         from_spec = _schema_ids_from_the_spec()
         assert from_spec is not None, (
             f"schema §6's spec is missing at {_SCHEMA}. It is tracked, so this "
@@ -1340,7 +1340,11 @@ class TestThePassCollects:
         before ``preflight_helpers``' ``observed.twin: full`` landed: the
         untouched base would earn A42 at ``inference.observed.primary``.
         """
-        assert preflight(preflight_document()).findings == ()
+        # `verdicts()` rather than `findings`: since A53 an informational
+        # notice fires for every placeholder node, so `findings` is never
+        # empty for a document that uses the shipped physics. What this
+        # test has always meant is that the base earns no VERDICT.
+        assert preflight(preflight_document()).verdicts() == ()
 
 
 class TestTheOneDocumentBuilder:

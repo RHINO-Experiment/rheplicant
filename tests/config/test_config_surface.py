@@ -2329,10 +2329,19 @@ class TestTheValidationPageDocument:
     #: The heading is scanned too, and it is the one that most needed it: it
     #: is also this class's locator, so a page corrected to four findings and
     #: a heading left saying "three" keeps every other assertion here passing.
+    #: ``(pattern, what it is, which quantity it counts)``.
+    #:
+    #: Two quantities, since A53. The heading counts how many ways the
+    #: document is WRONG, and an informational capability notice is not one of
+    #: them -- the document places placeholder operators, which is a
+    #: reasonable thing to do. The lead-in counts FINDINGS, which includes it.
+    #: Reading both against ``findings`` would make the heading say the
+    #: document is wrong in a way it is not.
     _COUNT_CLAIMS = (
-        (r"wrong (\w+) ways", "the heading"),
-        (r"and all (\w+) come back from one call", "the opening sentence"),
-        (r"^(\w+) findings,", "the bullet list's lead-in"),
+        (r"wrong (\w+) ways", "the heading", "verdicts"),
+        (r"and all (\w+) come back from one call", "the opening sentence",
+         "findings"),
+        (r"^(\w+) findings,", "the bullet list's lead-in", "findings"),
     )
 
     def _document(self):
@@ -2388,7 +2397,7 @@ class TestTheValidationPageDocument:
         report = preflight(self._document())
         text = f"{self.HEADING}\n{self._body()}"
         words = _NUMBER_WORDS
-        for pattern, what in self._COUNT_CLAIMS:
+        for pattern, what, quantity in self._COUNT_CLAIMS:
             found = re.search(pattern, text, re.MULTILINE | re.IGNORECASE)
             assert found, (
                 f"config-validation.md no longer counts its findings in "
@@ -2397,7 +2406,10 @@ class TestTheValidationPageDocument:
             )
             word = found.group(1).lower()
             assert word in words, f"{what}: unknown number word {word!r}"
-            assert words[word] == len(report.findings), (
+            counted = (
+                report.findings if quantity == "findings" else report.verdicts()
+            )
+            assert words[word] == len(counted), (
                 f"{what} says {word} and the document earns "
                 f"{len(report.findings)} findings "
                 f"({[f.check for f in report.findings]})."
@@ -2614,7 +2626,12 @@ class TestTheValidationPageDocument:
         document = self._document()
         for check, index in (("A27", a27), ("A30", 0), ("A33", 0), ("C18", 0)):
             document = _PAGE_FIXES[check][index][1](document)
-        remaining = [f.check for f in preflight(document).findings]
+        # `verdicts()`: the four remedies clear the four ERRORS. A53 has no
+        # remedy and is not meant to have one -- it reports that this
+        # document's physics is partly a stand-in, which stays true after
+        # every fix on the page and stops being said when the physics
+        # arrives, not when a document changes.
+        remaining = [f.check for f in preflight(document).verdicts()]
         assert remaining == [], (
             f"the four remedies together still leave {remaining}"
         )

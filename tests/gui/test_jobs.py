@@ -370,7 +370,11 @@ def test_real_priced_validation_and_forward_preview_cross_plan4_orchestration():
     validated = run_priced_validation(text)
     previewed = run_forward_preview(forward_preview_document(text))
 
-    assert validated == {"findings": [], "layers": 2}
+    # Same A53 notice as the test above: the synthetic document places
+    # placeholder operators. This test is about the two jobs crossing Plan 4's
+    # orchestration, so the notice is asserted by shape and not dwelt on.
+    assert validated["layers"] == 2
+    assert [one["check"] for one in validated["findings"]] == ["A53"]
     assert previewed["waterfall"]["shape"] == [16, 8]
     assert len(previewed["waterfall"]["values"]) == 16
     assert all(len(row) == 8 for row in previewed["waterfall"]["values"])
@@ -388,7 +392,14 @@ def test_real_priced_validation_accepts_plan4_preset_and_outputs(tmp_path):
     }
     text = yaml.safe_dump(document, sort_keys=False)
 
-    assert run_priced_validation(text) == {"findings": [], "layers": 2}
+    # The document places placeholder operators, so the priced run reports
+    # A53 -- which is what the GUI should show. Asserted by shape, not by the
+    # whole sentence: the wording is pinned in test_preflight_capability.py.
+    result = run_priced_validation(text)
+    assert result["layers"] == 2
+    assert [(one["check"], one["severity"]) for one in result["findings"]] == [
+        ("A53", "report")
+    ]
 
 
 def test_real_forward_preview_accepts_plan4_preset_and_outputs(tmp_path):

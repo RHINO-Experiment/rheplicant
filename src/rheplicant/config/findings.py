@@ -174,6 +174,31 @@ class Report:
         """The schema §6 ids that fired.  A finding with no id is not one."""
         return frozenset(one.check for one in self.findings if one.check)
 
+    def verdicts(self) -> tuple[Finding, ...]:
+        """The findings that say something is WRONG -- refusals and warnings.
+
+        ``findings`` is everything a pass found, and since A53 that includes
+        purely informational notices: a document placing a placeholder
+        operator earns one per node, on every run, for as long as the physics
+        is a stand-in. That is the point of the notice and it is also why an
+        "and nothing else" assertion cannot read ``findings`` any more --
+        seventeen of the twenty-nine shipped operators are placeholders, so
+        the stream is never empty for a document that uses them.
+
+        So the two questions are separated rather than one of them being
+        quietly redefined. ``findings`` is still everything. This is "what is
+        wrong with this document", which is what a caller deciding whether to
+        run, and a test asserting a remedy worked, actually mean.
+
+        ``report`` is excluded by SEVERITY rather than by check id, so a
+        second informational check needs no edit here.
+        """
+        return tuple(one for one in self.findings if one.severity != REPORT)
+
+    def verdict_checks(self) -> frozenset[str]:
+        """The ids of :meth:`verdicts` -- what "and nothing else" reads."""
+        return frozenset(one.check for one in self.verdicts() if one.check)
+
     def raise_if_refused(self, *, cumulative: Report | None = None) -> None:
         """The first refusal, verbatim, as the ``ConfigError`` it always was.
 

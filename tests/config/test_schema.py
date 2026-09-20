@@ -173,10 +173,16 @@ class TestStatusAgreesWithTheLoader:
         }
 
     def test_the_unpatched_document_is_accepted_by_the_real_loader(self):
-        """No `ConfigError`, no findings: every section this schema calls
+        """No `ConfigError`, no VERDICT: every section this schema calls
         accepted passes `preflight()` when present together, which is the
-        loader's own definition of "accepted"."""
-        assert preflight(preflight_document()).findings == ()
+        loader's own definition of "accepted".
+
+        `verdicts()` rather than `findings` since A53: the fixture places
+        placeholder operators, so it earns an informational capability notice
+        that is not a way the document is wrong. "Accepted" has always meant
+        "nothing refuses or warns about it".
+        """
+        assert preflight(preflight_document()).verdicts() == ()
 
     @pytest.mark.parametrize("name", ["outputs", "defaults", "plugins", "campaign"])
     def test_a_non_accepted_section_is_refused_by_the_real_loader(self, name):

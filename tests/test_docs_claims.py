@@ -355,7 +355,14 @@ def test_the_path_scan_still_reads_the_pages() -> None:
 # --------------------------------------------------------------------------
 
 #: ``tests/config/test_config_surface.py::TestTheLayerBoundaryIsMechanical``.
-_NODE_ID = re.compile(r"^([\w][\w./-]*\.py)::([\w:]+)$")
+#:
+#: Anchored at ``tests/`` because a pytest node id names a TEST. The same
+#: ``file.py::name`` notation is also how this repository cites a SOURCE
+#: symbol -- ``config/gating.py::DEFAULT_MODE`` -- and reading one of those as
+#: a node id reports "no such file" for a symbol that is right there.
+#: Measured when schema v1's spec became tracked and arrived in this scan
+#: carrying two of them.
+_NODE_ID = re.compile(r"^(tests/[\w][\w./-]*\.py)::([\w:]+)$")
 
 
 def _node_id_sites():

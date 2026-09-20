@@ -39,7 +39,7 @@ from typing import Any
 
 from _rheplicant_bootstrap.path_syntax import longest_legal_prefix
 from rheplicant.config.errors import ConfigError
-from rheplicant.config.findings import Finding, refuse
+from rheplicant.config.findings import Finding, refuse, report
 from rheplicant.config.paths import parse_path
 from rheplicant.config.preflight import register
 from rheplicant.config.preflight.fitting import _kinds, _latents, _runs
@@ -55,7 +55,9 @@ from rheplicant.config.sections.model import (
     operator_table,
 )
 from rheplicant.config.sections.transforms import _NAMED
+from rheplicant.core.capability import Maturity
 from rheplicant.core.contract import RANDOMNESS
+from rheplicant.radio import capabilities
 
 
 def _t4_graph():
@@ -295,6 +297,80 @@ def _double_count(document: Mapping[str, Any]) -> Iterable[Finding]:
         _nodes(document), section.get("acknowledge_double_count"))
     if problem is not None:
         yield refuse("A32", "model", problem)
+
+
+@register("A53")
+def _capability_level(document: Mapping[str, Any]) -> Iterable[Finding]:
+    """Check A53: say so when a document's physics is not all maintained.
+
+    **One finding per DOCUMENT, naming every node, not one per node.** The
+    first version emitted one each and a four-node document earned four
+    notices; seventeen of the twenty-nine shipped operators are placeholders,
+    so a realistic document earned a column of them. A notice that repeats is
+    a notice a reader learns to skip, which costs exactly the nodes it was
+    written for -- and it would have rewritten `docs/config-validation.md`,
+    the page that teaches people to read a report, into a list of them.
+
+    Informational, never a refusal and never a warning. A placeholder's
+    CONTRACT is real -- shapes, purity, PRNG consumption, ordering -- so a
+    document that places one is doing nothing wrong; what it must not do is
+    read the numbers as physics. ``report`` is the severity that says exactly
+    that: "worth recording beside the run; not worth interrupting anyone
+    over". This is its first producer.
+
+    The levels are READ, never decided here. They come off the ``maturity``
+    ClassVar through :func:`rheplicant.radio.capabilities`, the one walk every
+    view shares, so a node whose physics arrives leaves this sentence in the
+    same commit that raises its level.
+
+    Nodes whose class cannot be resolved WITHOUT IMPORTING anything are
+    skipped in silence, the same decline :func:`_t5_radio_class` documents; a
+    decline can only lose a notice, never invent one. An ambiguous or
+    misspelled ``type:`` is A7's to refuse and is not re-reported here.
+    """
+    specs = _nodes(document)
+    if not specs:
+        return
+    levels = capabilities()
+    table = None
+    placeholders: list[str] = []
+    experimental: list[str] = []
+    for node_id, spec in specs.items():
+        if not isinstance(spec, Mapping):
+            continue
+        if table is None:
+            table = operator_table()
+        classes = table.get(node_id)
+        declared = spec.get("type")
+        if isinstance(declared, str):
+            chosen = next(
+                (cls for cls in (classes or ()) if cls.__name__ == declared), None)
+        elif classes and len(classes) == 1:
+            chosen = classes[0]
+        else:
+            chosen = None
+        if chosen is None or chosen.__name__ not in levels:
+            continue
+        level = levels[chosen.__name__]
+        if level is Maturity.PLACEHOLDER:
+            placeholders.append(f"{node_id} ({chosen.__name__})")
+        elif level is Maturity.EXPERIMENTAL:
+            experimental.append(f"{node_id} ({chosen.__name__})")
+    if not placeholders and not experimental:
+        return
+    parts = []
+    if placeholders:
+        parts.append(
+            f"placeholder physics at {', '.join(sorted(placeholders))} -- the "
+            "contract is real and tested, the NUMBERS are a stand-in, so "
+            "results through these nodes are not predictions"
+        )
+    if experimental:
+        parts.append(
+            f"experimental physics at {', '.join(sorted(experimental))} -- "
+            "usable with stated limits and no general validity guarantee"
+        )
+    yield report("A53", "model", f"model: {'; '.join(parts)}. (check A53.)")
 
 
 def _t4_switch_order(document: Mapping[str, Any]) -> tuple[str, ...] | None:

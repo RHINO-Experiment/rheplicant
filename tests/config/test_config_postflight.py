@@ -382,7 +382,11 @@ class TestThePayload:
 
         @register("C13")
         def _second(payload):
-            seen.append([one.check for one in payload.run.report.findings])
+            # `verdicts()`: A53 reports on every document whose physics
+            # is partly a stand-in, so `findings` is never empty here
+            # and the question -- can C13 see C12's finding -- is about
+            # what a PRICED check produced, not about a capability notice.
+            seen.append([one.check for one in payload.run.report.verdicts()])
             return ()
 
         priced(priced_run(_document()))
@@ -806,7 +810,12 @@ class TestTheReportAccumulates:
         register("C12")(lambda payload: (
             report("C12", "inference.parameters", "kept."),))
         run = load_document(_document())
-        assert [one.message for one in run.report.findings] == ["kept."]
+        # The pre-flight A53 notice is in `findings` and is not what this
+        # test is about: the question is whether a POSTFLIGHT finding
+        # survives onto the object the caller holds.
+        assert [one.message for one in run.report.findings if one.check != "A53"] == [
+            "kept."
+        ]
 
 
 # ---------------------------------------------------------------------------

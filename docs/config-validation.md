@@ -71,6 +71,8 @@ could not be evaluated at that probe.
 | `report.warnings()` | the findings that do not |
 | `report.of(severity)` | the findings at one severity — `"refuse"`, `"warn"` or `"report"`, the third being a finding that is neither fatal nor advice |
 | `report.checks()` | the set of ids that fired |
+| `report.verdicts()` | the findings that say something is WRONG — refusals and warnings, with the informational ones left out |
+| `report.verdict_checks()` | the ids of those — what an "and nothing else" assertion reads |
 | `report.raise_if_refused()` | `ConfigError` with the first refusal verbatim, and a tail naming how many others there are |
 | `report.emit_warnings()` | each warning through `warnings.warn(..., ConfigWarning)` |
 
@@ -363,7 +365,9 @@ any two of them is the likeliest way to ship something that reads right:**
 
 ## A document that is wrong four ways
 
-Every error below is decided from text, and all four come back from one call.
+Every error below is decided from text, and all five come back from one call
+— four of them errors, and one a notice that this document's physics is partly
+a stand-in.
 
 ```yaml
 schema_version: 1
@@ -401,7 +405,7 @@ requires a sign in the exponent, so `1.0e+6` is a float and `1.0e6` is not.
 The page's document is parsed by the suite, so the exponent form would reach
 the value grammar as a string and refuse for a reason the page is not about.
 
-Four findings, **in registry order — which is the order a reader meets them,
+Five findings, **in registry order — which is the order a reader meets them,
 and A27 is first**. The rule that decides that order is not the one an earlier
 version of this page gave: alphabetical position in `preflight/__init__.py`'s
 foot-import block decides nothing on its own. **A foot-imported module's
@@ -424,6 +428,16 @@ both, so C18 is last. Write the bullets in that order and keep them in it;
   does not default its `source:`, so write `source: observed`, which is where
   a frozen sigma comes from. See
   [the noise section](config-inference.md#noise).
+- **A53** — this document's `noise`, `gain` and `bandpass` nodes are
+  placeholder physics, and A53 says so once for the whole document rather than
+  once per node. It is a `report`, not a refusal and not a warning: the
+  contract of a placeholder — its shapes, its ordering, its PRNG consumption —
+  is real and tested, so placing one is a reasonable thing to do. What the
+  notice buys you is that the NUMBERS are a stand-in, so a result through
+  those nodes is not a prediction. No fix; it stops being said when the
+  physics arrives, because the level is read from the operator rather than
+  listed here.
+
 - **A30** — `model.noise` draws its own randomness and `inference.twin.without:`
   does not drop it. A `conjugate.wiener` run closes the twin over one template
   state, so that draw would be the same realisation added to every prediction
