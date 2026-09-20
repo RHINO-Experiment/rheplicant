@@ -28,17 +28,28 @@ H^-1 r <= lambda R``), inflated by ``1 / sqrt(1 - eps kappa)`` for the
 rounding of ``g`` and ``H`` themselves. :meth:`Decrement.certifies` reads
 that bound, so an inexact solve can only make a verdict refuse.
 
-**Everything turns on that lower bound.** Where the Hessian is formed (up to
-:data:`DENSE_MAX` parameters) it is the scaled matrix's own smallest
-eigenvalue, computed, which also decides positive definiteness. Above that
-the solve is conjugate gradients, which can only sample the spectrum it has
-reached, so the caller should pass ``floor=``: a VERIFIED lower bound, which
-a model with proper Gaussian priors has, since ``H = J^T N^-1 J + P`` is
-bounded below by the prior precision ``P`` whenever the map is linear and the
-noise does not depend on it. Without one, a short Lanczos probe of ``H`` is
-taken and the floor is the lower end of its Ritz interval -- an estimate, and
-the reason a certificate there is best not relied on. A probe that cannot put
-that interval above zero refuses outright, as the dense path does.
+**Everything turns on that lower bound, and only a proof will do.** A
+:class:`Decrement` says where its floor came from, and
+:meth:`Decrement.certifies` answers ``True`` for two of the three:
+
+* ``"dense"`` -- the formed Hessian's own smallest eigenvalue, computed (up
+  to :data:`DENSE_MAX` parameters). It also decides positive definiteness.
+* ``"supplied"`` -- the caller's ``floor=``, which is a CLAIM the caller must
+  be able to prove. A model with proper Gaussian priors can: ``H = J^T N^-1 J
+  + P`` is bounded below by the prior precision ``P`` whenever the map is
+  linear in every parameter jointly and the noise does not depend on it.
+* ``"probe"`` -- a :data:`PROBE_STEPS`-step Lanczos probe of ``H``, whose
+  Ritz interval is an ESTIMATE and not a bound. ``theta[0] - beta |s[0]|``
+  says how far ``theta[0]`` is from SOME eigenvalue, not from the smallest,
+  so where the Krylov space never reaches the bottom of the spectrum the
+  probe's floor can sit above it: measured over 480 random spectra, 5 in 240
+  did in float32, the worst by a factor 7.4. A probe therefore never
+  certifies here. It still refuses -- non-positive curvature, or a bound
+  already outside the caller's limit -- which is what it is kept for.
+
+``"none"`` is the fourth value: no usable floor at all -- the dense path's
+smallest eigenvalue was not positive, or the probe's interval did not clear
+zero -- which is a refusal by itself.
 
 **Getting there.** :func:`polish` takes Newton steps -- a Steihaug-truncated
 conjugate-gradient direction, an Armijo backtracking line search, and each
@@ -52,9 +63,9 @@ them certifies.
 
 Limits. The decrement is a statement about the quadratic model of ``f`` at
 the point, so where the curvature changes over one unit of distance it is
-local. Above :data:`DENSE_MAX` parameters with no ``floor``, the bound rests
-on a probe rather than a proof, and a direction of negative curvature that
-neither the probe nor the Krylov space meets is not seen. In a precision
+local. Above :data:`DENSE_MAX` parameters with no ``floor``, nothing here
+certifies: the probe is a heuristic, and a direction of negative curvature
+that neither it nor the Krylov space meets is not seen. In a precision
 whose epsilon times ``kappa`` approaches one, the gradient and the Hessian
 are rounding and nothing here recovers them; the status says so instead.
 """
@@ -113,6 +124,14 @@ PROBE_STEPS: int = 32
 #: decrement means nothing. Only :data:`CONVERGED` can certify.
 CONVERGED, UNREACHED, NONCONVEX, NONFINITE = range(4)
 
+#: Where a decrement's curvature floor came from. Only :data:`PROVEN_FLOORS`
+#: can certify; a probe's floor is an estimate (see the module docstring) and
+#: is kept for refusing.
+FLOOR_DENSE, FLOOR_SUPPLIED, FLOOR_PROBE, FLOOR_NONE = (
+    "dense", "supplied", "probe", "none"
+)
+PROVEN_FLOORS: frozenset[str] = frozenset({FLOOR_DENSE, FLOOR_SUPPLIED})
+
 #: Each status as a phrase a caller can put in a sentence about the solve.
 STATUS_SAID: dict[int, str] = {
     CONVERGED: "reached its residual",
@@ -140,9 +159,10 @@ class Decrement:
             condition number the rounding allowance was computed from.
         products: Hessian-vector products spent, the residual's own and any
             spectral probe's included.
-        dense: whether the Hessian was formed and solved directly, which is
-            also whether the curvature floor was computed rather than
-            supplied or probed.
+        dense: whether the Hessian was formed and solved directly.
+        floor_source: ``"dense"``, ``"supplied"``, ``"probe"`` or ``"none"``
+            -- where the curvature the bound divides by came from, and
+            whether it is a proof (see the module docstring).
         status: one of :data:`CONVERGED`, :data:`UNREACHED`,
             :data:`NONCONVEX`, :data:`NONFINITE`.
     """
@@ -155,11 +175,32 @@ class Decrement:
     kappa: float
     products: int
     dense: bool
+    floor_source: str
     status: int
 
+    @property
+    def proven(self) -> bool:
+        """Whether the floor the bound rests on is a proof and not an estimate."""
+        return self.floor_source in PROVEN_FLOORS
+
     def certifies(self, limit: float) -> bool:
-        """Whether the point is within ``limit`` of the minimum, bound included."""
-        return self.status == CONVERGED and self.distance <= limit
+        """Whether the point is PROVEN within ``limit`` of the minimum.
+
+        Three things, and a probed floor fails the first however good the
+        other two look: the floor is a proof, the solve converged, and the
+        upper bound it allows is inside ``limit``.
+        """
+        return self.proven and self.status == CONVERGED and self.distance <= limit
+
+
+def real_size(template: Any) -> int:
+    """Real degrees of freedom in a pytree: a complex leaf counts twice.
+
+    What :data:`DENSE_MAX` is compared against, so a caller can ask the same
+    question before paying for anything.
+    """
+    flat, _ = ravel_pytree(template)
+    return int(flat.size) * (2 if jnp.iscomplexobj(flat) else 1)
 
 
 def decrement_program(
@@ -244,9 +285,13 @@ def decrement_program(
     def program(values):
         return solved(values)
 
-    # Which path the program took is a property of the shape, fixed when it was
-    # built; a caller reads it to say why a certificate could not be had.
+    # Which path the program took, and where its floor comes from, are
+    # properties of the shape and the arguments, fixed when it was built; a
+    # caller reads them to say why a certificate could be had, or could not.
     program.dense = dense
+    program.floor_source = (
+        FLOOR_DENSE if dense else FLOOR_SUPPLIED if floor is not None else FLOOR_PROBE
+    )
     return program
 
 
@@ -284,6 +329,7 @@ def decrement(
         distance = upper / math.sqrt(inflation)
     else:
         distance = math.inf
+    source = getattr(program, "floor_source", FLOOR_NONE)
     return Decrement(
         estimate=math.sqrt(squared) if math.isfinite(lambda2) else math.inf,
         distance=distance,
@@ -293,6 +339,7 @@ def decrement(
         kappa=kappa,
         products=int(products),
         dense=bool(getattr(program, "dense", False)),
+        floor_source=FLOOR_NONE if math.isnan(reach) else source,
         status=int(status),
     )
 
@@ -420,10 +467,14 @@ def _iterative_solve(curvature: Callable, slope: jax.Array, n: int, rtol: float,
         lambda2 = jnp.sum(slope * x)
         reach = jnp.sqrt(following / jnp.where(bottom > 0.0, bottom, jnp.nan))
         bound = 0.5 * (reach + jnp.sqrt(reach**2 + 4.0 * jnp.maximum(lambda2, 0.0)))
-        decided = (
-            (following <= rtol**2 * target) if limit is None
-            else (bound <= ceiling) | (lambda2 > ceiling**2)
-        )
+        if limit is None:
+            decided = following <= rtol**2 * target
+        elif floor is None:
+            # A probed floor never certifies, so the only verdict worth
+            # iterating for is the refusal; the residual decides the rest.
+            decided = (following <= rtol**2 * target) | (lambda2 > ceiling**2)
+        else:
+            decided = (bound <= ceiling) | (lambda2 > ceiling**2)
         status = jnp.where(
             ~(bend > 0.0), NONCONVEX,
             jnp.where(decided, CONVERGED,

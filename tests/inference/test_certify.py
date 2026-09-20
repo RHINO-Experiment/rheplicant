@@ -197,35 +197,56 @@ class TestTheNewtonDecrement:
         assert inside, "no seed's estimate fell inside the threshold: vacuous"
 
     @pytest.mark.parametrize(
-        "lambda2, reach, kappa, dtype, status, certified",
+        "lambda2, reach, kappa, dtype, status, source, certified",
         [
             # reach 1e-3 on an estimate of 0.09899: the bound is 0.09949
-            (0.0098, 1e-3, 1e4, jnp.float64, certify.CONVERGED, True),
+            (0.0098, 1e-3, 1e4, jnp.float64, certify.CONVERGED,
+             certify.FLOOR_DENSE, True),
             # the same estimate with a residual ten times larger: 0.1045
-            (0.0099, 1e-2, 1e4, jnp.float64, certify.CONVERGED, False),
+            (0.0098, 1e-2, 1e4, jnp.float64, certify.CONVERGED,
+             certify.FLOOR_DENSE, False),
             # a residual that bounds nothing at all
-            (1e-6, float("inf"), 1e4, jnp.float64, certify.CONVERGED, False),
+            (1e-6, float("inf"), 1e4, jnp.float64, certify.CONVERGED,
+             certify.FLOOR_DENSE, False),
             # 4-byte floats at kappa 1e7: eps * kappa = 1.19, all rounding
-            (1e-6, 0.0, 1e7, jnp.float32, certify.CONVERGED, False),
+            (1e-6, 0.0, 1e7, jnp.float32, certify.CONVERGED,
+             certify.FLOOR_DENSE, False),
             # a solve that did not reach its residual, or met non-positive
             # curvature, certifies nothing however small its estimate
-            (1e-6, 0.0, 1.0, jnp.float64, certify.UNREACHED, False),
-            (1e-6, 0.0, 1.0, jnp.float64, certify.NONCONVEX, False),
-            (float("nan"), 0.0, 1.0, jnp.float64, certify.CONVERGED, False),
+            (1e-6, 0.0, 1.0, jnp.float64, certify.UNREACHED,
+             certify.FLOOR_DENSE, False),
+            (1e-6, 0.0, 1.0, jnp.float64, certify.NONCONVEX,
+             certify.FLOOR_DENSE, False),
+            (float("nan"), 0.0, 1.0, jnp.float64, certify.CONVERGED,
+             certify.FLOOR_DENSE, False),
+            # a caller's floor is a proof and certifies; a probe's is an
+            # estimate and never does, whatever the bound says
+            (0.0098, 1e-3, 1e4, jnp.float64, certify.CONVERGED,
+             certify.FLOOR_SUPPLIED, True),
+            (0.0098, 1e-3, 1e4, jnp.float64, certify.CONVERGED,
+             certify.FLOOR_PROBE, False),
+            (1e-9, 0.0, 1.0, jnp.float64, certify.CONVERGED,
+             certify.FLOOR_PROBE, False),
+            (1e-9, 0.0, 1.0, jnp.float64, certify.CONVERGED,
+             certify.FLOOR_NONE, False),
         ],
     )
-    def test_it_passes_only_on_the_upper_bound(
-        self, lambda2, reach, kappa, dtype, status, certified
+    def test_it_passes_only_on_a_proven_floor_and_the_upper_bound(
+        self, lambda2, reach, kappa, dtype, status, source, certified
     ):
         """The rule on hand-made programs, at the 0.1 threshold: an estimate
-        inside it whose residual reaches outside it is refused."""
+        inside it whose residual reaches outside it is refused, and so is one
+        whose floor is a probe's rather than a proof."""
 
         def program(values):
             return (jnp.asarray(lambda2, dtype), jnp.asarray(0.0, dtype),
                     jnp.asarray(reach, dtype), 5, status, jnp.asarray(kappa, dtype))
 
+        program.floor_source = source
         measured = certify.decrement(None, {}, program=program)
         assert measured.certifies(LIMIT) is certified
+        assert measured.floor_source == source
+        assert measured.proven is (source in certify.PROVEN_FLOORS)
         assert measured.products == 5 and measured.status == status
 
     @pytest.mark.parametrize("dtype", [jnp.float32, jnp.float64])
@@ -303,18 +324,23 @@ class TestTheNewtonDecrement:
         indefinite, singular = spectrum.copy(), spectrum.copy()
         indefinite[0], singular[0] = -1.0, 0.0
         point = rng.standard_normal(n) * 1e-3
-        assert refuses(spectrum, point).certifies(LIMIT), "the fixture must be usable"
+        usable = refuses(spectrum, point)
+        assert usable.status == certify.CONVERGED, "the fixture must be usable"
+        assert usable.distance < LIMIT
         for eigenvalues, where in ((indefinite, point), (indefinite, np.zeros(n)),
                                    (singular, point)):
             measured = refuses(eigenvalues, where)
             assert measured.status == certify.NONCONVEX, (path, measured)
             assert not measured.certifies(LIMIT)
 
-    def test_a_verified_floor_makes_a_large_model_cheap_to_certify(self):
-        """What a caller's ``floor`` buys above :data:`certify.DENSE_MAX`: the
-        iteration stops as soon as its bound is inside the limit, instead of
-        probing the spectrum and driving the residual down. Measured on 2000
-        parameters: two products against 35."""
+    def test_only_a_proven_floor_certifies_a_large_model(self):
+        """Above :data:`certify.DENSE_MAX` the Hessian is not formed, so what
+        the bound divides by is either the caller's proof or a probe's
+        estimate. The proof certifies, and cheaply: the iteration stops as
+        soon as its bound is inside the limit. The probe, on the same model
+        at the same point, reports a bound inside the limit too and does NOT
+        certify, because its floor is measured to sit above the smallest
+        eigenvalue about once in fifty random spectra."""
         n, rng = 2000, np.random.default_rng(5)
         spectrum = np.linspace(1.0, 50.0, n)
         matrix = jnp.asarray(np.diag(spectrum))
@@ -327,8 +353,10 @@ class TestTheNewtonDecrement:
         at = {"x": jnp.asarray(point)}
         floored = certify.decrement(objective, at, floor=1.0, limit=LIMIT)
         probed = certify.decrement(objective, at, limit=LIMIT)
-        assert floored.certifies(LIMIT) and probed.certifies(LIMIT)
-        assert floored.products < probed.products
+        assert floored.floor_source == certify.FLOOR_SUPPLIED and floored.proven
+        assert probed.floor_source == certify.FLOOR_PROBE and not probed.proven
+        assert floored.certifies(LIMIT)
+        assert probed.distance < LIMIT and not probed.certifies(LIMIT)
         assert floored.products <= 4 and probed.products >= certify.PROBE_STEPS
 
     def test_a_program_is_built_once_and_reused(self):

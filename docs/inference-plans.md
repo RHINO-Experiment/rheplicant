@@ -382,22 +382,40 @@ by Cauchy–Schwarz in the `H⁻¹` inner product, inflated by `1/sqrt(1 − ε 
 for the rounding of `g` and `H` themselves. The run certifies on that upper
 bound and records it, so stopping the solve early can only make it refuse.
 
-**Where the lower bound comes from.** Below 1024 latents it is measured: the
-scaled Hessian's own smallest eigenvalue, which also decides positive
-definiteness, so an indefinite or numerically singular Hessian is refused
-rather than certified. Above it, the plan proves one where it can — for a
-model the prediction is affine in, under a sigma that does not depend on it,
-`H = JᵀN⁻¹J + P` is bounded below by the prior precision `P`, so a **single
-conjugate block with a Normal prior on every latent** hands the certificate
-`min(1/σ_prior²)` and the solve stops as soon as its bound is inside the
-threshold. Failing that (two blocks, a gradient block, a prior-free latent, a
-prediction-dependent sigma) the decrement takes a 32-step Lanczos probe of
-`H` and uses its Ritz interval, which is an estimate and says so: where the
-probe cannot bound the spectrum the run refuses at `max_iter` with "cannot
-certify this estimate at this size and precision", naming the latent count
-and `JAX_ENABLE_X64=1` — a different sentence from "did not converge",
-because it is a different thing. A probe that finds non-positive curvature
-refuses outright, as the dense path does.
+**Where the lower bound comes from, and why only a proof certifies.** Below
+1024 latents it is measured: the scaled Hessian's own smallest eigenvalue,
+which also decides positive definiteness, so an indefinite or numerically
+singular Hessian is refused rather than certified. Above it the Hessian is
+not formed, and there are two ways for a run to have a floor at all:
+
+| floor | where it comes from | certifies |
+|---|---|---|
+| `dense` | the formed Hessian's smallest eigenvalue (≤ 1024 latents) | yes |
+| `supplied` | the prior precision, where this plan can prove `H = JᵀN⁻¹J + P` | yes |
+| `probe` | a 32-step Lanczos probe's Ritz interval | **no** |
+| `none` | no usable floor at all | no |
+
+which one a run used is recorded as `PlanDiagnostics.floor_source`. The
+proof for the second is the model's: with the prediction affine in every
+latent **jointly**, a sigma that does not depend on it, and a Normal prior on
+every latent, `H = JᵀN⁻¹J + P ⪰ P ⪰ min(1/σ_prior²)` whatever the data. Each
+condition is checked — joint affinity by the same `check_linearity` a
+conjugate block passes, asked of all the latents at once, because two blocks
+that are each affine are not jointly affine (`gain × sky` is the standing
+case) — and the floor is the **widest** prior scale, the smallest precision.
+
+The third class is a heuristic and is treated as one. `θ₀ − β|s₀|` bounds the
+distance from `θ₀` to *some* eigenvalue of `H`, not to the smallest, so where
+the Krylov space never reaches the bottom of the spectrum the probe's floor
+can sit above it: measured over 480 random spectra, 5 in 240 did so in
+float32, the worst by a factor 7.4. A probed floor therefore never certifies
+here. It is kept for what it can do soundly — refuse: non-positive curvature,
+or a bound already outside the threshold. A run left with only a probe keeps
+sweeping and refuses at `max_iter` with **"cannot certify this estimate at
+this size and precision"**, naming the three things that would make a proof:
+a single conjugate block with Normal priors (or any partition of a jointly
+affine model), fewer latents than the dense limit, or float64 where the
+precision is what blocks the dense path.
 
 The T-002 third review found both halves of that by construction: a spectrum
 clustered at 1 with one eigenvalue at 1e-8 and a gradient whose component
@@ -510,9 +528,11 @@ both exhaust 3000 sweeps and refuse. A model that certifies at the caller's
 
 **What is left.** The decrement is a statement about the quadratic model of `f`
 at the returned point: where the curvature changes over a posterior σ it is
-local. Above 1024 latents with no floor the model can prove, the curvature
-comes from a probe rather than a proof, and a direction of negative curvature
-that neither the probe nor the Krylov space meets is not seen. In float32 a
+local. Above 1024 latents a model that is not jointly affine — a bilinear
+gain, a log-space block, anything a gradient block is there for — has no floor
+to prove and so no certificate at all; it refuses, and `tol=None` is the way
+to get the answer without a claim. A direction of negative curvature that
+neither the probe nor the Krylov space meets is not seen. In float32 a
 model whose posterior σ is small against its latents' magnitudes has a gradient
 that is mostly rounding, and no solve recovers it — those runs refuse, naming
 float64. Grouping the correlated latents into one `Block` removes the slowness

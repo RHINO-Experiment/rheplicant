@@ -205,7 +205,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-from rheplicant.core.errors import ParameterSpaceError
+from rheplicant.core.errors import LinearityRefused, ParameterSpaceError
 from rheplicant.core.operator import AbstractOperator
 from rheplicant.core.state import State
 from rheplicant.inference import certify
@@ -455,25 +455,30 @@ def _certify(programs: dict[Any, Any], cond: Any, values: dict[str, jax.Array],
 
 
 def _at_this_size(measured: Any) -> str:
-    """What a decrement solved by conjugate gradients adds to the refusal.
+    """What a decrement with no PROVEN curvature floor adds to the refusal.
 
-    Above :data:`~rheplicant.inference.certify.DENSE_MAX` latents the Hessian
-    is not formed, so the bound needs a curvature floor the model can prove:
-    one conjugate block over Normal priors under a sigma that does not depend
-    on the prediction (:meth:`SamplingPlan._curvature_floor`). Without one the
-    floor is a probe's, the residual a certificate needs is much smaller, and
-    in float32 it is usually out of reach.
+    The bound divides by a lower bound on the joint Hessian's smallest
+    eigenvalue, and this package certifies only where that number is a proof:
+    the formed Hessian's own eigenvalue below
+    :data:`~rheplicant.inference.certify.DENSE_MAX` latents, or the prior
+    precision where :meth:`SamplingPlan._curvature_floor`'s conditions hold.
+    Above that limit and outside those conditions the floor is a Lanczos
+    probe's, which is an estimate — measured, it sits ABOVE the smallest
+    eigenvalue for about one random spectrum in fifty — so the run refuses
+    however small the distance looks, and says what would make it a proof.
     """
-    if measured.dense:
+    if measured.proven:
         return ""
     return (
-        f"This model has more than {certify.DENSE_MAX} latents, so the decrement is "
-        "solved by conjugate gradients rather than formed, and certifying there needs "
-        f"a residual small against the curvature floor (it reached {measured.residual:.3g} "
-        f"relative, over {measured.products} products). A floor this plan can prove — "
-        "ONE conjugate block, a Normal prior on every latent, a sigma that does not "
-        "depend on the prediction — is what makes that cheap; float64 is what makes it "
-        "possible. "
+        f"Its curvature floor came from {measured.floor_source}, not from a proof, so "
+        "nothing here can certify a distance: this model has more than "
+        f"{certify.DENSE_MAX} latents, so the Hessian is not formed, and the plan "
+        "cannot claim the prior precision as a floor either. Three things give a "
+        "proof: ONE conjugate block with a Normal prior on every latent and a sigma "
+        "that does not depend on the prediction, which makes the prior precision a "
+        f"floor; fewer than {certify.DENSE_MAX} latents, which forms the Hessian and "
+        "measures it; or float64 (JAX_ENABLE_X64=1) where the precision is what "
+        "blocks the dense path. "
     )
 
 
@@ -495,18 +500,15 @@ def _not_converged_message(
     last ten sweeps had one: an inner solve's noise, which an exact block
     update does not make.
 
-    The headline changes for one case. A model with more latents than
-    :data:`~rheplicant.inference.certify.DENSE_MAX` has its decrement solved
-    by conjugate gradients, and when those do not reach a conclusive bound
-    the run has not failed to converge — it cannot say, at this size and
-    precision, whether it has. The refusal says that instead.
+    The headline changes for one case. A model whose decrement has no proven
+    curvature floor (above
+    :data:`~rheplicant.inference.certify.DENSE_MAX` latents, outside
+    :meth:`SamplingPlan._curvature_floor`'s conditions) has not failed to
+    converge — nothing here can say whether it has. The refusal says that
+    instead, and :func:`_at_this_size` says what would change it.
     """
     limit = math.sqrt(2.0 * gap_tol)
-    unsure = (
-        attempt is not None
-        and not attempt.measured.dense
-        and attempt.measured.status == certify.UNREACHED
-    )
+    unsure = attempt is not None and not attempt.measured.proven
     headline = (
         "SamplingPlan.estimate cannot certify this estimate at this size and "
         "precision"
@@ -841,6 +843,12 @@ class PlanDiagnostics:
         solve_tol: the closed-form blocks' CG tolerance at the end of the run,
             after any tightening (see :meth:`SamplingPlan.estimate`). ``None``
             for a draw.
+        floor_source: where the last certificate's curvature floor came from —
+            ``"dense"`` (the formed Hessian's own smallest eigenvalue),
+            ``"supplied"`` (this plan's prior-precision floor, see
+            :meth:`SamplingPlan._curvature_floor`), ``"probe"`` (a Lanczos
+            estimate, which never certifies) or ``"none"``. ``None`` as for
+            :attr:`distance_bound`.
 
     :attr:`objective` and the fields after it are not among the fields the
     config layer copies into a run's diagnostics record
@@ -864,6 +872,7 @@ class PlanDiagnostics:
     certificate_iterations: int | None = None
     certificate_attempts: int | None = None
     solve_tol: float | None = None
+    floor_source: str | None = None
 
 
 class PlanResult(Protocol):
@@ -1185,39 +1194,69 @@ class SamplingPlan:
         """A VERIFIED lower bound on the joint Hessian's smallest eigenvalue, or
         ``None`` when this plan's model gives none.
 
-        For a model the prediction is affine in, under a noise that does not
-        depend on it, the joint objective is
+        For a prediction the model is affine in JOINTLY, under a noise that
+        does not depend on it, the joint objective is
         ``0.5 |N^-1/2 (d - J x)|^2 + 0.5 (x - m)^T P (x - m)`` plus constants,
         so ``H = J^T N^-1 J + P`` and ``H >= P >= min(1 / sigma_prior^2)``:
-        the prior precision is a floor, whatever the data. The conditions are
-        each checked rather than assumed — ONE conjugate block, so the
-        linearity :meth:`_prepare` verifies is joint and not per block (two
-        conjugate blocks over a bilinear model are each linear and jointly
-        are not); a prediction-independent sigma, so the log-determinant is
-        constant; and a Normal prior on every latent, since a prior that is
-        not Gaussian has no constant curvature to floor with.
+        the prior precision is a floor, whatever the data. Each condition is
+        checked rather than assumed:
+
+        * **jointly affine.** Every latent declared ``linear=True``, so the
+          claim exists to be checked at all, and then: one conjugate block is
+          enough on its own, since :meth:`_prepare` has already verified that
+          block's joint linearity. With more than one block, each was
+          verified alone, and two conditionally affine blocks are not jointly
+          affine — the bilinear ``gain * sky`` is the standing example — so
+          the same check is asked of the union, and a refusal means no
+          floor.
+        * **a sigma that does not depend on the prediction**, so the
+          log-determinant is a constant and not curvature.
+        * **a Normal prior on every latent**, since a prior that is not
+          Gaussian has no constant curvature to floor with. The floor is the
+          smallest precision, which is the WIDEST scale.
 
         It is consulted only above
         :data:`~rheplicant.inference.certify.DENSE_MAX` latents, where the
-        Hessian is not formed and its smallest eigenvalue would otherwise be
-        a probe's estimate. Returning ``None`` is not a failure: it means a
-        certificate at that size has to say so (see :func:`_certify`).
+        Hessian is not formed. Returning ``None`` is not a failure: it means
+        the decrement falls back to a probe, which never certifies, and the
+        run says so (:func:`_at_this_size`).
         """
         if bool(cond.noise.depends_on_prediction):
             return None
-        if len(self._assign) != 1 or self._assign[0][1] != CONJUGATE:
-            return None
         floor = math.inf
         for name in self.space.names:
-            gaussian = _gaussian_parameters(self.space.latent(name).prior)
+            latent = self.space.latent(name)
+            if not latent.linear:
+                return None
+            gaussian = _gaussian_parameters(latent.prior)
             if gaussian is None:
                 return None
             widest = float(jnp.max(jnp.abs(jnp.asarray(gaussian[1]))))
             if not math.isfinite(widest) or widest <= 0.0:
                 return None
             floor = min(floor, 1.0 / widest**2)
-        return None if not math.isfinite(floor) else floor
+        if not math.isfinite(floor):
+            return None
+        single = len(self._assign) == 1 and self._assign[0][1] == CONJUGATE
+        if not single and not self._jointly_affine(cond):
+            return None
+        return floor
 
+    def _jointly_affine(self, cond: Conditioning) -> bool:
+        """Whether the prediction is affine in ALL latents at once.
+
+        The check :meth:`_prepare` runs per conjugate block, asked of the
+        union and answered rather than raised: its refusal is this plan's
+        answer, not this plan's failure.
+        """
+        try:
+            check_linearity(
+                self.space, cond.pipeline, cond.state_template,
+                names=self.space.names,
+            )
+        except LinearityRefused:
+            return False
+        return True
 
     def _prepare(
         self,
@@ -1552,8 +1591,15 @@ class SamplingPlan:
         tightened = solve_tol
         closed = any(engine in CLOSED_FORM for _, engine in self._assign)
         # Named apart from the sweep's `floor`, which is the CG TOLERANCE's:
-        # the two are both floors and neither is the other's.
-        curvature = self._curvature_floor(cond)
+        # the two are both floors and neither is the other's. Asked only where
+        # it can matter, since below DENSE_MAX the decrement measures the
+        # curvature itself and proving a floor would cost a linearity check
+        # this run has no use for.
+        curvature = (
+            self._curvature_floor(cond)
+            if certify.real_size(values) > certify.DENSE_MAX
+            else None
+        )
         converged = None if tol is None else False
         # "once" is "due now, and never again"; "each_sweep" is "due every time".
         due, repeat = check_identifiability is not False, (
@@ -1659,6 +1705,7 @@ class SamplingPlan:
                 ),
                 certificate_attempts=attempts,
                 solve_tol=tightened,
+                floor_source=None if attempt is None else attempt.measured.floor_source,
             ),
         )
 

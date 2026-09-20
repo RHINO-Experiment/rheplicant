@@ -26,7 +26,7 @@ spectral index at 4096 channels and 0.01 K is 1.7e-7, finer than float32
 resolves a number near 2.55.
 """
 
-import math
+import dataclasses
 from typing import ClassVar
 
 import equinox as eqx
@@ -703,29 +703,80 @@ class _Split(AbstractOperator):
         return state.with_data((self.design @ whole).reshape(n_time, n_freq))
 
 
-def _wide_plan(seed=3):
-    """One conjugate block of :data:`WIDE_COEFFICIENTS` coefficients, its data,
-    and the exact MAP and posterior precision of that linear-Gaussian model."""
+class _Product(AbstractOperator):
+    """``data = (design @ theta) * (1 + mean(phi))``: affine in each latent
+    alone, bilinear in the pair. The shape that makes two blocks' separate
+    linearity checks insufficient, and the reason a floor needs the joint
+    one."""
+
+    requires: ClassVar[tuple[str, ...]] = ("coords.time", "coords.freq")
+    provides: ClassVar[tuple[str, ...]] = ("data",)
+    design: jax.Array
+    theta: jax.Array
+    phi: jax.Array
+
+    def __call__(self, state: State) -> State:
+        n_time, n_freq = state.coords.time.shape[0], state.coords.freq.shape[0]
+        columns = self.design[:, : self.theta.shape[0]]
+        signal = (columns @ self.theta) * (1.0 + jnp.mean(self.phi))
+        return state.with_data(signal.reshape(n_time, n_freq))
+
+
+def _wide_plan(seed=3, blocks=1, scales=None):
+    """A wide linear-Gaussian model, its data, and the exact MAP and posterior
+    precision. ``blocks=2`` splits the coefficients in two, which is enough to
+    cost the plan its claim to joint linearity and so its floor; ``scales``
+    replaces the single prior width with one per coefficient."""
     rng = np.random.default_rng(seed)
     size = int(np.prod(WIDE_SHAPE))
     design = rng.standard_normal((size, WIDE_COEFFICIENTS)) / np.sqrt(WIDE_COEFFICIENTS)
     truth = rng.standard_normal(WIDE_COEFFICIENTS)
     observed = design @ truth + rng.standard_normal(size)
-    precision = design.T @ design + np.eye(WIDE_COEFFICIENTS) / WIDE_TAU**2
+    width = np.full(WIDE_COEFFICIENTS, WIDE_TAU) if scales is None else np.asarray(scales)
+    precision = design.T @ design + np.diag(1.0 / width**2)
     exact = np.linalg.solve(precision, design.T @ observed)
-    space = ParameterSpace(
-        latents=[
-            Latent("theta", init=jnp.zeros(WIDE_COEFFICIENTS),
-                   prior=dist.Normal(jnp.zeros(WIDE_COEFFICIENTS), WIDE_TAU),
+    half = WIDE_COEFFICIENTS // 2
+    product = blocks == "bilinear"
+    if product:
+        blocks = 2
+    # a scalar width where they are all the same: the linearity probe reads a
+    # latent's magnitude off its declaration, and a 1200-vector of tens sends
+    # it far enough out that the design's own matmul rounding trips the check
+
+    def declared(start, stop):
+        return WIDE_TAU if scales is None else jnp.asarray(width[start:stop])
+    if blocks == 1:
+        latents = [Latent("theta", init=jnp.zeros(WIDE_COEFFICIENTS),
+                          prior=dist.Normal(jnp.zeros(WIDE_COEFFICIENTS),
+                                            declared(0, WIDE_COEFFICIENTS)),
+                          linear=True)]
+        bindings = [Bind("theta", into=lambda p: p["wide"].theta)]
+        pipeline = Pipeline(
+            _Wide(design=jnp.asarray(design), theta=jnp.zeros(WIDE_COEFFICIENTS)),
+            names=("wide",),
+        )
+        plan = SamplingPlan(ParameterSpace(latents=latents, bindings=bindings),
+                            Block("theta"))
+    else:
+        latents = [
+            Latent("theta", init=jnp.zeros(half),
+                   prior=dist.Normal(jnp.zeros(half), declared(0, half)),
                    linear=True),
-        ],
-        bindings=[Bind("theta", into=lambda p: p["wide"].theta)],
-    )
-    pipeline = Pipeline(
-        _Wide(design=jnp.asarray(design), theta=jnp.zeros(WIDE_COEFFICIENTS)),
-        names=("wide",),
-    )
-    plan = SamplingPlan(space, Block("theta"))
+            Latent("phi", init=jnp.zeros(WIDE_COEFFICIENTS - half),
+                   prior=dist.Normal(jnp.zeros(WIDE_COEFFICIENTS - half),
+                                     declared(half, WIDE_COEFFICIENTS)),
+                   linear=True),
+        ]
+        bindings = [Bind("theta", into=lambda p: p["wide"].theta),
+                    Bind("phi", into=lambda p: p["wide"].phi)]
+        operator = _Product if product else _Split
+        pipeline = Pipeline(
+            operator(design=jnp.asarray(design), theta=jnp.zeros(half),
+                     phi=jnp.zeros(WIDE_COEFFICIENTS - half)),
+            names=("wide",),
+        )
+        plan = SamplingPlan(ParameterSpace(latents=latents, bindings=bindings),
+                            Block("theta"), Block("phi"))
     return plan, pipeline, jnp.asarray(observed.reshape(WIDE_SHAPE)), exact, precision
 
 
@@ -759,46 +810,86 @@ def test_a_block_too_wide_to_form_a_hessian_certifies_on_its_prior_floor():
     assert diagnostics.certificate_iterations <= 20, diagnostics.certificate_iterations
 
 
-def test_without_a_floor_that_block_says_so_rather_than_guessing():
-    """The same model, its latent split across two blocks so the plan can no
-    longer claim joint linearity from one block's check. With no floor to
-    prove, the decrement probes the spectrum instead, and what it cannot
-    bound it refuses -- naming the size, not a failure to converge."""
-    plan, pipeline, observed, _, _ = _wide_plan()
-    state = _grid_state(*WIDE_SHAPE)
-    noise = HomoscedasticNoise(sigma=jnp.array(1.0))
-    cond, _ = plan._prepare(pipeline, state, observed, noise, False, "probe")
+def test_without_a_proof_that_block_refuses_and_says_what_would_prove_it():
+    """The same size of model with no floor its plan can prove: the decrement
+    falls back to a Lanczos probe, whose floor is an estimate, so nothing is
+    certified however small the distance looks. The run refuses at max_iter,
+    and the refusal names the three things that would make a proof."""
     from rheplicant.inference import certify
     from rheplicant.inference.plan import _Attempt, _not_converged_message
 
-    measured = certify.Decrement(
-        estimate=0.3, distance=math.inf, lambda2=0.09, residual=1e-3,
-        reach=math.inf, kappa=math.nan, products=1000, dense=False,
-        status=certify.UNREACHED,
+    probed = certify.Decrement(
+        estimate=0.01, distance=0.02, lambda2=1e-4, residual=1e-6, reach=1e-3,
+        kappa=50.0, products=64, dense=False, floor_source=certify.FLOOR_PROBE,
+        status=certify.CONVERGED,
     )
     message = _not_converged_message(
         max_iter=50, tol=1e-8, gap_tol=0.005, effective=1e-8, changed=True,
         objective=[1.0, 1.0], chi2=[1.0, 1.0], contraction=0.5, gap=1e-9,
-        rise=None, attempt=_Attempt(50, measured, False), solve_tol=1e-6,
+        rise=None, attempt=_Attempt(50, probed, False), solve_tol=1e-6,
         dtype=np.float32, hidden="",
     )
     assert "cannot certify this estimate at this size and precision" in message
-    assert f"more than {certify.DENSE_MAX} latents" in message
-    assert "JAX_ENABLE_X64=1" in message
+    assert "came from probe, not from a proof" in message
+    assert f"more than {certify.DENSE_MAX} latents" in message  # form the Hessian
+    assert "ONE conjugate block" in message                     # prove the floor
+    assert "JAX_ENABLE_X64=1" in message                        # or change precision
+    # a proven floor says none of it
+    proven = dataclasses.replace(probed, floor_source=certify.FLOOR_DENSE)
+    plain = _not_converged_message(
+        max_iter=50, tol=1e-8, gap_tol=0.005, effective=1e-8, changed=True,
+        objective=[1.0, 1.0], chi2=[1.0, 1.0], contraction=0.5, gap=1e-9,
+        rise=None, attempt=_Attempt(50, proven, False), solve_tol=1e-6,
+        dtype=np.float32, hidden="",
+    )
+    assert plain.startswith("SamplingPlan.estimate did not converge")
+    assert "not from a proof" not in plain
+
+
+def test_a_wide_block_without_a_proof_runs_to_max_iter_and_refuses():
+    """The same at the level of a run: 1200 coefficients in two blocks over a
+    BILINEAR model, which each block's own linearity check passes and the
+    joint one does not, so the plan can prove no floor and the decrement has
+    only a probe. The run refuses however small the probe's bound looks,
+    which is the point: this package does not certify on an estimated
+    floor."""
+    # prior width 1 rather than 10: the same model, with the linearity probe's
+    # 1000x excursion small enough that the design's matmul rounding stays
+    # under its tolerance
+    plan, pipeline, observed, exact, precision = _wide_plan(
+        blocks="bilinear", scales=np.ones(WIDE_COEFFICIENTS)
+    )
+    state = _grid_state(*WIDE_SHAPE)
+    noise = HomoscedasticNoise(sigma=jnp.array(1.0))
+    cond, _ = plan._prepare(pipeline, state, observed, noise, False, "probe")
+    assert plan._curvature_floor(cond) is None
+    with pytest.raises(ParameterSpaceError) as refused:
+        plan.estimate(pipeline, state, observed, noise=noise, max_iter=20,
+                      check_identifiability=False)
+    message = str(refused.value)
+    assert "cannot certify this estimate at this size and precision" in message
+    assert "came from probe, not from a proof" in message
 
 
 @pytest.mark.parametrize(
     "variation, floored",
-    [("plain", True), ("two blocks", False), ("no prior", False),
-     ("gradient block", False), ("sigma from the prediction", False)],
+    [
+        ("plain", True),
+        ("two blocks", True),
+        ("gradient block", False),
+        ("bilinear", False),
+        ("no prior", False),
+        ("sigma from the prediction", False),
+    ],
 )
 def test_the_floor_is_claimed_only_where_the_model_proves_it(variation, floored):
-    """``H >= P`` needs every one of: a prediction the model is affine in
-    JOINTLY (one conjugate block, since two blocks are each checked alone and
-    a bilinear model passes both), a Normal prior on every latent, and a
-    sigma that does not depend on the prediction. Drop any one and the plan
-    claims no floor, which is what sends a model above
-    :data:`~rheplicant.inference.certify.DENSE_MAX` to the probe."""
+    """``H >= P`` needs a prediction the model is affine in JOINTLY, declared
+    so on every latent, a Normal prior on every latent, and a sigma that does
+    not depend on the prediction. Two blocks are not evidence of joint
+    affinity, so the check is asked of the union: the bilinear case here
+    passes each block's own linearity check and fails that one. A latent that
+    does not claim to be linear is not checked and so cannot be floored,
+    whatever its model happens to be."""
     from rheplicant.inference.noise import RadiometerNoise
 
     size, width = 8, 4.0
@@ -815,20 +906,20 @@ def test_the_floor_is_claimed_only_where_the_model_proves_it(variation, floored)
         _Wide(design=jnp.asarray(design), theta=jnp.zeros(size)), names=("wide",)
     )
     blocks = (Block("theta"),)
-    if variation == "two blocks":
-        # the same latent cannot be in two blocks, so split the model instead
+    if variation in ("two blocks", "bilinear"):
         space = ParameterSpace(
             latents=[
-                Latent(name, init=jnp.zeros(size // 2),
+                Latent(name, init=jnp.zeros(size // 2) + (0.0 if name == "theta" else 1.0),
                        prior=dist.Normal(jnp.zeros(size // 2), width), linear=True)
                 for name in ("theta", "phi")
             ],
             bindings=[Bind("theta", into=lambda p: p["wide"].theta),
                       Bind("phi", into=lambda p: p["wide"].phi)],
         )
+        operator = _Split if variation == "two blocks" else _Product
         pipeline = Pipeline(
-            _Split(design=jnp.asarray(design), theta=jnp.zeros(size // 2),
-                   phi=jnp.zeros(size // 2)),
+            operator(design=jnp.asarray(design), theta=jnp.zeros(size // 2),
+                     phi=jnp.zeros(size // 2)),
             names=("wide",),
         )
         blocks = (Block("theta"), Block("phi"))
@@ -844,3 +935,44 @@ def test_the_floor_is_claimed_only_where_the_model_proves_it(variation, floored)
     assert (floor is not None) is floored, (variation, floor)
     if floored:
         assert floor == pytest.approx(1.0 / width**2)
+
+
+@pytest.mark.parametrize(
+    "scales",
+    [
+        "one width",
+        "logspace(-2, 2)",
+        "logspace(2, -2)",
+        "one wide coefficient",
+        "one narrow coefficient",
+    ],
+)
+def test_the_claimed_floor_is_below_the_hessians_smallest_eigenvalue(scales):
+    """``H >= P`` floors the curvature at the SMALLEST prior precision, which
+    is the WIDEST prior scale — one character apart from the narrowest, and
+    wrong by the square of the spread.
+
+    The third review measured that: swapping the widest for the narrowest on
+    a block whose scales span ``logspace(-2, 2)`` claims 1e4 against a true
+    smallest eigenvalue of 5.4e-4, and certifies 2.4e-4 posterior sigma as
+    5.8e-6. Here the claim is checked against the eigenvalue itself, on a
+    model weak enough in the data that the prior sets the curvature, so a
+    floor above it is the assertion that fails."""
+    size = WIDE_COEFFICIENTS
+    width = {
+        "one width": np.full(size, 3.0),
+        "logspace(-2, 2)": np.logspace(-2.0, 2.0, size),
+        "logspace(2, -2)": np.logspace(2.0, -2.0, size),
+        "one wide coefficient": np.concatenate([[50.0], np.full(size - 1, 0.1)]),
+        "one narrow coefficient": np.concatenate([[0.02], np.full(size - 1, 5.0)]),
+    }[scales]
+    plan, pipeline, observed, _, precision = _wide_plan(scales=width, seed=11)
+    cond, _ = plan._prepare(
+        pipeline, _grid_state(*WIDE_SHAPE), observed,
+        HomoscedasticNoise(sigma=jnp.array(1.0)), False, "probe",
+    )
+    floor = plan._curvature_floor(cond)
+    smallest = float(np.linalg.eigvalsh(precision)[0])
+    assert floor is not None
+    assert floor <= smallest, (scales, floor, smallest)
+    assert floor == pytest.approx(1.0 / np.max(width) ** 2)
