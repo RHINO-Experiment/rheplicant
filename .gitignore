@@ -57,7 +57,8 @@ docs/superpowers/
 # /private/tmp being cleared; T-002's is 38 MB. Ignoring it keeps `git add -A`
 # from committing it to a public repo, and `git clean -fd` from deleting it.
 # `.agents/plans/` is deliberately NOT ignored: it is untracked like the rest,
-# but staying visible in `git status` is what tells the next session it is there.
+# but `aw context` ends with `git status -uall`, and with the evidence ignored
+# that section names the two plan documents instead of 3344 evidence files.
 /.agents/evidence/
 
 # Local reference material (contains unpublished draft; repo is public)
