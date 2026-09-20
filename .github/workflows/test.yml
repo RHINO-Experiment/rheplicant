@@ -26,9 +26,9 @@ concurrency:
   group: tests-${{ github.ref }}
   cancel-in-progress: true
 
-# bayesmith 0.9.0 is a local release and not on PyPI (see CLAUDE.md's
+# bayesmith 0.10.0 is a local release and not on PyPI (see CLAUDE.md's
 # complete-environment section), so until it is published the environment
-# steps below cannot resolve `bayesmith>=0.9,<0.10` and the suite jobs fail at
+# steps below cannot resolve `bayesmith>=0.10,<0.11` and the suite jobs fail at
 # install. The lint job does not depend on it.
 
 env:

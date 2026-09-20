@@ -62,20 +62,21 @@ dependencies = [
     # a resolution error. `tests/test_bayesmith_floor.py` asserts every level
     # by capability.
     #
-    # The range nevertheless starts at 0.9: the stable baseline relies on
-    # bayesmith 0.9's stability contract and is tested only against 0.9. It is
-    # closed at 0.10 because a pre-1.0 minor may move the deep module paths
-    # this package imports.
+    # The range nevertheless starts at 0.10: the stable baseline relies on
+    # bayesmith 0.10's stability contract and is tested only against 0.10. It
+    # is closed at 0.11 because a pre-1.0 minor may move the deep module paths
+    # this package imports -- 0.10 did exactly that, turning `optimize` from a
+    # module into a package, which is why the bound is not decoration.
     #
-    # 0.9.0 is a local release and not on PyPI (2026-09-19), so an install
+    # 0.10.0 is a local release and not on PyPI (2026-09-20), so an install
     # resolves it with
     #
-    #     --find-links ../bayesmith/runs/t002/unpublished-0.9.0
+    #     --find-links ../bayesmith/runs/t004/dist
     #
     # CLAUDE.md gives the hash check and the no-deps install this checkout
     # uses. The same bet the limTOD floor above records: declare the true
     # requirement rather than pretend the seam is optional.
-    "bayesmith>=0.9,<0.10",
+    "bayesmith>=0.10,<0.11",
 ]
 classifiers = [
     "Development Status :: 3 - Alpha",
@@ -87,15 +88,20 @@ classifiers = [
 ]
 
 [project.optional-dependencies]
-# The upper bound is bayesmith 0.9's own: NumPyro 0.22 breaks its validation
-# and Gibbs interfaces, and this package imports numpyro directly. The floor
-# was measured on 2026-09-19 in a clean Python 3.12 venv holding jax 0.11.0 and
-# the bayesmith 0.9.0 wheel, over every numpyro release from 0.15.0 to 0.21.0.
+# The upper bound is bayesmith's own, `numpyro>=0.15,<0.22`, unchanged from 0.9
+# to 0.10 (read off the 0.10.0 wheel's METADATA on 2026-09-20): NumPyro 0.22
+# breaks its validation and Gibbs interfaces, and this package imports numpyro
+# directly. The floor was measured on 2026-09-19 in a clean Python 3.12 venv
+# holding jax 0.11.0 and the bayesmith 0.9.0 wheel, over every numpyro release
+# from 0.15.0 to 0.21.0.
 # `import numpyro` fails on 0.15.0 to 0.15.2 (jax.experimental.host_callback),
 # on 0.15.3 to 0.18.0 (pjit_p) and on 0.19.0 to 0.20.1 (xla_pmap_p). 0.21.0
 # imports and passes tests/inference/test_numpyro_bridge.py and
 # test_graph_bridge.py, 74 tests. 0.21 requires jax>=0.7, which the jax>=0.5
-# above admits, and lies inside bayesmith's own numpyro>=0.15,<0.22.
+# above admits, and lies inside the bayesmith bound named at the top of this
+# comment. The floor measurement was taken against the 0.9.0 wheel and has not
+# been repeated against 0.10.0; it is still the right number because the bound
+# it sits inside did not move, but it is a 0.9.0 measurement and says so.
 numpyro = ["numpyro>=0.21,<0.22"]
 # NoiseWaveOperator is an adapter over rhino_cal_jax, the JAX implementation of
 # the noise-wave receiver model (D15). The physics has a life outside this

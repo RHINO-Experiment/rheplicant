@@ -23,7 +23,9 @@ UV = "uv"
 
 #: The sibling checkout whose local release the core dependency on bayesmith
 #: resolves from, because the range `pyproject.toml` declares is not on PyPI
-#: (0.9.0 is a local release; see CLAUDE.md's complete-environment section).
+#: (0.10.0 is a local release; see CLAUDE.md's complete-environment section).
+#: The manifest sits one level above the artefacts, as it did for 0.9.0, so
+#: these two constants are deliberately not one path joined twice.
 #: The fresh-venv installs below hand the resolver a `--find-links` to the
 #: release directory after checking every artefact against the release
 #: manifest, so they install the same hash-checked wheel the checkout's own
@@ -32,8 +34,8 @@ UV = "uv"
 #: contract CLAUDE.md states for the package itself, and a skip here is a
 #: thinner environment, never a pass.
 BAYESMITH_CHECKOUT = PROJECT_ROOT.parent / "bayesmith"
-BAYESMITH_RELEASE = BAYESMITH_CHECKOUT / "runs" / "t002" / "unpublished-0.9.0"
-BAYESMITH_MANIFEST = BAYESMITH_CHECKOUT / "runs" / "t002" / "release-manifest.json"
+BAYESMITH_RELEASE = BAYESMITH_CHECKOUT / "runs" / "t004" / "dist"
+BAYESMITH_MANIFEST = BAYESMITH_CHECKOUT / "runs" / "t004" / "release-manifest.json"
 
 
 CommandArgument = str | os.PathLike[str]

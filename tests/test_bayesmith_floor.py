@@ -1,6 +1,6 @@
 """The declared bayesmith range, checked by capability and by policy, not by version.
 
-``pyproject.toml`` declares ``bayesmith>=0.9,<0.10``, and that range holds two
+``pyproject.toml`` declares ``bayesmith>=0.10,<0.11``, and that range holds two
 numbers which this file keeps apart.
 
 * The **capability floor**, :data:`CAPABILITY_FLOOR`, is the highest release
@@ -17,16 +17,19 @@ numbers which this file keeps apart.
   arguments on names that already existed, so taken alone each is a
   ``TypeError`` at the call on the release below. A 0.5 install imports, and
   differs from 0.6 in behaviour only.
-* The **declared range** starts at 0.9 although the code needs nothing newer
-  than 0.6, because the stable baseline relies on bayesmith 0.9's stability
-  contract and is tested only against 0.9. It is closed at the next minor,
+* The **declared range** starts at 0.10 although the code needs nothing newer
+  than 0.6, because the stable baseline relies on bayesmith 0.10's stability
+  contract and is tested only against 0.10. It is closed at the next minor,
   because a pre-1.0 minor may move the deep module paths this package imports.
+  0.10 moved one: ``bayesmith.optimize`` became a package. The imports here
+  survived it, which is the point of closing the range rather than evidence
+  that closing it was unnecessary.
 
 **No case reads the installed version.** For most of this file's history
 bayesmith was installed editable from ``../bayesmith``, and an editable install
 reports the version its metadata was written with: 0.2.0 against 0.5.0 source
 on 2026-08-28, and still 0.2.0 against 0.9.0 source on 2026-09-19. The
-checkout now installs bayesmith from its local 0.9.0 wheel, where the metadata
+checkout now installs bayesmith from its local 0.10.0 wheel, where the metadata
 is right, but a guard that holds in one kind of environment only is what this
 file replaced. Whether a capability is reachable holds in every environment.
 """

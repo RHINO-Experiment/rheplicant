@@ -250,7 +250,7 @@ matplotlib, because rhino-cal's `gcr` imports each, as well as
 three: the file's five tests pass; with MomentRFI absent the three skip on
 `No module named 'MomentRFI'`.
 
-**bayesmith is declared `>=0.9,<0.10`, and the range holds two numbers.** The
+**bayesmith is declared `>=0.10,<0.11`, and the range holds two numbers.** The
 capability floor is 0.6, the highest release whose surface this package uses:
 0.2 `first_fit` and `exact.loglinear`; 0.3 `AffinityRefused`'s structured
 payload and `ComplexNormal`; 0.4 `observe(..., mask=)` and the node field
@@ -261,21 +261,28 @@ because `bayesmith.marginal` first ships in 0.5. A 0.5 install imports and
 fails only in behaviour, and the 0.4 and 0.5 keyword arguments are each a
 `TypeError` at the call on the release below.
 `tests/test_bayesmith_floor.py` asserts each level by capability, not by
-version. The range starts at 0.9 because the stable baseline relies on
-bayesmith 0.9's stability contract and is tested only against it, and it is
-closed at 0.10 because a pre-1.0 minor may move the deep module paths this
-package imports.
+version. The range starts at 0.10 because the stable baseline relies on
+bayesmith 0.10's stability contract and is tested only against it, and it is
+closed at 0.11 because a pre-1.0 minor may move the deep module paths this
+package imports. 0.10 moved one: `bayesmith.optimize` became a package, so
+`from bayesmith.optimize import minimize` still resolves while the module file
+that name used to live in is gone.
 
-**0.9.0 is a local release and not on PyPI** (2026-09-19; the index stops at
-0.8.0). Check the wheel's sha256 against
-`../bayesmith/runs/t002/release-manifest.json`, then
+**0.10.0 is a local release and not on PyPI** (built 2026-09-20; 0.9.0 was not
+published either, and the index stopped at 0.8.0 when it was checked on
+2026-09-19). Check both artefacts' sha256 against
+`../bayesmith/runs/t004/release-manifest.json`, which sits one level above the
+artefacts rather than beside them, then
 
 ```bash
-uv pip install --python .venv/bin/python --no-deps ../bayesmith/runs/t002/unpublished-0.9.0/bayesmith-0.9.0-py3-none-any.whl
+uv pip install --python .venv/bin/python --no-deps ../bayesmith/runs/t004/dist/bayesmith-0.10.0-py3-none-any.whl
 ```
 
 Any install that resolves this package's dependencies needs
-`--find-links ../bayesmith/runs/t002/unpublished-0.9.0`. The wheel replaces
+`--find-links ../bayesmith/runs/t004/dist`. The wheel was built at bayesmith's
+`8aefb3e` and that repository's HEAD has moved on; the manifest's shas describe
+the build, so an install checked against them is reproducible even though the
+wheel is byte-stale against HEAD. The wheel replaces
 the editable install from `../bayesmith` this checkout used while the two
 repositories were developed against each other: an editable install runs
 whatever the sibling working tree holds and reports the version its metadata
