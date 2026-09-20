@@ -125,6 +125,23 @@ readers are built; that is a description of internals, not an invitation.
 `tests/config/test_plugin_protocol.py` pins the five as private, so making one
 public becomes a decision someone takes rather than a line that slips through.
 
+## The GUI's HTTP API is internal
+
+Twenty-two routes under `/api`, consumed by the React client bundled beside
+them in `src/rheplicant/gui/static/`. It is versioned **with that client**, not
+on its own, and carries no compatibility promise to any other consumer.
+
+The OpenAPI document reports the package's version rather than FastAPI's
+default `0.1.0`, which reads as a declared API version and was a placeholder,
+and its description says the API is internal so a reader of the generated
+documentation does not have to guess.
+
+The route table is snapshotted in `tests/gui/golden/http_routes.json`. An
+internal API is pinned for almost the opposite reason a public one is: not so
+it cannot change, but so a change is VISIBLE — the only supported client is
+checked in and rebuilt by hand, and a route removed without rebuilding the
+bundle is a 404 nothing else would catch.
+
 ## External contract versions
 
 | Contract | Version | Where |

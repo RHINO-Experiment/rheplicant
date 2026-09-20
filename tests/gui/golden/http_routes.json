@@ -1,0 +1,90 @@
+[
+  {
+    "method": "PATCH",
+    "path": "/api/nodes/{node_id}"
+  },
+  {
+    "method": "POST",
+    "path": "/api/sessions"
+  },
+  {
+    "method": "GET",
+    "path": "/api/sessions/{session_id}"
+  },
+  {
+    "method": "PATCH",
+    "path": "/api/sessions/{session_id}/fields"
+  },
+  {
+    "method": "GET",
+    "path": "/api/sessions/{session_id}/jobs"
+  },
+  {
+    "method": "POST",
+    "path": "/api/sessions/{session_id}/jobs"
+  },
+  {
+    "method": "GET",
+    "path": "/api/sessions/{session_id}/jobs/{job_id}/artifacts/{artifact_name}"
+  },
+  {
+    "method": "POST",
+    "path": "/api/sessions/{session_id}/load"
+  },
+  {
+    "method": "PATCH",
+    "path": "/api/sessions/{session_id}/nodes/{node_id}"
+  },
+  {
+    "method": "PUT",
+    "path": "/api/sessions/{session_id}/nodes/{node_id}/compose"
+  },
+  {
+    "method": "PUT",
+    "path": "/api/sessions/{session_id}/nodes/{node_id}/many"
+  },
+  {
+    "method": "POST",
+    "path": "/api/sessions/{session_id}/nodes/{node_id}/move"
+  },
+  {
+    "method": "PUT",
+    "path": "/api/sessions/{session_id}/nodes/{node_id}/placement"
+  },
+  {
+    "method": "PUT",
+    "path": "/api/sessions/{session_id}/nodes/{node_id}/snapshot-before"
+  },
+  {
+    "method": "PUT",
+    "path": "/api/sessions/{session_id}/outputs/products/{product_name}"
+  },
+  {
+    "method": "PUT",
+    "path": "/api/sessions/{session_id}/outputs/report"
+  },
+  {
+    "method": "POST",
+    "path": "/api/sessions/{session_id}/redo"
+  },
+  {
+    "method": "POST",
+    "path": "/api/sessions/{session_id}/save"
+  },
+  {
+    "method": "POST",
+    "path": "/api/sessions/{session_id}/undo"
+  },
+  {
+    "method": "PUT",
+    "path": "/api/sessions/{session_id}/yaml"
+  },
+  {
+    "method": "POST",
+    "path": "/api/snapshot"
+  },
+  {
+    "method": "GET",
+    "path": "/api/starter"
+  }
+]

@@ -296,6 +296,18 @@ def _apply(
         raise HTTPException(status_code=422, detail=str(error)) from error
 
 
+#: The package's version, reported by the OpenAPI document. Imported lazily
+#: inside the module rather than from `rheplicant` at import time, because
+#: `gui` must not pull the whole package to describe itself.
+try:  # pragma: no cover - exercised by whichever install is present
+    from importlib.metadata import PackageNotFoundError
+    from importlib.metadata import version as _distribution_version
+
+    _PACKAGE_VERSION = _distribution_version("rheplicant")
+except PackageNotFoundError:  # pragma: no cover - a source tree with no install
+    _PACKAGE_VERSION = "0.0.0+unknown"
+
+
 def create_app(
     frontend_dir: Path | None = None,
     *,
@@ -304,7 +316,21 @@ def create_app(
     job_runner: JobRunner = execute_job,
 ) -> FastAPI:
     """Build the selected-stack API independently of a live frontend."""
-    app = FastAPI(title="Rheplicant YAML config editor")
+    # Version and description are set explicitly because FastAPI's defaults
+    # are misleading here: the OpenAPI document otherwise declares version
+    # "0.1.0", which reads as a stated API version and is only a placeholder.
+    # This API is INTERNAL -- it is versioned with the React client bundled
+    # beside it (U6), not independently -- so it reports the package's own
+    # version and says so in its description.
+    app = FastAPI(
+        title="Rheplicant YAML config editor",
+        version=_PACKAGE_VERSION,
+        description=(
+            "Internal API for the bundled workbench client. It is versioned "
+            "with that client rather than on its own, and carries no "
+            "compatibility promise to any other consumer. See docs/stability.md."
+        ),
+    )
     if session_store is not None and job_store is not None:
         raise ValueError("job_store belongs to SessionStore when both are supplied.")
     store = session_store if session_store is not None else SessionStore(job_store=job_store)
