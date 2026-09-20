@@ -7,7 +7,7 @@ import hashlib
 import os
 import traceback
 from collections.abc import Callable, Mapping, Sequence
-from typing import Literal, TextIO, cast
+from typing import Literal, NoReturn, TextIO, cast
 
 from _rheplicant_bootstrap.audit import AuditTrace
 from _rheplicant_bootstrap.audit.bundle import (
@@ -410,8 +410,15 @@ def _publish_failure_once(
     variant_names: Sequence[str],
     platform: OutputPlatform,
     stderr: TextIO,
-) -> None:
-    """Publish one terminal sibling; recover it once and never recurse."""
+) -> NoReturn:
+    """Publish one terminal sibling; recover it once and never recurse.
+
+    ``NoReturn`` because both exits raise: the transaction's own failure
+    re-raises the original with a note, and the success path re-raises after
+    reporting. It was annotated ``-> None``, which reads as "and then carry
+    on" -- and every caller is a bare statement inside an ``except``, where
+    carrying on would mean publishing a success bundle for a run that failed.
+    """
     _record_error_once(trace, original)
     try:
         path = _publish_transaction(
@@ -449,8 +456,11 @@ def _publish_error_after_transaction_failure(
     variant_names: Sequence[str],
     platform: OutputPlatform,
     stderr: TextIO,
-) -> None:
-    """Recover a failed success transaction, then try one error sibling."""
+) -> NoReturn:
+    """Recover a failed success transaction, then try one error sibling.
+
+    ``NoReturn`` for the same reason as the function it ends in.
+    """
     if isinstance(original, TransactionInterrupted):
         _record_materializations(trace, original.state.unreported_materializations)
     _record_error_once(trace, original)
@@ -724,12 +734,33 @@ def dispatch_request(
         # reason the preset SOURCES are one -- putting it in provenance.json
         # would be a format_version bump on a closed published schema, and the
         # comment above says what that costs.
-        additional_files = {
-            **(additional_files or {}),
-            CAPABILITIES_NAME: orchestration.capabilities_manifest(
-                trace.snapshot().resolved_layers
-            ),
-        }
+        # Wrapped on the same terms as the product bundle below, and for the
+        # same reason: every other failure surface in this function funnels
+        # through `_publish_failure_once`, which writes a typed audit envelope
+        # and republishes before re-raising. This call was the one step in the
+        # success block without that, so a raise here left a run that had
+        # already executed with no audited record of why it stopped -- a bare
+        # traceback, and a transaction the NEXT invocation has to recover.
+        try:
+            additional_files = {
+                **(additional_files or {}),
+                CAPABILITIES_NAME: orchestration.capabilities_manifest(
+                    trace.snapshot().resolved_layers
+                ),
+            }
+        except Exception as original:
+            _publish_failure_once(
+                original,
+                status="refused" if isinstance(original, REFUSALS) else "error",
+                publication=publication,
+                lease=lease,
+                trace=trace,
+                prepared=prepared,
+                run_names=run_names,
+                variant_names=variant_names,
+                platform=chosen_platform,
+                stderr=stderr,
+            )
         if request.products or request.report is not None:
             try:
                 scientific = orchestration.build_product_bundle(

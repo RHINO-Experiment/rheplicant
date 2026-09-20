@@ -150,6 +150,20 @@ uv venv                          # NOT `uv sync`, which cannot work here
 uv pip install -e . --group dev
 ```
 
+**Neither install line resolves today.** `rheplicant` requires
+`bayesmith>=0.10,<0.11`, and bayesmith's highest release on PyPI is 0.8.0;
+0.10.0 exists only as a local wheel. Until it is published, an install needs
+that wheel on the search path:
+
+```bash
+uv pip install --find-links ../bayesmith/runs/t004/dist -e . --group dev
+```
+
+This is why nothing here is pushed or uploaded, and it is the same reason the
+online documentation build and remote CI cannot run. It ends when bayesmith
+0.10.0 is on PyPI; [the bayesmith page](https://rheplicant.readthedocs.io/en/latest/bayesmith.html)
+says what the range is for.
+
 Requires Python ≥ 3.11, `jax ≥ 0.5`, `equinox ≥ 0.13`. Distribution and import
 name are the same: `rheplicant`. Full instructions, the optional integrations
 and the two-session test split are on the
@@ -236,7 +250,7 @@ arrived when is in
 ## Status
 
 The architecture and inference layer are complete and tested end-to-end
-(12035 tests, 90.2 % coverage, jit+grad+vmap through the full twin; assembly
+(12038 tests, 90.2 % coverage, jit+grad+vmap through the full twin; assembly
 is regression-tested bitwise against hand-built composition). Radio operator
 *physics* is deliberately placeholder where the docstring says so — 17 of the
 29 concrete `rheplicant.radio` operator classes — pending ports from limTOD
