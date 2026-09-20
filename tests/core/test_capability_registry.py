@@ -34,6 +34,7 @@ import inspect
 import pytest
 
 import rheplicant.radio as radio
+from _rheplicant_bootstrap.capability import REGISTRY, Capability, Surface
 from rheplicant.config.sections.model import operator_table
 from rheplicant.core.capability import Maturity
 from rheplicant.core.operator import AbstractOperator
@@ -282,3 +283,142 @@ def test_the_enum_is_documented_from_the_core_module():
         "but defines its own. Two enums with equal members are not equal to "
         "each other, so the GUI's level and the operator's would stop matching"
     )
+
+
+# ---------------------------------------------------------------------------
+# The table: capabilities with no class, and the views derived from it.
+# ---------------------------------------------------------------------------
+
+
+def test_no_class_is_ever_unavailable():
+    """The reading this registry is built on, pinned.
+
+    ``UNAVAILABLE`` describes a SURFACE's answer, not an implementation.
+    ``NeuralOperator`` is the case that settled it: refused from a config
+    document with a typed error naming its capability, and a working operator
+    from Python. If a class ever carried ``UNAVAILABLE`` the two readings
+    would both be in the tree and nothing would say which was meant.
+    """
+    wrong = [name for name, cls in SHIPPED if cls.maturity is Maturity.UNAVAILABLE]
+    assert not wrong, (
+        f"{wrong} declare Maturity.UNAVAILABLE as a ClassVar. A class records "
+        "how far its IMPLEMENTATION has been taken; that a surface refuses it "
+        "belongs in REGISTRY beside the surface, not on the class"
+    )
+
+
+def test_every_registry_row_is_unique_on_its_surface():
+    """Two rows for one (name, surface) is two answers to one question."""
+    seen: dict[tuple[str, Surface], Capability] = {}
+    for row in REGISTRY:
+        key = (row.name, row.surface)
+        assert key not in seen, (
+            f"{row.name!r} appears twice for surface {row.surface}; the second "
+            f"says {row.maturity} and the first says {seen[key].maturity}"
+        )
+        seen[key] = row
+
+
+@pytest.mark.parametrize(
+    "row",
+    [r for r in REGISTRY if r.surface is Surface.PYTHON],
+    ids=[r.name for r in REGISTRY if r.surface is Surface.PYTHON],
+)
+def test_a_python_row_names_something_that_exists(row):
+    """A dotted path that no longer resolves is a row protecting nothing.
+
+    The same failure as a comparison whose subject has left: the row keeps
+    claiming a level for a surface that is gone, and nothing notices because
+    the assertion never looks.
+    """
+    import importlib
+
+    module_path, _, attribute = row.name.rpartition(".")
+    try:
+        module = importlib.import_module(row.name)
+    except ImportError:
+        module = importlib.import_module(module_path)
+        assert hasattr(module, attribute), (
+            f"REGISTRY names {row.name!r}, and neither the module nor "
+            f"{attribute!r} inside {module_path!r} exists"
+        )
+
+
+@pytest.mark.parametrize(
+    "row",
+    [r for r in REGISTRY if r.inherits],
+    ids=[r.name for r in REGISTRY if r.inherits],
+)
+def test_an_inherited_level_really_rests_on_what_it_names(row):
+    """``inherits=`` is checked, not taken on trust.
+
+    A level inherited from upstream is the one kind of claim this package
+    cannot verify by running anything: bayesmith declares its own levels in
+    its ``docs/stability.md`` and we read them. What CAN be checked here is
+    the other half -- that the module claiming to inherit actually imports
+    the module it names. Without this, a row could keep claiming Experimental
+    long after the dependency it was inherited from had been dropped, and the
+    capability would stay labelled for a reason that no longer applied.
+    """
+    import importlib
+    import pathlib
+
+    module = importlib.import_module(row.name)
+    source = pathlib.Path(module.__file__).read_text(encoding="utf-8")
+    assert f"from {row.inherits} import" in source or f"import {row.inherits}" in source, (
+        f"{row.name} is recorded as inheriting its level from {row.inherits}, "
+        f"but its source does not import {row.inherits}. Either the dependency "
+        "was dropped and the level should be judged on its own merits, or the "
+        "row names the wrong module"
+    )
+
+
+def test_the_document_view_is_the_registry_and_not_a_second_table():
+    """``_CAPABILITY_KEYS`` must carry exactly the registry's document rows.
+
+    Not a tautology, although it is derived today: this is what turns a future
+    edit that re-spells the dict as a literal into a red test rather than a
+    silent second copy. The shape is asserted too, because
+    ``rheplicant-agent``'s server unpacks ``(capability, section)``.
+    """
+    from rheplicant.config.preflight.document import _CAPABILITY_KEYS
+
+    expected = {
+        row.name: (row.what, row.reference)
+        for row in REGISTRY
+        if row.surface is Surface.DOCUMENT and row.maturity is Maturity.UNAVAILABLE
+    }
+    assert _CAPABILITY_KEYS == expected, (
+        "_CAPABILITY_KEYS and REGISTRY's document rows disagree. If the dict "
+        "was re-spelled as a literal, delete it and keep the comprehension: "
+        "the rows live in REGISTRY so that the table, the A39 message and "
+        f"rheplicant-agent cannot drift apart. View: {_CAPABILITY_KEYS!r}"
+    )
+    assert len(_CAPABILITY_KEYS) == 8, (
+        f"schema §8 reserves eight keys; the view has {len(_CAPABILITY_KEYS)}"
+    )
+    for key, value in _CAPABILITY_KEYS.items():
+        assert isinstance(value, tuple) and len(value) == 2, (
+            f"{key} carries {value!r}; the consumer unpacks two strings"
+        )
+
+
+def test_the_refusal_message_quotes_the_registry():
+    """Registry -> message, end to end.
+
+    The table and the sentence a user reads are the pair most likely to drift,
+    because nothing renders them side by side. This walks the actual refusal
+    builder and requires the registry's own words in what comes out.
+    """
+    from rheplicant.config.preflight.document import _task3_capability
+
+    row = next(
+        r for r in REGISTRY
+        if r.surface is Surface.DOCUMENT and r.name == "campaign"
+    )
+    finding = _task3_capability("campaign", "campaign")
+    assert row.what in finding.message, (
+        f"the A39 message does not contain {row.what!r}: the table and the "
+        f"sentence have drifted. Message was: {finding.message!r}"
+    )
+    assert row.reference in finding.message

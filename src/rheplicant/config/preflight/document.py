@@ -58,6 +58,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 from typing import Any
 
+from _rheplicant_bootstrap.capability import REGISTRY, Maturity, Surface
 from _rheplicant_bootstrap.path_syntax import longest_legal_prefix
 from rheplicant.config.errors import ConfigError
 from rheplicant.config.findings import Finding, refuse
@@ -71,21 +72,17 @@ from rheplicant.config.resources import resolved_specs
 #: ``outputs:`` wholesale and raises before ``CHECKS`` runs.  They are carried
 #: anyway so that Plan 4 inherits the capability and the section rather than
 #: re-deriving them.
+#:
+#: **This is now a VIEW, not a table.**  The rows live once, in
+#: ``_rheplicant_bootstrap.capability.REGISTRY``, beside the capabilities that
+#: are not document keys; this comprehension selects the document surface's
+#: unavailable ones and keeps the exact ``{key: (capability, section)}`` shape
+#: the A39 message interpolates and ``rheplicant-agent``'s server iterates.
+#: The name stays because that consumer imports it by name.
 _CAPABILITY_KEYS: dict[str, tuple[str, str]] = {
-    "campaign": ("capability 4 (streaming evidence)", "§8.2"),
-    "inference.transitions": ("capability 4 (streaming evidence)", "§8.2"),
-    "inference.parameters.<name>.scope":
-        ("capability 4 (streaming evidence)", "§8.2"),
-    "inference.parameters.<name>.support":
-        ("capability 4 (streaming evidence)", "§8.2"),
-    "inference.parameters.<name>.hyper":
-        ("capability 4 (streaming evidence)", "§8.2"),
-    "model.<node>.type: NeuralOperator":
-        ("capability 3 (neural surrogates)", "§8.1"),
-    "outputs.write.memory_archive":
-        ("capability 4 (streaming evidence)", "§8.2"),
-    "outputs.write.posterior_net":
-        ("capability 3 (neural surrogates)", "§8.1"),
+    row.name: (row.what, row.reference)
+    for row in REGISTRY
+    if row.surface is Surface.DOCUMENT and row.maturity is Maturity.UNAVAILABLE
 }
 
 #: The two ``scope:`` names schema §8.2 reserves, and no others.  ``scope:
