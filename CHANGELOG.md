@@ -2,6 +2,49 @@
 
 ## Unreleased
 
+### What changed, in one page
+
+The detail below runs to a hundred sections in the order things happened.
+This is the same release grouped by what it affects, for a reader deciding
+whether it concerns them.
+
+**A configuration document is a first-class way to run this package.** A YAML
+document declares the instrument, the inference and the outputs; `rheplicant
+run` validates it, executes it and publishes an audit tree that is meant to
+outlive the run. The document grammar refuses what it cannot decide rather
+than guessing, and every refusal names the key to edit.
+
+**Every run publishes evidence about itself.** `provenance.json` records the
+software, the runtime, the inputs and the artefacts; `diagnostics.json`
+records the findings, the gates and the runs; `integrity.json` anchors the
+whole tree on one digest; `capabilities.json` says which of the physics that
+run used was a stand-in. All four are closed, versioned formats with schemas
+that ship in the wheel.
+
+**There is a browser editor.** It keeps exact YAML as the only scientific
+state, organises the work into Model, Config, Execute and Results, and runs
+jobs through a revision-checked session so a late response cannot overwrite
+an accepted document. The server is a trusted, loopback-by-default surface;
+its HTTP API is internal and versioned with the client bundled beside it.
+
+**The inference layer answers to bayesmith.** The block partition, the
+per-block engine, the exact solves, the chain marginal and the convergence
+certificate are upstream's; NumPyro supplies the chain. What remains here as
+a second implementation is labelled as one and held in agreement by a
+cross-check suite. See [the bayesmith page](https://rheplicant.readthedocs.io/en/latest/bayesmith.html) for the
+version range and why it is closed.
+
+**The instrument model gained real physics in places and declares where it
+has not.** Thirty-five shipped classes carry a maturity level, fourteen of
+them maintained; a document that places a placeholder is told so once, and
+the published record says which nodes they were.
+
+**The package says what it promises.** `docs/stability.md` states the layers
+and who may import whom, what counts as public in each of the six namespaces,
+the four capability levels, every external contract version and the
+compatibility policy — and each claim is checked against the code rather than
+maintained beside it.
+
 ### The browser editor is now a persistent scientific workbench
 
 Config Plans 6A–6C retain exact YAML as the sole scientific state while

@@ -307,5 +307,26 @@ except ImportError:  # pragma: no cover - only when the package will not import
 
 _GENERATED.mkdir(exist_ok=True)
 (_GENERATED / "radio-graph.mmd").write_text(_mermaid)
+
+# The capability matrix and the not-implemented list, on the same terms as the
+# diagram above: written at build time from the registry, so a clone that has
+# never run the generator still builds, and a level raised in the code cannot
+# leave a stale table behind. `tests/test_docs_capabilities.py` re-runs the
+# generator and compares, which is what makes the checked-in copy -- when
+# there is one -- honest.
+try:
+    import importlib.util as _importlib_util
+
+    _spec = _importlib_util.spec_from_file_location(
+        "_generate_capabilities", _DOCS_DIR / "_generate_capabilities.py"
+    )
+    _capability_page = _importlib_util.module_from_spec(_spec)
+    _spec.loader.exec_module(_capability_page)
+    _capability_page.main(_GENERATED / "capabilities.md")
+except ImportError:  # pragma: no cover - only when `rheplicant` will not import
+    (_GENERATED / "capabilities.md").write_text(
+        "The capability matrix could not be generated: `rheplicant` did not "
+        "import in this environment.\n"
+    )
 for (_which, _theme), _svg in _examples.items():
     (_DOCS_DIR / f"signal-path-{_which}-{_theme}.svg").write_text(_svg)

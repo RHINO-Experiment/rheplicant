@@ -240,6 +240,8 @@ tutorial-nuts
 :caption: Stability and capabilities
 
 stability
+capabilities
+bayesmith
 ```
 
 ```{toctree}
