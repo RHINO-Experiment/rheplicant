@@ -348,6 +348,19 @@ def _recover_publication(
         return None
 
 
+#: The stderr line that names a published failure bundle, by status label.
+#:
+#: It is a machine-readable line, and it had THREE spellings: this producer
+#: built it from a label, and both consumers -- ``gui_worker._AUDIT_PREFIXES``
+#: and ``gui/jobs._AUDIT_PREFIXES`` -- held their own literal tuple. A wording
+#: change here would have made both return ``None`` rather than raise, so the
+#: GUI would have lost its ``/artifacts/`` links with nothing failing.
+#:
+#: Exported so the consumers read it rather than restate it.
+AUDIT_LINE_LABELS = ("refused", "error")
+AUDIT_LINE_PREFIXES = tuple(f"{label} audit: " for label in AUDIT_LINE_LABELS)
+
+
 def _report_failure_audit(
     stream: TextIO,
     *,
@@ -355,7 +368,7 @@ def _report_failure_audit(
     path: str,
 ) -> None:
     label = "refused" if status == "refused" else "error"
-    stream.write(f"{label} audit: {path}\n")
+    stream.write(f"{AUDIT_LINE_PREFIXES[AUDIT_LINE_LABELS.index(label)]}{path}\n")
     stream.flush()
 
 

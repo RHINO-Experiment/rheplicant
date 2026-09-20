@@ -287,6 +287,14 @@ source = ["rheplicant", "_rheplicant_bootstrap"]
 # than assumed: a full serial run under it reports "Required test coverage of
 # 89.0% reached. Total coverage: 89.22%". The 0.22 of headroom absorbs the
 # one-statement run-to-run wobble noted above with room to spare.
+# Re-measured 2026-09-20 on the Stage 3 batch, serially and with the same
+# invocation the coverage job uses: 3056 of 31487 statements missed, 90.29 %,
+# "Required test coverage of 89.0% reached". The floor stays at 89 and is NOT
+# raised to track it -- CI measures lower than this checkout (88.96 against
+# 89.39 when last compared), because no single machine covers both
+# `platform_darwin.py` and `platform_linux.py`. A floor set from a local
+# number is one CI fails on for a reason that is not a regression.
+#
 # `precision` governs BOTH the reported digits and the COMPARISON: coverage
 # checks `round(total, precision)` against `fail_under`. Left unset it
 # defaults to 0, which made an 89 floor gate at 88.5 -- and pytest-cov

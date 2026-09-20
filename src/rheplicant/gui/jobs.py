@@ -15,6 +15,7 @@ from uuid import uuid4
 
 import yaml
 
+from _rheplicant_bootstrap.entry import AUDIT_LINE_PREFIXES as _AUDIT_PREFIXES
 from _rheplicant_bootstrap.errors import ConfigError
 from _rheplicant_bootstrap.gui_child import (
     DRAIN_SECONDS as _DRAIN_SECONDS,
@@ -460,7 +461,6 @@ def _error_result(error: ConfigError) -> object | None:
     return result
 
 
-_AUDIT_PREFIXES = ("refused audit: ", "error audit: ")
 
 
 def _audit_path(stderr: str) -> str | None:

@@ -420,3 +420,41 @@ def test_the_documented_output_tree_lists_what_a_run_publishes(tmp_path):
         f"docs/config-cli.md's tree does not list {sorted(missing)}, which a "
         "plain successful run publishes"
     )
+
+
+def test_the_documented_machine_lines_are_the_ones_the_code_produces():
+    """The four parseable lines, against the page that promises them.
+
+    ``docs/config-cli.md`` did not mention any of them until 2026-09-20 --
+    including the two that two modules in this repository parse. A line
+    nothing documents is one a caller discovers by reading the source and then
+    depends on without anyone knowing.
+
+    The two prefixes are imported rather than spelled, so a wording change
+    fails here instead of silently costing the GUI its artefact links.
+    """
+    from _rheplicant_bootstrap.entry import AUDIT_LINE_PREFIXES
+
+    page = (
+        Path(__file__).resolve().parents[2] / "docs" / "config-cli.md"
+    ).read_text(encoding="utf-8")
+    for prefix in AUDIT_LINE_PREFIXES:
+        assert f"`{prefix}PATH`" in page, f"the page does not document {prefix!r}"
+    assert "`configuration valid: base + N variants`" in page
+    assert "`configuration run complete: PATH`" in page
+
+
+def test_the_success_lines_the_page_documents_are_the_ones_written(tmp_path, capsys):
+    """And the stdout half, measured rather than transcribed."""
+    from _rheplicant_bootstrap.cli import main
+
+    config = tmp_path / "config.yaml"
+    write_document(config)
+    assert main(["validate", str(config)]) == 0
+    assert capsys.readouterr().out == "configuration valid: base + 0 variants\n"
+
+    target = tmp_path / "result"
+    run_config = tmp_path / "run.yaml"
+    write_document(run_config, document(output=target))
+    assert main(["run", str(run_config)]) == 0
+    assert capsys.readouterr().out == f"configuration run complete: {target}\n"

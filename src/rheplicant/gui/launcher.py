@@ -18,6 +18,7 @@ import argparse
 import ipaddress
 import re
 import socket
+import sys
 from collections.abc import Iterable, Sequence
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -349,11 +350,35 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
+#: What ``rheplicant`` exits for a usage or configuration refusal, and now
+#: what this command exits for one too.
+#:
+#: ``raise SystemExit("message")`` prints the message and exits **1**, which
+#: is what a bad ``--host`` or ``--port`` did here. ``docs/config-cli.md``
+#: says 1 is "unexpected package or internal failure; a traceback is
+#: printed" and 2 is the refusal -- so this command reported a rejected
+#: invocation as an internal fault, and the page did not show the
+#: disagreement because it documented only ``rheplicant``.
+REFUSAL_EXIT = 2
+
+
+def _refuse_invocation(message: str, cause: BaseException | None = None):
+    """Print a refusal on stderr and exit :data:`REFUSAL_EXIT`.
+
+    Named for the invocation rather than just ``_refuse``, because this module
+    already has a ``_refuse`` -- the ASGI one that sends a 400 to a request
+    with a bad ``Host`` header. Shadowing it turned 79 host-guard tests red
+    at once, which is the cheap version of that mistake.
+    """
+    print(message, file=sys.stderr)
+    raise SystemExit(REFUSAL_EXIT) from cause
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Console entry point for ``rheplicant-gui``."""
     arguments = _parser().parse_args(argv)
     if not 0 <= arguments.port <= 65535:
-        raise SystemExit("--port must be between 0 and 65535.")
+        _refuse_invocation("--port must be between 0 and 65535.")
     allowed_hosts = tuple(arguments.allowed_hosts)
     try:
         _assert_bind(
@@ -367,7 +392,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         # checks again on its own, so the rule holds for programmatic callers
         # too, but main() does not depend on that to give CLI users a prompt
         # SystemExit instead of an unhandled RuntimeError.
-        raise SystemExit(str(error)) from error
+        _refuse_invocation(str(error), error)
     try:
         serve(
             host=arguments.host,
@@ -377,11 +402,13 @@ def main(argv: Sequence[str] | None = None) -> int:
             allowed_hosts=allowed_hosts,
         )
     except _MissingInstall as error:
+        # NOT a refusal: the invocation was fine and the environment is not.
+        # It keeps exit 1 and the message-carrying SystemExit deliberately.
         raise SystemExit(str(error)) from error
     return 0
 
 
-__all__ = ["create_editor_app", "frontend_directory", "main", "serve"]
+__all__ = ["REFUSAL_EXIT", "create_editor_app", "frontend_directory", "main", "serve"]
 
 
 if __name__ == "__main__":  # pragma: no cover - console-script path

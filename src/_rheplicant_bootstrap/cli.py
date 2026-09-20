@@ -7,6 +7,7 @@ import sys
 from collections.abc import Sequence
 from typing import BinaryIO, TextIO
 
+from _rheplicant_bootstrap.audit.software import package_version
 from _rheplicant_bootstrap.entry import _render_exception, dispatch_request
 from _rheplicant_bootstrap.errors import REFUSALS, ConfigError
 from _rheplicant_bootstrap.output.manager import parse_output_grammar, resolve_output_request
@@ -44,6 +45,14 @@ class _Parser(argparse.ArgumentParser):
 
 def _parser() -> _Parser:
     parser = _Parser(prog="rheplicant", add_help=True)
+    # ``--version`` before the subparsers, so it answers without a CONFIG.
+    # argparse's ``version`` action raises ``SystemExit(0)`` after printing,
+    # which is the same path ``--help`` takes and which ``main`` reports as
+    # its own exit code; the ``error`` override above deliberately does not
+    # touch either.
+    parser.add_argument(
+        "--version", action="version", version=f"rheplicant {package_version()}"
+    )
     commands = parser.add_subparsers(dest="command", required=True)
     for name in ("validate", "run", "script"):
         command = commands.add_parser(name)

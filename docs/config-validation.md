@@ -438,6 +438,12 @@ both, so C18 is last. Write the bullets in that order and keep them in it;
   physics arrives, because the level is read from the operator rather than
   listed here.
 
+  A successful `run` also publishes the same answer as a record,
+  `capabilities.json`, listing every node of every resolved layer with its
+  level — so filtering an archive on "did anything placeholder feed this
+  number" does not mean parsing this sentence. The notice and the record are
+  two views of one resolution, not two walks that could disagree.
+
 - **A30** — `model.noise` draws its own randomness and `inference.twin.without:`
   does not drop it. A `conjugate.wiener` run closes the twin over one template
   state, so that draw would be the same realisation added to every prediction

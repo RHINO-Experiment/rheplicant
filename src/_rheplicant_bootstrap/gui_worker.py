@@ -28,6 +28,7 @@ from contextlib import contextmanager
 from io import StringIO
 
 from _rheplicant_bootstrap.audit import AuditTrace
+from _rheplicant_bootstrap.entry import AUDIT_LINE_PREFIXES as _AUDIT_PREFIXES
 from _rheplicant_bootstrap.errors import REFUSALS, ConfigError
 from _rheplicant_bootstrap.execution_environment import (
     prepare_execution_environment,
@@ -227,7 +228,6 @@ def _run_forward_preview(yaml_text: str) -> dict[str, object]:
         execution.close()
 
 
-_AUDIT_PREFIXES = ("refused audit: ", "error audit: ")
 
 
 def _published_audit(stderr_text: str) -> str | None:

@@ -42,6 +42,39 @@ instead — see "Placing one run's tree without editing the document".
 It controls success/progress text only. Warnings and errors always use standard
 error.
 
+`rheplicant --version` prints `rheplicant <version>` and exits 0. The version
+is the installed distribution's, read from the same place the `software` row
+of every `provenance.json` reads it.
+
+`rheplicant-gui` uses the same table: a rejected `--host`, `--port` or
+`--allow-remote` combination exits **2** with the message on standard error.
+It exits 1 only for a missing `rheplicant[gui]` install, which is an
+environment fault and not a refused invocation. Until 2026-09-20 a refused
+invocation exited 1 here, because `SystemExit("message")` carries the text as
+its exit *code* and Python then exits 1 — so the two commands disagreed about
+this table, and the disagreement was invisible from this page because the
+page documented only `rheplicant`.
+
+### Lines a caller may parse
+
+Four lines are machine-readable. They are stable in the sense the rest of this
+page is stable, and they are spelled once in the code
+(`_rheplicant_bootstrap.entry.AUDIT_LINE_PREFIXES` for the last two).
+
+| Stream | Line | When |
+|---|---|---|
+| stdout | `configuration valid: base + N variants` | `validate` succeeded |
+| stdout | `configuration run complete: PATH` | `run` published a tree at `PATH` |
+| stderr | `refused audit: PATH` | a refusal published its sibling at `PATH` |
+| stderr | `error audit: PATH` | an internal failure published its sibling |
+
+The two `audit:` lines are written **before** the failure unwinds and prints
+itself, so a long traceback pushes them out of any bounded excerpt of the
+stream: read them from the whole stream, and take the last match. The GUI's
+worker prefers its own framed `failure_audit` field over parsing them at all,
+because a plugin that prints `error audit: /somewhere/else` would otherwise
+choose the directory a long-lived parent serves artefacts from.
+
 ## Audit and scientific output trees
 
 A successful run publishes:

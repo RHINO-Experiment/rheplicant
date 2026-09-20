@@ -39,6 +39,26 @@ DEPENDENCIES = ("jax", "jaxlib", "equinox", "numpy", "numpyro")
 _TIMEOUT_SECONDS = 5.0
 
 
+#: What a caller reports when there is no installed distribution to ask.
+#: ``rheplicant.__version__`` and ``gui/api.py`` both use this string, and a
+#: fourth spelling of the same fallback is how three of them come to disagree.
+UNKNOWN_VERSION = "0.0.0+unknown"
+
+
+def package_version() -> str:
+    """The installed ``rheplicant`` version, for anything that prints it.
+
+    ``--version`` on the command line, the OpenAPI document's version and the
+    ``software`` row of every provenance record are three readings of one
+    fact, and this is the one reading. The audit row keeps
+    :func:`_version`'s ``(value, reason)`` pair because provenance records WHY
+    a fact is missing; a printed version has nowhere to put a reason, so it
+    gets the marker instead.
+    """
+    version, _reason = _version("rheplicant")
+    return version or UNKNOWN_VERSION
+
+
 def _version(distribution: str) -> tuple[str | None, str | None]:
     try:
         return metadata.version(distribution), None
@@ -260,7 +280,9 @@ __all__ = [
     "PROJECT_KEYS",
     "PYTHON_KEYS",
     "SOFTWARE_KEYS",
+    "UNKNOWN_VERSION",
     "VERSION_FACT_KEYS",
     "collect_software",
+    "package_version",
     "validate_software",
 ]

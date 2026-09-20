@@ -19,6 +19,7 @@ from fastapi import BackgroundTasks, FastAPI, HTTPException, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field
 
+from _rheplicant_bootstrap.audit.software import package_version
 from _rheplicant_bootstrap.errors import ConfigError
 from _rheplicant_bootstrap.gui_limits import MAX_RETAINED_JOBS
 from rheplicant.gui.document import EditorSnapshot, snapshot
@@ -296,16 +297,14 @@ def _apply(
         raise HTTPException(status_code=422, detail=str(error)) from error
 
 
-#: The package's version, reported by the OpenAPI document. Imported lazily
-#: inside the module rather than from `rheplicant` at import time, because
-#: `gui` must not pull the whole package to describe itself.
-try:  # pragma: no cover - exercised by whichever install is present
-    from importlib.metadata import PackageNotFoundError
-    from importlib.metadata import version as _distribution_version
-
-    _PACKAGE_VERSION = _distribution_version("rheplicant")
-except PackageNotFoundError:  # pragma: no cover - a source tree with no install
-    _PACKAGE_VERSION = "0.0.0+unknown"
+#: The package's version, reported by the OpenAPI document. Read from the
+#: bootstrap layer rather than from `rheplicant`, because `gui` must not pull
+#: the whole package to describe itself -- and from ONE reading rather than
+#: its own, because `--version`, this document and every provenance
+#: `software` row are three printings of one fact. This module had its own
+#: `importlib.metadata` call and its own `"0.0.0+unknown"` fallback; the
+#: command line was about to be given a third of each.
+_PACKAGE_VERSION = package_version()
 
 
 def create_app(

@@ -25,6 +25,22 @@ runs:
 """
 
 
+
+def refused(capsys, call, *, naming: str) -> None:
+    """A refused invocation: exit ``REFUSAL_EXIT``, message on stderr.
+
+    It used to be ``pytest.raises(SystemExit, match=...)``, which passed
+    because ``SystemExit("message")`` carries the text as its CODE and exits
+    **1**. ``docs/config-cli.md`` reserves 1 for an internal failure and 2 for
+    a refusal, so this command was reporting a rejected invocation as a fault
+    of its own. The message is the same; where it goes and what the process
+    returns are not.
+    """
+    with pytest.raises(SystemExit) as excinfo:
+        call()
+    assert excinfo.value.code == launcher.REFUSAL_EXIT, excinfo.value.code
+    assert naming in capsys.readouterr().err
+
 def test_selected_gui_extra_and_console_launcher_are_public() -> None:
     project = tomllib.loads((PROJECT_ROOT / "pyproject.toml").read_text())["project"]
 
@@ -79,7 +95,7 @@ def test_bundled_app_serves_the_editor_and_api_from_one_origin() -> None:
     assert created.json()["document"]["yaml_text"] == BASE
 
 
-def test_launcher_defaults_to_loopback_and_remote_binding_is_explicit(monkeypatch) -> None:
+def test_launcher_defaults_to_loopback_and_remote_binding_is_explicit(monkeypatch, capsys) -> None:
     calls: list[tuple[str, int, str]] = []
 
     def fake_serve(
@@ -96,13 +112,16 @@ def test_launcher_defaults_to_loopback_and_remote_binding_is_explicit(monkeypatc
     assert launcher.main(["--port", "9123", "--log-level", "error"]) == 0
     assert calls == [("127.0.0.1", 9123, "error")]
 
-    with pytest.raises(SystemExit, match="--allow-remote"):
-        launcher.main(["--host", "0.0.0.0"])
+    refused(capsys, lambda: launcher.main(["--host", "0.0.0.0"]),
+            naming="--allow-remote")
     assert len(calls) == 1
 
     assert launcher.main(["--host", "::1", "--port", "9124"]) == 0
-    with pytest.raises(SystemExit, match="--allowed-host"):
-        launcher.main(["--host", "0.0.0.0", "--allow-remote", "--port", "9125"])
+    refused(
+        capsys,
+        lambda: launcher.main(["--host", "0.0.0.0", "--allow-remote", "--port", "9125"]),
+        naming="--allowed-host",
+    )
     assert len(calls) == 2
     assert launcher.main(
         [
@@ -263,7 +282,7 @@ def _resolves_to(monkeypatch, *addresses: str) -> None:
 
 
 def test_localhost_is_a_loopback_bind_only_when_every_address_is_loopback(
-    monkeypatch,
+    monkeypatch, capsys
 ) -> None:
     """"localhost" used to be accepted by name. It is now resolved, and a
     hosts file that points it anywhere else needs --allow-remote like any
@@ -277,8 +296,8 @@ def test_localhost_is_a_loopback_bind_only_when_every_address_is_loopback(
     _resolves_to(monkeypatch, "127.0.0.1", "203.0.113.7")
     with pytest.raises(RuntimeError, match="--allow-remote"):
         launcher.serve(host="localhost", port=8000, log_level="info")
-    with pytest.raises(SystemExit, match="--allow-remote"):
-        launcher.main(["--host", "LOCALHOST"])
+    refused(capsys, lambda: launcher.main(["--host", "LOCALHOST"]),
+            naming="--allow-remote")
 
     _resolves_to(monkeypatch)
     with pytest.raises(RuntimeError, match="--allow-remote"):
@@ -290,7 +309,7 @@ def test_localhost_is_a_loopback_bind_only_when_every_address_is_loopback(
     assert len(calls) == 1
 
 
-def test_localhost_that_does_not_resolve_is_not_a_loopback_bind(monkeypatch) -> None:
+def test_localhost_that_does_not_resolve_is_not_a_loopback_bind(monkeypatch, capsys) -> None:
     pytest.importorskip("uvicorn")
     import uvicorn
 
@@ -301,6 +320,47 @@ def test_localhost_that_does_not_resolve_is_not_a_loopback_bind(monkeypatch) -> 
         raise socket.gaierror(socket.EAI_NONAME, "nodename nor servname provided")
 
     monkeypatch.setattr(launcher.socket, "getaddrinfo", unresolvable)
-    with pytest.raises(SystemExit, match="--allow-remote"):
-        launcher.main(["--host", "localhost"])
+    refused(capsys, lambda: launcher.main(["--host", "localhost"]),
+            naming="--allow-remote")
     assert calls == []
+
+
+def test_the_console_script_exits_two_for_a_refused_invocation() -> None:
+    """The contract at the process level, which is where a caller reads it.
+
+    In-process tests see ``SystemExit``; a shell sees the number. Both halves
+    are asserted because they were both wrong together: the message was the
+    exit CODE, so the process returned 1 and printed the text -- indisputably
+    a refusal reported as an internal failure.
+    """
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "from rheplicant.gui.launcher import main; "
+            "raise SystemExit(main(['--host', '0.0.0.0']))",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    # NOT compared against `launcher.REFUSAL_EXIT`, which is what this
+    # assertion said first and what made it unable to fail: reading the
+    # constant means lowering the constant back to 1 keeps the test green,
+    # and "the two commands agree" was the whole claim. The number is
+    # measured from `rheplicant` refusing something, in this same test.
+    refusal = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "from _rheplicant_bootstrap.cli import main; "
+            "raise SystemExit(main(['run', '/nonexistent/nothing.yaml']))",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    assert refusal.returncode not in (0, 1), refusal.stderr
+    assert completed.returncode == refusal.returncode
+    assert "--allow-remote" in completed.stderr
+    assert "Traceback" not in completed.stderr

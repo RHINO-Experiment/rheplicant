@@ -264,13 +264,16 @@ def test_a_loopback_bind_address_is_itself_an_allowed_host(monkeypatch) -> None:
     assert client.get("/api/starter", headers={"Host": "127.0.0.3"}).status_code == 400
 
 
-def test_allow_remote_without_an_allowed_host_is_refused(monkeypatch) -> None:
+def test_allow_remote_without_an_allowed_host_is_refused(monkeypatch, capsys) -> None:
     calls: list[dict] = []
     monkeypatch.setattr(launcher, "serve", lambda **kwargs: calls.append(kwargs))
     with pytest.raises(SystemExit) as excinfo:
         launcher.main(["--host", "0.0.0.0", "--allow-remote"])
-    assert isinstance(excinfo.value.code, str)
-    assert "--allowed-host" in excinfo.value.code
+    # Exit 2, the code `rheplicant` uses for a refusal, with the message on
+    # stderr. It used to be SystemExit("<message>"), which Python prints and
+    # then exits 1 -- the code the page reserves for an internal failure.
+    assert excinfo.value.code == launcher.REFUSAL_EXIT
+    assert "--allowed-host" in capsys.readouterr().err
     assert calls == []
 
 
@@ -285,12 +288,13 @@ def test_serve_refuses_allow_remote_without_an_allowed_host(monkeypatch) -> None
 @pytest.mark.parametrize(
     "name", ["gui.example.org:8000", "http://gui.example.org", "", "gui example", "a/b"]
 )
-def test_a_malformed_allowed_host_is_refused(monkeypatch, name) -> None:
+def test_a_malformed_allowed_host_is_refused(monkeypatch, capsys, name) -> None:
     calls: list[dict] = []
     monkeypatch.setattr(launcher, "serve", lambda **kwargs: calls.append(kwargs))
     with pytest.raises(SystemExit) as excinfo:
         launcher.main(["--host", "0.0.0.0", "--allow-remote", "--allowed-host", name])
-    assert "--allowed-host" in str(excinfo.value.code)
+    assert excinfo.value.code == launcher.REFUSAL_EXIT
+    assert "--allowed-host" in capsys.readouterr().err
     assert calls == []
 
 
