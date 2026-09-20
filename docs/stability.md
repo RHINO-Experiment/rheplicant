@@ -36,7 +36,7 @@ at call time. Importing it any earlier would put JAX behind
 **The bootstrap is two layers in one package**, and which module is in which
 is now written down rather than implied. Seven modules are the **command
 half** — `__init__`, `__main__`, `cli`, `entry`, `execution_environment`,
-`gui_worker` and `script` — and the other thirty-seven are the **foundation**.
+`gui_worker` and `script` — and the other forty-four are the **foundation**.
 The seam is what a module costs at import: the foundation is read before
 `rheplicant` is importable and must stay that way, while a command module
 drives the package once it is. No foundation module imports a command one.

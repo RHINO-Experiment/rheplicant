@@ -141,7 +141,21 @@ def test_no_stored_version_is_compared_loosely_anywhere():
     for path in sorted(src.rglob("*.py")):
         text = path.read_text(encoding="utf-8")
         for match in re.finditer(
-            r"^.*\[.format_version.\]\s*!=\s*|^.*\.get\(.format_version.\)\s*!=\s*",
+            # Four spellings, not two. The first version of this census saw
+            # only a subscript and a `.get(...)`, so `row.format_version != 1`
+            # and a bare `format_version != X` were invisible to it -- and
+            # `output/transaction.py` was carrying exactly the defect this
+            # file exists to find, unguarded, while the census read green.
+            # That is the census's own failure mode: a matcher narrower than
+            # the thing it guards.
+            r"^.*\[.format_version.\]\s*!=\s*"
+            r"|^.*\.get\(.format_version.\)\s*!=\s*"
+            r"|^.*\.format_version\s*!=\s*"
+            # A bare name, wherever it sits on the line: the guarded
+            # comparison in entry.py is the SECOND term of its condition, so a
+            # line-anchored pattern missed it. The lookbehind is what keeps
+            # this branch from re-matching the two spellings above.
+            r"|^.*(?<![\w.])format_version\s*!=\s*",
             text,
             re.M,
         ):

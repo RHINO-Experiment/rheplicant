@@ -1,7 +1,7 @@
 :::{admonition} There is a sibling package, and this layer is not moving to it
 :class: note
 
-`bayesmith <https://pypi.org/project/bayesmith/>`_ does Bayesian inference over
+[bayesmith](https://pypi.org/project/bayesmith/) does Bayesian inference over
 an explicit graph, with no radio astronomy in it. Several capabilities on these
 pages have a counterpart there: the linear-Gaussian exact solves, the iterative
 GLS, the Fisher matrix, the square-root information layer, and the graph

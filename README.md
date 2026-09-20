@@ -44,7 +44,7 @@ None of the four is a separate mode. They all read the **same twin object**,
 which is what makes the calibration you fit the simulator you trust.
 
 **2 and 4 have a sibling, and it is a separate package rather than a
-successor.** `bayesmith <https://pypi.org/project/bayesmith/>`_ does inference
+successor.** [bayesmith](https://pypi.org/project/bayesmith/) does inference
 over a graph with no radio astronomy in it, and the capabilities it shares with
 this package are held in agreement by a cross-check suite rather than by shared
 code. Nothing here is moving or deprecated: `rheplicant.inference` is the

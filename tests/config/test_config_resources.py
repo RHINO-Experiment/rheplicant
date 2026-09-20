@@ -3291,8 +3291,18 @@ class TestExtends:
 
     @pytest.mark.parametrize("kind", ["list", "tuple", "set", "frozenset"])
     def test_compatibility_reachability_identity_cache_handles_collisions(self, kind, monkeypatch):
-        from _rheplicant_bootstrap import layering as neutral_layering
         from _rheplicant_bootstrap import layering_copy as neutral_copy
+
+        # The patch goes on the module that CALLS `id`, not the one that owns
+        # the function under test. A bare name resolves in the globals of the
+        # module where the code was DEFINED, so after `layering.py` was split
+        # this patch -- still aimed at `layering` -- stopped reaching anything
+        # and the test degraded into a containment check that passes whatever
+        # the collision logic does. Measured 2026-09-20: 0 calls to
+        # `colliding_id` against `layering`, 2 against `layering_probe`.
+        # `_compatibility_add_identity`/`_compatibility_has_identity` have no
+        # other test, so this was their only coverage.
+        from _rheplicant_bootstrap import layering_probe as neutral_probe
 
         class HashableMapping(dict):
             __hash__ = object.__hash__
@@ -3313,7 +3323,7 @@ class TestExtends:
                 return 7
             return real_id(value)
 
-        monkeypatch.setattr(neutral_layering, "id", colliding_id, raising=False)
+        monkeypatch.setattr(neutral_probe, "id", colliding_id, raising=False)
 
         assert neutral_copy._compatibility_reaches_mapping([reaching, empty], target)
 

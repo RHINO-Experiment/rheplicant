@@ -199,3 +199,50 @@ def test_the_page_states_the_real_development_status(page):
     assert f"`{declared.group(1)}`" in page, (
         f"{PAGE.name} does not quote the declared classifier {declared.group(1)!r}"
     )
+
+
+#: The page writes its two bootstrap-layer counts as words.
+_NUMBER_WORDS = {
+    "seven": 7,
+    "thirty-seven": 37,
+    "forty-four": 44,
+    "forty-five": 45,
+    "fifty-one": 51,
+}
+
+
+def test_the_page_states_the_real_bootstrap_layer_split(page):
+    """The one number on this page that was NOT checked, and had gone stale.
+
+    The page opens by saying every number on it is checked against the code.
+    That was false here: it said thirty-seven foundation modules while
+    ``tests/test_import_direction.py`` pinned forty-four, because splitting
+    ``layering.py`` into its seven subjects added seven foundation modules and
+    the prose was not in the loop. The guard that knew lived in another file
+    and had no reason to read this page.
+
+    Both halves are derived here, from the same walk the import-direction
+    ratchet uses, so the page cannot drift from it again.
+    """
+    from tests.test_import_direction import BOOTSTRAP_COMMAND, _bootstrap_modules
+
+    # The ratchet's OWN walk, not a second one. A stem-based reimplementation
+    # written here first gave 46 against the ratchet's 44, because the package
+    # has subpackages and `audit/__init__.py` and `output/__init__.py` are not
+    # two modules called `__init__`. Two walks of one package is the shape
+    # this whole page exists to stop.
+    foundation = set(_bootstrap_modules()) - BOOTSTRAP_COMMAND
+
+    stated = re.search(r"([A-Za-z-]+) modules are the \*\*command\s+half\*\*", page, re.S)
+    assert stated, "the page no longer states a command-half count"
+    assert _NUMBER_WORDS.get(stated.group(1).lower()) == len(BOOTSTRAP_COMMAND), (
+        f"the page says {stated.group(1)!r} command modules; the ratchet "
+        f"pins {len(BOOTSTRAP_COMMAND)}"
+    )
+
+    other = re.search(r"the other ([a-z-]+) are the \*\*foundation\*\*", page)
+    assert other, "the page no longer states a foundation count"
+    assert _NUMBER_WORDS.get(other.group(1)) == len(foundation), (
+        f"the page says {other.group(1)!r} foundation modules; the walk finds "
+        f"{len(foundation)}. Splitting a foundation module changes this number"
+    )

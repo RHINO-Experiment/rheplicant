@@ -895,7 +895,7 @@ def catalog_drift(catalog: FormCatalog) -> tuple[str, ...]:
 #: ``operator_table``, the value vocabulary and the shorthand pattern are
 #: re-exported rather than merely imported. ``gui/node_forms.py`` needs all
 #: four and may not reach the config layer itself -- the boundary test at
-#: ``tests/config/test_config_surface.py`` keeps that list at five files, and
+#: ``tests/config/test_config_surface.py`` keeps that list at three files, and
 #: this module is one of them, so gatewaying is the role it already has.
 #: ``form_catalog_finalize`` takes the same route for the same reason.
 __all__ = [

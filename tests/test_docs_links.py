@@ -408,3 +408,40 @@ def test_the_sidebar_keeps_furo_s_own_components_and_adds_ours() -> None:
     )
     assert "sidebar/github.html" in listed
     assert (DOCS / "_templates" / "sidebar" / "github.html").is_file()
+
+
+#: reStructuredText's inline hyperlink: ``text <url>``_ -- valid in Sphinx's
+#: default markup and inert in Markdown, where the backticks make a code span
+#: that CommonMark never re-parses for a nested link. It renders as literal
+#: text with a trailing underscore.
+_RST_LINK = re.compile(r"`[^`]*<[a-z]+://[^>]+>`_")
+
+
+def test_no_markdown_page_carries_a_reStructuredText_link() -> None:
+    """A link that is not a link, and that no link guard could see.
+
+    ``README.md`` carried ```bayesmith <https://pypi.org/project/bayesmith/>`_``
+    -- RST syntax in a MyST/Markdown file. It rendered on GitHub and on PyPI as
+    inline code followed by a stray underscore, not as a hyperlink.
+
+    Every other link check here starts from ``](url)`` or from an ``href``
+    attribute, so none of them could see it: the matcher was narrower than the
+    thing it guarded, which is the recurring shape in this repository. This
+    test looks for the syntax that should not be here rather than for the
+    syntax that should.
+    """
+    # _sources() is docs/*.md and conf.py; the offender that motivated this
+    # test was in README.md, which that helper does not cover. Widening the
+    # helper would change what every other test here scans, so the population
+    # is spelled out once, at the top level, and README is in it.
+    pages = [(p.name, p.read_text(encoding="utf-8")) for p in sorted(DOCS.glob("*.md"))]
+    pages.append(("README.md", (ROOT / "README.md").read_text(encoding="utf-8")))
+    pages.append(("CHANGELOG.md", (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")))
+    assert len(pages) > 20, "the page walk found almost nothing; it is not scanning"
+    offenders = [
+        f"{name}: {match.group(0)}" for name, text in pages for match in _RST_LINK.finditer(text)
+    ]
+    assert not offenders, (
+        "reStructuredText link syntax in a Markdown file renders as literal "
+        f"text, not as a link: {offenders}. Write [text](url)"
+    )

@@ -541,7 +541,8 @@ def _read_journal(parent_fd: int, name: str) -> TransactionJournal:
         value["new_marker_id"],
     )
     if (
-        row.format_version != 1
+        type(row.format_version) is not int
+        or row.format_version != 1
         or _TRANSACTION_ID.fullmatch(row.transaction_id or "") is None
         or row.publication not in _PUBLICATIONS
         or row.phase not in TRANSACTION_PHASES
