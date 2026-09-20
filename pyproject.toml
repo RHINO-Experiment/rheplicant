@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "rheplicant"
-version = "0.9.0.dev0"
+version = "0.9.0"
 description = "RHEPLICANT — a differentiable replica of a radio antenna (RHino + REPLICa + ANTenna): a JAX + Equinox scientific pipeline framework for single-antenna radio telescopes"
 readme = "README.md"
 license = { file = "LICENSE" }
@@ -107,6 +107,10 @@ classifiers = [
 # comment. The floor measurement was taken against the 0.9.0 wheel and has not
 # been repeated against 0.10.0; it is still the right number because the bound
 # it sits inside did not move, but it is a 0.9.0 measurement and says so.
+# What HAS been checked against 0.10.0 is the floor itself: numpyro 0.21.0 and
+# bayesmith 0.10.0 are what this release's whole suite runs on, so the pair at
+# the bottom of the range is verified even though the releases below it have
+# not been re-walked.
 numpyro = ["numpyro>=0.21,<0.22"]
 # NoiseWaveOperator is an adapter over rhino_cal_jax, the JAX implementation of
 # the noise-wave receiver model (D15). The physics has a life outside this

@@ -179,3 +179,26 @@ def test_the_page_names_the_guards_that_hold_its_claims(page):
     ):
         assert guard in page, f"{PAGE.name} does not name {guard}"
         assert (ROOT / guard).exists(), f"{PAGE.name} names {guard}, which is gone"
+
+
+def test_the_page_states_the_real_development_status(page):
+    """The classifier is a claim about maturity, in two places.
+
+    ``docs/stability.md`` says the package is pre-1.0 and quotes the
+    classifier; ``pyproject.toml`` is what PyPI reads. Nothing joined them, so
+    raising one would have left the other saying the older thing -- and this
+    is exactly the release where somebody is tempted to raise it.
+
+    Alpha is deliberate at 0.9.0 and the page argues it: the boundaries and
+    the API are frozen, and 17 of the 29 shipped operator classes are still
+    placeholder physics. A classifier describes the whole package, and the
+    physics is the part a reader is most likely to trust by mistake.
+    """
+    declared = re.search(
+        r'"(Development Status :: [^"]+)"', (ROOT / "pyproject.toml").read_text()
+    )
+    assert declared, "pyproject.toml declares no development-status classifier"
+    assert f"`{declared.group(1)}`" in page, (
+        f"{PAGE.name} does not quote the declared classifier "
+        f"{declared.group(1)!r}"
+    )
