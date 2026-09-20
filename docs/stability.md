@@ -150,6 +150,7 @@ bundle is a 404 nothing else would catch.
 | Audit bundle integrity manifest | `1` | `_rheplicant_bootstrap.audit.integrity.INTEGRITY_FORMAT_VERSION` |
 | Audit provenance document | `1` | `provenance-v1.schema.json`, `format_version.const` |
 | Audit diagnostics document | `1` | `diagnostics-v1.schema.json`, `format_version.const` |
+| Scientific product manifest | `1` | `products-v1.schema.json`, `format_version.const` |
 | Inference archive | `3` | `rheplicant.inference.archive` |
 | Generated script | `1` | `_rheplicant_bootstrap.script.SCRIPT_FORMAT_VERSION` |
 
@@ -157,6 +158,15 @@ A published script carries its format version in the call it makes, and a
 script written before versions existed is refused with the command that
 regenerates it — the embedded source bytes in the old file are unchanged and
 still the author's.
+
+`products.json` names every scientific product a run published, the requests
+that asked for them and the omissions, so a reader of an archived tree can see
+what was asked for as well as what arrived. It was absent from this table until
+2026-09-20 -- the table was a hand-written list, and a hand-written list of
+published formats is one that goes one row short. It is now derived: every
+schema in `src/rheplicant/config/schemas/` that declares a `format_version`
+must appear here by file name and version, which is what
+`tests/test_stability_page.py` checks.
 
 The two audit documents are **closed**: every object in them sets
 `additionalProperties: false` and requires every property it declares, so a

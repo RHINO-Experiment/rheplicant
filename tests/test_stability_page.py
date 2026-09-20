@@ -18,6 +18,7 @@ and a test that tried would be pinning wording rather than fact.
 from __future__ import annotations
 
 import importlib
+import json
 import pathlib
 import re
 from collections import Counter
@@ -26,13 +27,13 @@ import pytest
 
 from _rheplicant_bootstrap.audit.integrity import INTEGRITY_FORMAT_VERSION
 from rheplicant.config.schema import json_schema
-from rheplicant.config.schemas import load_schema
 from rheplicant.core.capability import Maturity
 from rheplicant.inference.archive import _FORMAT_VERSION
 from rheplicant.radio import capabilities
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 PAGE = ROOT / "docs" / "stability.md"
+SCHEMAS = ROOT / "src" / "rheplicant" / "config" / "schemas"
 
 NAMESPACES = (
     "rheplicant", "rheplicant.core", "rheplicant.radio",
@@ -103,21 +104,53 @@ def test_the_page_never_claims_a_class_is_unavailable(page):
     )
 
 
+def packaged_schema_versions():
+    """Every schema shipped in the wheel that declares a ``format_version``.
+
+    Read from the directory rather than listed, because a list is what this
+    guard was before and what it missed: ``products-v1`` shipped a versioned,
+    published manifest and the page's table did not mention it at all. Two
+    further rows were added by hand on 2026-09-20 and the same omission could
+    have happened again the same way.
+    """
+    rows = {}
+    for path in sorted(SCHEMAS.glob("*.schema.json")):
+        schema = json.loads(path.read_bytes())
+        const = schema.get("properties", {}).get("format_version", {}).get("const")
+        if const is not None:
+            rows[path.name.removesuffix(".schema.json")] = const
+    assert rows, "no packaged schema declares a format_version"
+    return rows
+
+
 def test_the_page_states_the_real_contract_versions(page):
     for version, what in (
         (f'`"{json_schema()["schemaVersion"]}"`', "the schema version"),
         (f"| `{INTEGRITY_FORMAT_VERSION}` |", "the integrity version"),
         (f"| `{_FORMAT_VERSION}` |", "the archive version"),
-        *(
-            (
-                f"| Audit {name} document | "
-                f"`{load_schema(f'{name}-v1')['properties']['format_version']['const']}` |",
-                f"the {name} document version",
-            )
-            for name in ("provenance", "diagnostics")
-        ),
     ):
         assert version in page, f"{PAGE.name} does not state {what} as {version}"
+
+
+@pytest.mark.parametrize("name", sorted(packaged_schema_versions()))
+def test_the_page_names_every_packaged_schema_and_its_version(page, name):
+    """A published format the page does not list is one nobody was told about.
+
+    The row has to name the schema FILE, not just carry the number: every
+    version here is currently ``1``, so a table that stated the numbers alone
+    would be satisfied by any three rows at all.
+    """
+    version = packaged_schema_versions()[name]
+    assert f"`{name}.schema.json`" in page, (
+        f"{PAGE.name} does not name the packaged schema {name}.schema.json"
+    )
+    row = next(
+        (line for line in page.splitlines() if f"`{name}.schema.json`" in line), None
+    )
+    assert row is not None
+    assert f"`{version}`" in row, (
+        f"{PAGE.name}'s row for {name} does not state its version {version}"
+    )
 
 
 def test_the_page_states_the_declared_bayesmith_range(page):
