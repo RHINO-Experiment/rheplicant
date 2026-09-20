@@ -201,13 +201,19 @@ def test_the_page_states_the_real_development_status(page):
     )
 
 
-#: The page writes its two bootstrap-layer counts as words.
-_NUMBER_WORDS = {
-    "seven": 7,
-    "thirty-seven": 37,
-    "forty-four": 44,
-    "forty-five": 45,
-    "fifty-one": 51,
+#: The page writes its two bootstrap-layer counts as words. Generated rather
+#: than listed: a hand-kept table needs an entry added every time a module is
+#: split, and the entry that is missing reads as "the page states no count"
+#: rather than as "this table is short".
+_ONES = (
+    "zero one two three four five six seven eight nine ten eleven twelve "
+    "thirteen fourteen fifteen sixteen seventeen eighteen nineteen"
+).split()
+_TENS = "_ _ twenty thirty forty fifty sixty seventy eighty ninety".split()
+_NUMBER_WORDS = {word: n for n, word in enumerate(_ONES)} | {
+    (_TENS[t] if o == 0 else f"{_TENS[t]}-{_ONES[o]}"): t * 10 + o
+    for t in range(2, 10)
+    for o in range(10)
 }
 
 

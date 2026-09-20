@@ -52,11 +52,6 @@ LARGE: dict[str, tuple[str, str]] = {
         "checking a linearity claim and exporting the operator are two "
         "jobs; the solve helpers are a third",
     ),
-    "_rheplicant_bootstrap/plugins.py": (
-        SPLIT,
-        "audited import, the closed JSON projection and the refusal "
-        "vocabulary are separable, and only the first needs the audit trail",
-    ),
     "rheplicant/config/preflight/model.py": (
         SPLIT,
         "schema §6's model checks are a dozen independent passes sharing "

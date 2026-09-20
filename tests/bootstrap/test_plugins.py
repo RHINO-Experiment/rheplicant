@@ -30,6 +30,48 @@ from _rheplicant_bootstrap.plugins import (
     plugin_audit_row,
 )
 from _rheplicant_bootstrap.types import UNAVAILABLE_REASONS
+from _rheplicant_bootstrap import plugins as plugin_module
+
+from _rheplicant_bootstrap import plugins_projection, plugins_records, plugins_vocabulary
+
+#: The plugins family, after section 3.2 split `plugins.py` into its three
+#: subjects. A bare name resolves in the globals of the module where the code
+#: was DEFINED, so a patch aimed at `plugins` alone silently stops reaching
+#: code that moved -- and a test that patches nothing still passes, which is
+#: this repository's most expensive failure shape.
+#:
+#: These tests patch a name's BEHAVIOUR, not one module's view of it, so they
+#: patch every module in the family that has it. That is also what keeps them
+#: working the next time something moves, and the assertion inside makes a
+#: name that has vanished entirely fail loudly instead of silently.
+_PLUGIN_FAMILY = (
+    plugin_module,
+    plugins_vocabulary,
+    plugins_projection,
+    plugins_records,
+)
+
+
+def _family_patch(monkeypatch, name, value, *, raising=True):
+    holders = [m for m in _PLUGIN_FAMILY if hasattr(m, name)]
+    if raising:
+        assert holders, f"{name!r} is defined nowhere in the plugins family"
+    elif not holders:
+        # `raising=False` at the call site means the caller knows the name may
+        # be absent. Setting it on the origin keeps that case behaving as it
+        # did before the split, where there was only one module to set it on.
+        monkeypatch.setattr(plugin_module, name, value, raising=False)
+        return
+    for holder in holders:
+        monkeypatch.setattr(holder, name, value)
+
+
+def _family_attr(name):
+    for holder in _PLUGIN_FAMILY:
+        if hasattr(holder, name):
+            return getattr(holder, name)
+    raise AssertionError(f"{name!r} is defined nowhere in the plugins family")
+
 
 SRC = Path(__file__).parents[2] / "src"
 
@@ -1386,7 +1428,7 @@ def test_record_path_components_are_budgeted_before_collection(tmp_path, monkeyp
 
     from _rheplicant_bootstrap import plugins as plugin_module
 
-    monkeypatch.setattr(plugin_module, "_METADATA_EVIDENCE_LIMIT", 4)
+    _family_patch(monkeypatch, "_METADATA_EVIDENCE_LIMIT", 4)
     monkeypatch.setattr(plugin_module.metadata, "packages_distributions", lambda: {})
     monkeypatch.setattr(plugin_module.metadata, "distributions", lambda: (distribution,))
     with pytest.raises(ConfigError, match="metadata.*budget"):
@@ -1402,7 +1444,7 @@ def test_exact_string_record_path_is_budgeted_before_component_splitting(tmp_pat
 
     from _rheplicant_bootstrap import plugins as plugin_module
 
-    monkeypatch.setattr(plugin_module, "_METADATA_EVIDENCE_LIMIT", 4)
+    _family_patch(monkeypatch, "_METADATA_EVIDENCE_LIMIT", 4)
     monkeypatch.setattr(plugin_module.metadata, "packages_distributions", lambda: {})
     monkeypatch.setattr(plugin_module.metadata, "distributions", lambda: (distribution,))
 
@@ -1437,7 +1479,7 @@ def test_exact_record_text_charges_dot_and_empty_segments(
 
     from _rheplicant_bootstrap import plugins as plugin_module
 
-    monkeypatch.setattr(plugin_module, "_METADATA_EVIDENCE_LIMIT", 4)
+    _family_patch(monkeypatch, "_METADATA_EVIDENCE_LIMIT", 4)
     monkeypatch.setattr(
         plugin_module.metadata,
         "packages_distributions",
@@ -1468,7 +1510,7 @@ def test_long_single_record_component_uses_bounded_base_string_scans(tmp_path, m
         range_calls += 1
         pytest.fail("RECORD component used a Python per-character range")
 
-    monkeypatch.setattr(plugin_module, "_METADATA_EVIDENCE_LIMIT", 2)
+    _family_patch(monkeypatch, "_METADATA_EVIDENCE_LIMIT", 2)
     monkeypatch.setattr(plugin_module, "range", forbidden_range, raising=False)
     monkeypatch.setattr(plugin_module.metadata, "packages_distributions", lambda: {})
     monkeypatch.setattr(plugin_module.metadata, "distributions", lambda: (distribution,))
@@ -2078,7 +2120,7 @@ def test_direct_url_integer_limit_is_derived_from_the_one_mibibyte_budget():
     from _rheplicant_bootstrap import plugins as plugin_module
 
     expected = math.ceil((1024 * 1024) * math.log2(10))
-    assert plugin_module._DIRECT_URL_INTEGER_BIT_LIMIT == expected
+    assert _family_attr("_DIRECT_URL_INTEGER_BIT_LIMIT") == expected
     exact = 1 << (expected - 1)
     assert _valid_distribution(direct_url={"value": exact}).direct_url == {"value": exact}
     with pytest.raises(ConfigError, match="direct_url.*integer"):
@@ -2090,7 +2132,7 @@ def test_direct_url_nodes_consume_the_shared_metadata_budget(monkeypatch):
 
     module = _module("direct_url_node_budget")
     distribution = _FakeDistribution("direct-url-node-dist", Path("/tmp"), direct_url='{"a":[]}')
-    monkeypatch.setattr(plugin_module, "_METADATA_EVIDENCE_LIMIT", 4, raising=False)
+    _family_patch(monkeypatch, "_METADATA_EVIDENCE_LIMIT", 4, raising=False)
     monkeypatch.setattr(plugin_module.importlib, "import_module", lambda name: module)
     monkeypatch.setattr(
         plugin_module.metadata,
@@ -2120,10 +2162,10 @@ def test_direct_url_freeze_consumes_the_shared_budget_before_nested_copy(
             type(self).emissions += 1
             return index
 
-    monkeypatch.setattr(plugin_module, "_METADATA_EVIDENCE_LIMIT", 1)
-    budget = plugin_module._MetadataBudget()
+    _family_patch(monkeypatch, "_METADATA_EVIDENCE_LIMIT", 1)
+    budget = _family_attr("_MetadataBudget")()
     with pytest.raises(ConfigError, match="metadata.*budget"):
-        plugin_module._freeze_direct_url(
+        _family_attr("_freeze_direct_url")(
             {"items": CountingSequence()},
             where="plugin distribution direct_url",
             budget=budget,
@@ -2158,7 +2200,7 @@ def test_plugin_record_direct_url_copy_uses_the_remaining_aggregate_budget(
         MappingProxyType({"items": CountingSequence()}),
     )
     object.__setattr__(distribution, "direct_url_reason", None)
-    monkeypatch.setattr(plugin_module, "_METADATA_EVIDENCE_LIMIT", 2)
+    _family_patch(monkeypatch, "_METADATA_EVIDENCE_LIMIT", 2)
 
     with pytest.raises(ConfigError, match="metadata.*budget"):
         _valid_record(distributions=(distribution,))
@@ -2179,10 +2221,10 @@ def test_shared_direct_url_budget_precedes_mapping_pair_unpack(monkeypatch):
         def items(self):
             return (BrokenPair(),)
 
-    monkeypatch.setattr(plugin_module, "_METADATA_EVIDENCE_LIMIT", 1)
-    budget = plugin_module._MetadataBudget()
+    _family_patch(monkeypatch, "_METADATA_EVIDENCE_LIMIT", 1)
+    budget = _family_attr("_MetadataBudget")()
     with pytest.raises(ConfigError, match="metadata.*budget"):
-        plugin_module._freeze_direct_url(
+        _family_attr("_freeze_direct_url")(
             PairMapping(),
             where="plugin distribution direct_url",
             budget=budget,
@@ -2408,7 +2450,7 @@ def test_packages_distribution_pair_budget_precedes_limit_plus_one_unpack(
         def items(self):
             return iter((("unrelated", ()), BrokenPair()))
 
-    monkeypatch.setattr(plugin_module, "_METADATA_EVIDENCE_LIMIT", 1)
+    _family_patch(monkeypatch, "_METADATA_EVIDENCE_LIMIT", 1)
     monkeypatch.setattr(
         plugin_module.importlib,
         "import_module",
@@ -2459,7 +2501,7 @@ def test_metadata_budget_is_shared_across_candidate_arms(tmp_path, monkeypatch):
     )
     distribution = _FakeDistribution("not-a-candidate", tmp_path)
     distribution.files = None
-    monkeypatch.setattr(plugin_module, "_METADATA_EVIDENCE_LIMIT", 3)
+    _family_patch(monkeypatch, "_METADATA_EVIDENCE_LIMIT", 3)
     monkeypatch.setattr(plugin_module.importlib, "import_module", lambda name: module)
     monkeypatch.setattr(
         plugin_module.metadata,
@@ -2487,7 +2529,7 @@ def test_record_entries_and_final_candidates_share_the_metadata_budget(tmp_path,
 
     from _rheplicant_bootstrap import plugins as plugin_module
 
-    monkeypatch.setattr(plugin_module, "_METADATA_EVIDENCE_LIMIT", 4, raising=False)
+    _family_patch(monkeypatch, "_METADATA_EVIDENCE_LIMIT", 4, raising=False)
     monkeypatch.setattr(plugin_module.metadata, "packages_distributions", lambda: {})
     monkeypatch.setattr(plugin_module.metadata, "distributions", lambda: (distribution,))
     with pytest.raises(ConfigError, match="metadata.*budget"):
@@ -2495,7 +2537,7 @@ def test_record_entries_and_final_candidates_share_the_metadata_budget(tmp_path,
 
     module = _module("candidate_budget_plugin")
     monkeypatch.setattr(plugin_module.importlib, "import_module", lambda name: module)
-    monkeypatch.setattr(plugin_module, "_METADATA_EVIDENCE_LIMIT", 3, raising=False)
+    _family_patch(monkeypatch, "_METADATA_EVIDENCE_LIMIT", 3, raising=False)
     monkeypatch.setattr(
         plugin_module.metadata,
         "packages_distributions",
@@ -2649,7 +2691,7 @@ def test_plugin_record_distribution_limit_is_checked_before_any_copy(
             direct_url_reason="missing_direct_url",
         )
 
-    monkeypatch.setattr(plugin_module, "_METADATA_EVIDENCE_LIMIT", 4)
+    _family_patch(monkeypatch, "_METADATA_EVIDENCE_LIMIT", 4)
     exact = tuple(distribution(index) for index in range(4))
     assert len(_valid_record(distributions=exact).distributions) == 4
 
@@ -2663,7 +2705,7 @@ def test_plugin_record_distribution_limit_is_checked_before_any_copy(
         copy_calls += 1
         pytest.fail("oversized distributions were copied before the limit")
 
-    monkeypatch.setattr(plugin_module, "_copy_distribution_record", forbidden_copy)
+    _family_patch(monkeypatch, "_copy_distribution_record", forbidden_copy)
     for operation in (
         lambda: _valid_record(distributions=oversized),
         lambda: plugin_audit_row(forged),
@@ -2680,10 +2722,10 @@ def test_plugin_record_uses_one_shared_budget_for_nested_direct_urls(
     from _rheplicant_bootstrap import plugins as plugin_module
 
     distribution = _valid_distribution(name="budgeted-direct-url", direct_url={"a": 1})
-    monkeypatch.setattr(plugin_module, "_METADATA_EVIDENCE_LIMIT", 5)
+    _family_patch(monkeypatch, "_METADATA_EVIDENCE_LIMIT", 5)
     assert _valid_record(distributions=(distribution,)).distributions
 
-    monkeypatch.setattr(plugin_module, "_METADATA_EVIDENCE_LIMIT", 4)
+    _family_patch(monkeypatch, "_METADATA_EVIDENCE_LIMIT", 4)
     with pytest.raises(ConfigError, match="distribution.*budget"):
         _valid_record(distributions=(distribution,))
 
@@ -2696,10 +2738,10 @@ def test_plugin_record_charges_each_repeated_tuple_edge(monkeypatch):
         name="tuple-edge-budget",
         direct_url={"items": [shared, shared, shared, shared]},
     )
-    monkeypatch.setattr(plugin_module, "_METADATA_EVIDENCE_LIMIT", 10)
+    _family_patch(monkeypatch, "_METADATA_EVIDENCE_LIMIT", 10)
     assert _valid_record(distributions=(distribution,)).distributions
 
-    monkeypatch.setattr(plugin_module, "_METADATA_EVIDENCE_LIMIT", 9)
+    _family_patch(monkeypatch, "_METADATA_EVIDENCE_LIMIT", 9)
     with pytest.raises(ConfigError, match="distribution.*budget"):
         _valid_record(distributions=(distribution,))
 
@@ -2736,8 +2778,8 @@ def test_plugin_record_reuses_one_prevalidated_shared_direct_url(monkeypatch):
         distributions.append(distribution)
 
     template = _valid_record()
-    real_freeze = plugin_module.freeze_evidence
-    real_freeze_roots = plugin_module._freeze_evidence_roots
+    real_freeze = _family_attr("freeze_evidence")
+    real_freeze_roots = _family_attr("_freeze_evidence_roots")
     freeze_calls = 0
 
     def count_freeze(*args, **kwargs):
@@ -2750,10 +2792,10 @@ def test_plugin_record_reuses_one_prevalidated_shared_direct_url(monkeypatch):
         freeze_calls += 1
         return real_freeze_roots(*args, **kwargs)
 
-    monkeypatch.setattr(plugin_module, "_METADATA_EVIDENCE_LIMIT", 256)
-    monkeypatch.setattr(plugin_module, "freeze_evidence", count_freeze)
-    monkeypatch.setattr(
-        plugin_module,
+    _family_patch(monkeypatch, "_METADATA_EVIDENCE_LIMIT", 256)
+    _family_patch(monkeypatch, "freeze_evidence", count_freeze)
+    _family_patch(
+        monkeypatch,
         "_freeze_evidence_roots",
         count_freeze_roots,
     )
@@ -2814,8 +2856,8 @@ def test_plugin_record_aggregate_copy_preserves_cross_root_shared_children(
         distributions.append(distribution)
 
     template = _valid_record()
-    real_freeze = plugin_module.freeze_evidence
-    real_freeze_roots = plugin_module._freeze_evidence_roots
+    real_freeze = _family_attr("freeze_evidence")
+    real_freeze_roots = _family_attr("_freeze_evidence_roots")
     freeze_calls = []
 
     def count_freeze(*args, **kwargs):
@@ -2826,10 +2868,10 @@ def test_plugin_record_aggregate_copy_preserves_cross_root_shared_children(
         freeze_calls.append(kwargs.get("where"))
         return real_freeze_roots(*args, **kwargs)
 
-    monkeypatch.setattr(plugin_module, "_METADATA_EVIDENCE_LIMIT", 256)
-    monkeypatch.setattr(plugin_module, "freeze_evidence", count_freeze)
-    monkeypatch.setattr(
-        plugin_module,
+    _family_patch(monkeypatch, "_METADATA_EVIDENCE_LIMIT", 256)
+    _family_patch(monkeypatch, "freeze_evidence", count_freeze)
+    _family_patch(
+        monkeypatch,
         "_freeze_evidence_roots",
         count_freeze_roots,
     )
@@ -3042,15 +3084,15 @@ def test_plugin_projection_validates_the_detached_snapshot_after_copy(
     forged = _valid_record()
     object.__setattr__(forged, "distributions", (distribution,))
 
-    real_freeze_roots = plugin_module._freeze_evidence_roots
+    real_freeze_roots = _family_attr("_freeze_evidence_roots")
 
     def mutate_at_snapshot(value, *, where, **kwargs):
         if where == "plugin distribution direct_urls":
             backing["injected"] = injected
         return real_freeze_roots(value, where=where, **kwargs)
 
-    monkeypatch.setattr(
-        plugin_module,
+    _family_patch(
+        monkeypatch,
         "_freeze_evidence_roots",
         mutate_at_snapshot,
     )
@@ -3070,15 +3112,15 @@ def test_plugin_record_rebudgets_a_direct_url_that_grows_at_snapshot(
     )
     object.__setattr__(distribution, "direct_url", MappingProxyType(backing))
     object.__setattr__(distribution, "direct_url_reason", None)
-    real_freeze_roots = plugin_module._freeze_evidence_roots
+    real_freeze_roots = _family_attr("_freeze_evidence_roots")
 
     def grow_at_snapshot(value, *, where, **kwargs):
         backing.update({f"late-{index}": index for index in range(20)})
         return real_freeze_roots(value, where=where, **kwargs)
 
-    monkeypatch.setattr(plugin_module, "_METADATA_EVIDENCE_LIMIT", 8)
-    monkeypatch.setattr(
-        plugin_module,
+    _family_patch(monkeypatch, "_METADATA_EVIDENCE_LIMIT", 8)
+    _family_patch(
+        monkeypatch,
         "_freeze_evidence_roots",
         grow_at_snapshot,
     )
@@ -3222,10 +3264,10 @@ class _PairMapping(Mapping):
 def _validate_forged_proxy_pair(pair: object) -> None:
     from _rheplicant_bootstrap import plugins as plugin_module
 
-    plugin_module._validate_frozen_json(
+    _family_attr("_validate_frozen_json")(
         MappingProxyType(_PairMapping(pair)),
         where="plugin distribution direct_url",
-        budget=plugin_module._MetadataBudget(),
+        budget=_family_attr("_MetadataBudget")(),
         require_frozen=True,
     )
 
@@ -3236,7 +3278,7 @@ def test_direct_url_budget_stops_before_unpacking_the_limit_plus_one_pair(
     from _rheplicant_bootstrap import plugins as plugin_module
 
     pair = _BrokenJsonPair()
-    monkeypatch.setattr(plugin_module, "_METADATA_EVIDENCE_LIMIT", 1)
+    _family_patch(monkeypatch, "_METADATA_EVIDENCE_LIMIT", 1)
     with pytest.raises(ConfigError, match="distribution.*budget"):
         _validate_forged_proxy_pair(pair)
     assert pair.calls == 0
@@ -3284,7 +3326,7 @@ def test_plugin_record_copy_does_not_swallow_baseexception(monkeypatch):
     def stop(_value, **_kwargs):
         raise KeyboardInterrupt
 
-    monkeypatch.setattr(plugin_module, "_copy_distribution_record", stop)
+    _family_patch(monkeypatch, "_copy_distribution_record", stop)
     with pytest.raises(KeyboardInterrupt):
         _valid_record(distributions=(distribution,))
 

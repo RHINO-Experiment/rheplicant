@@ -439,11 +439,12 @@ def test_the_command_half_is_named_and_covers_the_package():
     assert BOOTSTRAP_COMMAND <= live, {"named and gone": sorted(BOOTSTRAP_COMMAND - live)}
     foundation = live - BOOTSTRAP_COMMAND
     assert foundation, "the whole package cannot be the command half"
-    # 44, up from A1's 37: splitting `layering.py` into its three subjects
-    # plus the defensive copy's three pieces added seven foundation modules
-    # on 2026-09-20 (section 3.2). The command half did not move, which is the
-    # point of pinning the two numbers apart.
-    assert len(BOOTSTRAP_COMMAND) == 7 and len(foundation) == 44, (
+    # 47, up from A1's 37. Section 3.2's splits are the whole of the increase:
+    # `layering.py` into its seven subjects (+7, 2026-09-20), then `plugins.py`
+    # into vocabulary, projection and records (+3, 2026-09-21). The command
+    # half has not moved once, which is the point of pinning the two apart --
+    # a split adds foundation modules and must not quietly add a command one.
+    assert len(BOOTSTRAP_COMMAND) == 7 and len(foundation) == 47, (
         f"A1-2 recorded a 7-module command half; this tree has "
         f"{len(BOOTSTRAP_COMMAND)} and {len(foundation)} foundation modules. "
         "Reclassify deliberately rather than letting the number drift"
