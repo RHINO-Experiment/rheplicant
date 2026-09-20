@@ -5,6 +5,8 @@ from __future__ import annotations
 import re
 from collections import Counter
 
+from _rheplicant_bootstrap.capability import REGISTRY, Maturity, Surface
+from _rheplicant_bootstrap.errors import ConfigError
 from _rheplicant_bootstrap.output.manager import (
     _OUTPUT_KEYS,
     _PLAN4B_TOP,
@@ -157,8 +159,32 @@ def _output_widgets(builder: _Builder) -> None:
         builder.add(f"outputs.{key}", widget="group")
 
 
+def _reserved_reason(name: str) -> str:
+    """The sentence a reserved document key carries, taken from the registry.
+
+    It was a literal here and a second literal in the section metadata below,
+    and both restated ``REGISTRY``'s own ``what`` for the same key. A key that
+    is reserved has exactly one reason, and the registry is where that reason
+    is decided -- so the day capability 4 lands, the row moves and this
+    sentence moves with it instead of being two more edits somebody has to
+    remember.
+    """
+    for row in REGISTRY:
+        if row.surface is Surface.DOCUMENT and row.name == name:
+            if row.maturity is not Maturity.UNAVAILABLE:
+                raise ConfigError(
+                    f"the GUI disables {name!r}, which the capability registry "
+                    f"now calls {row.maturity.value!r} rather than unavailable."
+                )
+            return f"Reserved for {row.what}."
+    raise ConfigError(
+        f"the GUI disables {name!r} and the capability registry has no "
+        "document row for it, so nothing decides the reason."
+    )
+
+
 def _campaign_widgets(builder: _Builder) -> None:
-    reason = "Reserved for capability 4 (streaming evidence)."
+    reason = _reserved_reason("campaign")
     for path in (
         "campaign.epoch_id",
         "campaign.inputs",
@@ -233,7 +259,7 @@ def build_catalog() -> FormCatalog:
             "Campaign",
             "campaign",
             disabled=True,
-            reason="Reserved for capability 4 (streaming evidence).",
+            reason=_reserved_reason("campaign"),
         ),
     )
     return FormCatalog(
