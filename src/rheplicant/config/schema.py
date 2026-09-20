@@ -11,6 +11,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from _rheplicant_bootstrap.process import SCHEMA_VERSION
+
 
 def _list(value: Any) -> list[str]:
     return list(value)
@@ -96,7 +98,10 @@ def json_schema() -> dict[str, Any]:
         }
 
     return {
-        "schemaVersion": "1",
+        # Derived from the bootstrap's SCHEMA_VERSION rather than written
+        # again. A STRING here is this contract's own choice -- a consumer
+        # branches on it -- and the document carries the int.
+        "schemaVersion": str(SCHEMA_VERSION),
         "sections": [_section(name) for name in _SECTIONS],
         "exits": exits,
         "operators": sorted(

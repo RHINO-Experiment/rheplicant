@@ -1,0 +1,218 @@
+{
+  "catalogs": {
+    "acceptedUnits": [
+      "Hz",
+      "s",
+      "unix_s",
+      "K",
+      "deg",
+      "m",
+      "ohm",
+      "dimensionless",
+      "count",
+      "samples",
+      "bits",
+      "channels",
+      "cycles",
+      "adc_count"
+    ],
+    "fileFormats": [
+      "csv",
+      "eqx_leaves",
+      "npy",
+      "npz",
+      "rhino_hdf5",
+      "touchstone",
+      "txt"
+    ],
+    "resourceKinds": [
+      "arrays",
+      "bases",
+      "beams",
+      "projectors",
+      "s_params",
+      "sky_models"
+    ],
+    "shapeSymbols": [
+      "n_time",
+      "n_freq",
+      "n_source",
+      "n_pix",
+      "n_alm",
+      "n_load"
+    ]
+  },
+  "exits": [
+    "forward",
+    "fisher",
+    "optimize",
+    "plan.estimate",
+    "plan.sample",
+    "conjugate.wiener",
+    "conjugate.gcr",
+    "conjugate.gls",
+    "condition",
+    "identifiability",
+    "score_directions",
+    "gradient",
+    "mmodes",
+    "predict",
+    "nuts",
+    "npe",
+    "compare",
+    "benchmark"
+  ],
+  "operators": [
+    "arange",
+    "as",
+    "axis",
+    "basis_fit",
+    "basis_matrix",
+    "channel_spacing",
+    "column",
+    "dtype",
+    "file",
+    "from",
+    "from_grid",
+    "from_switch_order",
+    "full",
+    "horizon_fraction",
+    "interpolate_onto",
+    "linspace",
+    "list",
+    "modulo",
+    "normal",
+    "normalize",
+    "offset",
+    "ones",
+    "part",
+    "python",
+    "ref",
+    "sample_cadence",
+    "scale",
+    "stack",
+    "uniform",
+    "unit",
+    "unit_mean_free",
+    "value",
+    "zeros"
+  ],
+  "schemaVersion": "1",
+  "sections": [
+    {
+      "name": "schema_version",
+      "reason": null,
+      "required": false,
+      "status": "accepted"
+    },
+    {
+      "name": "defaults",
+      "reason": "is not read by this layer -- it is handled by the command line -- presets are YAML files, and that is where YAML first comes off disk.",
+      "required": false,
+      "status": "deferred"
+    },
+    {
+      "name": "plugins",
+      "reason": "is not read by this layer -- it is handled by the command line -- importing a plugin belongs to the process entry point, not to a mapping.",
+      "required": false,
+      "status": "deferred"
+    },
+    {
+      "name": "runtime",
+      "reason": null,
+      "required": true,
+      "status": "accepted"
+    },
+    {
+      "name": "observation",
+      "reason": null,
+      "required": true,
+      "status": "accepted"
+    },
+    {
+      "name": "resources",
+      "reason": null,
+      "required": false,
+      "status": "accepted"
+    },
+    {
+      "name": "model",
+      "reason": null,
+      "required": true,
+      "status": "accepted"
+    },
+    {
+      "name": "variants",
+      "reason": null,
+      "required": false,
+      "status": "accepted"
+    },
+    {
+      "name": "inference",
+      "reason": null,
+      "required": false,
+      "status": "accepted"
+    },
+    {
+      "name": "runs",
+      "reason": null,
+      "required": true,
+      "status": "accepted"
+    },
+    {
+      "name": "outputs",
+      "reason": "is not read by this layer -- it is handled by the command line, which owns the output tree, its provenance and its audit trail.",
+      "required": false,
+      "status": "deferred"
+    },
+    {
+      "name": "campaign",
+      "reason": "is reserved with capability 4 (streaming evidence, schema \u00a78.2) and refused in v1.",
+      "required": false,
+      "status": "reserved"
+    }
+  ],
+  "transforms": [
+    "adc",
+    "additive_noise_emi",
+    "antenna_loss",
+    "apply_cal",
+    "basis_expand",
+    "basis_fit",
+    "basis_matrix",
+    "basis_temperature",
+    "beam_analysis",
+    "beam_spill",
+    "channel_spacing",
+    "cw_centre",
+    "cw_level",
+    "exp_log",
+    "file",
+    "filters_averaging",
+    "foreground",
+    "gain",
+    "global_signal",
+    "ground_pickup",
+    "horizon_fraction",
+    "interpolate_onto",
+    "ionosphere",
+    "matmul",
+    "modifier_affine",
+    "noise_wave",
+    "normal",
+    "normalize",
+    "part_angle",
+    "part_same",
+    "python",
+    "radiometer_fraction",
+    "ref",
+    "sample_cadence",
+    "sky_projection",
+    "sky_space",
+    "stack",
+    "transform_affine",
+    "uniform",
+    "uniform_sky",
+    "unit_mean_free"
+  ]
+}

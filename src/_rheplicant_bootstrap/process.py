@@ -95,7 +95,7 @@ class RawProcessEntry:
             if not static_isinstance(frozen_runtime, Mapping):
                 raise ConfigError("raw process runtime must be a mapping or null.")
         frozen_outputs = _freeze_output(raw_outputs)
-        object.__setattr__(self, "schema_version", 1)
+        object.__setattr__(self, "schema_version", SCHEMA_VERSION)
         object.__setattr__(self, "defaults", canonical_defaults)
         object.__setattr__(self, "plugins", plugins)
         object.__setattr__(self, "raw_runtime", frozen_runtime)
@@ -402,7 +402,7 @@ def parse_raw_process_mapping(
         raw_runtime = None
     outputs = _call_output_parser(parse_outputs, top.get("outputs", {}))
     return RawProcessEntry(
-        schema_version=1,
+        schema_version=SCHEMA_VERSION,
         defaults=defaults,
         plugins=plugins,
         raw_runtime=raw_runtime,
@@ -700,6 +700,30 @@ def validate_variant_process_sections(
                 )
 
 
+#: The configuration grammar's version, spelled once.
+#:
+#: It was spelled in eight places -- this module's default and constructor,
+#: three refusal messages, the equality below, the published
+#: ``json_schema()["schemaVersion"]`` and the GUI's starter document -- and a
+#: grammar version that lives in eight places is a grammar version that will
+#: be bumped in seven.
+#:
+#: An ``int`` because that is what a document carries and what
+#: :func:`schema_version_problem` compares type-exactly. The published schema
+#: renders it as a string, which is that contract's own choice and is derived
+#: from this rather than written again.
+#:
+#: **The three refusal messages below still write "1" as prose, deliberately.**
+#: They are pinned verbatim by
+#: ``test_config_preflight.py::TestNoMovedMessageWasReworded``, which
+#: reconstructs them from the source literals -- interpolating a constant
+#: splits the literal and the guard stops finding it, measured. So the
+#: constant governs BEHAVIOUR and the sentences stay prose, and
+#: ``test_schema_version_constant.py`` holds the two to each other: if this
+#: number ever moves, the messages go red rather than quietly saying 1.
+SCHEMA_VERSION: int = 1
+
+
 def schema_version_problem(version: object) -> str | None:
     """Why a document's ``schema_version`` is refused, or ``None`` for 1.
 
@@ -723,9 +747,9 @@ def schema_version_problem(version: object) -> str | None:
             "purpose rather than by luck."
         )
     number = int.__int__(version)
-    if number == 1:
+    if number == SCHEMA_VERSION:
         return None
-    if number > 1:
+    if number > SCHEMA_VERSION:
         return (
             f"schema_version: {_runtime_render(number)} is newer than this "
             "rheplicant reads; it reads schema_version 1. A later rheplicant "
@@ -878,6 +902,7 @@ def parse_effective_process_mapping(
 
 
 __all__ = [
+    "SCHEMA_VERSION",
     "EffectiveProcessEntry",
     "OutputGrammarParser",
     "RawProcessEntry",
