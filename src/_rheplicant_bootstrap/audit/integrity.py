@@ -174,6 +174,14 @@ def verify_tree(published: Mapping[str, bytes]) -> tuple[str, ...]:
         if type(row) is not dict or type(row.get("relative_path")) is not str:
             problems.append(f"{INTEGRITY_NAME} has a malformed file row.")
             continue
+        # The WRITER refuses a duplicate path; this verifier used to let the
+        # later row win and say nothing. Tamper detection still worked -- a
+        # wrong digest is reported whichever row survives -- but a manifest
+        # malformed in exactly this way read as well-formed, and this function
+        # is documented as verifying a tree it did not write.
+        if row["relative_path"] in expected:
+            problems.append(f"{INTEGRITY_NAME} lists {row['relative_path']!r} more than once.")
+            continue
         expected[row["relative_path"]] = row
 
     for relative_path, row in sorted(expected.items()):

@@ -23,10 +23,18 @@ own ``format_version``, its own schema in the wheel, and ``integrity.json``
 covers it like every other file in the tree. Nothing in the audit contract
 moves.
 
-**It is written on the success path only, and that is a stated limit rather
-than an oversight.** The record is a view of the resolved layers, and a
-document refused before it resolves has none; a refused run's bundle carries
-check A53's notice in ``diagnostics.json`` as it always did.
+**It is written on the success path only.** The record is a view of the
+resolved layers, and a document refused before it resolves has none.
+
+That is the motivating case rather than the whole of it, and the difference
+is worth stating: the file is attached to the terminal SUCCESS publication, so
+a run whose layers DID resolve and which then failed later -- building the
+product bundle, say -- publishes a refused or error bundle without it. Every
+such bundle still carries check A53's notice in ``diagnostics.json``, which is
+the English of the same fact; what it does not carry is the machine-readable
+form. Widening this means passing the already-built file into
+``_publish_failure_once``, and it is a behaviour change to a published tree
+rather than a repair, so it is written down here rather than made quietly.
 
 WHAT IT RECORDS, AND WHAT IT DOES NOT
 -------------------------------------
@@ -112,7 +120,16 @@ def node_levels(document: Mapping[str, Any]) -> tuple[NodeLevel, ...]:
         else:
             chosen = None
         if chosen is None or chosen.__name__ not in levels:
+            # Report the name whichever way it was learned. Reading only
+            # `declared` threw away a class this walk had already resolved --
+            # the case where a node resolves unambiguously to one class that
+            # `capabilities()` does not carry a level for, which is reachable
+            # the moment `operator_table()` and `capability_classes()` walk
+            # different populations. A row saying `type: null` then blames the
+            # document for something the registry did.
             name = declared if isinstance(declared, str) else None
+            if name is None and chosen is not None:
+                name = chosen.__name__
             rows.append(NodeLevel(node_id, name, None, "unresolved_type"))
             continue
         rows.append(NodeLevel(node_id, chosen.__name__, levels[chosen.__name__].value, None))
@@ -138,6 +155,20 @@ def capabilities_manifest(layers: Sequence[ResolvedLayerRecord]) -> bytes:
     for record in layers:
         if type(record) is not ResolvedLayerRecord:
             raise ConfigError("capabilities record requires exact resolved layers.")
+        nodes = node_levels(record.effective_document)
+        # Exactly one of `level` and `level_reason` is set, checked here as
+        # `validate_software` checks its own pairs. The schema cannot say it:
+        # both fields are independent nullable unions, so a row with neither
+        # -- or with both -- is schema-VALID and incoherent, and would publish.
+        # `node_levels` gets this right today; nothing downstream would notice
+        # if it stopped.
+        for row in nodes:
+            if (row.level is None) == (row.level_reason is None):
+                raise ConfigError(
+                    f"capabilities record for node {row.node_id!r} sets "
+                    f"level={row.level!r} and level_reason={row.level_reason!r}; "
+                    "exactly one of the two carries the answer."
+                )
         rows.append(
             {
                 "layer": {"kind": record.layer.kind, "name": record.layer.name},
@@ -148,7 +179,7 @@ def capabilities_manifest(layers: Sequence[ResolvedLayerRecord]) -> bytes:
                         "level": row.level,
                         "level_reason": row.level_reason,
                     }
-                    for row in node_levels(record.effective_document)
+                    for row in nodes
                 ),
             }
         )

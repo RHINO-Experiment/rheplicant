@@ -3269,3 +3269,75 @@ class TestEveryPageThatCountsTheValueFormsCountsThemRight:
                 f"{page} says {word} families; config-values.md has "
                 f"{families} numbered subsections."
             )
+
+
+class TestTheCatalogGatewayIsTheWholeGateway:
+    """The allowlist above is a text scan, and one shape slips past it.
+
+    ``gui/form_catalog.py`` holds the config vocabulary for the whole GUI and
+    re-exports it through ``__all__``; every other GUI module is supposed to
+    take it from there. But ``__all__`` only governs ``import *``, so a module
+    can import a name the list does not carry, and the boundary scan cannot
+    see it: the text it looks for is ``from rheplicant.config``, and such a
+    module writes ``from rheplicant.gui.form_catalog`` instead.
+
+    Measured 2026-09-20: exactly one module does it, and it is the other half
+    of ``form_catalog.py`` -- ``form_catalog_finalize.py``, which the two
+    modules' own import cycle shows is one module written in two files
+    (``form_catalog`` imports it back inside function bodies). Two of the
+    twelve names it takes, ``RESOURCE_KINDS`` and ``RUN_KINDS``, are config
+    vocabulary.
+
+    So this is an exception rather than a leak, and the point of the test is
+    that it stays exactly one. A THIRD module reaching around ``__all__``
+    would be a second gateway, which is the thing the allowlist exists to
+    prevent and the thing it cannot see.
+    """
+
+    #: The other half of form_catalog.py, and the only module allowed to take
+    #: names it does not export.
+    PAIRED = "gui/form_catalog_finalize.py"
+
+    def _reaching_modules(self) -> dict[str, list[str]]:
+        import ast
+
+        root = pathlib.Path(rheplicant.__file__).parent
+        catalog = ast.parse((root / "gui" / "form_catalog.py").read_text(encoding="utf-8"))
+        exported: set[str] = set()
+        for node in ast.walk(catalog):
+            if isinstance(node, ast.Assign) and any(
+                isinstance(target, ast.Name) and target.id == "__all__" for target in node.targets
+            ):
+                exported = {element.value for element in node.value.elts}
+        assert exported, "form_catalog.py declares no __all__; the gateway is gone"
+
+        reaching: dict[str, list[str]] = {}
+        for path in sorted(root.rglob("*.py")):
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+            for node in ast.walk(tree):
+                if (
+                    isinstance(node, ast.ImportFrom)
+                    and node.module
+                    and node.module.endswith("form_catalog")
+                ):
+                    outside = sorted({alias.name for alias in node.names} - exported)
+                    if outside:
+                        reaching[str(path.relative_to(root))] = outside
+        return reaching
+
+    def test_only_the_paired_module_imports_names_the_catalog_does_not_export(self):
+        reaching = self._reaching_modules()
+        assert set(reaching) == {self.PAIRED}, (
+            "these GUI modules take names form_catalog.py does not export, so "
+            "they are not going through the declared gateway: "
+            f"{ {k: v for k, v in reaching.items() if k != self.PAIRED} }. "
+            "Add the name to form_catalog.py's __all__, or take it from there"
+        )
+
+    def test_the_paired_module_still_reaches_for_something(self):
+        """Guard the guard: an equality against an empty set would also hold
+        if the walk stopped finding imports at all."""
+        reaching = self._reaching_modules()
+        assert len(reaching.get(self.PAIRED, ())) > 5, (
+            "the walk found almost nothing; it is no longer scanning imports"
+        )
