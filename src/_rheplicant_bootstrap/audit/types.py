@@ -92,13 +92,6 @@ class GateRecord:
 
 
 @dataclass(frozen=True, slots=True)
-class DeferredValidationRecord:
-    layer: LayerIdentity
-    descriptor: RunDescriptor
-    checks: Sequence[str]
-
-
-@dataclass(frozen=True, slots=True)
 class ParsedRunRecord:
     layer: LayerIdentity
     descriptor: RunDescriptor
@@ -212,7 +205,6 @@ class AuditSnapshot:
     variants: Sequence[VariantRecord]
     resources: Sequence[ResourceRecord]
     gates: Sequence[GateRecord]
-    deferred_validations: Sequence[DeferredValidationRecord]
     parsed_runs: Sequence[ParsedRunRecord]
     run_outcomes: Sequence[RunOutcomeRecord]
     deletions: Sequence[DeletionAuditRecord]

@@ -6,9 +6,9 @@ from collections.abc import Mapping
 
 from _rheplicant_bootstrap.audit.types import (
     AuditSnapshot,
-    DeferredValidationRecord,
     FindingRecord,
     GateRecord,
+    ParsedRunRecord,
     RunOutcomeRecord,
 )
 from _rheplicant_bootstrap.errors import ConfigError
@@ -94,15 +94,24 @@ def build_diagnostics(
                 "reason": row.reason,
             }
         )
+    # Projected from the PARSED RUNS, which is where a deferred check is
+    # recorded when the handler declares it. There used to be a second record
+    # -- `DeferredValidationRecord`, the same (layer, descriptor, checks)
+    # triple under another name -- and nothing in `src/` ever created one, so
+    # this array published empty for every run while `benchmark`, `compare`
+    # and `predict` each declared checks that the parsed run already held.
+    # Two spellings of one fact, and the published one was the empty spelling.
     deferred = []
-    for index, row in enumerate(snapshot.deferred_validations):
-        if type(row) is not DeferredValidationRecord:
-            raise ConfigError(f"deferred_validations[{index}] is not exact.")
+    for index, row in enumerate(snapshot.parsed_runs):
+        if type(row) is not ParsedRunRecord:
+            raise ConfigError(f"parsed_runs[{index}] is not exact.")
+        if not row.deferred_checks:
+            continue
         deferred.append(
             {
                 "layer": _layer(row.layer),
                 "descriptor": _descriptor(row.descriptor),
-                "checks": row.checks,
+                "checks": row.deferred_checks,
             }
         )
     runs = []

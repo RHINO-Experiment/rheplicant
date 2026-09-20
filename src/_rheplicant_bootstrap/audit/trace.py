@@ -41,7 +41,6 @@ from .types import (
     ArtefactTable,
     AuditSnapshot,
     DefaultRecord,
-    DeferredValidationRecord,
     DeletionAuditRecord,
     DeliveryRecord,
     ErrorRecord,
@@ -419,7 +418,6 @@ class AuditTrace:
         self._variants: list[VariantRecord] = []
         self._resources: list[ResourceRecord] = []
         self._gates: list[GateRecord] = []
-        self._deferred: list[DeferredValidationRecord] = []
         self._parsed: list[ParsedRunRecord] = []
         self._outcomes: list[RunOutcomeRecord] = []
         self._deletions: list[DeletionAuditRecord] = []
@@ -626,22 +624,6 @@ class AuditTrace:
         )
         with self._lock:
             self._gates.append(record)
-
-    def record_deferred_validation(
-        self, layer: LayerIdentity, row: Mapping[str, JsonValue]
-    ) -> None:
-        item = _mapping(
-            row,
-            keys=LAYER_ROW_KEYS["deferred_validation"],
-            where="deferred validation",
-        )
-        record = DeferredValidationRecord(
-            _layer(layer),
-            _descriptor(item["descriptor"], where="deferred validation.descriptor"),
-            _string_sequence(item["checks"], where="deferred validation.checks"),
-        )
-        with self._lock:
-            self._deferred.append(record)
 
     def record_parsed_run(self, layer: LayerIdentity, row: Mapping[str, JsonValue]) -> None:
         exact_layer = _layer(layer)
@@ -1027,7 +1009,6 @@ class AuditTrace:
                 variants=tuple(self._variants),
                 resources=tuple(self._resources),
                 gates=tuple(self._gates),
-                deferred_validations=tuple(self._deferred),
                 parsed_runs=tuple(self._parsed),
                 run_outcomes=tuple(self._outcomes),
                 deletions=tuple(self._deletions),

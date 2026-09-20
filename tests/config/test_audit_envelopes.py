@@ -42,11 +42,11 @@ from _rheplicant_bootstrap.audit.types import (
     ArtefactMaterialization,
     ArtefactRecord,
     ArtefactTable,
-    DeferredValidationRecord,
     DeletionAuditRecord,
     FindingRecord,
     GateRecord,
     InputRecord,
+    ParsedRunRecord,
     PathEncoding,
     ResolvedLayerRecord,
     RunOutcomeRecord,
@@ -298,11 +298,12 @@ def populated_snapshot():
         {
             "descriptor": descriptor,
             "resolved_options": {"draws": 100},
-            "deferred_checks": ("B4",),
+            # Two, because `diagnostics.deferred_validations` is projected
+            # from here now: the parsed run is the one place a deferred check
+            # is recorded, and the array that publishes it has no record of
+            # its own to disagree with.
+            "deferred_checks": ("B4", "B7"),
         },
-    )
-    trace.record_deferred_validation(
-        base, {"descriptor": descriptor, "checks": ("B4", "B7")}
     )
     trace.record_run_outcome(
         base,
@@ -728,7 +729,7 @@ def test_semantic_rows_preserve_layers_order_and_closed_diagnostics():
             FindingRecord(variant, "postflight", "second", "report", "", "two"),
         ),
         gates=(GateRecord(base, "units", "gate-v1", "warn", "enabled", None),),
-        deferred_validations=(DeferredValidationRecord(base, descriptor, checks),),
+        parsed_runs=(ParsedRunRecord(base, descriptor, {}, checks),),
         run_outcomes=(
             RunOutcomeRecord(
                 variant,
@@ -760,7 +761,12 @@ def test_semantic_rows_preserve_layers_order_and_closed_diagnostics():
     ]
     assert [row["check"] for row in diagnostics["findings"]] == ["first", "second"]
     assert tuple(diagnostics["findings"][0]) == ("check", "message", "severity", "where")
+    # Projected from the parsed run now, not from a record of its own. The
+    # array published empty for every real run while this test passed, because
+    # the fixture created the second record directly and nothing in `src/`
+    # ever did.
     assert diagnostics["deferred_validations"][0]["checks"] == list(checks)
+    assert diagnostics["deferred_validations"][0]["descriptor"]["name"] == descriptor.name
     assert diagnostics["runs"][0] == {
         "capture_scope": "arbitrary_exception",
         "exception_message": "expected",

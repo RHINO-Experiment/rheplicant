@@ -21,6 +21,7 @@ from _rheplicant_bootstrap.audit.bundle import (
     terminal_reserialization_snapshot,
     with_integrity,
 )
+from _rheplicant_bootstrap.audit.names import encode_name
 from _rheplicant_bootstrap.audit.resolved import (
     ResolvedArtefact,
     build_resolved_artefacts,
@@ -72,7 +73,7 @@ from _rheplicant_bootstrap.presets import (
     read_installed_preset,
     validate_preset_document,
 )
-from _rheplicant_bootstrap.types import SourceInput, Status
+from _rheplicant_bootstrap.types import LayerIdentity, SourceInput, Status
 from _rheplicant_bootstrap.yaml import safe_load_document
 
 _TRUSTED_CODE_WARNING = TRUSTED_CODE_WARNING
@@ -258,6 +259,51 @@ def _resolved(
     )
 
 
+def _record_variants(
+    trace: AuditTrace,
+    resolved: Sequence[ResolvedArtefact],
+    variant_names: Sequence[str],
+) -> None:
+    """One provenance row per DECLARED variant, before the tree is staged.
+
+    `provenance.json` declares a `variants` array -- encoded name, status and
+    the resolved document's digest -- and nothing in `src/` ever called
+    `AuditTrace.record_variant`, so it published `[]` for every run. Measured
+    2026-09-20 on a document declaring one variant: `path_encodings` had the
+    variant, `artefacts.resolved_variants` had its row, the variant's
+    `config.resolved.yaml` was published, and this array was empty. Three
+    views agreed and the fourth said none.
+
+    Here rather than at the layer freeze, because the DIGEST is what the row
+    is worth and it does not exist until the resolved document is serialized.
+    Called once per publication, from the first `_resolved` of the
+    transaction; the second call re-serializes the same layers and would be
+    refused as a duplicate, which is the recorder's own guard doing its job.
+
+    **Two of the four status words are produced and two are not.**  A declared
+    variant that resolved is `ok`; one that did not is `not_reached`.
+    `refused` and `error` describe a variant that was reached and failed on
+    its own, which this function cannot distinguish from `not_reached` --
+    a failure publication carries only the layers that completed. The
+    vocabulary is in a closed published schema and cannot be narrowed without
+    a `format_version` bump, so the gap is written down here rather than
+    papered over by guessing.
+    """
+    by_name = {
+        row.layer.name: row for row in resolved if row.layer.kind == "variant"
+    }
+    for name in variant_names:
+        artefact = by_name.get(name)
+        trace.record_variant(
+            LayerIdentity("variant", name),
+            {
+                "encoded_name": encode_name(name),
+                "status": "ok" if artefact is not None else "not_reached",
+                "resolved_sha256": None if artefact is None else artefact.sha256,
+            },
+        )
+
+
 def _publish_transaction(
     authorization: VerifiedOutputLease | PublicationLease,
     *,
@@ -278,6 +324,8 @@ def _publish_transaction(
         variant_names=variant_names,
         component_limit=component_limit,
     )
+    _record_variants(trace, resolved, variant_names)
+    candidate, already_serialized = _candidate(trace)
     initial = serialize_bundle(
         candidate,
         status=status,
