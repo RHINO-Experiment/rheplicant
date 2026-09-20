@@ -144,12 +144,19 @@ def registry():
 
 
 #: Every check id schema §6 declares, in table order -- as a LITERAL.
-#: ``docs/superpowers/`` is gitignored (``.gitignore:52``, confirmed with
-#: ``git check-ignore -v``), so a worktree or a ``git archive`` tree has no
-#: copy of the spec and a test that read it would error with
-#: ``FileNotFoundError`` rather than fail honestly.  The cross-check against
-#: the real file is :func:`_schema_ids_from_the_spec`, which SKIPS when it is
-#: absent; where it is absent the literal is all that holds the census.
+#:
+#: **This is a convenience copy now, not the authority, and that changed.**
+#: ``docs/superpowers/`` used to be ignored wholesale, so no clone had the
+#: spec, :func:`_schema_ids_from_the_spec` stood down, and this literal was
+#: the only thing anyone but one checkout ran -- a copy acting as the
+#: contract because the original was unreachable.  The spec is tracked now
+#: (``.gitignore`` re-includes exactly that one file), the comparison runs
+#: everywhere and FAILS rather than skipping when the file is missing, so a
+#: drift between the two is a red test rather than a quiet divergence.
+#:
+#: The literal is kept because it is what the id-shape assertions read
+#: without parsing 172 KB of Markdown, and because having both is what makes
+#: the comparison mean something.
 _SCHEMA_IDS: tuple[str, ...] = (
     tuple(f"A{n}" for n in range(1, 53))
     + tuple(f"B{n}" for n in range(1, 10))
@@ -1099,19 +1106,31 @@ class TestTheRegistry:
         its pipe form, or the id regex drifting -- each of which would let the
         literal drift away from the spec unnoticed.
 
-        SKIPS rather than fails when the spec is not in the tree:
-        ``docs/superpowers/`` is gitignored (``.gitignore:52``), so a worktree
-        and a ``git archive`` tree have no copy and a hard read would error
-        with ``FileNotFoundError``, which says nothing true about the ids.
-        Where the spec is absent the literal below is all that runs; where it
-        is present, this test holds the two to each other."""
+        **This used to SKIP when the spec was absent, and the reason is gone.**
+        ``docs/superpowers/`` was gitignored wholesale, so ``git ls-files``
+        reported zero files under it: a clone, a worktree and a ``git archive``
+        tree all lacked the spec, the comparison stood down, and the 80-entry
+        literal below was the only thing anyone but this checkout ever ran.
+        The authority for a versioned contract was reachable by nobody while
+        its copy was the only readable thing -- the repository's own
+        "derive, do not re-spell" hazard with the original on the wrong side.
+
+        The spec is tracked now (``.gitignore`` re-includes exactly that one
+        file and keeps the plans and the other specs ignored), so its absence
+        is a broken checkout rather than a normal condition, and this fails
+        instead of standing down. A guard that skips is not a guard that
+        passes."""
         found = _schema_ids()
         assert len(found) == 80, found[:5]
         assert len(set(found)) == len(found), "an id is declared twice"
         assert found[0] == "A1" and "A52" in found and "C17" in found
         from_spec = _schema_ids_from_the_spec()
-        if from_spec is None:
-            pytest.skip("schema §6 spec absent -- docs/superpowers/ is gitignored")
+        assert from_spec is not None, (
+            f"schema §6's spec is missing at {_SCHEMA}. It is tracked, so this "
+            "is a broken checkout rather than the old ignored-file case -- "
+            "restore it rather than making this skip again, or the literal "
+            "above becomes the contract by default"
+        )
         assert from_spec == found
 
 

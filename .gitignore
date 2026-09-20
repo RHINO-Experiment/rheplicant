@@ -51,7 +51,23 @@ htmlcov/
 # Claude Code: agent workspace and the specs/plans it writes (working notes,
 # not package documentation — DESIGN.md is where decisions land)
 .claude/
-docs/superpowers/
+docs/superpowers/*
+# ONE exception, and it is not a working note. The config schema v1 spec holds
+# section 6's table of check ids, and
+# `tests/config/test_config_preflight.py::TestTheRegistry` compares the
+# registered ids against it. While it was ignored, that comparison ran only on
+# a machine that happened to have the file: `git ls-files docs/superpowers`
+# returned zero, so on any clone the spec was absent, the comparison SKIPPED by
+# design, and an 80-entry literal in the test was the only thing left. The
+# authority for a versioned contract was reachable by nobody, and the copy was
+# the only thing anyone could read.
+#
+# Re-including a path needs its parents re-included first, which is why the
+# line above is `docs/superpowers/*` rather than `docs/superpowers/`: git will
+# not look inside an excluded DIRECTORY at all.
+!docs/superpowers/specs/
+docs/superpowers/specs/*
+!docs/superpowers/specs/2026-08-09-rheplicant-config-schema-v1.md
 # Same rule, newer directory. `.agents/evidence/` holds what a task's audit and
 # review agents wrote, copied out of the session scratchpad so it survives
 # /private/tmp being cleared; T-002's is 38 MB. Ignoring it keeps `git add -A`
