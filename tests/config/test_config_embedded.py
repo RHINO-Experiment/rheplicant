@@ -1,9 +1,18 @@
+"""The embedded entry, called the way a generated script calls it.
+
+Every call here passes ``format_version``, because a real generated
+program does: the entry point refuses a call without one rather than
+accepting a shape it cannot identify. A test that omitted it would be
+exercising a path no published script takes.
+"""
+
 from __future__ import annotations
 
 import base64
 import json
 
 from _rheplicant_bootstrap.entry import run_embedded_config
+from _rheplicant_bootstrap.script import SCRIPT_FORMAT_VERSION
 from tests.config.test_config_cli import document, write_document
 
 
@@ -12,6 +21,7 @@ def test_embedded_entry_uses_the_embedded_launch_mode(tmp_path):
     target = tmp_path / "embedded"
     payload = write_document(source_path, document(output=target))
     assert run_embedded_config(
+        format_version=SCRIPT_FORMAT_VERSION,
         input_bytes_b64=base64.b64encode(payload).decode("ascii"),
         source_path=str(source_path),
         source_realpath=str(source_path),
@@ -32,6 +42,7 @@ def test_embedded_entry_publishes_to_the_invocation_directory(tmp_path):
     payload = write_document(source_path, document())
     assert b"outputs" not in payload
     assert run_embedded_config(
+        format_version=SCRIPT_FORMAT_VERSION,
         input_bytes_b64=base64.b64encode(payload).decode("ascii"),
         source_path=str(source_path),
         source_realpath=str(source_path),
@@ -51,6 +62,7 @@ def test_embedded_entry_records_no_override_when_none_is_given(tmp_path):
     target = tmp_path / "embedded"
     payload = write_document(source_path, document(output=target))
     assert run_embedded_config(
+        format_version=SCRIPT_FORMAT_VERSION,
         input_bytes_b64=base64.b64encode(payload).decode("ascii"),
         source_path=str(source_path),
         source_realpath=str(source_path),
@@ -67,6 +79,7 @@ def test_embedded_entry_refuses_an_override_against_an_authored_directory(tmp_pa
     authored = tmp_path / "authored"
     payload = write_document(source_path, document(output=authored))
     assert run_embedded_config(
+        format_version=SCRIPT_FORMAT_VERSION,
         input_bytes_b64=base64.b64encode(payload).decode("ascii"),
         source_path=str(source_path),
         source_realpath=str(source_path),
@@ -89,6 +102,7 @@ def test_embedded_entry_keeps_the_products_the_invocation_asks_for(tmp_path):
     payload = write_document(source_path, document())
     assert b"outputs" not in payload
     assert run_embedded_config(
+        format_version=SCRIPT_FORMAT_VERSION,
         input_bytes_b64=base64.b64encode(payload).decode("ascii"),
         source_path=str(source_path),
         source_realpath=str(source_path),
@@ -111,6 +125,7 @@ def test_embedded_entry_refuses_an_invocation_write_against_an_asking_document(t
     value["outputs"] = {"write": {"arrays": True}}
     payload = write_document(source_path, value)
     assert run_embedded_config(
+        format_version=SCRIPT_FORMAT_VERSION,
         input_bytes_b64=base64.b64encode(payload).decode("ascii"),
         source_path=str(source_path),
         source_realpath=str(source_path),
@@ -138,6 +153,7 @@ def test_embedded_entry_refuses_a_model_the_fold_cannot_assemble(tmp_path, capsy
     }
     payload = write_document(source_path, value)
     assert run_embedded_config(
+        format_version=SCRIPT_FORMAT_VERSION,
         input_bytes_b64=base64.b64encode(payload).decode("ascii"),
         source_path=str(source_path),
         source_realpath=str(source_path),

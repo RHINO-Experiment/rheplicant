@@ -856,6 +856,7 @@ def _render_exception(error: Exception, stderr: TextIO, *, traceback_error: bool
 
 def run_embedded_config(
     *,
+    format_version: object = None,
     source_path: str,
     source_realpath: str | None,
     source_name: str,
@@ -874,6 +875,26 @@ def run_embedded_config(
     the document, so the embedded bytes and their digest stay the author's.
     """
     import sys
+
+    from _rheplicant_bootstrap.script import SCRIPT_FORMAT_VERSION
+
+    # Type-exact, like every other stored version in this package: `1.0 != 1`
+    # and `True != 1` are both False in Python, so either would be read as
+    # version 1 and the call below made against a shape nothing verified.
+    if format_version is None:
+        raise ConfigError(
+            "this generated script predates script format versions and this "
+            f"rheplicant reads format {SCRIPT_FORMAT_VERSION}. Regenerate it "
+            "with `rheplicant script` from the same document; the embedded "
+            "source bytes in the old file are still yours and unchanged."
+        )
+    if type(format_version) is not int or format_version != SCRIPT_FORMAT_VERSION:
+        raise ConfigError(
+            f"this generated script declares script format "
+            f"{format_version!r} and this rheplicant reads "
+            f"{SCRIPT_FORMAT_VERSION}. Regenerate it with `rheplicant script`, "
+            "or run it with the rheplicant that wrote it."
+        )
 
     chosen_stdout = sys.stdout if stdout is None else stdout
     chosen_stderr = sys.stderr if stderr is None else stderr

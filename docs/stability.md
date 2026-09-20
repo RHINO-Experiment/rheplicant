@@ -149,6 +149,12 @@ bundle is a 404 nothing else would catch.
 | Configuration document schema | `"1"` | `json_schema()["schemaVersion"]` |
 | Audit bundle integrity manifest | `1` | `_rheplicant_bootstrap.audit.integrity.INTEGRITY_FORMAT_VERSION` |
 | Inference archive | `3` | `rheplicant.inference.archive` |
+| Generated script | `1` | `_rheplicant_bootstrap.script.SCRIPT_FORMAT_VERSION` |
+
+A published script carries its format version in the call it makes, and a
+script written before versions existed is refused with the command that
+regenerates it — the embedded source bytes in the old file are unchanged and
+still the author's.
 
 Each is compared **type-exactly** where it is read. `3.0 != 3` is False in
 Python and so is `True != 1`, so a manifest storing either would otherwise be
