@@ -306,24 +306,23 @@ fail_under` in `pyproject.toml` (currently **89**, raised from 82 with the
 fix above). That is the only place the floor lives; the `--cov-fail-under`
 flag it used to read is gone.
 
-**The floor is 89 and it gates at 88.5, and CI prints `FAIL` on every run
-while passing.** Both halves measured 2026-08-28. `coverage` compares the
-total **rounded to `[tool.coverage.report] precision`** digits, and `precision`
-is not set here, so it defaults to **0**: `should_fail_under(88.96, 89, 0)` is
-`False` because `round(88.96) == 89`. At `precision = 2` the same call is
-`True`. So the effective floor is half a point below the declared one.
-
-The confusing part is that **pytest-cov prints its own line from the
-UNROUNDED number**, so every Coverage job on CI ends with
+**The floor gates where it says it does, and that took a setting.** `coverage`
+compares the total **rounded to `[tool.coverage.report] precision`** digits.
+Unset, `precision` defaults to **0**, and an 89 floor then gated at 88.5:
+`should_fail_under(88.96, 89, 0)` is `False` because `round(88.96) == 89`.
+Worse, pytest-cov prints its own line from the UNROUNDED total, so every
+Coverage job ended with
 
     FAIL Required test coverage of 89.0% not reached. Total coverage: 88.96%
 
-and then exits **0** and is marked green — measured on three consecutive runs
-at 88.99 %, 88.97 % and 88.96 %, all `success`, going back before this
-programme. The line that prints is not the line that decides. Anyone reading
-that log will conclude the gate is broken; it is doing exactly what it was
-configured to do, and what is wrong is that two different numbers are
-displayed by two different components.
+and then exited **0** and was marked green — measured on three consecutive
+runs at 88.99 %, 88.97 % and 88.96 %, all `success`. The line that printed was
+not the line that decided.
+
+`precision = 2` has been set since `a7bbd4f` (2026-08-28), so the number that
+prints and the number that decides are now the same one, and the floor is the
+declared 89. The paragraph above is kept because the failure is invisible when
+it happens: a green job whose own log says FAIL.
 
 Note also that **CI's coverage was lower than a local run's** (88.96 % against
 89.39 %), and the reason first written here — that `MomentRFI` cannot install
