@@ -237,6 +237,13 @@ tutorial-nuts
 
 ```{toctree}
 :maxdepth: 2
+:caption: Stability and capabilities
+
+stability
+```
+
+```{toctree}
+:maxdepth: 2
 :caption: Reference
 
 examples

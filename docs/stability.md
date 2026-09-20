@@ -1,0 +1,147 @@
+# Stability and capabilities
+
+What this package promises, what it does not, and how you can tell which is
+which without reading the source.
+
+Every number on this page is checked against the code by
+`tests/test_stability_page.py`. If one of them is wrong, that test is red —
+the page cannot drift quietly, which is the only reason it is worth writing
+numbers down at all.
+
+## The layers, and which may depend on which
+
+```text
+_rheplicant_bootstrap      depends on nothing in this project
+rheplicant.core            -> bootstrap
+rheplicant.radio           -> core
+rheplicant.inference       -> core
+rheplicant.config          -> bootstrap, core, radio, inference
+rheplicant.gui             -> bootstrap, core, config, radio
+```
+
+Two properties matter more than the rest:
+
+`radio` and `inference` do not import each other. A forward model and a
+likelihood layer are siblings, so you can use the instrument model without the
+Bayesian half and point the Bayesian half at something else.
+
+`gui` does not import `inference`. It reaches `config`, and `config` reaches
+`inference`.
+
+There is one cycle and it is deliberate: `config` imports the bootstrap at
+module scope, and the bootstrap's command half imports `config.orchestration`
+at call time. Importing it any earlier would put JAX behind
+`rheplicant --help`.
+
+`tests/test_import_direction.py` pins all of this, in both directions — a
+dependency that is allowed and unused is deleted, so the table is the whole
+truth rather than a ceiling.
+
+## What counts as public
+
+The importable surface is `__all__`, in six namespaces, **338 names**:
+
+| Namespace | Names |
+|---|---|
+| `rheplicant` | 25 |
+| `rheplicant.core` | 31 |
+| `rheplicant.radio` | 61 |
+| `rheplicant.inference` | 106 |
+| `rheplicant.config` | 41 |
+| `rheplicant.gui` | 74 |
+
+Every one is pinned by name in `tests/test_public_surface.py`. Adding a name
+is a promise; removing one breaks whoever believed the last promise. Both show
+up as a diff in review.
+
+A leading underscore means private, and a private name crosses a package
+boundary only through a route recorded in
+`tests/test_cross_package_privates.py` — eight routes today. If you are
+importing an underscore name from another package and it is not on that list,
+it will not stay importable.
+
+## The four capability levels
+
+Every shipped capability — an operator, a sky model or a sky projector —
+declares one, as a `maturity` class variable beside `requires` and `provides`.
+There is no default: a class that does not declare a level raises rather than
+inheriting a claim about its physics.
+
+| Level | What you may conclude |
+|---|---|
+| Maintained | Documented contract, regression-tested within its declared domain. |
+| Experimental | Usable, with stated limits and no general validity guarantee. Anything built on an upstream Experimental surface inherits this. |
+| Placeholder | Correct plumbing and shapes, stand-in physics. The contract is real and tested; the numbers are not predictions. |
+| Unavailable | Named by the schema or API and refused with a typed error. |
+
+Today, of **35** shipped capabilities:
+
+| Level | Count |
+|---|---|
+| Maintained | 14 |
+| Experimental | 2 |
+| Placeholder | 19 |
+
+Read them at runtime rather than from this table:
+
+```python
+from rheplicant.radio import at_level, capabilities
+from rheplicant import Maturity
+
+capabilities()                      # every capability -> its level
+at_level(Maturity.PLACEHOLDER)      # the names whose numbers are stand-ins
+```
+
+**A level belongs to a capability on a surface, not to a capability alone.**
+`NeuralOperator` is a working operator from Python and is refused from a
+configuration document with a typed error naming its capability — one class,
+two answers. So the class variable records how far the *implementation* has
+been taken, and `Unavailable` describes a *surface's* answer. No class is ever
+`Unavailable`; the eight document keys that are live in
+`_rheplicant_bootstrap.capability.REGISTRY`.
+
+A placeholder is not a bug and not a warning. Placing one is a reasonable
+thing to do — the contract, the ordering and the differentiability are real,
+which is what makes the pipeline worth assembling before the physics arrives.
+What you must not do is read its numbers as a prediction.
+
+## External contract versions
+
+| Contract | Version | Where |
+|---|---|---|
+| Configuration document schema | `"1"` | `json_schema()["schemaVersion"]` |
+| Audit bundle integrity manifest | `1` | `_rheplicant_bootstrap.audit.integrity.INTEGRITY_FORMAT_VERSION` |
+| Inference archive | `3` | `rheplicant.inference.archive` |
+
+Each is compared **type-exactly** where it is read. `3.0 != 3` is False in
+Python and so is `True != 1`, so a manifest storing either would otherwise be
+accepted as a version it is not — and the archive's version guards a byte
+layout, where being wrong returns numbers rather than an error.
+
+## Compatibility policy
+
+This package is pre-1.0 and says so: `Development Status :: 3 - Alpha`.
+
+- A **patch** release changes no public name and no contract version.
+- A **minor** release may add public names and may raise a contract version.
+  It may remove a name only where the removal is stated in the changelog.
+- Placeholder physics may be replaced in any release. Its *contract* —
+  shapes, ordering, purity, PRNG consumption — is what is stable, and
+  replacing the body raises the capability's level rather than changing its
+  interface.
+
+## The bayesmith range
+
+`bayesmith>=0.10,<0.11`.
+
+The floor and the ceiling are both load-bearing, and for different reasons.
+The floor is a capability floor: `rheplicant.inference.plan` imports
+`bayesmith.optimize.certify`, which 0.10 added, so an earlier bayesmith fails
+at import rather than at a call site. The ceiling is closed at the next minor
+because a pre-1.0 bayesmith minor may move the deep module paths this package
+imports — 0.10 did exactly that, turning `bayesmith.optimize` from a module
+into a package.
+
+`tests/test_bayesmith_floor.py` asserts each level by capability rather than
+by version number, because an editable install reports whatever version its
+metadata was written with.
