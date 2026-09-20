@@ -52,6 +52,14 @@ jobs:
         # new ruff release cannot turn this job red without a change here.
         run: uvx ruff@0.16.3 check src tests
 
+      - name: Ruff format
+        # D4, adopted 2026-09-20 once section 2.6's citation migration meant
+        # formatting could no longer invalidate a citation. Same pin and the
+        # same reason: a formatter's default output changes between releases,
+        # and an unpinned one would rewrite the tree on somebody else's
+        # schedule.
+        run: uvx ruff@0.16.3 format --check src tests
+
   suite:
     name: Suite (Python ${{ matrix.python }})
     runs-on: ubuntu-latest

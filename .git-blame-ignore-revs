@@ -1,0 +1,13 @@
+# Revisions to skip when reading `git blame`.
+#
+# Use with:
+#     git config blame.ignoreRevsFile .git-blame-ignore-revs
+#
+# A commit belongs here only if it changed NO behaviour and touched a large
+# number of lines, so that blame points at whoever wrote a line rather than at
+# whoever reformatted it.
+
+# style: ruff format, now that formatting cannot invalidate a citation
+# 470 files, behaviour-preserving. D4, deferred in Stage 0 until section 2.6's
+# citation migration reached zero.
+165b7f42d870eed7f3970b65a99edb4b2bbc39c2
