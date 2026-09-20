@@ -142,9 +142,13 @@ def test_direct_and_sdist_wheels_have_the_same_closed_file_list(
             names = tuple(row.filename for row in archive.infolist())
         assert len(names) == len(set(names))
         assert "rheplicant/config/presets/rhino_v1.yaml" in names
-        assert "rheplicant/config/schemas/provenance-v1.schema.json" in names
-        assert "rheplicant/config/schemas/diagnostics-v1.schema.json" in names
-        assert "rheplicant/config/schemas/products-v1.schema.json" in names
+        # Derived, for the reason SCHEMAS is derived at the top of this file:
+        # spelled out, this was three names against a package that shipped
+        # four, so capabilities-v1 could ship or stop shipping with nothing
+        # here noticing. The equality below closes the list, but only against
+        # the OTHER wheel -- both can be wrong together.
+        for schema in SCHEMAS:
+            assert f"rheplicant/config/schemas/{schema}" in names, schema
         assert "rheplicant/gui/static/index.html" in names
         assert any(
             name.startswith("rheplicant/gui/static/assets/") and name.endswith(".js")
