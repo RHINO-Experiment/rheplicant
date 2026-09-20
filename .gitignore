@@ -68,14 +68,23 @@ docs/superpowers/*
 !docs/superpowers/specs/
 docs/superpowers/specs/*
 !docs/superpowers/specs/2026-08-09-rheplicant-config-schema-v1.md
-# Same rule, newer directory. `.agents/evidence/` holds what a task's audit and
-# review agents wrote, copied out of the session scratchpad so it survives
-# /private/tmp being cleared; T-002's is 38 MB. Ignoring it keeps `git add -A`
-# from committing it to a public repo, and `git clean -fd` from deleting it.
-# `.agents/plans/` is deliberately NOT ignored: it is untracked like the rest,
-# but `aw context` ends with `git status -uall`, and with the evidence ignored
-# that section names the two plan documents instead of 3344 evidence files.
-/.agents/evidence/
+# Same rule, newer directory -- and now the WHOLE of it, by the user's decision
+# on 2026-09-20. `.agents/` holds a task's plans, the evidence its audit and
+# review agents wrote, and the portable skills; T-002's evidence alone is 38 MB
+# and the directory is 47 MB. Ignoring it does two things: `git add -A` cannot
+# sweep it into a public repo, and `git clean -fd` cannot delete it -- plain
+# `clean` skips ignored files and removes untracked ones, so being ignored is
+# the SAFER of the two states, not the riskier. It took `-x` to lose it.
+#
+# What this costs, stated so nobody rediscovers it: only `/.agents/evidence/`
+# was ignored before, which left `git status -uall` -- the last thing
+# `aw context` prints -- naming the plan documents. It no longer names them.
+# The plan is reached through `aw context` itself, which reads the task record
+# rather than the working tree.
+#
+# Nothing here is a backup. `.agents/` is local-only and outside version
+# control entirely; the AW handoff is the thing that carries state forward.
+/.agents/
 
 # Local reference material (contains unpublished draft; repo is public)
 assets/
