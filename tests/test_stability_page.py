@@ -194,11 +194,8 @@ def test_the_page_states_the_real_development_status(page):
     placeholder physics. A classifier describes the whole package, and the
     physics is the part a reader is most likely to trust by mistake.
     """
-    declared = re.search(
-        r'"(Development Status :: [^"]+)"', (ROOT / "pyproject.toml").read_text()
-    )
+    declared = re.search(r'"(Development Status :: [^"]+)"', (ROOT / "pyproject.toml").read_text())
     assert declared, "pyproject.toml declares no development-status classifier"
     assert f"`{declared.group(1)}`" in page, (
-        f"{PAGE.name} does not quote the declared classifier "
-        f"{declared.group(1)!r}"
+        f"{PAGE.name} does not quote the declared classifier {declared.group(1)!r}"
     )
