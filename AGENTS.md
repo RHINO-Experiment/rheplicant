@@ -430,6 +430,28 @@ the equivalent is to copy the `-actual.png` a normal failing run writes,
 asserting each image's size and changed region before writing it, then
 re-running normally to verify.
 
+## Splitting a module moves where a monkeypatch lands
+
+A pure move is not pure when a test patches a module global. A bare name --
+`id`, `open`, `len` -- resolves in the globals of the module where the code
+was **defined**, so moving a function to a new file moves the only place a
+patch of that name can reach.
+
+Measured 2026-09-20, on the `layering.py` split. The test retargeted its
+IMPORT to the function's new home and left `monkeypatch.setattr` aimed at
+`layering`, which no longer defines or calls `id`. Against `layering` the
+patched function was called **0** times; against `layering_probe`, where
+`id(item)` actually appears, **2**. The test degraded into a containment
+check that passes whatever the collision logic does, and
+`_compatibility_add_identity`/`_compatibility_has_identity` had no other
+test, so that was all of their coverage.
+
+The split commit's own message records fixing this for one function and
+missing another, which is the shape to expect: the failures are silent, one
+per patched name, and they read as green. Before splitting any of the nine
+files still marked SPLIT, `grep -rn "setattr(.*<module>" tests/` and check
+each hit against where the patched name is now resolved.
+
 ## Two habits this codebase rewards
 
 **Derive, do not re-spell.** The widget census is built live from the config
