@@ -100,8 +100,10 @@ class PowerLawSkyModel(AbstractSkyModel):
 class MapSky(AbstractSkyModel):
     """Fixed brightness maps, and the frequency grid they were built on.
 
-    The stand-in for a GSM / pyGDSM realisation, and the shape every worked
-    example in this package reaches for. ``__call__`` returns the stored maps
+    Where the maps come from is the caller's business -- a GSM / pyGDSM
+    realisation, a simulation, or a fit -- and this is the shape every worked
+    example in this package reaches for. The BODY is real: it stores maps and
+    returns them. ``__call__`` returns the stored maps
     and **does not consult its ``freq`` argument** beyond checking that it has
     the same shape as the grid the maps were built on.
 

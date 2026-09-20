@@ -209,6 +209,17 @@ __all__ = [
 from rheplicant.radio.graph import RADIO_GRAPH, assemble  # noqa: E402  (needs operators above)
 
 __all__ += ["RADIO_GRAPH", "assemble"]
+
+# Imported after the operators for the same reason `graph` is: the walk reads
+# `__all__`, which is not finished until this module is. The functions
+# themselves are lazy, so importing them here costs nothing.
+from rheplicant.radio.census import (  # noqa: E402
+    at_level,
+    capabilities,
+    capability_classes,
+)
+
+__all__ += ["at_level", "capabilities", "capability_classes"]
 __all__ += [
     "cst_beam_maps",
     "cst_frequency_table",

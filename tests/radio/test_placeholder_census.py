@@ -22,111 +22,98 @@ from pathlib import Path
 import pytest
 
 import rheplicant.radio as radio
+from rheplicant.core.capability import Maturity
 from rheplicant.core.operator import AbstractOperator
+from rheplicant.radio import at_level, capability_classes
 
-#: Wording by which an operator declares its own body a stand-in. This is a
-#: proxy -- it reads prose -- so the test pins the resulting membership lists
-#: rather than the count alone: a docstring that picks up "trivial" in some
-#: unrelated sentence moves a name between lists and must be looked at, not
-#: silently absorbed by a count that happens to stay put.
+#: Wording by which a class declares its own body a stand-in. This reads
+#: PROSE, and it is now the only thing here that does: the membership lists
+#: below are derived from the ``maturity`` ClassVar each class declares, so
+#: this regex no longer decides anything. It checks that the docstring a
+#: reader sees AGREES with the level the package publishes, in both
+#: directions, which is the direction the plan asks for -- docs checked
+#: against the registry, never the reverse.
 _PLACEHOLDER_WORDING = re.compile(
     r"placeholder|toy|trivial|stand-?in|not (?:the )?real|deliberately simpl|simplest",
     re.IGNORECASE,
 )
 
-#: Operators whose own docstring declares the body a stand-in. Three of these
-#: are load-bearing regardless (``ReceiverOperator``, ``GainOperator``,
-#: ``CalLoadOperator``): their *shape* is the identifiability convention, the
-#: plan's engine derivation and ``must_precede``. "Placeholder" is a claim
-#: about the body, never about the contract.
-PLACEHOLDER = frozenset({
-    "ADCOperator",
-    "ApplyCalibrationOperator",
-    # Moved BACK from REAL, deliberately, after the criterion for that list was
-    # written out and found not to hold. The argument for promoting them was
-    # that their contract and placement are real -- and both are: ground pickup
-    # reads env.temperature with a documented t_ground fallback and sits in the
-    # antenna-temperature sum; atmospheric emission sits before the
-    # receiver_input switch and before the noise-wave stage, for reasons its
-    # module docstring argues from radiative transfer.
-    #
-    # But that criterion does not SEPARATE the two lists: ReceiverOperator,
-    # GainOperator and CalLoadOperator are on this side and their contracts are
-    # load-bearing enough that README calls them out by name. Whatever divides
-    # the lists has to be a claim about the BODY, and by that standard
-    # `coupling * T_amb` and a constant `t_atm` are stand-ins -- which is what
-    # both module docstrings had gone on saying while the class docstrings were
-    # cleaned to move them.
-    "AtmosphericEmissionOperator",
-    "GroundPickupOperator",
-    "BackendOperator",
-    "CalLoadOperator",
-    "EMIOperator",
-    "FlaggingOperator",
-    "ForegroundOperator",
-    "GainOperator",
-    "GlobalSignalOperator",
-    "IonosphereOperator",
-    "NoiseOperator",
-    "PointSourceOperator",
-    "RFIOperator",
-    "ReceiverOperator",
-    "SkyOperator",
-})
-
-#: Operators that carry no such wording. Adding a name here is a claim that
-#: the physics is real, and the burden is a docstring that says what it does.
-REAL = frozenset({
-    # Was on the PLACEHOLDER side until its docstring was read rather than
-    # matched: it said "the real flagger behind the placeholder above", and the
-    # wording check below fired on that reference to its NEIGHBOUR. The body
-    # bridges to the numpy MomentRFI package and is the permanent integration.
-    "MomentRFIFlaggingOperator",
-    "AntennaLossOperator",
-    "BasisTemperatureOperator",
-    "BeamSpillOperator",
-    "CWCalibrationOperator",
-    "FourierBandFilter",
-    "NeuralOperator",
-    "NoiseWaveOperator",
-    "RadiometerNoiseOperator",
-    "SiderealFilter",
-    "SkySourceOperator",
-    "SkySpaceFilter",
-})
-
 
 def _concrete_operators() -> dict[str, type]:
-    """Every concrete operator class the package exports, by name."""
-    found = {}
-    for name in radio.__all__:
-        obj = getattr(radio, name)
-        if not (inspect.isclass(obj) and issubclass(obj, AbstractOperator)):
-            continue
-        if inspect.isabstract(obj) or name.startswith("Abstract"):
-            continue
-        found[name] = obj
-    return found
+    """Every concrete OPERATOR class the package exports, by name.
+
+    A subset of :func:`rheplicant.radio.capability_classes`, which also holds
+    the sky models and projectors. The counts this module pins say "operator
+    classes" in the prose they check, so the counted population stays
+    operators; the prose CHECKS below cover every capability.
+    """
+    return {
+        name: cls
+        for name, cls in capability_classes().items()
+        if issubclass(cls, AbstractOperator)
+    }
+
+
+#: Classes whose body is a stand-in, and the rest. Both are now DERIVED from
+#: the levels the classes declare, not written out here.
+#:
+#: They used to be two hand-maintained frozensets, and keeping them was real
+#: work with a real argument attached to individual names -- which is where
+#: the reasoning went when they were replaced. ``AtmosphericEmissionOperator``
+#: and ``GroundPickupOperator`` are the case worth remembering: both were
+#: promoted to REAL on the grounds that their contract and placement are real,
+#: and both were moved back, because that criterion does not SEPARATE the two
+#: lists (``ReceiverOperator`` and ``GainOperator`` have load-bearing contracts
+#: and stand-in bodies too). Whatever divides them has to be a claim about the
+#: BODY. Each class now states that claim in its own docstring -- "The BODY is
+#: a placeholder" -- and declares the matching level beside ``requires`` and
+#: ``provides``.
+#:
+#: That history is also why the derivation is worth having. When the capability
+#: registry was first written its level for those two was taken from the
+#: docstring's SUMMARY line, which had been cleaned when they were promoted,
+#: so the registry said MAINTAINED while this census said placeholder and
+#: nothing compared them. Two criteria, two answers, no failure.
+PLACEHOLDER = frozenset(
+    name for name, cls in _concrete_operators().items()
+    if cls.maturity is Maturity.PLACEHOLDER
+)
+REAL = frozenset(_concrete_operators()) - PLACEHOLDER
+
+#: Every capability, not just the operators, for the prose checks.
+ALL_PLACEHOLDER = at_level(Maturity.PLACEHOLDER)
+ALL_OTHER = frozenset(capability_classes()) - ALL_PLACEHOLDER
 
 
 class TestCensus:
-    def test_the_two_lists_are_the_exported_operators(self):
-        """No operator is unclassified, and none is classified twice.
+    def test_the_shared_walk_sees_what_a_direct_walk_sees(self):
+        """The derivation in ``src/`` agrees with the obvious one.
 
-        This is what makes the count below mean something: a new operator
-        lands in neither list and fails here, so the census cannot quietly
-        stop covering the package it claims to describe.
+        The lists are derived now, so "no operator is unclassified" is true by
+        construction and asserting it would prove nothing. What is worth
+        asserting is the part construction does NOT give: that
+        ``capability_classes()`` -- the one walk every view shares -- really
+        covers the exported operators, rather than filtering some of them out
+        on its way. If it ever narrowed, every view would narrow with it,
+        silently and together, which is the failure mode a shared derivation
+        buys in exchange for the drift it removes.
         """
-        exported = set(_concrete_operators())
-        assert not (PLACEHOLDER & REAL), PLACEHOLDER & REAL
-        assert PLACEHOLDER | REAL == exported, {
-            "unclassified": sorted(exported - (PLACEHOLDER | REAL)),
-            "listed but not exported": sorted((PLACEHOLDER | REAL) - exported),
+        direct = {
+            name: obj
+            for name in radio.__all__
+            if inspect.isclass(obj := getattr(radio, name, None))
+            and issubclass(obj, AbstractOperator)
+            and not inspect.isabstract(obj)
         }
+        assert set(_concrete_operators()) == set(direct), {
+            "shared walk missed": sorted(set(direct) - set(_concrete_operators())),
+            "shared walk invented": sorted(set(_concrete_operators()) - set(direct)),
+        }
+        assert not (PLACEHOLDER & REAL)
 
-    @pytest.mark.parametrize("name", sorted(PLACEHOLDER))
+    @pytest.mark.parametrize("name", sorted(ALL_PLACEHOLDER))
     def test_placeholder_operators_say_so(self, name):
-        doc = inspect.getdoc(_concrete_operators()[name]) or ""
+        doc = inspect.getdoc(capability_classes()[name]) or ""
         # Necessary, not sufficient. A docstring can contain the word while
         # DENYING that it applies -- "the real flagger behind the placeholder
         # above" matched here for a year while describing a permanent
@@ -138,7 +125,7 @@ class TestCensus:
             f"the counts in rheplicant/radio/__init__.py and README.md."
         )
 
-    @pytest.mark.parametrize("name", sorted(REAL))
+    @pytest.mark.parametrize("name", sorted(ALL_OTHER))
     def test_real_operators_do_not_hedge(self, name):
         """The direction that catches a stale caveat, not a stale count.
 
@@ -147,7 +134,7 @@ class TestCensus:
         checks -- which is the failure this whole module is about, one level
         down.
         """
-        doc = inspect.getdoc(_concrete_operators()[name]) or ""
+        doc = inspect.getdoc(capability_classes()[name]) or ""
         assert not _PLACEHOLDER_WORDING.search(doc), (
             f"{name} is listed as real physics but its docstring still hedges. "
             f"Either the caveat is stale and should go, or the operator belongs "

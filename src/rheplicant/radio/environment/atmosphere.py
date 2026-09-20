@@ -33,7 +33,7 @@ from rheplicant.core.state import State
 
 
 class AtmosphericEmissionOperator(AbstractOperator):
-    """Produce the beam-averaged atmospheric emission contribution [K].
+    """Produce the beam-averaged atmospheric emission contribution [K] (placeholder body).
 
     The BODY is a placeholder: a constant effective temperature, optionally per
     channel, with no opacity, no elevation dependence and no weather. The
@@ -57,7 +57,7 @@ class AtmosphericEmissionOperator(AbstractOperator):
     requires: ClassVar[tuple[str, ...]] = ("coords.time", "coords.freq")
     provides: ClassVar[tuple[str, ...]] = ("data",)
     graph_node: ClassVar[str] = "atmosphere"
-    maturity: ClassVar[Maturity] = Maturity.MAINTAINED
+    maturity: ClassVar[Maturity] = Maturity.PLACEHOLDER
 
     t_atm: jax.Array
 

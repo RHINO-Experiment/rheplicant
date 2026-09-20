@@ -1744,8 +1744,11 @@ class TestWhereTheToneMayGo:
 
     def test_the_tone_is_the_only_shipped_class_with_an_ordering_constraint(
             self):
-        """Measured at ``48b359d``: 1 of the 58 names in
-        ``rheplicant.radio.__all__``.
+        """Measured at ``48b359d``: 1 of the names in
+        ``rheplicant.radio.__all__`` (58 then, 61 now -- the count is not what
+        this asserts, and spelling it here was a second copy of a number
+        `test_this_pass_and_the_build_agree_on_every_exported_class` already
+        pins).
 
         ``_tone_placement`` is written generally -- it asks every entry's class
         for a ``must_precede`` -- so this is not a limitation.  It is the
@@ -3410,13 +3413,17 @@ class TestOneClassOneAnswer:
                 f"{module}:{name} -- the build says {built!r} and this pass "
                 f"says {answered!r}")
             checked += 1
-        # 57 of the 58 exported names: measured, ``PROTECTED_KEY`` is a plain
+        # 60 of the 61 exported names: measured, ``PROTECTED_KEY`` is a plain
         # string constant and carries no ``__module__`` at all, so there is no
         # "its own module" spelling to put to either resolver.  The number is
         # here so that a name leaving ``__all__`` is a red test rather than a
-        # quietly shorter loop.
-        assert checked == 57
-        assert len(radio.__all__) == 58
+        # quietly shorter loop -- and it moved from 57 the way it is supposed
+        # to, deliberately, when ``at_level``, ``capabilities`` and
+        # ``capability_classes`` joined the surface as the capability
+        # registry's views.  Functions, so they resolve like any other name
+        # here and answer ``None`` to the class resolver.
+        assert checked == 60
+        assert len(radio.__all__) == 61
 
     def test_answering_imports_nothing(self):
         """§2.4 and §0 at once: the widening reads ``sys.modules`` and never

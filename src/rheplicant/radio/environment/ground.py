@@ -26,7 +26,7 @@ from rheplicant.core.state import State
 
 
 class GroundPickupOperator(AbstractOperator):
-    """Produce a ground-pickup contribution coupled to ambient temperature.
+    """Produce a ground-pickup contribution coupled to ambient temperature (placeholder body).
 
     The BODY is a placeholder: one scalar coupling times one temperature, with
     no dependence on where the sidelobes actually point. The contract is not.
@@ -51,7 +51,7 @@ class GroundPickupOperator(AbstractOperator):
     requires: ClassVar[tuple[str, ...]] = ("coords.time", "coords.freq", "env.temperature")
     provides: ClassVar[tuple[str, ...]] = ("data",)
     graph_node: ClassVar[str] = "ground_pickup"
-    maturity: ClassVar[Maturity] = Maturity.MAINTAINED
+    maturity: ClassVar[Maturity] = Maturity.PLACEHOLDER
 
     coupling: jax.Array
     t_ground: jax.Array
