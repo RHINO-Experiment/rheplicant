@@ -561,7 +561,10 @@ def _marker_id(directory_fd: int) -> str:
     if (
         type(value) is not dict
         or tuple(sorted(value)) != ("format_version", "run_directory_id")
-        or value.get("format_version") != 1
+        # Type-exact: `1.0` and `True` are both `== 1`, and this marker is
+        # what decides whether a result directory is ours to read.
+        or type(value.get("format_version")) is not int
+        or value["format_version"] != 1
         or type(value.get("run_directory_id")) is not str
         or _MARKER_ID.fullmatch(value["run_directory_id"]) is None
     ):

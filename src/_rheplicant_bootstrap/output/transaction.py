@@ -956,6 +956,9 @@ def _read_marker_id(parent_fd: int, name: str) -> str:
     if (
         type(value) is not dict
         or tuple(sorted(value)) != ("format_version", "run_directory_id")
+        # Type-exact, like every other clause here: `1.0 != 1` and
+        # `True != 1` are both False, so either would be read as version 1.
+        or type(value["format_version"]) is not int
         or value["format_version"] != 1
         or _MARKER_ID.fullmatch(value["run_directory_id"] or "") is None
         or payload != _canonical_json(value)

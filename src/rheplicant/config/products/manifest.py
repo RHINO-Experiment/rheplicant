@@ -153,7 +153,10 @@ def validate_product_bundle(bundle: ProductBundle, *, component_limit: int) -> N
     }:
         raise ConfigError("scientific product manifest has an invalid root shape.")
     if (
-        value["format_version"] != 1
+        # Type-exact for the same reason the three `type(...) is not list`
+        # clauses below are: `1.0` and `True` are both `== 1`.
+        type(value["format_version"]) is not int
+        or value["format_version"] != 1
         or type(value["requests"]) is not list
         or type(value["files"]) is not list
         or type(value["omissions"]) is not list

@@ -125,3 +125,54 @@ class TestTheArchiveManifest:
         with pytest.raises(StateValidationError) as raised:
             archive.load_memory(target, None)
         assert "float" in str(raised.value), raised.value
+
+
+def test_no_stored_version_is_compared_loosely_anywhere():
+    """The census: every ``format_version`` comparison in ``src/`` is type-exact.
+
+    The three readers above were found one at a time. This is the check that
+    would have found all of them at once, and the one that catches the fourth:
+    a comparison of a stored ``format_version`` must be preceded by a
+    ``type(...) is not int`` clause guarding it.
+
+    Read as TEXT rather than by AST on purpose. The clauses are spread across
+    boolean chains of five and six terms, and what matters is whether the type
+    guard is present in the same condition -- a property of the written
+    condition, which is what a reviewer reads.
+    """
+    import pathlib
+    import re
+
+    src = pathlib.Path(__file__).resolve().parents[1] / "src"
+    loose = []
+    for path in sorted(src.rglob("*.py")):
+        text = path.read_text(encoding="utf-8")
+        for match in re.finditer(
+            r'^.*\[.format_version.\]\s*!=\s*|^.*\.get\(.format_version.\)\s*!=\s*',
+            text, re.M,
+        ):
+            line_no = text[: match.start()].count("\n")
+            window = "\n".join(text.splitlines()[max(0, line_no - 25): line_no + 1])
+            # The guard must be ON format_version. Asking only whether the
+            # window contains "type(" was the first version of this check and
+            # it was VACUOUS: every one of these conditions type-checks its
+            # neighbouring fields -- `type(value) is not dict`,
+            # `type(value["requests"]) is not list` -- so the substring was
+            # always present and the census passed with all three fixes
+            # reverted. Measured, not reasoned: reverting one and re-running
+            # is what showed it.
+            # Line-scoped, so the nested parenthesis in
+            # `type(manifest.get("format_version"))` does not stop the match --
+            # a `[^)]*` pattern cannot cross it, which cost one red run. The
+            # window is 25 lines because archive.py's guard sits above a long
+            # refusal message.
+            if not re.search(
+                r"type\([^\n]*format_version[^\n]*is\s+not\s+int", window
+            ):
+                loose.append(f"{path.relative_to(src)}:{line_no + 1}")
+    assert not loose, (
+        f"these compare a stored format_version without a type check in the "
+        f"same condition: {loose}. `1.0 != 1` and `True != 1` are both False, "
+        "so the version would be accepted and the payload read against a shape "
+        "nothing verified"
+    )
