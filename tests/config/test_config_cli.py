@@ -464,3 +464,42 @@ def test_the_success_lines_the_page_documents_are_the_ones_written(tmp_path, cap
     write_document(run_config, document(output=target))
     assert main(["run", str(run_config)]) == 0
     assert capsys.readouterr().out == f"configuration run complete: {target}\n"
+
+
+def test_a_manifest_listing_one_path_twice_is_reported():
+    """``verify_tree`` verifies a tree it did not write, so it cannot assume
+    the writer's refusals held.
+
+    ``_digest_rows`` raises on a duplicate ``relative_path``; the verifier used
+    to let the later row win and say nothing, so a manifest malformed in
+    exactly this way read as well-formed. Tamper detection was never affected
+    -- a wrong digest is reported whichever row survives -- which is why this
+    needs its own test rather than falling out of the forgery cases above.
+
+    The root is recomputed over the duplicated list, so the manifest is
+    self-consistent and the root check cannot be what fails. Without that the
+    test would pass for the wrong reason.
+    """
+    import hashlib
+
+    from _rheplicant_bootstrap.audit.integrity import (
+        INTEGRITY_NAME,
+        integrity_bytes,
+        verify_tree,
+    )
+    from _rheplicant_bootstrap.audit.json import canonical_json_bytes
+
+    files = {"a.txt": b"A", "b.txt": b"B"}
+    rows = tuple(sorted(files.items()))
+    manifest = json.loads(integrity_bytes(rows))
+    assert verify_tree({**files, INTEGRITY_NAME: canonical_json_bytes(manifest)}) == ()
+
+    manifest["files"].append(dict(manifest["files"][0]))
+    manifest["root_sha256"] = hashlib.sha256(canonical_json_bytes(manifest["files"])).hexdigest()
+
+    problems = verify_tree({**files, INTEGRITY_NAME: canonical_json_bytes(manifest)})
+    assert any("more than once" in problem for problem in problems), problems
+    assert not any("root_sha256" in problem for problem in problems), (
+        "the root check fired, so this test would pass even with the duplicate "
+        f"check removed: {problems}"
+    )

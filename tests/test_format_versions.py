@@ -155,7 +155,14 @@ def test_no_stored_version_is_compared_loosely_anywhere():
             # comparison in entry.py is the SECOND term of its condition, so a
             # line-anchored pattern missed it. The lookbehind is what keeps
             # this branch from re-matching the two spellings above.
-            r"|^.*(?<![\w.])format_version\s*!=\s*",
+            r"|^.*(?<![\w.])format_version\s*!=\s*"
+            # Reversed operands and getattr. Neither is used for a
+            # format_version today, but `1 != x` IS this codebase's style in
+            # four other places, so the next one written that way would be
+            # invisible to the census that exists to find it -- which is how
+            # the two branches above came to be missing.
+            r"|^.*!=\s*[\w.\[\]\"']*format_version"
+            r"|^.*getattr\([^\n]*format_version[^\n]*\)\s*!=\s*",
             text,
             re.M,
         ):
