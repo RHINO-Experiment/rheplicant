@@ -11,9 +11,26 @@ here: several modules import lazily to break a cycle at module scope, and an
 edge that exists only inside a function is still an edge. A text scan would
 also see the four prefixes inside a docstring; this does not.
 
+**Dynamic imports are read too, and the first version of this file did not
+read them.** It asserted that ``_rheplicant_bootstrap`` imports nothing from
+this project, and it PASSED -- while
+``execution_environment.py:82`` called
+``importlib.import_module("rheplicant.config.orchestration")``. An ``ast``
+walk over ``Import`` and ``ImportFrom`` cannot see that, so the guard was
+green about a property that was false in exactly the way it could not look.
+Stage 1 had the edge on record as A1-2; what was missing was a check that
+could fail on it. Literal string arguments to ``import_module`` and
+``__import__`` now count as edges.
+
+A dynamic import whose argument is NOT a literal cannot be resolved here at
+all, and three exist: the plugin loader, ``config/hatch.py``'s target import
+and postflight's discovery. Each takes a name from a document or from the
+filesystem, so there is no edge to check -- what governs them is the audited
+plugin protocol and ``import_target``'s own refusals, not this file.
+
 The stack, measured rather than declared:
 
-    _rheplicant_bootstrap      imports nothing from this project
+    _rheplicant_bootstrap      nothing statically; ONE pinned dynamic edge
     rheplicant.core            -> bootstrap
     rheplicant.radio           -> core
     rheplicant.inference       -> core
@@ -54,7 +71,7 @@ BOOTSTRAP = "_rheplicant_bootstrap"
 #: package -> the packages it may import. Both directions are asserted, so
 #: this is the whole truth and not a ceiling.
 ALLOWED: dict[str, frozenset[str]] = {
-    BOOTSTRAP: frozenset(),
+    BOOTSTRAP: frozenset({"rheplicant.config"}),  # dynamic only; see BOOTSTRAP_UPWARD
     "rheplicant": frozenset({"rheplicant.core"}),
     "rheplicant.core": frozenset({BOOTSTRAP}),
     "rheplicant.radio": frozenset({"rheplicant.core"}),
@@ -66,6 +83,26 @@ ALLOWED: dict[str, frozenset[str]] = {
         BOOTSTRAP, "rheplicant.core", "rheplicant.config", "rheplicant.radio",
     }),
 }
+
+#: The bootstrap's one upward edge, and the only one it may have.
+#:
+#: The bootstrap is two layers in one package (A1-2): a foundation that is read
+#: before ``rheplicant`` is importable, and a COMMAND half that drives the
+#: package once it is. The command half cannot import ``config`` at module
+#: scope without dragging the whole package -- and JAX -- into a bare
+#: ``--help``, so it reaches for it at call time instead. That is the inversion
+#: being pinned: allowed, singular, and named here so a second one is a red
+#: test rather than a precedent.
+BOOTSTRAP_UPWARD: dict[tuple[str, str], str] = {
+    ("_rheplicant_bootstrap/execution_environment.py",
+     "rheplicant.config.orchestration"):
+        "establish_runtime() hands back the orchestration module the command "
+        "half then drives; importing it at module scope would put JAX behind "
+        "`rheplicant --help`, which tests/config/test_entry_order.py forbids",
+}
+
+#: The one cycle this project accepts, from the inversion above.
+PINNED_CYCLE = (BOOTSTRAP, "rheplicant.config")
 
 #: Edges that are allowed and carry a cost worth stating at the edge itself.
 NOTED = {
@@ -111,23 +148,85 @@ def _edges() -> dict[str, frozenset[str]]:
                 there = _package_of(module)
                 if there and there != here:
                     found[here].add(there)
+            for module in _dynamic_targets(node):
+                there = _package_of(module)
+                if there and there != here:
+                    found[here].add(there)
     return {key: frozenset(value) for key, value in found.items()}
 
 
-def test_the_bottom_of_the_stack_depends_on_nothing_above_it():
-    """``_rheplicant_bootstrap`` imports no part of this project.
+def _dynamic_targets(node: ast.AST) -> list[str]:
+    """Literal module names handed to ``import_module`` or ``__import__``.
 
-    Asserted on its own rather than folded into the table below, because it is
-    the property the whole stack rests on: the CLI entry point reads it before
-    ``rheplicant`` is importable, and ``tests/config/test_entry_order.py``
-    depends on that being true to keep JAX out of a bare ``--help``.
+    A non-literal argument yields nothing: it cannot be resolved without
+    running the program, and the three that exist take a name from a document
+    or the filesystem rather than naming a package at all.
     """
-    reached = sorted(_edges().get(BOOTSTRAP, frozenset()))
-    assert not reached, (
-        f"{BOOTSTRAP} now imports {reached}. It is read before the package is "
-        "importable, so this is not a layering preference -- it is what makes "
-        "the entry point work at all"
+    if not isinstance(node, ast.Call):
+        return []
+    function = node.func
+    name = (function.attr if isinstance(function, ast.Attribute)
+            else function.id if isinstance(function, ast.Name) else "")
+    if name not in {"import_module", "__import__"} or not node.args:
+        return []
+    first = node.args[0]
+    if isinstance(first, ast.Constant) and isinstance(first.value, str):
+        return [first.value]
+    return []
+
+
+def test_the_bottom_of_the_stack_imports_nothing_at_module_scope():
+    """No STATIC edge out of the bootstrap, in any direction.
+
+    This is the property the stack rests on: the CLI entry point reads the
+    bootstrap before ``rheplicant`` is importable, and
+    ``tests/config/test_entry_order.py`` depends on that to keep JAX out of a
+    bare ``--help``. A module-scope import of any part of the package would
+    break it at import time, which is why the one real edge is deferred to a
+    call and pinned separately below.
+    """
+    static: set[str] = set()
+    for path in sorted((SRC / BOOTSTRAP).rglob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            modules: list[str] = []
+            if isinstance(node, ast.ImportFrom) and node.module and not node.level:
+                modules = [node.module]
+            elif isinstance(node, ast.Import):
+                modules = [alias.name for alias in node.names]
+            for module in modules:
+                if _package_of(module) not in ("", BOOTSTRAP):
+                    static.add(f"{path.relative_to(SRC)} -> {module}")
+    assert not static, (
+        f"{BOOTSTRAP} imports the package at module scope: {sorted(static)}. "
+        "It is read before `rheplicant` is importable, so this is not a "
+        "layering preference -- it is what makes the entry point work"
     )
+
+
+def test_the_bootstrap_has_exactly_one_upward_edge():
+    """And it is the pinned one, at the pinned call site.
+
+    The first version of this file asserted that the bootstrap imports nothing
+    from the project and passed, because it read only ``Import`` nodes and the
+    edge is an ``importlib.import_module`` with a literal argument. The
+    assertion was green about something false. What makes it able to fail now
+    is reading that call; what makes it USEFUL is naming the one edge, so a
+    second one is a red test rather than a precedent set by the first.
+    """
+    found = set()
+    for path in sorted((SRC / BOOTSTRAP).rglob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            for module in _dynamic_targets(node):
+                if _package_of(module) not in ("", BOOTSTRAP):
+                    found.add((str(path.relative_to(SRC)), module))
+    assert found == set(BOOTSTRAP_UPWARD), {
+        "unpinned": sorted(found - set(BOOTSTRAP_UPWARD)),
+        "pinned and gone": sorted(set(BOOTSTRAP_UPWARD) - found),
+    }
+    for reason in BOOTSTRAP_UPWARD.values():
+        assert len(reason) > 60, f"an inversion needs a reason, not a label: {reason!r}"
 
 
 @pytest.mark.parametrize("package", sorted(ALLOWED), ids=sorted(ALLOWED))
@@ -155,6 +254,11 @@ def test_no_two_packages_import_each_other():
     Checked separately from the table because the table could allow one by
     accident -- two entries, each naming the other, each looking reasonable
     alone.
+
+    One is accepted and named: ``config`` imports the bootstrap at module
+    scope, and the bootstrap's command half imports ``config.orchestration``
+    at call time. That is the inversion A1-2 recorded, and it was invisible to
+    this file until the scanner learned to read dynamic imports.
     """
     live = _edges()
     cycles = sorted(
@@ -163,7 +267,12 @@ def test_no_two_packages_import_each_other():
          for there in reached
          if here in live.get(there, frozenset())}
     )
-    assert not cycles, f"these packages import each other: {cycles}"
+    assert cycles == [PINNED_CYCLE], (
+        f"the package cycles are {cycles}; the only one this project accepts "
+        f"is {PINNED_CYCLE}, which is the bootstrap's command half driving the "
+        "package at call time (see BOOTSTRAP_UPWARD). A cycle makes two "
+        "packages one, whatever the directory listing says"
+    )
 
 
 def test_the_two_domain_layers_stay_siblings():
