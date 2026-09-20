@@ -84,6 +84,38 @@ ALLOWED: dict[str, frozenset[str]] = {
     }),
 }
 
+#: WHICH bootstrap modules are the command half (A1-2).
+#:
+#: The prose below has named two layers since this file was written and never
+#: said which module is in which, so the only checkable part of A1-2 was the
+#: single upward edge. This is the membership, and it is the non-derivable
+#: half: everything else about these modules -- their size, their imports --
+#: can be measured, and which side of the seam they belong on cannot.
+#:
+#: The seam is what a module costs AT IMPORT. A foundation module is read
+#: before ``rheplicant`` is importable and must stay that way; a command
+#: module drives the package once it is, and may reach for it at call time.
+BOOTSTRAP_COMMAND: frozenset[str] = frozenset({
+    BOOTSTRAP,
+    f"{BOOTSTRAP}.__main__",
+    f"{BOOTSTRAP}.cli",
+    f"{BOOTSTRAP}.entry",
+    f"{BOOTSTRAP}.execution_environment",
+    f"{BOOTSTRAP}.gui_worker",
+    f"{BOOTSTRAP}.script",
+})
+
+#: The package root is in the command half by ROLE and not by cost, and it is
+#: the one member a foundation module may import.
+#:
+#: It has to be: importing any submodule runs it first, so a rule saying no
+#: foundation module may reach the command half would be false the moment
+#: anything imported anything. What makes the exemption safe is that the root
+#: defers BOTH of its own imports into function bodies --
+#: ``test_the_package_root_costs_nothing_at_import`` is the assertion that
+#: keeps it true, so the exemption proves itself rather than being asserted.
+BOOTSTRAP_ROOT_IS_FREE = BOOTSTRAP
+
 #: The bootstrap's one upward edge, and the only one it may have.
 #:
 #: The bootstrap is two layers in one package (A1-2): a foundation that is read
@@ -324,4 +356,119 @@ def test_the_table_covers_every_package_that_exists():
     assert not missing, (
         f"{missing} exist in src/ and have no entry in the table, so nothing "
         "says what they may import"
+    )
+
+
+def _bootstrap_modules() -> dict[str, pathlib.Path]:
+    """Every module in the bootstrap package, by dotted name."""
+    found = {}
+    for path in sorted((SRC / BOOTSTRAP).rglob("*.py")):
+        parts = list(path.relative_to(SRC).with_suffix("").parts)
+        if parts[-1] == "__init__":
+            parts = parts[:-1]
+        found[".".join(parts)] = path
+    return found
+
+
+def _module_scope_imports(path: pathlib.Path) -> set[str]:
+    """Modules imported at MODULE scope, which is what an import costs.
+
+    Does not descend into function bodies -- an import there is deferred and
+    costs nothing until the function runs, which is the whole mechanism the
+    seam below relies on. A class body is module scope and is descended into.
+
+    **Every ``from X import Y`` contributes ``X.Y`` as well as ``X``**, and the
+    first version of this helper did not. It recorded only ``node.module``, so
+    ``from _rheplicant_bootstrap import cli`` read as an import of the package
+    ROOT -- which is the one member the rule below exempts. Probed by injecting
+    exactly that line into a foundation module: the guard stayed GREEN. A
+    matcher that cannot see the most natural spelling of the thing it forbids
+    is the failure this repository keeps writing down.
+    """
+    targets: set[str] = set()
+
+    def walk(node: ast.AST) -> None:
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+                continue
+            if isinstance(child, ast.ImportFrom) and child.module and not child.level:
+                targets.add(child.module)
+                targets.update(
+                    f"{child.module}.{alias.name}" for alias in child.names
+                )
+            elif isinstance(child, ast.Import):
+                targets.update(alias.name for alias in child.names)
+            walk(child)
+
+    walk(ast.parse(path.read_text(encoding="utf-8")))
+    return targets
+
+
+def test_the_command_half_is_named_and_covers_the_package():
+    """Both directions, like every other table here.
+
+    A module added to the bootstrap without being classified fails, which is
+    the point: the seam is what the package is FOR, and a new module lands on
+    one side of it whether or not anyone said so. Measured 2026-09-20, exactly
+    one module had arrived since A1 drew the line (``capability``, the
+    JAX-free level vocabulary the GUI reads) and it is foundation.
+    """
+    live = set(_bootstrap_modules())
+    assert BOOTSTRAP_COMMAND <= live, {
+        "named and gone": sorted(BOOTSTRAP_COMMAND - live)
+    }
+    foundation = live - BOOTSTRAP_COMMAND
+    assert foundation, "the whole package cannot be the command half"
+    assert len(BOOTSTRAP_COMMAND) == 7 and len(foundation) == 37, (
+        f"A1-2 recorded a 7-module command half; this tree has "
+        f"{len(BOOTSTRAP_COMMAND)} and {len(foundation)} foundation modules. "
+        "Reclassify deliberately rather than letting the number drift"
+    )
+
+
+def test_no_foundation_module_imports_the_command_half():
+    """The direction that makes the seam real.
+
+    Without it, ``BOOTSTRAP_COMMAND`` is a comment. Measured before it was
+    written: zero such edges, so this pins a property the tree already has
+    rather than asking for work.
+    """
+    modules = _bootstrap_modules()
+    reachable = BOOTSTRAP_COMMAND - {BOOTSTRAP_ROOT_IS_FREE}
+    offences = []
+    for name, path in modules.items():
+        if name in BOOTSTRAP_COMMAND:
+            continue
+        for target in sorted(_module_scope_imports(path) & reachable):
+            offences.append((name, target))
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            for target in _dynamic_targets(node):
+                if target in reachable:
+                    offences.append((name, target))
+    assert not offences, (
+        f"foundation modules reaching the command half: {sorted(set(offences))}. "
+        "The foundation is read before `rheplicant` is importable; a command "
+        "module is what drives the package once it is"
+    )
+
+
+def test_the_package_root_costs_nothing_at_import():
+    """What makes the root's exemption above safe rather than assumed.
+
+    Importing any bootstrap submodule runs the root first, so if the root
+    imported its own command modules at module scope, every foundation module
+    would pay for the CLI. Both of its entry points defer into function
+    bodies; this is the assertion that keeps them deferred.
+    """
+    root = _bootstrap_modules()[BOOTSTRAP]
+    at_module_scope = _module_scope_imports(root)
+    project = sorted(
+        name
+        for name in at_module_scope
+        if _package_of(name) or name.split(".")[0] in (BOOTSTRAP, "rheplicant")
+    )
+    assert not project, (
+        f"{BOOTSTRAP}/__init__.py imports {project} at module scope. Both of "
+        "its entry points defer, which is what lets the foundation import the "
+        "root without paying for the command half"
     )

@@ -33,6 +33,20 @@ module scope, and the bootstrap's command half imports `config.orchestration`
 at call time. Importing it any earlier would put JAX behind
 `rheplicant --help`.
 
+**The bootstrap is two layers in one package**, and which module is in which
+is now written down rather than implied. Seven modules are the **command
+half** — `__init__`, `__main__`, `cli`, `entry`, `execution_environment`,
+`gui_worker` and `script` — and the other thirty-seven are the **foundation**.
+The seam is what a module costs at import: the foundation is read before
+`rheplicant` is importable and must stay that way, while a command module
+drives the package once it is. No foundation module imports a command one.
+
+The package root is in the command half by role and not by cost, and it is the
+one member the foundation may import — it has to be, because importing any
+submodule runs it first. Both of its entry points defer into function bodies,
+and `tests/test_import_direction.py` asserts that they stay deferred, so the
+exemption proves itself instead of being taken on trust.
+
 `tests/test_import_direction.py` pins all of this, in both directions — a
 dependency that is allowed and unused is deleted, so the table is the whole
 truth rather than a ceiling.
