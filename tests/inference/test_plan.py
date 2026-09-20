@@ -53,6 +53,8 @@ from rheplicant.inference.plan import (
     CHECK_EACH_SWEEP,
     CHECK_ONCE,
     MIN_DRAWS,
+    MIN_SWEEPS,
+    OBJECTIVE_FLOOR_EPS,
     _halves,
 )
 from rheplicant.radio import GainOperator
@@ -253,6 +255,139 @@ def make_line_pipeline() -> Pipeline:
     return Pipeline(
         GaussianLine(amp=jnp.zeros(N_TIME), centre=jnp.array(0.0)), names=("line",)
     )
+
+
+def _line_map(observed, *, sigma):
+    """The line model's exact joint MAP and the posterior precision there.
+
+    Newton on ``0.5 chi2 - log prior`` over ``(amp, centre)``, in NumPy float64
+    with the derivatives of :class:`GaussianLine` written out by hand, so the
+    reference shares no code with the estimate it judges and does not touch
+    the process-global x64 flag. Returns ``({name: array}, precision)`` with
+    the precision over ``amp`` then ``centre``, flattened.
+    """
+    data = np.asarray(observed, np.float64)
+    x = np.linspace(-1.0, 1.0, N_FREQ)
+    width = GaussianLine(amp=jnp.zeros(N_TIME), centre=jnp.array(0.0)).width
+    amp_loc = np.broadcast_to(np.asarray(AMP_PRIOR.loc, np.float64), (N_TIME,))
+    amp_scale = np.broadcast_to(np.asarray(AMP_PRIOR.scale, np.float64), (N_TIME,))
+    centre_loc = float(CENTRE_PRIOR.loc)
+    centre_scale = float(CENTRE_PRIOR.scale)
+
+    def derivatives(amp, centre):
+        u = (x - centre) / width**2
+        profile = np.exp(-0.5 * ((x - centre) / width) ** 2)
+        slope = profile * u                        # d profile / d centre
+        bend = profile * (u**2 - 1.0 / width**2)   # d2 profile / d centre2
+        residual = (data - amp[:, None] * profile[None, :]) / sigma
+        gradient = np.concatenate([
+            -residual @ profile / sigma + (amp - amp_loc) / amp_scale**2,
+            [-np.sum(residual * amp[:, None] * slope[None, :]) / sigma
+             + (centre - centre_loc) / centre_scale**2],
+        ])
+        hessian = np.zeros((N_TIME + 1, N_TIME + 1))
+        hessian[:N_TIME, :N_TIME] = np.diag(
+            np.sum(profile**2) / sigma**2 + 1.0 / amp_scale**2
+        )
+        cross = amp * np.sum(profile * slope) / sigma**2 - residual @ slope / sigma
+        hessian[:N_TIME, N_TIME] = hessian[N_TIME, :N_TIME] = cross
+        hessian[N_TIME, N_TIME] = (
+            np.sum(amp**2) * np.sum(slope**2) / sigma**2
+            - np.sum(residual * amp[:, None] * bend[None, :]) / sigma
+            + 1.0 / centre_scale**2
+        )
+        return gradient, hessian
+
+    flat = np.concatenate([np.asarray(LINE_TRUTH["amp"], np.float64),
+                           [float(LINE_TRUTH["centre"])]])
+    for _ in range(30):
+        gradient, hessian = derivatives(flat[:N_TIME], flat[N_TIME])
+        flat = flat - np.linalg.solve(hessian, gradient)
+    gradient, precision = derivatives(flat[:N_TIME], flat[N_TIME])
+    step = np.linalg.solve(precision, gradient)
+    assert np.sqrt(step @ precision @ step) < 1e-8, "reference Newton stalled"
+    return {"amp": flat[:N_TIME], "centre": flat[N_TIME]}, precision
+
+
+def _basis_map(observed, *, sigma, gain_prior=GAIN_PRIOR, coeff_prior=COEFF_PRIOR):
+    """The basis model's exact joint MAP and the posterior precision there.
+
+    ``mu[t, f] = gain[t] * (T[t, f] + tone[f])`` with ``T = TIME_BASIS @ c @
+    FREQ_BASIS.T``, bilinear, so its derivatives are written out by hand and
+    Newton is run in NumPy float64 from the truth, with step halving. Shares no
+    code with the plan and leaves the process-global x64 flag alone. Returns
+    ``({name: array}, precision)``, the precision over ``gain`` then the
+    row-major ``t_coeff``.
+    """
+    data = np.asarray(observed, np.float64)
+    time_basis = np.asarray(TIME_BASIS, np.float64)
+    freq_basis = np.asarray(FREQ_BASIS, np.float64)
+    tone = np.zeros(N_FREQ)
+    tone[TONE_CHANNEL] = TONE_KELVIN
+    shape = np.shape(COEFF0)
+    n_gain = N_TIME
+
+    def normal(prior, size):
+        loc = np.broadcast_to(np.asarray(prior.loc, np.float64), prior.batch_shape)
+        scale = np.broadcast_to(np.asarray(prior.scale, np.float64), prior.batch_shape)
+        return loc.reshape(size), scale.reshape(size)
+
+    gain_loc, gain_scale = normal(gain_prior, n_gain)
+    coeff_loc, coeff_scale = normal(coeff_prior, int(np.prod(shape)))
+    loc = np.concatenate([gain_loc, coeff_loc])
+    prior_precision = 1.0 / np.concatenate([gain_scale, coeff_scale]) ** 2
+    # d T[t, f] / d c[i, j] = TIME_BASIS[t, i] * FREQ_BASIS[f, j], as (t, f, i*j)
+    basis = np.einsum("ti,fj->tfij", time_basis, freq_basis).reshape(
+        N_TIME, N_FREQ, -1
+    )
+
+    def objective(theta):
+        gain, coeff = theta[:n_gain], theta[n_gain:].reshape(shape)
+        signal = time_basis @ coeff @ freq_basis.T + tone[None, :]
+        residual = (data - gain[:, None] * signal) / sigma
+        return 0.5 * (np.sum(residual**2) + np.sum(prior_precision * (theta - loc) ** 2))
+
+    def derivatives(theta):
+        gain, coeff = theta[:n_gain], theta[n_gain:].reshape(shape)
+        signal = time_basis @ coeff @ freq_basis.T + tone[None, :]
+        residual = (data - gain[:, None] * signal) / sigma
+        jacobian = np.zeros((N_TIME, N_FREQ, theta.size))
+        jacobian[np.arange(N_TIME), :, np.arange(N_TIME)] = signal
+        jacobian[:, :, n_gain:] = gain[:, None, None] * basis
+        jacobian = jacobian.reshape(N_TIME * N_FREQ, theta.size)
+        gradient = (
+            -jacobian.T @ residual.ravel() / sigma + prior_precision * (theta - loc)
+        )
+        hessian = jacobian.T @ jacobian / sigma**2 + np.diag(prior_precision)
+        # d2 mu[t, f] / d gain[t] d c[i, j] = basis[t, f, ij]
+        cross = -np.einsum("tf,tfk->tk", residual, basis) / sigma
+        hessian[:n_gain, n_gain:] += cross
+        hessian[n_gain:, :n_gain] += cross.T
+        return gradient, hessian
+
+    theta = np.concatenate([np.asarray(GAIN0, np.float64),
+                            np.asarray(COEFF0, np.float64).ravel()])
+    for _ in range(100):
+        gradient, hessian = derivatives(theta)
+        step = -np.linalg.solve(hessian, gradient)
+        length = 1.0
+        while objective(theta + length * step) > objective(theta) and length > 1e-8:
+            length /= 2.0
+        theta = theta + length * step
+    gradient, precision = derivatives(theta)
+    step = np.linalg.solve(precision, gradient)
+    assert np.sqrt(step @ precision @ step) < 1e-6, "reference Newton stalled"
+    return {"gain": theta[:n_gain], "t_coeff": theta[n_gain:].reshape(shape)}, precision
+
+
+def _posterior_sigmas_from(estimate, exact, precision):
+    """Mahalanobis distance of ``estimate.values`` from ``exact``, in posterior sigma."""
+    got = np.concatenate(
+        [np.ravel(np.asarray(estimate.values[name], np.float64)) for name in exact]
+    )
+    want = np.concatenate([np.ravel(value) for value in exact.values()])
+    residual = got - want
+    return float(np.sqrt(residual @ precision @ residual))
 
 
 # ------------------------------------------------------------ Block declaring --
@@ -489,6 +624,10 @@ class TestTheMotivatingCase:
         millions while EVERY block's own CG residual has been converged since
         sweep one. A per-block residual is computed from the block; it cannot
         see across the partition, and this is what that costs.
+
+        The verdict is taken on the joint negative log posterior, the quantity
+        the sweep minimises (T-002 A5-1); the refusal names it and still
+        reports the joint chi-squared beside it.
         """
         space, pipeline, observed = basis_setup
         plan = SamplingPlan(space, Block("gain"), Block("t_coeff"))
@@ -499,7 +638,8 @@ class TestTheMotivatingCase:
             )
         message = str(caught.value)
         assert "did not converge" in message
-        assert "JOINT chi-squared is still falling" in message, message
+        assert "JOINT negative log posterior is still changing" in message, message
+        assert "chi2 = " in message, message
 
         # and the counter-evidence, in the message itself: the per-block number
         # that reads converged the whole way down
@@ -672,13 +812,97 @@ class TestConvergence:
         assert est.diagnostics.sweeps == 2
         assert est.diagnostics.chi2.shape == (3,)
 
-    def test_the_test_is_a_DECREASE_not_a_CHANGE(self, basis_setup, state):
-        """The trap iterative_gls documents for its own reweight_tol: at the
-        fixed point consecutive sweeps differ by the inner solver's own noise,
-        so |chi2[k] - chi2[k-1]| never falls below it and a converged run is
-        refused forever. Measured here: the plateau's sweep-to-sweep jitter is
-        far above the default tol, and the run still converges — which it could
-        not if the test were on the absolute change.
+    def test_an_increase_of_chi_squared_is_not_a_stop(self, state):
+        """A chi-squared rise is not convergence, and the run goes on past it.
+
+        Until T-002 the rule was a DECREASE of the joint chi-squared, so any
+        sweep on which chi-squared rose counted as converged. Here a tight
+        prior pulls the gain away from the truth, and chi-squared rises by
+        half its value at sweep 58 while the objective is still falling: the
+        old rule stopped there, 3.6 posterior sigma from the MAP (measured).
+
+        The relative change test then stopped at sweep 73, 0.74 sigma off in
+        this module's float32. The Newton decrement refuses that point and
+        the run continues: measured, it stops at sweep 95, 0.069 sigma from
+        the MAP, having tightened the conjugate solves twice along the way.
+        """
+        gain_prior = dist.Normal(jnp.ones(N_TIME), 0.01)
+        space = basis_space(gain_prior=gain_prior)
+        pipeline = make_pipeline()
+        observed = observed_of(space, pipeline, TRUTH)
+        plan = SamplingPlan(space, Block("gain"), Block("t_coeff"))
+        common = {"noise": NOISE, "max_iter": 200, "solve_guard": None}
+
+        free = plan.estimate(pipeline, state, observed, tol=None, **common)
+        chi2, objective = free.diagnostics.chi2, free.diagnostics.objective
+        rise = np.diff(chi2) / np.maximum(np.abs(chi2[1:]), 1.0)
+        rose = [sweep for sweep in range(MIN_SWEEPS, 200) if rise[sweep - 1] > 0.1]
+        assert rose, "the fixture must make chi-squared rise, or this test is vacuous"
+        # the objective was still falling where chi-squared first rose
+        assert objective[rose[0] - 1] - objective[rose[0]] > 1.0, objective[rose[0]]
+
+        estimate = plan.estimate(pipeline, state, observed, **common)
+        diagnostics = estimate.diagnostics
+        assert diagnostics.converged is True
+        assert diagnostics.sweeps > rose[0], (diagnostics.sweeps, rose[0])
+        exact, precision = _basis_map(observed, sigma=NOISE, gain_prior=gain_prior)
+        distance = _posterior_sigmas_from(estimate, exact, precision)
+        assert distance < 0.1, (distance, diagnostics.sweeps)
+
+    def test_an_inexact_inner_solve_is_tightened_until_it_certifies(
+        self, basis_setup, state
+    ):
+        """The second review's MEDIUM, in float32. At noise 0.30 the sweep's
+        fixed point at the default ``solve_tol = 1e-6`` is 0.113 posterior
+        sigma from the MAP (the reviewer's float64 measurement), so a stop
+        there cannot be certified. The run tightens the closed-form blocks'
+        CG when the objective rises beyond its resolution or the decrement
+        refuses a candidate, down to the float32 floor of two machine
+        epsilons; measured, it converges at sweep 111, 0.072 sigma off.
+        Without the tightening it exhausts 3000 sweeps and refuses.
+        """
+        space, pipeline, _ = basis_setup
+        observed = observed_of(space, pipeline, TRUTH)
+        estimate = SamplingPlan(space, Block("gain"), Block("t_coeff")).estimate(
+            pipeline, state, observed, noise=0.30, max_iter=3000, solve_guard=None
+        )
+        diagnostics = estimate.diagnostics
+        assert diagnostics.converged is True
+        assert diagnostics.solve_tol < 1e-6
+        exact, precision = _basis_map(observed, sigma=0.30)
+        distance = _posterior_sigmas_from(estimate, exact, precision)
+        assert distance < 0.1, (distance, diagnostics.sweeps)
+
+    def test_the_floor_is_recorded_and_scales_with_the_dtype(self, basis_setup, state):
+        """The applied tolerance is ``max(tol, OBJECTIVE_FLOOR_EPS * eps)``.
+
+        This module runs in float32, where the default ``tol = 1e-8`` is below
+        the objective's epsilon; the floor is what lets a float32 run stop at
+        all (see :data:`OBJECTIVE_FLOOR_EPS`). A ``tol`` above the floor is
+        applied as given.
+        """
+        space, pipeline, observed = basis_setup
+        plan = SamplingPlan(space, Block("gain"), Block("t_coeff"))
+        common = {"noise": NOISE, "max_iter": 200, "solve_guard": None}
+        floored = plan.estimate(pipeline, state, observed, **common)
+        eps = float(np.finfo(np.float32).eps)
+        assert floored.diagnostics.effective_tol == OBJECTIVE_FLOOR_EPS * eps
+        loose = plan.estimate(pipeline, state, observed, tol=1e-3, **common)
+        assert loose.diagnostics.effective_tol == 1e-3
+        free = plan.estimate(pipeline, state, observed, tol=None, max_iter=2,
+                             noise=NOISE, solve_guard=None)
+        assert free.diagnostics.effective_tol is None
+
+    def test_the_float32_basis_model_converges_onto_the_float64_map(
+        self, basis_setup, state
+    ):
+        """The motivating model, in this module's float32, within 0.1 posterior
+        sigma of its MAP computed in float64.
+
+        Measured: the run stops at sweep 94, 0.079 sigma from the MAP. Without
+        the floor it never stops (the objective's plateau moves by tens of
+        float32 ulps a sweep); with the old chi-squared rule it stopped at
+        sweep 95, 0.080 sigma.
         """
         space, pipeline, observed = basis_setup
         plan = SamplingPlan(space, Block("gain"), Block("t_coeff"))
@@ -686,47 +910,9 @@ class TestConvergence:
             pipeline, state, observed, noise=NOISE, max_iter=200, solve_guard=None
         )
         assert est.diagnostics.converged is True
-        trace = est.diagnostics.chi2
-        # the last step made no progress (that is why it stopped) ...
-        assert trace[-2] - trace[-1] <= 1e-8 * max(abs(trace[-1]), 1.0)
-        # ... while the plateau it stopped on is jittering by far more than that
-        plateau = trace[-min(10, trace.size) :]
-        assert float(np.max(np.abs(np.diff(plateau)))) > 1e-8, plateau
-
-    def test_min_sweeps_keeps_a_stationary_first_step_from_ending_the_run(self, state):
-        """The reason iterative_gls has a min_reweights: the first steps of a
-        fixed-point iteration can be nearly stationary without being anywhere
-        near the fixed point.
-
-        Started AT the answer, the very first sweep makes no progress — so
-        min_sweeps is the only thing standing between the run and a
-        one-sweep "converged". The two settings must give different sweep
-        counts, or the floor is doing nothing.
-        """
-        space = ParameterSpace(
-            latents=[
-                Latent("gain", init=GAIN0, prior=GAIN_PRIOR, linear=True),
-                Latent("t_coeff", init=COEFF0, prior=COEFF_PRIOR, linear=True),
-            ],
-            bindings=[
-                Bind("gain", into=lambda p: p["gain"].gain),
-                Bind(
-                    "t_coeff",
-                    into=lambda p: p["t_ant"].t_ant,
-                    fn=lambda c: TIME_BASIS @ c @ FREQ_BASIS.T,
-                ),
-            ],
-        )
-        pipeline = make_pipeline()
-        observed = observed_of(space, pipeline, TRUTH)
-        plan = SamplingPlan(space, Block("gain"), Block("t_coeff"))
-        common = {"noise": NOISE, "max_iter": 30, "solve_guard": None}
-
-        immediate = plan.estimate(pipeline, state, observed, min_sweeps=1, **common)
-        floored = plan.estimate(pipeline, state, observed, min_sweeps=8, **common)
-        assert immediate.diagnostics.sweeps == 1, immediate.diagnostics.chi2
-        assert floored.diagnostics.sweeps >= 8, floored.diagnostics.chi2
-        assert immediate.diagnostics.converged is floored.diagnostics.converged is True
+        exact, precision = _basis_map(observed, sigma=NOISE)
+        distance = _posterior_sigmas_from(est, exact, precision)
+        assert distance < 0.1, (distance, est.diagnostics.sweeps)
 
     def test_a_min_sweeps_above_the_cap_is_refused(self, basis_setup, state):
         """It would make the test unreachable, so every run would exhaust
@@ -737,6 +923,48 @@ class TestConvergence:
             plan.estimate(
                 pipeline, state, observed, noise=NOISE, max_iter=5, min_sweeps=6
             )
+
+    def test_min_sweeps_is_not_policed_when_no_verdict_is_asked_for(
+        self, basis_setup, state
+    ):
+        """``min_sweeps`` is the floor under a VERDICT, so with ``tol=None``
+        there is no verdict for it to floor and the pair above is not the
+        caller's mistake: the run takes its sweeps and returns, making no
+        convergence claim.
+
+        The twin of :meth:`test_a_min_sweeps_above_the_cap_is_refused`, and
+        the cell that names the stand-down. Without it, deleting ``tol is not
+        None and`` from that guard still turns tests red — but only tests
+        that pass ``tol=None`` with a cap below the default ``min_sweeps``
+        while asking about something else entirely, so their greenness rests
+        on a fixture nobody chose for this.
+        """
+        from rheplicant.inference.plan import EARLIEST_CONVERGED_SWEEP
+
+        space, pipeline, observed = basis_setup
+        plan = SamplingPlan(space, Block("gain"), Block("t_coeff"))
+        common = {"noise": NOISE, "tol": None, "solve_guard": None}
+
+        free = plan.estimate(pipeline, state, observed, max_iter=5,
+                             min_sweeps=6, **common)
+        assert free.diagnostics.converged is None
+        assert free.diagnostics.sweeps == 5
+
+        # and below the earliest sweep a verdict could be reached at all,
+        # where a run WITH a tol can only refuse
+        early = plan.estimate(pipeline, state, observed,
+                              max_iter=EARLIEST_CONVERGED_SWEEP - 1,
+                              min_sweeps=EARLIEST_CONVERGED_SWEEP + 3, **common)
+        assert early.diagnostics.converged is None
+        assert early.diagnostics.sweeps == EARLIEST_CONVERGED_SWEEP - 1
+        # asserted without a `match=`, because the sentence belongs to
+        # test_a_min_sweeps_above_the_cap_is_refused and the refusal census
+        # counts each one once
+        with pytest.raises(ParameterSpaceError) as refused:
+            plan.estimate(pipeline, state, observed, noise=NOISE,
+                          max_iter=EARLIEST_CONVERGED_SWEEP - 1,
+                          min_sweeps=EARLIEST_CONVERGED_SWEEP + 3)
+        assert "min_sweeps <= max_iter" in str(refused.value)
 
     @pytest.mark.parametrize("max_iter", [0, -1, 2.0])
     def test_a_nonsense_sweep_cap_is_refused(self, basis_setup, state, max_iter):
@@ -1216,17 +1444,33 @@ class TestGradientEngine:
         assert float(declared - without) == pytest.approx(float(expected), rel=1e-3)
         assert float(expected) != 0.0, "the fixture's prior must actually bite"
 
-    def test_a_mixed_plan_estimates_both_blocks(self, line_setup, state):
+    @pytest.mark.parametrize("steps", [None, 200])
+    def test_a_mixed_plan_estimates_both_blocks(self, line_setup, state, steps):
+        """Both blocks land on the exact joint MAP, within 0.1 posterior sigma.
+
+        This compared against the TRUTH with an absolute 5e-3 on ``centre``,
+        whose posterior sigma is 1.5e-4, so neither T-002 estimate defect could
+        fail it. It also ran only ``steps=200``, where Adam's restart floor is
+        already small; at the default step count the same plan used to land
+        0.66 posterior sigma from the MAP and report converged. The reference
+        here is the MAP itself, by float64 Newton on the joint objective, and
+        the distance is Mahalanobis under the posterior precision there.
+        """
         space, pipeline, observed = line_setup
-        plan = SamplingPlan(space, Block("amp"), Block("centre", steps=200))
+        block = Block("centre") if steps is None else Block("centre", steps=steps)
+        plan = SamplingPlan(space, Block("amp"), block)
         est = plan.estimate(
             pipeline, state, observed, noise=0.05, max_iter=60, tol=1e-6,
             solve_guard=None,
         )
         assert plan.engines == {("amp",): CONJUGATE, ("centre",): GRADIENT}
-        assert float(jnp.abs(est.values["centre"] - LINE_TRUTH["centre"])) < 5e-3, (
-            est.values["centre"]
+        exact, precision = _line_map(observed, sigma=0.05)
+        got = np.concatenate(
+            [np.ravel(np.asarray(est.values[name], np.float64)) for name in exact]
         )
+        residual = got - np.concatenate([np.ravel(value) for value in exact.values()])
+        distance = float(np.sqrt(residual @ precision @ residual))
+        assert distance < 0.1, (distance, est.values, exact)
         # the amps are all different from each other, so a solve that returned
         # one number broadcast across the block would fail here
         assert jnp.allclose(est.values["amp"], LINE_TRUTH["amp"], rtol=2e-2), (
@@ -1279,25 +1523,46 @@ class TestGradientEngine:
         )
         assert seen == [True, True, True, False, False, False, False, False, False], seen
 
-    def test_the_gradient_block_uses_its_declared_step_count(self, line_setup, state):
-        """``steps`` is a statistical assumption for a draw and a real budget
-        for an estimate; either way it must reach the engine. One Adam step
-        cannot travel as far as two hundred."""
+    def test_the_gradient_block_uses_its_declared_step_count(
+        self, line_setup, state, monkeypatch
+    ):
+        """``steps`` is a statistical assumption for a draw and a budget of
+        Adam steps for an estimate; either way it must reach the engine.
+
+        This compared how far one Adam step and four hundred travelled. The
+        Newton steps that now follow Adam (T-002 A5-2) put the block on its
+        conditional optimum either way, so the distance no longer depends on
+        the count, and the plumbing is read off the optimiser's own argument.
+        The last assertion is that independence; before the repair the two
+        counts ended more than twenty times apart in distance travelled.
+        """
+        import rheplicant.inference.engines as engines_module
+
         space, pipeline, observed = line_setup
         common = {
             "noise": 0.05, "max_iter": 3, "tol": None, "solve_guard": None,
             "check_identifiability": False,
         }
+        seen: list[int] = []
+        real = engines_module._adam
+
+        def spy(potential, x0, steps, step_sizes):
+            seen.append(steps)
+            return real(potential, x0, steps, step_sizes)
+
+        monkeypatch.setattr(engines_module, "_adam", spy)
         stingy = SamplingPlan(space, Block("amp"), Block("centre", steps=1)).estimate(
             pipeline, state, observed, **common
         )
+        assert set(seen) == {1}, seen
+        seen.clear()
         generous = SamplingPlan(
             space, Block("amp"), Block("centre", steps=400)
         ).estimate(pipeline, state, observed, **common)
-        start = float(space.latent("centre").init)
-        moved_little = abs(float(stingy.values["centre"]) - start)
-        moved_far = abs(float(generous.values["centre"]) - start)
-        assert moved_far > 20.0 * moved_little, (moved_little, moved_far)
+        assert set(seen) == {400}, seen
+        assert float(stingy.values["centre"]) == pytest.approx(
+            float(generous.values["centre"]), rel=1e-6
+        )
 
 
 class TestTheDefaultsTheConfigLayerQUOTES:
@@ -1333,6 +1598,19 @@ class TestTheDefaultsTheConfigLayerQUOTES:
         from rheplicant.inference.plan import DEFAULT_MAX_ITER, MIN_SWEEPS
 
         assert MIN_SWEEPS <= DEFAULT_MAX_ITER
+
+    def test_the_earliest_verdict_is_the_sweep_the_A25_message_quotes(self):
+        """Pinned beside its declaration, like the two above: pre-flight A25
+        refuses a ``max_iter`` below it and quotes it, and derives nothing
+        from it but the comparison. The stop rule counts two changes between
+        sweep outputs, so it is 3; the default cap must leave room for it."""
+        from rheplicant.inference.plan import (
+            DEFAULT_MAX_ITER,
+            EARLIEST_CONVERGED_SWEEP,
+        )
+
+        assert EARLIEST_CONVERGED_SWEEP == 3
+        assert EARLIEST_CONVERGED_SWEEP <= DEFAULT_MAX_ITER
 
     def test_min_draws_is_the_smallest_a_split_rhat_is_defined_on(self):
         """``MIN_DRAWS`` is derived rather than chosen, so it is pinned that

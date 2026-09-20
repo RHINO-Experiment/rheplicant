@@ -58,6 +58,7 @@ from jax import lax
 from rheplicant.core.errors import ParameterSpaceError
 from rheplicant.core.operator import AbstractOperator
 from rheplicant.core.state import State
+from bayesmith.optimize import certify
 from rheplicant.inference.linear import (
     _magnitude,
     gcr_sample,
@@ -101,6 +102,13 @@ DEFAULT_GRADIENT_STEPS: int = 25
 #: absolute step cannot serve a beam width near 12 degrees and a log-gain near
 #: 0.1 at once; a relative one can.
 DEFAULT_LEARNING_RATE: float = 1e-2
+
+#: The tag that keeps a cached estimate transition's key apart from every other
+#: key in a plan's ``programs`` dict. :func:`gradient_draw` keys on
+#: ``(names, steps, adapting)`` and :func:`_conjugate_update` on a 6-tuple of
+#: ``names`` and solver settings; a 4-tuple opening with this string cannot
+#: equal either.
+_ESTIMATE_TAG: str = "estimate"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -153,10 +161,12 @@ class Conditioning:
     def chi2(self, values: dict[str, jax.Array]) -> jax.Array:
         """The JOINT chi-squared at the current parameter tuple.
 
-        The quantity a plan monitors for convergence, and the reason it is here
-        rather than in a block: it is computed from the whole parameter tuple
-        against the whole data set, so it is the one number in a Gibbs scheme
-        that no partition can hide anything from. A per-block CG residual read
+        Reported by both exits, and the trace :meth:`SamplingPlan.sample`
+        tests mixing on; a point estimate's stop rule reads
+        :meth:`neg_log_posterior` instead (T-002 A5-1). It is here rather than
+        in a block because it is computed from the whole parameter tuple
+        against the whole data set, so it is a number in a Gibbs scheme that
+        no partition can hide anything from. A per-block CG residual read
         ~1e-7 on an answer thousands of kelvin wrong — and read the SAME
         ~1e-7 on the run that was right, which is the sharper complaint.
         It was not lying; it simply cannot see across the partition it is
@@ -199,13 +209,92 @@ class Conditioning:
         is absent, deliberately and at measured cost -- see that function.
 
         :meth:`chi2` is deliberately NOT extended to include this. It is the
-        convergence monitor, and a monitor that silently changed units the
+        reported goodness of fit, and a number that silently changed units the
         moment a noise model started reading its argument would be worse than
         the omission this replaces.
         """
         return 0.5 * self.chi2(values) + log_determinant(
             self.noise, self.forward(values)
         )
+
+    def neg_log_posterior(self, values: dict[str, jax.Array]) -> jax.Array:
+        """``-log p(values | data)`` up to a constant, over EVERY latent.
+
+        :meth:`neg_log_likelihood` minus the declared log prior of each latent
+        (zero for a prior-free one). Every block's conditional potential is
+        this function with the other blocks held fixed, so it is the one
+        objective that a sweep of conditional updates descends, and it is what
+        :meth:`~rheplicant.inference.plan.SamplingPlan.estimate` monitors for
+        convergence.
+
+        :meth:`chi2` is not that objective. With a prior, the MAP is not the
+        chi-squared minimum, and a sweep that moves towards the MAP can raise
+        chi-squared; a stop rule on chi-squared read such a rise as
+        convergence, 1 to 15 posterior sigma from the MAP (T-002 A5-1).
+        """
+        return self.neg_log_likelihood(values) - _log_prior(
+            self.space, self.space.names, values
+        )
+
+
+def _objective_terms(
+    cond: Conditioning, values: dict[str, jax.Array]
+) -> tuple[jax.Array, dict[str, jax.Array], dict[str, jax.Array]]:
+    """:meth:`Conditioning.neg_log_posterior` as per-element TERMS, and chi2.
+
+    Returns ``(chi2, terms, scales)``. ``terms`` holds the likelihood per data
+    sample (``0.5 r**2 + log sigma``, zero for an unobserved one) and the
+    negative log prior per latent; their sum is the objective, which
+    ``tests/inference/test_estimate_reaches_map.py`` pins to
+    :meth:`Conditioning.neg_log_posterior`. ``scales`` holds each term's
+    rounding magnitude: the term itself, plus ``|r| |mu| / sigma`` for a
+    data term, which is how far a rounding of the prediction moves it.
+
+    Written per term so that :meth:`SamplingPlan.estimate` can take the
+    change between two sweeps as a sum of per-term differences. The
+    difference of two totals is resolved only to ``eps * |f|``, and ``|f|``
+    grows with the number of samples and with every prior's normalizing
+    constant, none of which the change contains.
+
+    The ``seen``/``safe`` rule is :meth:`Conditioning.chi2`'s and
+    :func:`~rheplicant.inference.noise.log_determinant`'s, restated per
+    sample because both of those return sums.
+    """
+    prediction = cond.forward(values)
+    sigma = cond.noise.std(prediction)
+    seen = jnp.isfinite(sigma)
+    safe = jnp.where(seen, sigma, 1.0)
+    residual = jnp.where(seen, (cond.observed - prediction) / safe, 0.0)
+    likelihood = 0.5 * residual**2 + jnp.where(seen, jnp.log(safe), 0.0)
+    moved = jnp.where(seen, jnp.abs(prediction) / safe, 0.0)
+    terms = {"likelihood": likelihood}
+    scales = {"likelihood": jnp.abs(likelihood) + jnp.abs(residual) * moved}
+    for name in cond.space.names:
+        prior = cond.space.latent(name).prior
+        if prior is not None:
+            term = -jnp.asarray(prior.log_prob(values[name]))
+            terms[name] = term
+            scales[name] = jnp.abs(term)
+    return jnp.sum(residual**2), terms, scales
+
+
+def _monitor_programs(cond: Conditioning, resolution_eps: float) -> tuple[Callable, Callable]:
+    """``(measure, change)``, jitted once per run for a point estimate's monitor.
+
+    ``measure(values) -> (chi2, objective, terms, scales)`` is this model's
+    half: the joint chi-squared and the objective as the per-element terms
+    :func:`_objective_terms` builds. ``change`` is
+    :func:`~bayesmith.optimize.certify.change_program`'s, which differences
+    those terms and says what the arithmetic resolved.
+    """
+
+    @eqx.filter_jit
+    def measure(values):
+        chi2, terms, scales = _objective_terms(cond, values)
+        objective = sum(jnp.sum(term) for term in terms.values())
+        return chi2, objective, terms, scales
+
+    return measure, certify.change_program(resolution_eps)
 
 
 def _log_prior(space: ParameterSpace, names: Sequence[str], x: dict[str, jax.Array]):
@@ -568,6 +657,44 @@ def _adam(
     return fitted
 
 
+def _estimate_transition(
+    cond: Conditioning,
+    names: Sequence[str],
+    *,
+    steps: int,
+    learning_rate: float,
+) -> Callable[..., tuple[dict[str, jax.Array], jax.Array]]:
+    """One jittable gradient-block estimate: ``(others, x0) -> (x, potential)``.
+
+    The estimate-side twin of :func:`_gradient_transition`, and the same
+    repair. :func:`gradient_estimate` used to build a fresh
+    :func:`conditional_potential` closure every sweep and run it unjitted, so
+    every ``jax.jit`` beneath it saw a function it had never seen: measured by
+    the T-002 verifier (A10-1), ``sweeps + 2`` compilations per run, 98
+    identical ones at 100 sweeps and 84 % of the wall clock. The neighbours
+    are a traced argument here, so a run compiles this once per block.
+
+    The step sizes are Python floats fixed at build time from the latents'
+    declared magnitudes, which is why they may be closed over; see
+    :func:`~rheplicant.inference.linear._magnitude`.
+    """
+    potential_of = _potential_of(cond, names)
+    step_sizes = {
+        name: learning_rate * _magnitude(cond.space.latent(name)) for name in names
+    }
+
+    @eqx.filter_jit
+    def transition(others, x0):
+        def potential(x):
+            return potential_of(others, x)
+
+        descended = _adam(potential, x0, steps, step_sizes)
+        fitted = certify.polish(potential, descended)[0]
+        return fitted, potential(fitted)
+
+    return transition
+
+
 def gradient_estimate(
     cond: Conditioning,
     names: tuple[str, ...],
@@ -575,22 +702,38 @@ def gradient_estimate(
     *,
     steps: int,
     learning_rate: float = DEFAULT_LEARNING_RATE,
+    programs: dict[Any, Any] | None = None,
     **_ignored,
 ) -> tuple[dict[str, jax.Array], jax.Array]:
-    """Descend the block's conditional potential for ``steps`` Adam steps.
+    """Descend the block's conditional potential: ``steps`` Adam steps, then Newton.
+
+    The Adam steps do the travelling and the Newton steps
+    (:func:`~bayesmith.optimize.certify.polish`) remove Adam's step-size
+    floor, so the block ends each sweep at its conditional optimum rather
+    than a fixed fraction of a step away from it.
 
     Returns the updated values and the potential reached, which stands in the
     residual's place in the conjugate engine's return — a number to record,
-    never a convergence verdict. The verdict is the joint chi-squared, one level
-    up.
+    never a convergence verdict. The verdict is the joint objective,
+    :meth:`Conditioning.neg_log_posterior`, one level up.
+
+    ``programs`` is the caller's compiled-transition cache, as for
+    :func:`gradient_draw`, and for the same reasons it is keyed without the
+    conditioning. The key opens with a tag so it cannot equal a draw's or a
+    conjugate block's key in the same dict.
     """
-    potential = conditional_potential(cond, names, values)
+    key_for = (_ESTIMATE_TAG, tuple(names), steps, learning_rate)
+    transition = None if programs is None else programs.get(key_for)
+    if transition is None:
+        transition = _estimate_transition(
+            cond, names, steps=steps, learning_rate=learning_rate
+        )
+        if programs is not None:
+            programs[key_for] = transition
+    others = {key: value for key, value in values.items() if key not in names}
     x0 = {name: values[name] for name in names}
-    step_sizes = {
-        name: learning_rate * _magnitude(cond.space.latent(name)) for name in names
-    }
-    fitted = _adam(potential, x0, steps, step_sizes)
-    return {**values, **fitted}, potential(fitted)
+    fitted, potential = transition(others, x0)
+    return {**values, **fitted}, potential
 
 
 def _require_numpyro():

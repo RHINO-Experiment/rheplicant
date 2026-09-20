@@ -249,16 +249,21 @@ against `Estimate` or `Draws` when it genuinely needs the values or the chain.
 Both exits on the fixture above, at `HomoscedasticNoise(1.0)`:
 
 ```text
-plan.estimate   sweeps 93   converged True   chi2 1.16085e+08 -> 0.0136245
-                block residuals {('gain',): 7.56e-07, ('t_coeff',): 1.03e-06}
-                max |T_ant - truth| = 0.0332 K
+plan.estimate   sweeps 94   converged True   objective 5.80427e+07 -> 140.936
+                chi2 1.16085e+08 -> 0.0062980   effective_tol 7.63e-06
+                distance_bound 0.079 σ   contraction 0.124   certificate 19 products
+                block residuals {('gain',): 7.61e-07, ('t_coeff',): 4.02e-07}
+                max |T_ant - truth| = 0.0252 K, 0.079 posterior σ from the MAP
 
 plan.sample     n_sweeps  60   kept  30   rhat 1.434   converged False
                 n_sweeps 200   kept 100   rhat 0.99    converged True
                 n_sweeps 600   kept 300   rhat 1.001   converged True
 ```
 
-The 93 sweeps and the `rhat = 1.434` are the same fact seen twice: these two
+The estimate runs in float32, so its change tolerance is the float32 floor
+rather than the default `tol = 1e-8`, and it converges at sweep 94 of its 100
+(see the monitoring section below). Those 94 sweeps and
+the `rhat = 1.434` are the same fact seen twice: these two
 blocks are strongly correlated, so the alternation moves slowly, and 30 kept
 draws are nowhere near stationarity. Neither exit hides it — `converged` is
 `False` on the short run and `PlanDiagnostics.rhat` says by how much.
@@ -333,26 +338,221 @@ Iterating is not one either: five sweeps and two hundred agree to four figures,
 because the solve reaches the solution manifold at once and then has nowhere
 left to move.
 
-So the monitored quantity is the **joint** χ² at the current parameter tuple,
-across sweeps. When it has not settled, the refusal says so and names what the
-per-block numbers were doing at the time:
+So the monitored quantity is a **joint** one at the current parameter tuple,
+across sweeps. For `plan.estimate` it is the joint negative log posterior `f`,
+`Conditioning.neg_log_posterior` — the objective every block update descends —
+and what certifies a run is the **Newton decrement** of `f` at the point it
+would return:
+
+* **the certificate**: `λ² = gᵀH⁻¹g` over every latent, for `g` and `H` the
+  gradient and Hessian of `f`. Near its minimum `f` is quadratic,
+  `f − f* = d² / 2` for `d` the Mahalanobis distance under the posterior
+  precision, and `λ` *is* that distance. A run converges when `λ` is at most
+  `sqrt(2 gap_tol)` — 0.1 posterior σ by default — which does not grow with
+  `N` and does not care which block is slow. Recorded as
+  `PlanDiagnostics.distance_bound`, with the Hessian-vector products it cost
+  in `.certificate_iterations` and the number of times it ran in
+  `.certificate_attempts`.
+* **the schedule**: the decrement costs a gradient and a solve, so it is asked
+  only where a stop is plausible — the last two changes of `f` within
+  `t × max(|f|, 1)`, `t = max(tol, 64 ε)` for `ε` the machine epsilon of the
+  objective's dtype (`OBJECTIVE_FLOOR_EPS = 64`, recorded as
+  `.effective_tol`), and this sweep's decrease either below what the
+  arithmetic resolves or inside `gap_tol` after extrapolation at its estimated
+  contraction `ρ = D[k] / D[k−1]` (recorded as `.contraction`). Those two
+  tests schedule; neither certifies. After a candidate the decrement refuses,
+  the next one waits twice as long, so a run that never certifies pays
+  `O(log max_iter)` decrements.
+
+**How the decrement is computed, and why an inexact solve is safe.** The
+numerics are in `bayesmith.optimize.certify`, upstream rather than here. They
+know nothing about models: the module takes a callable and a pytree, and the
+plan supplies the joint objective. Knowing nothing about models is also why it
+moved. It was written in this package and lifted into bayesmith byte for byte
+in bayesmith 0.10.0, with its 50 unit tests; the acceptance test that drives a
+whole estimate to its MAP stayed here, because that one does need this
+package's models. `H` is never formed from the model: every product is `jax.jvp` of
+`jax.grad` of `f`. Up to 1024 latents the decrement takes `n` such products,
+assembles the Hessian, scales it by its diagonal and solves by
+eigendecomposition; above that it runs conjugate gradients on the products
+alone. Either way the solve is inexact, and the verdict is never `gᵀx` as it
+stands. With `r = g − Hx` the true residual — recomputed with one more
+product, because a recursive one drifts — and `μ` a **lower bound on the
+smallest eigenvalue** of `H`,
 
 ```text
-SamplingPlan.estimate did not converge: after 4 sweeps the JOINT chi-squared is
-still falling by 728774 per sweep (chi2 = 2.31316e+06), which is above
-tol=1e-08. Note what this does NOT show up in: every conjugate block's own CG
-residual is 4.18e-07 or better, because a per-block residual is computed from
-the block and converges at every sweep of an alternation that is going nowhere.
+λ  ≤  (R + sqrt(R² + 4 gᵀx)) / 2,      R = |r| / sqrt(μ)
 ```
 
-It is a *decrease* that is tested, not a change: block-coordinate descent cannot
-increase the objective, so once a sweep stops reducing it there is nothing left
-to reach. Testing `|χ²[k] − χ²[k−1]|` instead walks into the floor
-[`iterative_gls`](inference-linear.md#when-the-covariance-is-not-given) documents for its own
-`reweight_tol` — consecutive sweeps differ by roughly the inner solver's noise
-whatever the outer iteration does. Measured in float32 on the motivating model,
-the plateau sits at χ² = 2.7e-3 and jitters by 1.2e-3 a sweep, so a converged run
-would have been refused for 300 sweeps and counting.
+by Cauchy–Schwarz in the `H⁻¹` inner product, inflated by `1/sqrt(1 − ε κ)`
+for the rounding of `g` and `H` themselves. The run certifies on that upper
+bound and records it, so stopping the solve early can only make it refuse.
+
+**Where the lower bound comes from, and why only a proof certifies.** Below
+1024 latents it is measured: the scaled Hessian's own smallest eigenvalue,
+which also decides positive definiteness, so an indefinite or numerically
+singular Hessian is refused rather than certified. Above it the Hessian is
+not formed, and there are two ways for a run to have a floor at all:
+
+| floor | where it comes from | certifies |
+|---|---|---|
+| `dense` | the formed Hessian's smallest eigenvalue (≤ 1024 latents) | yes |
+| `supplied` | the prior precision, where this plan can prove `H = JᵀN⁻¹J + P` | yes |
+| `probe` | a 32-step Lanczos probe's Ritz interval | **no** |
+| `none` | no usable floor at all | no |
+
+which one a run used is recorded as `PlanDiagnostics.floor_source`. The
+proof for the second is the model's: with the prediction affine in every
+latent **jointly**, a sigma that does not depend on it, and a Normal prior on
+every latent, `H = JᵀN⁻¹J + P ⪰ P ⪰ min(1/σ_prior²)` whatever the data. Each
+condition is checked — joint affinity by the same `check_linearity` a
+conjugate block passes, asked of all the latents at once, because two blocks
+that are each affine are not jointly affine (`gain × sky` is the standing
+case) — and the floor is the **widest** prior scale, the smallest precision.
+
+The third class is a heuristic and is treated as one. `θ₀ − β|s₀|` bounds the
+distance from `θ₀` to *some* eigenvalue of `H`, not to the smallest, so where
+the Krylov space never reaches the bottom of the spectrum the probe's floor
+can sit above it: measured over 480 random spectra, 5 in 240 did so in
+float32, the worst by a factor 7.4. A probed floor therefore never certifies
+here. It is kept for what it can do soundly — refuse: non-positive curvature,
+or a bound already outside the threshold. A run left with only a probe keeps
+sweeping and refuses at `max_iter` with **"cannot certify this estimate at
+this size and precision"**, naming the three things that would make a proof:
+a single conjugate block with Normal priors (or any partition of a jointly
+affine model), fewer latents than the dense limit, or float64 where the
+precision is what blocks the dense path.
+
+The T-002 third review found both halves of that by construction: a spectrum
+clustered at 1 with one eigenvalue at 1e-8 and a gradient whose component
+along it sat just under the iteration's residual, where a condition number
+read off the iteration's own Lanczos matrix said 1.2 against a true 1e8 and
+turned a true 0.067 σ into a reported 0.050; and an indefinite Hessian at a
+zero gradient, which the iterative path certified at distance zero while the
+dense path refused it.
+
+What it costs, measured on this machine in float64 against one sweep of the
+same plan:
+
+| model | latents | products | one decrement | in sweeps |
+|---|---|---|---|---|
+| power law, 4096 channels | 2 | 3 | 0.2 ms | 0.13 |
+| two collinear blocks, `N = 1e6` | 2 | 3 | 0.8 ms | 1.4 |
+| one conjugate block of 256 coefficients | 256 | 257 | 28 ms | 10 |
+| one conjugate block of 1024 coefficients | 1024 | 1025 | 322 ms | 16 |
+| one conjugate block of 2000 coefficients | 2000 | 2 | 7.5 ms | 0.17 |
+
+The last row is the prior floor paying for itself: above 1024 latents the
+Hessian is not formed, and a floor the model proves lets the iteration stop
+at the second product instead of probing the spectrum.
+
+When it has not converged, the refusal names what failed and what the per-block
+numbers were doing at the time:
+
+```text
+SamplingPlan.estimate did not converge: after 4 sweeps the JOINT negative log
+posterior is still changing by -3.64e+05 per sweep (objective = 1.15674e+06,
+chi2 = 2.31319e+06). A verdict needs two consecutive sweep-to-sweep changes each
+within 7.63e-06 of it, relative (tol=1e-08, floored at 64 machine epsilons of
+the objective's dtype), then the Newton decrement within 0.1 posterior sigma.
+The decrease contracts by 0.7323 per sweep, leaving a gap of about 1.36e+06
+nats. Note what this does NOT show up in: every conjugate block's own CG
+residual is 5.56e-07 or better, because a per-block residual is computed from
+the block and converges at every sweep of an alternation that is going nowhere.
+In float32 the objective's own rounding can keep it moving, and a gradient
+below that rounding cannot be descended at all: run in float64
+(JAX_ENABLE_X64=1).
+```
+
+A run that did reach a candidate is refused in the decrement's own terms
+instead — the distance it measured, what the solve did, and the `solve_tol` the
+closed-form blocks ended at.
+
+The changes counted are between sweep outputs, never from the starting values
+(the first change only seeds the contraction), so the earliest verdict is at
+sweep 3 (`EARLIEST_CONVERGED_SWEEP`) whatever `min_sweeps` says below that, and
+`max_iter` of 1 or 2 with a `tol` always refuses. A config document that asks
+for that is refused before it runs, by pre-flight check A25.
+
+The joint χ² is still recorded (`PlanDiagnostics.chi2`) and is no longer the
+test. It was until T-002, as a *decrease*: any sweep that did not lower χ² counted
+as converged. With a prior the MAP is not the χ² minimum, so a sweep moving
+towards the MAP raises χ², and the rule read that rise as convergence — measured
+1 to 15 posterior σ from the exact MAP, including a plan of two conjugate blocks
+and no gradient block. An exact conditional update cannot raise `f` beyond the
+arithmetic's noise, so a rise beyond its resolution is never convergence.
+
+**Why a curvature check, and not the changes alone.** A tolerance relative to
+`|f|` certifies a distance of about `sqrt(2 t |f| / (1 − ρ))`, and `|f|` is
+about `N / 2` for `N` data. The first T-002 review measured the change test
+alone passing two collinear conjugate blocks 0.6 posterior σ from the MAP at
+`N = 1e6` in float64 and 16.5 σ in float32. Extrapolating the decreases at
+their contraction removes the `|f|` but not the second failure: `ρ` read from
+the decreases is the *fastest* mode still moving, so a slow mode hidden under a
+fast one passes. The second review measured that too — two correlated pairs,
+one started 30 σ off and one 1 σ off, certified 0.5 to 1.0 σ away, and 4618
+random dense precisions giving false certificates up to 1.33 σ. The decrement
+is a distance and has neither failure. Two collinear templates started 20 σ
+off, re-measured with it
+(`tests/inference/test_estimate_reaches_map.py`,
+`test_estimate_large_n_float32.py`):
+
+| N | r | float64: sweeps, σ from the MAP | float32 |
+|---|---|---|---|
+| 1e4 | 0.864 | 28, 0.006 | 21, 0.050 |
+| 1e4 | 0.993 | 431, 0.059 | 410, 0.078 |
+| 1e5 | 0.961 | 71, 0.069 | 68, 0.088 |
+| 1e6 | 0.866 | 20, 0.073 | 19, 0.097 |
+| 1e6 | 0.993 | 401, 0.098 | 523, 0.019 |
+
+`tol` keeps its meaning and default, so code that passes a `tol` still asks for
+what it asked for; what changed is that the change test no longer suffices, and a
+run that used to report converged may now take more sweeps or refuse.
+
+**The resolution, and what it is now for.** The change is summed term by term,
+so the constant parts of `f` (every prior's normalizer) and the bulk of the χ²
+sum cancel exactly instead of costing `ε |f|`; what remains is resolved to about
+`4 ε sqrt(Σ term²)` (`RESOLUTION_EPS`). A decrease below that is treated as no
+decrease — the sweep becomes a candidate and the decrement decides. Until the
+decrement, the resolution was the certificate's own floor, and a float32 run
+whose decreases fell below it was refused however good its answer: the second
+review measured that floor 50 to 1500 times coarser than the distance it stood
+for, and the float32 column above is the same grid that used to refuse on it.
+
+**When the inner solves are the obstacle.** A conjugate block solved to
+`solve_tol` has a fixed point that is not the MAP, and on correlated blocks the
+offset is not small: 0.11 posterior σ at the default `1e-6` on the bilinear
+fixture at noise 0.30 (second review). The decrement sees it as the distance it
+is and refuses, so when a sweep shows inexactness — the objective rising beyond
+its resolution, or a candidate refused — the closed-form blocks' tolerance is
+divided by 100, down to a floor of `1e-12` in float64 and two machine epsilons
+in float32, and the value the run ended at is recorded as
+`PlanDiagnostics.solve_tol`. On that fixture the run converges at `1e-8`,
+0.002 σ from the MAP in float64 and 0.072 σ in float32; without the tightening
+both exhaust 3000 sweeps and refuse. A model that certifies at the caller's
+`solve_tol` is never tightened.
+
+**What is left.** The decrement is a statement about the quadratic model of `f`
+at the returned point: where the curvature changes over a posterior σ it is
+local. Above 1024 latents a model that is not jointly affine — a bilinear
+gain, a log-space block, anything a gradient block is there for — has no floor
+to prove and so no certificate at all; it refuses, and `tol=None` is the way
+to get the answer without a claim. A direction of negative curvature that
+neither the probe nor the Krylov space meets is not seen. In float32 a
+model whose posterior σ is small against its latents' magnitudes has a gradient
+that is mostly rounding, and no solve recovers it — those runs refuse, naming
+float64. Grouping the correlated latents into one `Block` removes the slowness
+rather than the symptom.
+
+The change test's float32 floor exists because float32 cannot resolve
+`tol = 1e-8`: its epsilon is 1.19e-7, and conjugate solves at `solve_tol = 1e-6`
+move the objective at its plateau by tens of ulps a sweep — the inner-solver
+floor [`iterative_gls`](inference-linear.md#when-the-covariance-is-not-given)
+documents for its own `reweight_tol`. On the fixture above, with the trace
+replayed against the float64 MAP, a floor of 4 ε never stops, 64 ε stops at
+sweep 94 and 0.079 posterior σ, and 256 ε at sweep 89 and 0.13 σ. In float64 the
+floor is 1.4e-14 and `tol` governs; the same fixture stops at sweep 133,
+0.003 σ, its conjugate solves tightened to `solve_tol = 1e-8` on the way.
 
 :::{important}
 **The joint χ² catches a slow partition, not a degenerate one.** Running the

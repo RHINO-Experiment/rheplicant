@@ -226,7 +226,17 @@ that variant accepts, never which runs execute.
   `{python: ...}`; it moves `inference.trainable` or
   `inference.parameters`, never both.
 - `plan.estimate` — a blockwise point estimate; `blocks:` is required, and a
-  seed is refused (the asymmetry is the package's own; check A29).
+  seed is refused (the asymmetry is the package's own; check A29). `tol:` is
+  the relative change of the joint negative log posterior between sweeps
+  (default `1e-8`, floored at 64 machine epsilons); since T-002 that change
+  only schedules the verdict, and what gives it is the Newton decrement of
+  that objective at the point the run would return, which must be within 0.1
+  posterior σ of its minimum whatever the number of data. Its threshold is
+  `gap_tol` in the Python API and not a document key in this release. A run
+  whose sweeps stall short of that — a float32 objective below its own
+  rounding, a conjugate solve too loose, a frozen prediction-dependent sigma —
+  refuses at `max_iter` saying which, and names `JAX_ENABLE_X64=1` where the
+  precision is the cause ([the monitoring section](inference-plans.md#convergence-is-monitored-on-the-joint-χ²-never-a-per-block-residual)).
 - `plan.sample` — blockwise posterior draws; `blocks:`, a named `seed:` and
   `n_sweeps:` are required; `warm_start: {kind: plan.estimate, blocks:,
   move:}` moves only the named inits.

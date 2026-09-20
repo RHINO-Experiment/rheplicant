@@ -78,6 +78,33 @@ _ENGINES: frozenset[str] = frozenset(
     {_T7_CONJUGATE, _T7_LOG_CONJUGATE, _T7_GRADIENT}
 )
 
+#: The ``log_route_refusal`` reasons (``inference/loglinear.py``) that a
+#: noise's TEXT can decide, spelled as ``LOG_ROUTE_REFUSALS`` spells them.
+#: Written out because this module may not import that package; what keeps
+#: the copy honest is ``tests/config/test_preflight_log_route.py``, which
+#: builds the package's noise model for each row of a table and compares
+#: :func:`_log_route_refusal_text` with ``log_route_refusal``, and checks each
+#: word against ``LOG_ROUTE_REFUSALS``. ``noise_neither`` is the verdict T-002
+#: G4 (A5-3) gave a ``RadiometerNoise`` with a declared floor.
+#:
+#: The package's third reason, ``fractional_too_large``, is NOT here: ``f =
+#: 1 / sqrt(channel_width * integration_time)`` needs both values resolved,
+#: and their default ``{from: observation}`` reads the observation's grid.
+#: That document is still refused, by ``to_log_space`` at P3.
+_T7_NOISE_ADDITIVE: str = "noise_additive"
+_T7_NOISE_NEITHER: str = "noise_neither"
+_LOG_ROUTE_REASONS: frozenset[str] = frozenset(
+    {_T7_NOISE_ADDITIVE, _T7_NOISE_NEITHER})
+
+#: ``inference.noise.kind`` values whose sigma does not scale with the
+#: prediction. ``homoscedastic`` is a ``HomoscedasticNoise``; a
+#: ``radiometer_frozen`` sigma is DECIDED into an array once
+#: (``sections/noise.py::freeze_sigma``) and a plan wraps a bare sigma as a
+#: ``HomoscedasticNoise`` -- additive either way, and ``log_route_refusal``
+#: says ``noise_additive`` for both.
+_T7_ADDITIVE_KINDS: frozenset[str] = frozenset({"homoscedastic",
+                                                "radiometer_frozen"})
+
 #: The keys a block entry takes -- ``_BLOCK_KEYS`` (``exits.py:165``), copied
 #: for the same reason :data:`_ENGINES` is: reaching it means importing
 #: ``sections/exits``, which foot-imports ``conjugate``, ``diagnostics``,
@@ -136,6 +163,72 @@ def _latents(document: Mapping[str, Any]) -> dict[str, Any]:
         return {}
     return {name: (body if isinstance(body, Mapping) else {})
             for name, body in parameters.items() if isinstance(name, str)}
+
+
+def _log_route_refusal_text(noise: Any) -> str | None:
+    """``log_route_refusal``'s verdict on ``inference.noise``, from its TEXT.
+
+    ``None`` means either "the log route exists" or "the text cannot say";
+    both let the block through, and the package decides the second at P3.
+
+    * ``kind:`` in :data:`_T7_ADDITIVE_KINDS` -> ``noise_additive``.
+    * ``kind: radiometer`` with a ``floor:`` whose number the text carries and
+      which is not ``<= 0`` -> ``noise_neither``. ``not <= 0`` rather than
+      ``> 0``, as G4 writes it in the package, so a NaN floor is refused and
+      not routed. The number is read by ``preflight/instrument.py``'s
+      :func:`_text_number`, which APPLIES the unit: ``celsius`` is affine, and
+      ``{value: 0, unit: celsius}`` is a floor of 273.15 K.
+    * Anything else -- no noise, ``kind: none``, an unknown kind, a floor
+      written as ``{ref: ...}`` -- stands down. Those are other checks' and
+      ``build_noise``'s to refuse, and a second voice here would give one
+      fault two refusals.
+
+    ``flags:`` does not enter: ``log_route_refusal`` unwraps a
+    ``FlaggedNoise`` and judges the base model.
+    """
+    from rheplicant.config.preflight.instrument import _text_number
+
+    if not isinstance(noise, Mapping):
+        return None
+    kind = noise.get("kind")
+    if not isinstance(kind, str):
+        return None
+    if kind in _T7_ADDITIVE_KINDS:
+        return _T7_NOISE_ADDITIVE
+    if kind != "radiometer" or "floor" not in noise:
+        return None
+    floor = _text_number(noise["floor"])
+    if floor is None:
+        return None
+    return _T7_NOISE_NEITHER if not floor <= 0.0 else None
+
+
+def _log_route_message(named: str, site: str, position: int,
+                       noise: Mapping[str, Any], reason: str) -> str:
+    """Why this ``engine: log_conjugate`` block has no log route."""
+    opening = f"{named}: {site}[{position}] asks for engine: log_conjugate, and "
+    if reason == _T7_NOISE_NEITHER:
+        floor = noise["floor"]
+        said = (f"{floor.get('value')} {floor.get('unit', '')}".strip()
+                if isinstance(floor, Mapping) else repr(floor))
+        return (
+            opening + f"inference.noise.floor declares {said} on kind: "
+            "radiometer, so sigma = f * max(|mu|, floor): proportional to the "
+            "prediction above the floor and constant below it. The log route "
+            "uses sigma = f on every sample, which is the declared likelihood "
+            "only where the floor never binds, so a floored noise has no "
+            "closed-form log route (log_route_refusal: noise_neither). Declare "
+            "engine: gradient for this block, which evaluates the declared "
+            "likelihood, or drop inference.noise.floor if the prediction cannot "
+            "approach zero (check A19).")
+    return (
+        opening + f"inference.noise is kind: {noise.get('kind')}, whose sigma "
+        "does not scale with the prediction. The log route solves against "
+        "log(data) under a multiplicative noise d = mu (1 + f w); applied to a "
+        "noise that is already additive it states a different likelihood from "
+        "the one declared (log_route_refusal: noise_additive). Declare another "
+        "engine for this block, or inference.noise.kind: radiometer if the "
+        "noise is multiplicative (check A19).")
 
 
 def _runs(document: Mapping[str, Any]) -> tuple[dict, ...]:
@@ -532,7 +625,8 @@ def _a17_message(named: str, site: str, position: int, steps: Any) -> str:
 def _t7_engines(named: str, listed: str, site: str,
                 entries: tuple[Mapping[str, Any], ...],
                 latents: Mapping[str, Any], *,
-                derive: bool) -> Iterable[Finding]:
+                derive: bool,
+                noise: Any = None) -> Iterable[Finding]:
     """A17, A18, A19 and the engine enum, in the order ``plan.py`` decides them.
 
     **``derive`` is False when the partition is wrong, and only the ENUM runs
@@ -579,6 +673,26 @@ def _t7_engines(named: str, listed: str, site: str,
                 "it is derived from linear: true on each member, which is the "
                 "normal case -- an explicit engine is an override (check A19).")
             continue
+
+        # The log route, which reads the block's declared engine and the
+        # noise and no latent, so it runs whether or not the partition is
+        # right, as the enum does. `to_log_space` refuses the same noises at
+        # P3 through `log_route_refusal`; before this, such a document passed
+        # `rheplicant validate` and failed `rheplicant run` with a traceback.
+        #
+        # Filed under A19 -- an engine override whose precondition the
+        # declaration does not meet -- and NOT id-less like the enum above:
+        # measured, an id-less finding reaches `rheplicant validate` as
+        # "finding.check must be a non-empty string." from the audit trace
+        # (`_rheplicant_bootstrap/audit/trace.py`), exit 2 with the message
+        # lost, which is what `engine: banana` does today.
+        if declared == _T7_LOG_CONJUGATE:
+            reason = _log_route_refusal_text(noise)
+            if reason is not None:
+                yield refuse("A19", block_where,
+                             _log_route_message(named, site, position,
+                                                noise, reason))
+                continue
         if not derive:
             continue
 
@@ -659,6 +773,8 @@ def _blocks(document: Mapping[str, Any]) -> Iterable[Finding]:
     this one's.
     """
     latents = _latents(document)
+    inference = document.get("inference")
+    noise = inference.get("noise") if isinstance(inference, Mapping) else None
     for index, run in enumerate(_runs(document)):
         kind = run.get("kind")
         if not (isinstance(kind, str) and kind.startswith("plan.")):
@@ -675,7 +791,7 @@ def _blocks(document: Mapping[str, Any]) -> Iterable[Finding]:
                                             latents))
             yield from partition
             yield from _t7_engines(named, listed, site, entries, latents,
-                                   derive=not partition)
+                                   derive=not partition, noise=noise)
 
 
 # --- Task 8: the prior gates, and the seed asymmetry ------------------------
@@ -1238,6 +1354,16 @@ _T9_MIN_DRAWS: int = 4
 _T9_MIN_SWEEPS: int = 3
 _T9_DEFAULT_MAX_ITER: int = 100
 
+#: ``EARLIEST_CONVERGED_SWEEP`` from ``inference/plan.py``, the first sweep at
+#: which ``SamplingPlan.estimate`` can report converged: its stop rule needs
+#: two consecutive sweep-to-sweep changes within tol, and the first change is
+#: sweep 2 against sweep 1 (T-002 A5-1). Written out for the same measured
+#: reason as the three above, and held to the package's value by the same
+#: test, ``test_the_three_plan_counts_are_the_packages_own``;
+#: ``test_no_name_from_the_inference_layer_is_imported_at_all`` refuses the
+#: deferred import that would otherwise spell it.
+_T9_EARLIEST_CONVERGED_SWEEP: int = 3
+
 #: What ``check_identifiability:`` takes, in the package's own order.
 #:
 #: **A TUPLE and not a frozenset, and neither reason is style.**  ``x in
@@ -1453,27 +1579,50 @@ def _a25_bounds(where: str, name: str, prefix: str,
 
 def _a25_pair_message(named: str, prefix: str, spec: Mapping[str, Any],
                       floor: int, cap: int) -> str:
-    """A25's ``1 <= min_sweeps <= max_iter`` refusal, naming only what the
-    document actually wrote.
+    """A25's sweep-count refusal, naming only what the document actually wrote.
 
-    Either half may be the PACKAGE's default, and a message that spelled a
-    default as though the user had typed it is the "hard-coded value the user
-    never wrote" shape Task 7 shipped: ``max_iter: 1`` with no ``min_sweeps``
-    would otherwise read *"min_sweeps: 3 is above max_iter: 1"* and send the
-    reader looking for a key that is not in their document.  The fix clause
-    says "declare a lower min_sweeps" rather than "lower min_sweeps" for the
-    same reason -- there may be nothing there to lower.
+    Two clauses, one finding. ``1 <= min_sweeps <= max_iter`` is the package's
+    own guard; ``max_iter >= EARLIEST_CONVERGED_SWEEP`` is what its stop rule
+    needs to be able to pass at all (T-002 A5-1). A document can break
+    either or both, and when it breaks both it gets one message that names
+    both and one piece of advice that satisfies both: raise ``max_iter`` to
+    the larger of the two floors.
+
+    Either half of the pair may be the PACKAGE's default, and a message that
+    spelled a default as though the user had typed it is the "hard-coded
+    value the user never wrote" shape Task 7 shipped: ``max_iter: 1`` with no
+    ``min_sweeps`` would otherwise read *"min_sweeps: 3 is above max_iter: 1"*
+    and send the reader looking for a key that is not in their document.  The
+    fix clause says "declare a lower min_sweeps" rather than "lower
+    min_sweeps" for the same reason -- there may be nothing there to lower.
+    The cap in the second clause is always written, since the default is
+    far above the earliest verdict.
     """
     floor_said = (f"{prefix}min_sweeps: {floor}" if "min_sweeps" in spec
                   else f"min_sweeps, which defaults to {floor},")
     cap_said = (f"{prefix}max_iter: {cap}" if "max_iter" in spec
                 else f"max_iter, which defaults to {cap}")
+    earliest = _T9_EARLIEST_CONVERGED_SWEEP
+    clauses = []
+    if floor > cap:
+        clauses.append(f"{floor_said} is above {cap_said}, so the convergence "
+                       "test is never consulted")
+    if cap < earliest:
+        clauses.append(
+            f"{cap_said} is below {earliest}, the earliest sweep at which a "
+            "verdict can come: the test needs two consecutive sweep-to-sweep "
+            "changes within tol, and the first is sweep 2 against sweep 1")
+    if cap < earliest:
+        advice = (f"Raise max_iter to at least {max(floor, earliest)}, or "
+                  f"declare {prefix}tol: null")
+    else:
+        advice = ("Declare a lower min_sweeps, raise max_iter, or declare "
+                  f"{prefix}tol: null")
     return (
-        f"{named}: {floor_said} is above {cap_said}, so the convergence test "
-        "is never consulted -- the run always exhausts max_iter and always "
-        "refuses, including on a model it converged on at sweep two. Declare "
-        f"a lower min_sweeps, raise max_iter, or declare {prefix}tol: null to "
-        "run a fixed number of sweeps with no verdict (check A25).")
+        f"{named}: " + "; and ".join(clauses) + " -- the run always exhausts "
+        "max_iter and always refuses, including on a model that had already "
+        f"settled. {advice} to run a fixed number of sweeps with no verdict "
+        "(check A25).")
 
 
 def _a25_sites(run: Mapping[str, Any]) -> tuple[tuple[str, str, Mapping], ...]:
@@ -1675,12 +1824,18 @@ def _counts(document: Mapping[str, Any]) -> Iterable[Finding]:
                 # 43 modules into the first call and takes this pass from
                 # 1.6 ms to 23 ms -- see `_T9_MIN_DRAWS`, which carries the
                 # measurement and the test that keeps the three honest.
+                #
+                # The second clause is the stop rule's own floor: with a tol
+                # no run converges before `_T9_EARLIEST_CONVERGED_SWEEP`, so
+                # a cap below it always exhausts and refuses at P3, whatever
+                # `min_sweeps` says. Same gate, same site, ONE finding.
                 floor = spec.get("min_sweeps", _T9_MIN_SWEEPS)
                 cap = spec.get("max_iter", _T9_DEFAULT_MAX_ITER)
                 if (spec.get("tol", 1) is not None
                         and _t9_whole_number(floor)
                         and _t9_whole_number(cap)
-                        and floor > cap):
+                        and (floor > cap
+                             or cap < _T9_EARLIEST_CONVERGED_SWEEP)):
                     yield refuse("A25", site,
                                  _a25_pair_message(named, prefix, spec,
                                                    floor, cap))

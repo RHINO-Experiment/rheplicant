@@ -2981,9 +2981,54 @@ class TestCounts:
         # `floor > cap` is not.  Kills the guard written `floor >= cap` --
         # which refuses a document the package runs and which `9 > 2` cannot
         # see.  The pair either side of the threshold is the whole test.
-        assert _counted(_estimate(min_sweeps=2, max_iter=2)) == []
+        # At 3 rather than 2 since T-002: a cap below the earliest verdict
+        # (sweep 3) is refused by its own clause, which would hide this one.
+        assert _counted(_estimate(min_sweeps=3, max_iter=3)) == []
         assert [f.check for f in
-                _counted(_estimate(min_sweeps=3, max_iter=2))] == ["A25"]
+                _counted(_estimate(min_sweeps=4, max_iter=3))] == ["A25"]
+
+    def test_a_cap_below_the_earliest_verdict_is_refused_only_when_tol_is_live(
+            self):
+        # `SamplingPlan.estimate` needs two consecutive sweep-to-sweep changes
+        # within tol, the first being sweep 2 against sweep 1, so no run with
+        # a tol can converge before `EARLIEST_CONVERGED_SWEEP` (T-002 A5-1).
+        # `max_iter: 2` with `min_sweeps: 1` passes the pair clause and then
+        # exhausts its sweeps and refuses at P3. Kills dropping the clause.
+        from rheplicant.inference.plan import EARLIEST_CONVERGED_SWEEP
+
+        below = EARLIEST_CONVERGED_SWEEP - 1
+        for floor in range(1, below + 1):
+            found = _counted(_estimate(min_sweeps=floor, max_iter=below))
+            assert [f.check for f in found] == ["A25"], (floor, found)
+            message = found[0].message
+            assert f"max_iter: {below} is below {EARLIEST_CONVERGED_SWEEP}" in message
+            assert ("the earliest sweep at which a verdict can come"
+                    in message), message
+            assert f"at least {EARLIEST_CONVERGED_SWEEP}" in message
+        # THE BOUNDARY: a cap AT the earliest verdict is legal. Kills the
+        # clause written `cap <= earliest`.
+        assert _counted(_estimate(min_sweeps=1,
+                                  max_iter=EARLIEST_CONVERGED_SWEEP)) == []
+        # ...and gated on `tol` like the pair: with no convergence test
+        # there is no verdict to be early for, and the package runs it.
+        assert _counted(_estimate(min_sweeps=1, max_iter=below, tol=None)) == []
+        # ...on the warm start as well, read off the warm site's own `tol`.
+        assert [f.check for f in _counted(
+            _warmed(min_sweeps=1, max_iter=below))] == ["A25"]
+        assert _counted(_warmed(min_sweeps=1, max_iter=below, tol=None)) == []
+
+    def test_both_clauses_give_ONE_finding_that_names_both(self):
+        # `min_sweeps: 9, max_iter: 2` breaks the pair AND sits below the
+        # earliest verdict. One site, one finding: two findings for one pair
+        # of keys would read as two problems. Its advice has to satisfy both,
+        # so it names the larger of the two floors. Kills a second `yield`.
+        from rheplicant.inference.plan import EARLIEST_CONVERGED_SWEEP
+
+        found = _counted(_estimate(min_sweeps=9, max_iter=2))
+        assert [f.check for f in found] == ["A25"]
+        assert "min_sweeps: 9 is above max_iter: 2" in found[0].message
+        assert f"is below {EARLIEST_CONVERGED_SWEEP}" in found[0].message
+        assert "Raise max_iter to at least 9" in found[0].message
 
     @pytest.mark.parametrize("options, said", [
         ({"max_iter": 1}, "min_sweeps, which defaults to 3, is above "
@@ -3046,21 +3091,30 @@ class TestCounts:
         assert [f.check for f in
                 _counted(_warmed(min_sweeps=9, max_iter=2))] == ["A25"]
 
-    def test_the_tol_gate_covers_min_sweeps_and_NOTHING_else(self):
+    def test_a_null_tol_stands_down_the_min_sweeps_clause_and_NOTHING_else(self):
         # `plan.py:909` gates only the `min_sweeps` clause; `max_iter` is
-        # refused unconditionally at `:900`.  Kills widening `_A25_TOL_GATED`
-        # to `{"min_sweeps", "max_iter"}`, under which `max_iter: 2.5` beside
-        # `tol: null` goes unchecked and reaches the user as `plan.py:900`'s
-        # FALSE "needs max_iter >= 1, got 2.5" -- the very message this
-        # task's headline claims to fix.
-        from rheplicant.config.preflight.fitting import _A25_TOL_GATED
-
-        assert _A25_TOL_GATED == frozenset({"min_sweeps"})
+        # refused unconditionally at `:900`.  Kills gating any other row on
+        # the live `tol`, under which `max_iter: 2.5` beside `tol: null` goes
+        # unchecked and reaches the user as `plan.py:900`'s FALSE "needs
+        # max_iter >= 1, got 2.5" -- the very message this task's headline
+        # claims to fix.
+        #
+        # Split from the constant pin below deliberately: while the two lived
+        # in one test, widening `_A25_TOL_GATED` failed on the pin's line and
+        # this half was never evaluated against that mutant at all.
         found = _counted(_estimate(max_iter=2.5, tol=None))
         assert [f.check for f in found] == ["A25"]
         assert "is a whole number" in found[0].message
         assert [f.check for f in
                 _counted(_estimate(solve_tol=-1.0, tol=None))] == ["A25"]
+
+    def test_the_tol_gate_is_the_one_row_and_is_pinned_where_it_is_written(self):
+        # The constant behind the behaviour above, asserted on its own so
+        # that a widened gate fails BOTH: this one on its spelling, that one
+        # on what a document does.
+        from rheplicant.config.preflight.fitting import _A25_TOL_GATED
+
+        assert _A25_TOL_GATED == frozenset({"min_sweeps"})
 
     def test_the_run_site_is_reported_before_the_warm_site(self):
         # `_a25_sites` appends; `insert(0, ...)` would put the warm start
@@ -3257,15 +3311,21 @@ class TestCounts:
         """
         from rheplicant.config.preflight.fitting import (
             _T9_DEFAULT_MAX_ITER,
+            _T9_EARLIEST_CONVERGED_SWEEP,
             _T9_MIN_DRAWS,
             _T9_MIN_SWEEPS,
         )
         from rheplicant.inference import MIN_DRAWS
-        from rheplicant.inference.plan import DEFAULT_MAX_ITER, MIN_SWEEPS
+        from rheplicant.inference.plan import (
+            DEFAULT_MAX_ITER,
+            EARLIEST_CONVERGED_SWEEP,
+            MIN_SWEEPS,
+        )
 
         assert _T9_MIN_DRAWS == MIN_DRAWS
         assert _T9_MIN_SWEEPS == MIN_SWEEPS
         assert _T9_DEFAULT_MAX_ITER == DEFAULT_MAX_ITER
+        assert _T9_EARLIEST_CONVERGED_SWEEP == EARLIEST_CONVERGED_SWEEP
 
     def test_no_name_from_the_inference_layer_is_imported_at_all(self):
         """The other half, and the one an equality cannot be.
@@ -3656,13 +3716,15 @@ class TestCounts:
         # sweep and `nuts` counts warmup and samples separately.  Kills a
         # kept-draws computation applied to every kind, which would refuse a
         # `max_iter: 2` estimate for keeping too few draws it never had.
-        assert _counted(_estimate(max_iter=2, min_sweeps=1)) == []
+        # `max_iter: 3`, not 2: since T-002 a cap below the earliest
+        # verdict is A25's to refuse, and this test's subject is A24's gate.
+        assert _counted(_estimate(max_iter=3, min_sweeps=1)) == []
         # ...and with `n_sweeps` actually DECLARED on the estimate, which is
         # the cell that reaches the `kind == "plan.sample"` gate at all.
         # Without it the estimate run has no `n_sweeps`, `_a24_kept_draws`
         # returns None, and the A24 leg is unreachable whether the gate is
         # there or not -- so `if kind == "plan.sample"` deleted survives.
-        assert _counted(_estimate(max_iter=2, min_sweeps=1, n_sweeps=6)) == []
+        assert _counted(_estimate(max_iter=3, min_sweeps=1, n_sweeps=6)) == []
         assert _counted(_chain()) == []
 
     @pytest.mark.parametrize("key", ["num_samples", "num_warmup"])
@@ -3805,32 +3867,48 @@ _COUNT_VERBATIM = [
     ('a25-the-min-sweeps-pair',
      _estimate(min_sweeps=9, max_iter=2), 'A25', 'runs[0]',
      "runs['fit']: min_sweeps: 9 is above max_iter: 2, so the convergence "
-     "test is never consulted -- the run always exhausts max_iter and always "
-     "refuses, including on a model it converged on at sweep two. Declare a "
-     "lower min_sweeps, raise max_iter, or declare tol: null to run a fixed "
-     "number of sweeps with no verdict (check A25)."),
+     "test is never consulted; and max_iter: 2 is below 3, the earliest sweep "
+     "at which a verdict can come: the test needs two consecutive "
+     "sweep-to-sweep changes within tol, and the first is sweep 2 against "
+     "sweep 1 -- the run always exhausts max_iter and always refuses, "
+     "including on a model that had already settled. Raise max_iter to at "
+     "least 9, or declare tol: null to run a fixed number of sweeps with no "
+     "verdict (check A25)."),
     ('a25-the-min-sweeps-pair-with-a-DEFAULTED-floor',
      _estimate(max_iter=1), 'A25', 'runs[0]',
      "runs['fit']: min_sweeps, which defaults to 3, is above max_iter: 1, so "
-     "the convergence test is never consulted -- the run always exhausts "
-     "max_iter and always refuses, including on a model it converged on at "
-     "sweep two. Declare a lower min_sweeps, raise max_iter, or declare tol: "
-     "null to run a fixed number of sweeps with no verdict (check A25)."),
+     "the convergence test is never consulted; and max_iter: 1 is below 3, "
+     "the earliest sweep at which a verdict can come: the test needs two "
+     "consecutive sweep-to-sweep changes within tol, and the first is sweep 2 "
+     "against sweep 1 -- the run always exhausts max_iter and always refuses, "
+     "including on a model that had already settled. Raise max_iter to at "
+     "least 3, or declare tol: null to run a fixed number of sweeps with no "
+     "verdict (check A25)."),
     ('a25-the-min-sweeps-pair-with-a-DEFAULTED-cap',
      _estimate(min_sweeps=101), 'A25', 'runs[0]',
      "runs['fit']: min_sweeps: 101 is above max_iter, which defaults to 100, "
      "so the convergence test is never consulted -- the run always exhausts "
-     "max_iter and always refuses, including on a model it converged on at "
-     "sweep two. Declare a lower min_sweeps, raise max_iter, or declare tol: "
+     "max_iter and always refuses, including on a model that had already "
+     "settled. Declare a lower min_sweeps, raise max_iter, or declare tol: "
      "null to run a fixed number of sweeps with no verdict (check A25)."),
     ('a25-the-min-sweeps-pair-on-the-warm-start',
      _warmed(min_sweeps=9, max_iter=2), 'A25', 'runs[0].warm_start',
      "runs['fit']: warm_start.min_sweeps: 9 is above warm_start.max_iter: 2, "
-     "so the convergence test is never consulted -- the run always exhausts "
-     "max_iter and always refuses, including on a model it converged on at "
-     "sweep two. Declare a lower min_sweeps, raise max_iter, or declare "
-     "warm_start.tol: null to run a fixed number of sweeps with no verdict "
-     "(check A25)."),
+     "so the convergence test is never consulted; and warm_start.max_iter: 2 "
+     "is below 3, the earliest sweep at which a verdict can come: the test "
+     "needs two consecutive sweep-to-sweep changes within tol, and the first "
+     "is sweep 2 against sweep 1 -- the run always exhausts max_iter and "
+     "always refuses, including on a model that had already settled. Raise "
+     "max_iter to at least 9, or declare warm_start.tol: null to run a fixed "
+     "number of sweeps with no verdict (check A25)."),
+    ('a25-the-cap-below-the-earliest-verdict',
+     _estimate(min_sweeps=1, max_iter=2), 'A25', 'runs[0]',
+     "runs['fit']: max_iter: 2 is below 3, the earliest sweep at which a "
+     "verdict can come: the test needs two consecutive sweep-to-sweep changes "
+     "within tol, and the first is sweep 2 against sweep 1 -- the run always "
+     "exhausts max_iter and always refuses, including on a model that had "
+     "already settled. Raise max_iter to at least 3, or declare tol: null to "
+     "run a fixed number of sweeps with no verdict (check A25)."),
     ('a25-a-count-with-no-integer-to-round-to',
      _sample(n_sweeps=float("inf")), 'A25', 'runs[0]',
      "runs['fit']: n_sweeps: is a whole number; got inf, and there is no "
@@ -3872,12 +3950,13 @@ class TestTheCountRefusalsAreThePRODUCT:
         """ANTI-VACUITY: a table is only as good as its rows.
 
         Both ids, both sites, and the default/explicit warmup pair -- which
-        is the one clause of A24 that varies with the document.
+        is the one clause of A24 that varies with the document. Ten rows
+        since T-002 added A25's cap-below-the-earliest-verdict clause alone.
         """
         assert {row[2] for row in _COUNT_VERBATIM} == {"A24", "A25"}
         assert {row[3] for row in _COUNT_VERBATIM} == {"runs[0]",
                                                        "runs[0].warm_start"}
-        assert len(_COUNT_VERBATIM) == 9
+        assert len(_COUNT_VERBATIM) == 10
 
     def test_every_count_finding_carries_its_own_tag(self):
         # Task 3 shipped the equivalent over its five checks; this is Task

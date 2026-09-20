@@ -64,9 +64,14 @@ nowhere left to move.
 Two things here can notice, and both are on by default.
 :func:`~rheplicant.inference.identifiability.identifiability` sees across
 blocks and refuses the model before a sweep runs, naming the degenerate
-directions by latent; and the convergence monitor is the **joint** chi-squared
-at the current parameter tuple across sweeps, never a per-block residual — which
+directions by latent; and the convergence monitor is a **joint** quantity at
+the current parameter tuple across sweeps, never a per-block residual — which
 is precisely the number that read ~1e-7 on an answer thousands of kelvin wrong.
+For :meth:`SamplingPlan.estimate` that quantity is the joint negative log
+posterior (:meth:`~rheplicant.inference.engines.Conditioning.neg_log_posterior`),
+the objective every block update descends; the joint chi-squared is recorded
+beside it, and :meth:`SamplingPlan.sample` tests its mixing on the chi-squared
+trace.
 
 **The identifiability check costs a dense Jacobian and a dense SVD**, ``n_data x
 n_par`` float64 words, so ``check_identifiability=`` is the caller's explicit
@@ -134,9 +139,11 @@ be discovered.
 ``0.5 * chi2 + log_determinant``, and both potential builders take it -- the
 single-argument one the optimiser gets and the lifted one NUTS gets, since
 fixing one alone would have rebuilt the same two-targets defect a layer down.
-``chi2`` itself is deliberately unchanged: it is the convergence monitor, and
-a monitor that changed units the moment a noise model started reading its
-argument would be worse than the omission it replaced.
+``chi2`` itself is deliberately unchanged: it is reported goodness of fit and
+the sampler's mixing trace, and a number that changed units the moment a
+noise model started reading its argument would be worse than the omission it
+replaced. The point estimate's stop rule reads the full objective, log
+determinant included, since T-002 (A5-1).
 
 The gradient block moved from **6.248269** to **5.004059** on the fixture
 below, against an unbiased closed form of 5.104641 -- so onto the unbiased
@@ -191,15 +198,17 @@ point estimate at all.
 """
 
 import dataclasses
+import math
 from typing import Any, Protocol
 
 import jax
 import jax.numpy as jnp
 import numpy as np
 
-from rheplicant.core.errors import ParameterSpaceError
+from rheplicant.core.errors import LinearityRefused, ParameterSpaceError
 from rheplicant.core.operator import AbstractOperator
 from rheplicant.core.state import State
+from bayesmith.optimize import certify
 from rheplicant.inference.engines import (
     CLOSED_FORM,
     CONJUGATE,
@@ -208,6 +217,7 @@ from rheplicant.inference.engines import (
     GRADIENT,
     LOG_CONJUGATE,
     Conditioning,
+    _monitor_programs,
     conditional_potential,
     conjugate_draw,
     conjugate_estimate,
@@ -222,7 +232,7 @@ from rheplicant.inference.identifiability import (
     identifiability,
 )
 from rheplicant.inference.likelihood import check_observed_shape
-from rheplicant.inference.linear import check_linearity
+from rheplicant.inference.linear import _gaussian_parameters, check_linearity
 from rheplicant.inference.loglinear import check_log_linearity, to_log_space
 from rheplicant.inference.parameters import ParameterSpace
 from rheplicant.inference.uncertainty import as_noise_model
@@ -236,20 +246,66 @@ CHECK_EACH_SWEEP: str = "each_sweep"
 #: Sweep cap for :meth:`SamplingPlan.estimate`.
 DEFAULT_MAX_ITER: int = 100
 
-#: Relative PROGRESS in the JOINT chi-squared below which a point estimate has
-#: converged — ``chi2[k-1] - chi2[k]``, relative to ``max(|chi2|, 1)``.
+#: Relative CHANGE in the JOINT negative log posterior below which a point
+#: estimate has converged, where ``f`` is
+#: :meth:`~rheplicant.inference.engines.Conditioning.neg_log_posterior`. The
+#: test is ``|f[k] - f[k-1]| <= t * max(|f[k]|, 1)`` on two consecutive
+#: sweep-to-sweep changes, with ``t = max(tol, OBJECTIVE_FLOOR_EPS * eps)`` and
+#: ``eps`` the machine epsilon of the objective's dtype (see
+#: :data:`OBJECTIVE_FLOOR_EPS`). The name predates this rule; until T-002 it was
+#: a tolerance on the DECREASE of the joint chi-squared.
 #:
-#: A decrease rather than a change, and that is the whole design of the test.
-#: Block-coordinate descent cannot increase the objective, so once a sweep stops
-#: reducing it there is nothing left to reach. Testing ``|chi2[k] - chi2[k-1]|``
-#: instead walks into the trap
-#: :func:`~rheplicant.inference.gls.iterative_gls` documents for its own
-#: ``reweight_tol``: consecutive sweeps differ by roughly the inner solver's own
-#: noise whatever the outer iteration is doing, so a threshold below that floor
-#: measures CG and never passes. Measured on the motivating model in float32:
-#: the plateau sits at chi2 = 2.7e-3 and jitters by 1.2e-3 a sweep, so a
-#: converged run would have been refused for 300 sweeps and counting.
+#: **Why the objective and not chi-squared.** A block update minimises its
+#: conditional of ``f``, so ``f`` is what a sweep descends. Chi-squared is not:
+#: with a prior the MAP is not the chi-squared minimum, and a sweep that moves
+#: towards the MAP raises chi-squared. The old rule read any such rise as
+#: convergence; the T-002 verifier (A5-1) measured runs certified 1 to 15
+#: posterior sigma from the exact MAP that way, including a plan of two
+#: conjugate blocks with no gradient block.
+#:
+#: **Why a change in both directions.** For Gaussian noise that does not
+#: depend on the prediction every block update is an exact conditional
+#: minimisation, so ``f`` cannot rise beyond the arithmetic's noise; a larger
+#: rise means a block did not do what its engine says, or the noise is
+#: prediction-dependent and the conjugate engine's frozen-sigma solve has a
+#: fixed point that is not a minimum of ``f`` (see the module docstring).
+#: Neither is convergence.
+#:
+#: **What this cannot see.** A change is a certificate of distance only when
+#: the sweep makes progress. For two blocks with posterior correlation ``r``
+#: a sweep shrinks the objective gap by about ``r**4``, so a tolerance on the
+#: change bounds the Mahalanobis distance to the MAP by about
+#: ``sqrt(2 t |f| / (1 - r**4))``, and ``|f|`` is about ``N / 2`` for ``N``
+#: data: the T-002 review measured two conjugate blocks passing this test 0.6
+#: posterior sigma from the MAP at ``N = 1e6`` in float64 and 16.5 sigma in
+#: float32. So this test certifies nothing on its own: it selects the sweeps
+#: at which the Newton decrement (:data:`DEFAULT_GAP_TOL`) is computed, and
+#: the decrement decides.
 DEFAULT_CHI2_TOL: float = 1e-8
+
+#: A point estimate's certificate, in nats of the joint objective ``f``:
+#: ``converged=True`` needs the Newton decrement at the returned point,
+#: ``lambda2 = g^T H^-1 g`` over every latent, bounded by ``2 * gap_tol``
+#: (T-002 reviews, HIGH).
+#:
+#: **Nats and sigma.** Near a minimum ``f`` is locally quadratic, and
+#: ``sqrt(lambda2)`` is the Mahalanobis distance to it under the posterior
+#: precision (the Hessian of ``f``); the gap in nats is ``lambda2 / 2``. So
+#: ``0.5 * 0.1**2 = 0.005`` nats is 0.1 posterior sigma, and ``gap_tol = g``
+#: certifies ``sqrt(2 g)`` sigma, whatever the number of data and however
+#: the blocks are correlated.
+#:
+#: **What decides and what only schedules.** The decrement is one gradient
+#: and a conjugate-gradient solve on Hessian-vector products
+#: (:func:`~rheplicant.inference.engines._decrement_program`). It runs only
+#: on a sweep that passes the cheap tests: the change within ``tol``, and a
+#: gap pre-screen (:func:`_gap_step`) that extrapolates the decreases at their
+#: estimated contraction, or a decrease below what the arithmetic resolves.
+#: Those tests pick the candidate; they cannot certify, because the
+#: contraction read from decreases is the fastest mode still moving, and the
+#: second review measured a slow mode hidden under a fast one passing a gap
+#: test 0.5 to 1.0 sigma off.
+DEFAULT_GAP_TOL: float = 0.5 * 0.1**2
 
 #: Sweeps taken before the convergence test is consulted at all. The first
 #: steps of a coordinate descent can be nearly stationary without being near the
@@ -262,6 +318,45 @@ DEFAULT_CHI2_TOL: float = 1e-8
 #: because the ratio is not the design — what is, is that a sweep costs more
 #: than a reweight and so fewer of them are spent before asking.
 MIN_SWEEPS: int = 3
+
+#: The floor under a point estimate's relative tolerance, in units of the
+#: objective's machine epsilon: the stop rule uses
+#: ``max(tol, OBJECTIVE_FLOOR_EPS * eps)``.
+#:
+#: Without it the default ``tol = 1e-8`` sits below float32's epsilon
+#: (1.19e-7), and a float32 run can pass the test only if two consecutive
+#: sweeps reproduce the objective to the last bit. Conjugate solves at
+#: ``solve_tol = 1e-6`` do not: on the motivating bilinear model
+#: (``tests/inference/test_plan.py``, float32, 400 sweeps recorded) the
+#: objective at its plateau moves by tens of ulps a sweep, which is the trace
+#: :data:`~bayesmith.optimize.certify.OBJECTIVE_FLOOR_EPS` was measured on.
+#: In float64 the floor is 1.4e-14 and ``tol`` governs.
+OBJECTIVE_FLOOR_EPS: int = certify.OBJECTIVE_FLOOR_EPS
+
+#: How many consecutive sweep-to-sweep changes of the objective the stop rule
+#: needs within the effective tolerance. See :func:`_settled`.
+_SETTLED_CHANGES: int = certify.SETTLED_CHANGES
+
+#: The first sweep at which :meth:`SamplingPlan.estimate` can report
+#: converged, whatever ``min_sweeps`` says below it. The changes are counted
+#: between sweep OUTPUTS, never from the starting values, so
+#: :data:`_SETTLED_CHANGES` changes need one more sweep than that. A run with
+#: a ``tol`` and a ``max_iter`` below this always refuses; the config
+#: layer's pre-flight check A25 refuses such a document before it runs.
+EARLIEST_CONVERGED_SWEEP: int = _SETTLED_CHANGES + 1
+
+#: The resolution of a sweep-to-sweep change of the objective, in units of
+#: machine epsilon: ``RESOLUTION_EPS * eps * sqrt(sum (s0 + s1)**2)`` over the
+#: objective's terms, where ``s`` is each term's rounding magnitude (see
+#: :func:`~rheplicant.inference.engines._monitor_programs`). The gap
+#: pre-screen treats a change below it as no change; nothing certifies on it.
+#:
+#: The change is taken as a sum of per-term differences, so the constant parts
+#: of ``f`` (every prior's normalizer) and the bulk of the chi-squared sum
+#: cancel term by term instead of costing ``eps * |f|``. The multiple is
+#: :data:`~bayesmith.optimize.certify.RESOLUTION_EPS` and was measured on
+#: this package's collinear templates.
+RESOLUTION_EPS: float = certify.RESOLUTION_EPS
 
 #: Split-``r_hat`` above which a run's draws are reported unmixed. 1.05 rather
 #: than the modern 1.01 because this is ``r_hat`` of a single scalar summary of
@@ -276,6 +371,216 @@ MIN_DRAWS: int = 4
 #: Null directions named in a refusal before it says "and N more". Enough to see
 #: the pattern, few enough to read.
 _DIRECTIONS_SHOWN: int = 4
+
+
+#: The stop rule's two halves, from
+#: :mod:`~bayesmith.optimize.certify`: whether the objective's last
+#: :data:`_SETTLED_CHANGES` changes are within a tolerance, and that
+#: tolerance floored at the dtype's resolution. The changes counted are
+#: between sweep OUTPUTS, never from the starting values, so the earliest a
+#: trace can settle is :data:`EARLIEST_CONVERGED_SWEEP`.
+_settled = certify.settled
+_effective_tol = certify.effective_tol
+
+
+#: The gap PRE-SCREEN, from :mod:`~bayesmith.optimize.certify`: it picks
+#: the sweeps at which the Newton decrement is computed and certifies
+#: nothing. :func:`_certify` is what decides.
+_GapState = certify.GapState
+_gap_step = certify.gap_step
+
+
+#: The key of a point estimate's monitor in the run's ``programs`` cache. A
+#: 1-tuple of a string cannot equal a gradient block's ``(names, steps,
+#: adapting)``, a conjugate block's 6-tuple or an estimate transition's
+#: ``("estimate", names, steps, learning_rate)``.
+_MONITOR_TAG: tuple[str] = ("monitor",)
+
+#: The key of the Newton decrement's program in the same cache.
+_DECREMENT_TAG: tuple[str] = ("decrement",)
+
+#: How a closed-form block's CG tolerance is tightened when the sweep shows
+#: its solves are inexact (a rise of the objective the arithmetic resolves,
+#: or a candidate stop the decrement refuses), and where that stops, from
+#: :mod:`~bayesmith.optimize.certify`. Measured here: the bilinear basis
+#: fixture's worst case certifies at 1e-8, six digits above the float64
+#: floor. See :meth:`SamplingPlan.estimate`, ``solve_tol``.
+_SOLVE_TOL_STEP = certify.SOLVE_TOL_STEP
+_solve_tol_floor = certify.solve_tol_floor
+
+
+@dataclasses.dataclass(frozen=True)
+class _Attempt:
+    """One certificate: the sweep it was taken at, and what it measured.
+
+    ``measured`` is a :class:`~bayesmith.optimize.certify.Decrement`, whose
+    ``estimate`` and ``distance`` are in posterior sigma because the Hessian
+    of the joint negative log posterior IS the posterior precision.
+    """
+
+    sweep: int
+    measured: Any
+    certified: bool
+
+
+def _certify(programs: dict[Any, Any], cond: Any, values: dict[str, jax.Array],
+             gap_tol: float, sweep: int, floor: float | None = None) -> _Attempt:
+    """The Newton decrement at ``values``, and whether it certifies ``gap_tol``.
+
+    The objective is :meth:`Conditioning.neg_log_posterior` over every
+    latent, so the decrement is the distance to the MAP of the model the
+    sweep is descending, in posterior sigma; ``gap_tol`` nats stands for
+    ``sqrt(2 gap_tol)`` of them. The verdict reads the upper bound the solve's
+    residual and the curvature floor allow, never the estimate alone, so an
+    inexact solve can only make it refuse — see
+    :func:`~bayesmith.optimize.certify.decrement`.
+
+    ``floor`` is :meth:`SamplingPlan._curvature_floor`'s, and matters only
+    for a model with more latents than
+    :data:`~bayesmith.optimize.certify.DENSE_MAX`, where the Hessian is not
+    formed and its smallest eigenvalue has to come from somewhere.
+
+    The program is built once per run and cached in ``programs`` beside the
+    block transitions, because compiling it every candidate stop would cost
+    more than the solve.
+    """
+    limit = math.sqrt(2.0 * gap_tol)
+    program = programs.get(_DECREMENT_TAG)
+    if program is None:
+        program = programs[_DECREMENT_TAG] = certify.decrement_program(
+            cond.neg_log_posterior, values, floor=floor, limit=limit
+        )
+    measured = certify.decrement(None, values, program=program)
+    return _Attempt(sweep, measured, measured.certifies(limit))
+
+
+def _at_this_size(measured: Any) -> str:
+    """What a decrement with no PROVEN curvature floor adds to the refusal.
+
+    The bound divides by a lower bound on the joint Hessian's smallest
+    eigenvalue, and this package certifies only where that number is a proof:
+    the formed Hessian's own eigenvalue below
+    :data:`~bayesmith.optimize.certify.DENSE_MAX` latents, or the prior
+    precision where :meth:`SamplingPlan._curvature_floor`'s conditions hold.
+    Above that limit and outside those conditions the floor is a Lanczos
+    probe's, which is an estimate — measured, it sits ABOVE the smallest
+    eigenvalue for about one random spectrum in fifty — so the run refuses
+    however small the distance looks, and says what would make it a proof.
+    """
+    if measured.proven:
+        return ""
+    return (
+        f"Its curvature floor came from {measured.floor_source}, not from a proof, so "
+        "nothing here can certify a distance: this model has more than "
+        f"{certify.DENSE_MAX} latents, so the Hessian is not formed, and the plan "
+        "cannot claim the prior precision as a floor either. Three things give a "
+        "proof: ONE conjugate block with a Normal prior on every latent and a sigma "
+        "that does not depend on the prediction, which makes the prior precision a "
+        f"floor; fewer than {certify.DENSE_MAX} latents, which forms the Hessian and "
+        "measures it; or float64 (JAX_ENABLE_X64=1) where the precision is what "
+        "blocks the dense path. "
+    )
+
+
+def _not_converged_message(
+    *, max_iter: int, tol: float, gap_tol: float, effective: float,
+    changed: bool, objective: list[float], chi2: list[float],
+    contraction: float | None, gap: float | None,
+    rise: tuple[int, float] | None, attempt: _Attempt | None, solve_tol: float,
+    dtype: Any, hidden: str,
+) -> str:
+    """:meth:`SamplingPlan.estimate`'s refusal at ``max_iter``.
+
+    Two shapes. If a sweep passed the pre-screen and the Newton decrement was
+    computed, the message is about the decrement: the distance it measured,
+    what its conjugate gradients did, and the CG tolerance the closed-form
+    blocks ended at. Otherwise the run never settled, and the message names
+    the change test, the contraction and the gap it last estimated. Either
+    way it names the last rise of the objective beyond its resolution if the
+    last ten sweeps had one: an inner solve's noise, which an exact block
+    update does not make.
+
+    The headline changes for one case. A model whose decrement has no proven
+    curvature floor (above
+    :data:`~bayesmith.optimize.certify.DENSE_MAX` latents, outside
+    :meth:`SamplingPlan._curvature_floor`'s conditions) has not failed to
+    converge — nothing here can say whether it has. The refusal says that
+    instead, and :func:`_at_this_size` says what would change it.
+    """
+    limit = math.sqrt(2.0 * gap_tol)
+    unsure = attempt is not None and not attempt.measured.proven
+    headline = (
+        "SamplingPlan.estimate cannot certify this estimate at this size and "
+        "precision"
+        if unsure
+        else "SamplingPlan.estimate did not converge"
+    )
+    opening = (
+        f"{headline}: after {max_iter} sweeps the JOINT "
+        f"negative log posterior is still changing by "
+        f"{objective[-1] - objective[-2]:.3g} per sweep (objective = "
+        f"{objective[-1]:.6g}, chi2 = {chi2[-1]:.6g}). "
+    )
+    if rise is not None and rise[0] > max_iter - 10:
+        opening += (
+            f"It rose by {rise[1]:.3g} nats at sweep {rise[0]}, beyond its "
+            "resolution, which an exact block update cannot do: an inner solve "
+            "is inexact at this precision (solve_tol, or the dtype). "
+        )
+    if attempt is not None:
+        measured = attempt.measured
+        where = (
+            f"between {measured.estimate:.3g} and {measured.distance:.3g}"
+            if math.isfinite(measured.distance)
+            else f"at least {measured.estimate:.3g} (its residual is too large to "
+            "bound it from above)"
+        )
+        return opening + (
+            f"The last candidate stop, sweep {attempt.sweep}, was not certified: the "
+            "Newton decrement of the joint objective "
+            f"{certify.STATUS_SAID[measured.status]}"
+            f" after {measured.products} Hessian-vector product(s) and puts the "
+            f"point {where} "
+            f"posterior sigma from the objective's minimum, against {limit:.3g} "
+            f"(gap_tol = {gap_tol:g} nats). The sweep's fixed point "
+            "is not that minimum when an inner solve is inexact (the closed-form "
+            f"blocks ended at solve_tol = {solve_tol:g}), when sigma depends on the "
+            "prediction and a conjugate block freezes it, when a block is solved in "
+            f"log space, or in {np.dtype(dtype).name} when the objective's gradient "
+            "is below its rounding. " + _at_this_size(measured)
+            + "Run in float64 (JAX_ENABLE_X64=1), group the "
+            "correlated latents into ONE Block, raise max_iter, or pass tol=None to "
+            "accept an unconverged answer."
+        )
+    said_rho = "not estimable" if contraction is None else f"{contraction:.4g}"
+    if changed:
+        opening += (
+            "The change passed tol, but no sweep after it passed the gap "
+            f"pre-screen (gap_tol = {gap_tol:g} nats). "
+        )
+    else:
+        opening += (
+            "A verdict needs two consecutive sweep-to-sweep changes each within "
+            f"{effective:.3g} of it, relative (tol={tol:g}, floored at "
+            f"{OBJECTIVE_FLOOR_EPS} machine epsilons of the objective's dtype), then "
+            f"the Newton decrement within {limit:.3g} posterior sigma. "
+        )
+    left = "" if gap is None else f", leaving a gap of about {gap:.3g} nats"
+    rounding = (
+        ""
+        if np.dtype(dtype).itemsize >= 8
+        else f"In {np.dtype(dtype).name} the objective's own rounding can keep it "
+        "moving, and a gradient below that rounding cannot be descended at all: "
+        "run in float64 (JAX_ENABLE_X64=1). "
+    )
+    return opening + (
+        f"The decrease contracts by {said_rho} per sweep{left}. " + hidden + rounding
+        + "Slow convergence here means the blocks are correlated — group the "
+        "correlated latents into ONE Block, which resolves them in a single "
+        "solve, or raise max_iter. identifiability(space, pipeline, state, "
+        "names=...) reports how much the partition is costing. Pass tol=None to "
+        "accept an unconverged answer."
+    )
 
 
 def _halves(values: np.ndarray) -> np.ndarray:
@@ -391,6 +696,9 @@ class Block:
             :meth:`SamplingPlan.estimate`, as a fraction of ``max|init|``.
             ``None`` takes
             :data:`~rheplicant.inference.engines.DEFAULT_LEARNING_RATE`.
+            It sets how far the Adam steps travel in a sweep; the Newton steps
+            that follow them set the precision, so the answer does not carry
+            a floor proportional to it.
             It has no meaning at :meth:`SamplingPlan.sample`, where NUTS adapts
             its own step size, and none for a conjugate block, which has no
             iterate to step. Giving it to a conjugate block is an error rather
@@ -479,16 +787,20 @@ class PlanDiagnostics:
     """What a run measured, shared by both exits.
 
     Attributes:
-        chi2: the JOINT chi-squared, one entry per sweep — the monitored
-            quantity. For :meth:`SamplingPlan.estimate` it decreases towards a
-            fixed point; for :meth:`SamplingPlan.sample` it fluctuates around a
-            stationary value, which is what :attr:`rhat` tests.
+        chi2: the JOINT chi-squared, one entry per sweep, the first at the
+            starting values. For :meth:`SamplingPlan.estimate` it is reported
+            data and not the stop rule: with a prior it can RISE as the run
+            approaches the MAP. For :meth:`SamplingPlan.sample` it fluctuates
+            around a stationary value, which is what :attr:`rhat` tests.
         sweeps: sweeps actually run.
-        converged: for a point estimate, whether the joint chi-squared settled
-            within ``tol`` (``None`` when the test was disabled). For a draw,
+        converged: for a point estimate, whether the Newton decrement at the
+            returned point certified it within ``gap_tol`` of the objective's
+            minimum (see :data:`DEFAULT_GAP_TOL`; ``None`` when the test was
+            disabled). For a draw,
             whether :attr:`rhat` came in under the caller's threshold. **False
-            here means the answer is not what it looks like** — the same reading
-            as :attr:`~rheplicant.inference.gls.GLSResult.converged`.
+            here means the answer is not what it looks like** — the same
+            reading as
+            :attr:`~rheplicant.inference.gls.GLSResult.converged`.
         engines: which engine each block took, keyed by the block's ``names``.
         block_residuals: each conjugate block's last relative CG residual, and
             each gradient block's last conditional potential. Recorded because
@@ -505,6 +817,43 @@ class PlanDiagnostics:
             estimate).
         rhat: split-``r_hat`` of the post-warmup joint chi-squared (``None`` for
             a point estimate).
+        objective: the JOINT negative log posterior (up to a constant), one
+            entry per sweep aligned with :attr:`chi2`, the first at the
+            starting values — the quantity a point estimate's stop rule tests.
+            ``None`` for a draw.
+        effective_tol: the relative tolerance the stop rule applied,
+            ``max(tol, OBJECTIVE_FLOOR_EPS * eps)`` for the objective's dtype
+            (see :data:`OBJECTIVE_FLOOR_EPS`). ``None`` for a draw and for a
+            point estimate run with ``tol=None``.
+        contraction: the per-sweep contraction of the objective's decrease the
+            gap pre-screen used at the last sweep (see :func:`_gap_step`), or
+            ``None`` when it had none. ``None`` for a draw.
+        distance_bound: the last Newton decrement's upper bound, in posterior
+            sigma: ``sqrt(g^T H^-1 g)`` at the returned point plus the error
+            its solve may have left (see :func:`_certify`), so
+            at most ``sqrt(2 gap_tol)`` when :attr:`converged` is ``True``.
+            ``inf`` when the residual could not bound it; ``None`` when no
+            decrement was computed, and for a draw.
+        certificate_iterations: the Hessian-vector products the last decrement
+            took: its conjugate-gradient iterations, or one per latent where
+            it formed the Hessian instead. ``None`` as for
+            :attr:`distance_bound`.
+        certificate_attempts: how many decrements the run computed (0 when no
+            sweep was a candidate). ``None`` for a draw.
+        solve_tol: the closed-form blocks' CG tolerance at the end of the run,
+            after any tightening (see :meth:`SamplingPlan.estimate`). ``None``
+            for a draw.
+        floor_source: where the last certificate's curvature floor came from —
+            ``"dense"`` (the formed Hessian's own smallest eigenvalue),
+            ``"supplied"`` (this plan's prior-precision floor, see
+            :meth:`SamplingPlan._curvature_floor`), ``"probe"`` (a Lanczos
+            estimate, which never certifies) or ``"none"``. ``None`` as for
+            :attr:`distance_bound`.
+
+    :attr:`objective` and the fields after it are not among the fields the
+    config layer copies into a run's diagnostics record
+    (``config/products/extractors.py::DIAGNOSTIC_FIELDS``), so that record's
+    format is unchanged by them.
     """
 
     chi2: np.ndarray
@@ -516,6 +865,14 @@ class PlanDiagnostics:
     noise_depends_on_prediction: bool
     warmup: int | None = None
     rhat: float | None = None
+    objective: np.ndarray | None = None
+    effective_tol: float | None = None
+    contraction: float | None = None
+    distance_bound: float | None = None
+    certificate_iterations: int | None = None
+    certificate_attempts: int | None = None
+    solve_tol: float | None = None
+    floor_source: str | None = None
 
 
 class PlanResult(Protocol):
@@ -833,6 +1190,74 @@ class SamplingPlan:
 
     # -------------------------------------------------------------- running --
 
+    def _curvature_floor(self, cond: Conditioning) -> float | None:
+        """A VERIFIED lower bound on the joint Hessian's smallest eigenvalue, or
+        ``None`` when this plan's model gives none.
+
+        For a prediction the model is affine in JOINTLY, under a noise that
+        does not depend on it, the joint objective is
+        ``0.5 |N^-1/2 (d - J x)|^2 + 0.5 (x - m)^T P (x - m)`` plus constants,
+        so ``H = J^T N^-1 J + P`` and ``H >= P >= min(1 / sigma_prior^2)``:
+        the prior precision is a floor, whatever the data. Each condition is
+        checked rather than assumed:
+
+        * **jointly affine.** Every latent declared ``linear=True``, so the
+          claim exists to be checked at all, and then: one conjugate block is
+          enough on its own, since :meth:`_prepare` has already verified that
+          block's joint linearity. With more than one block, each was
+          verified alone, and two conditionally affine blocks are not jointly
+          affine — the bilinear ``gain * sky`` is the standing example — so
+          the same check is asked of the union, and a refusal means no
+          floor.
+        * **a sigma that does not depend on the prediction**, so the
+          log-determinant is a constant and not curvature.
+        * **a Normal prior on every latent**, since a prior that is not
+          Gaussian has no constant curvature to floor with. The floor is the
+          smallest precision, which is the WIDEST scale.
+
+        It is consulted only above
+        :data:`~bayesmith.optimize.certify.DENSE_MAX` latents, where the
+        Hessian is not formed. Returning ``None`` is not a failure: it means
+        the decrement falls back to a probe, which never certifies, and the
+        run says so (:func:`_at_this_size`).
+        """
+        if bool(cond.noise.depends_on_prediction):
+            return None
+        floor = math.inf
+        for name in self.space.names:
+            latent = self.space.latent(name)
+            if not latent.linear:
+                return None
+            gaussian = _gaussian_parameters(latent.prior)
+            if gaussian is None:
+                return None
+            widest = float(jnp.max(jnp.abs(jnp.asarray(gaussian[1]))))
+            if not math.isfinite(widest) or widest <= 0.0:
+                return None
+            floor = min(floor, 1.0 / widest**2)
+        if not math.isfinite(floor):
+            return None
+        single = len(self._assign) == 1 and self._assign[0][1] == CONJUGATE
+        if not single and not self._jointly_affine(cond):
+            return None
+        return floor
+
+    def _jointly_affine(self, cond: Conditioning) -> bool:
+        """Whether the prediction is affine in ALL latents at once.
+
+        The check :meth:`_prepare` runs per conjugate block, asked of the
+        union and answered rather than raised: its refusal is this plan's
+        answer, not this plan's failure.
+        """
+        try:
+            check_linearity(
+                self.space, cond.pipeline, cond.state_template,
+                names=self.space.names,
+            )
+        except LinearityRefused:
+            return False
+        return True
+
     def _prepare(
         self,
         pipeline: AbstractOperator,
@@ -992,7 +1417,7 @@ class SamplingPlan:
                     )
                 else:
                     values, potential = gradient_estimate(
-                        cond, block.names, values, steps=steps,
+                        cond, block.names, values, steps=steps, programs=programs,
                         **({} if block.learning_rate is None
                            else {"learning_rate": block.learning_rate}),
                     )
@@ -1014,12 +1439,65 @@ class SamplingPlan:
         check_identifiability: Any = CHECK_ONCE,
         solve_tol: float = 1e-6,
         solve_guard: float | None = None,
+        gap_tol: float = DEFAULT_GAP_TOL,
     ) -> Estimate:
         """Best fit: block-coordinate descent to a fixed point of the whole model.
 
         Every block is updated to its conditional best — a Wiener solve for a
-        conjugate block, Adam on the conditional posterior for a gradient one —
-        and the sweep repeats until the **joint** chi-squared stops moving.
+        conjugate block; for a gradient one, Adam on the conditional posterior
+        followed by Newton steps that remove Adam's step-size floor (see
+        :func:`~rheplicant.inference.engines.gradient_estimate`) — and the
+        sweep repeats until the point is certified near the minimum of the
+        **joint** negative log posterior ``f``, whose minimum is the MAP:
+
+        * **the certificate**: the Newton decrement of ``f`` over every
+          latent, ``sqrt(g^T H^-1 g)``, at most ``sqrt(2 gap_tol)`` posterior
+          sigma (0.1 by default) once the error its conjugate gradients may
+          have left is added (see :data:`DEFAULT_GAP_TOL` and :func:`_certify`).
+          It does not grow with the number of data, and it sees every mode,
+          the slow ones included.
+        * **the schedule**: the decrement is computed only on a sweep whose
+          last two changes of ``f`` are within the effective tolerance
+          ``max(tol, OBJECTIVE_FLOOR_EPS * eps)``, relative to ``|f|``, and
+          whose decrease passes the gap pre-screen (:func:`_gap_step`) or is
+          below what the arithmetic resolves. After a refusal the next
+          candidate waits twice as many candidates as the last, so a run
+          pays O(log max_iter) decrements.
+
+        The joint chi-squared is recorded but not tested, because with a
+        prior it can rise while the run approaches the MAP. A rise of ``f``
+        beyond its resolution is never convergence.
+
+        **Inexact inner solves.** A conjugate block solved to ``solve_tol``
+        moves the sweep's fixed point off the MAP by an amount that grows as
+        the blocks become correlated: measured on the bilinear basis fixture,
+        0.11 posterior sigma at ``solve_tol = 1e-6``. When a sweep shows it (a
+        rise of ``f`` the arithmetic resolves, or a candidate the decrement
+        refuses) the closed-form blocks' tolerance is divided by
+        ``1 / _SOLVE_TOL_STEP`` down to a floor set by the dtype, and the
+        value the run ended at is recorded as
+        :attr:`PlanDiagnostics.solve_tol`. A model that certifies at the
+        caller's ``solve_tol`` is never tightened.
+
+        **Migration (T-002 reviews).** Until the certificate, the change test
+        alone decided, and a tolerance relative to ``|f|`` certifies a
+        distance that grows as ``sqrt(N)``: measured, 0.6 posterior sigma at
+        ``N = 1e6`` in float64 and 16.5 in float32. ``tol`` keeps its meaning
+        and default, so a caller's ``tol`` still does what it did; what is new
+        is that it no longer suffices, and runs that used to report converged
+        may now run longer or refuse.
+
+        **What the certificate cannot see.** It measures the distance to the
+        minimum of a locally quadratic model of ``f`` at the returned point.
+        Far from quadratic, where the curvature changes over a posterior
+        sigma, the decrement is a local statement. A direction of
+        non-positive curvature, an iteration that does not reach its residual
+        within its cap (:data:`~bayesmith.optimize.certify.MAXITER`),
+        or a residual too large to bound the decrement certifies nothing, and
+        the run refuses at ``max_iter`` saying which. In float32 the gradient
+        of ``f`` is itself rounded, so a model whose posterior sigma is small
+        against the latents' magnitude can stay above the threshold at every
+        sweep; the refusal names float64 as the remedy.
 
         Args:
             pipeline: the forward model.
@@ -1029,29 +1507,47 @@ class SamplingPlan:
             noise: a :class:`~rheplicant.inference.noise.NoiseModel`, or a bare
                 sigma (wrapped as
                 :class:`~rheplicant.inference.noise.HomoscedasticNoise`).
-            max_iter: sweep cap.
-            tol: relative PROGRESS in the joint chi-squared below which the run
-                has converged — see :data:`DEFAULT_CHI2_TOL` for why it is a
-                decrease and not a change. ``None`` runs exactly ``max_iter``
-                sweeps and makes no convergence claim at all — the only way to
-                get an answer back without one.
-            min_sweeps: sweeps taken before the test is consulted.
+            max_iter: sweep cap. With a ``tol``, a verdict needs
+                :data:`EARLIEST_CONVERGED_SWEEP` (3) sweeps (see
+                ``min_sweeps``), so ``max_iter`` of 1 or 2 can never converge
+                and always refuses.
+            tol: relative change in the joint negative log posterior below
+                which the run has converged, required on two consecutive
+                sweep-to-sweep changes — see :data:`DEFAULT_CHI2_TOL`. It is
+                floored at :data:`OBJECTIVE_FLOOR_EPS` machine epsilons of the
+                objective's dtype, and the value applied is recorded as
+                :attr:`PlanDiagnostics.effective_tol`. ``None`` runs exactly
+                ``max_iter`` sweeps and makes no convergence claim at all — the
+                only way to get an answer back without one.
+            min_sweeps: sweeps taken before the test is consulted. The test
+                compares sweep 2 with sweep 1 and sweep 3 with sweep 2 at the
+                earliest (the starting values are not a sweep's output), so
+                the earliest verdict is at sweep ``max(min_sweeps,
+                EARLIEST_CONVERGED_SWEEP)``: ``min_sweeps`` of 1, 2 and 3
+                behave alike.
             check_identifiability: ``"once"``, ``"each_sweep"`` or ``False``. See
                 the module docstring; a point estimate is the exit that needs it
                 most, because it has no other diagnostic.
-            solve_tol: CG tolerance for conjugate blocks.
+            solve_tol: CG tolerance for conjugate blocks, at the start: the run
+                tightens it when its solves are inexact (see above).
             solve_guard: bound on each conjugate solve's relative ERROR, as for
                 :func:`~rheplicant.inference.linear.wiener_solve`. ``None`` skips
                 the condition-number estimate, which is what a 10^6-coefficient
                 block wants — see that function's own note on the bargain.
+            gap_tol: the certificate's threshold, in nats of the joint
+                negative log posterior: the Newton decrement must be at most
+                ``2 gap_tol`` — see :data:`DEFAULT_GAP_TOL`. The last
+                decrement's upper bound is recorded as
+                :attr:`PlanDiagnostics.distance_bound`, in posterior sigma.
+                Not consulted when ``tol`` is ``None``.
 
         Returns:
             An :class:`Estimate`.
 
         Raises:
             ParameterSpaceError: if the model is not identified; if ``observed``
-                is mis-shaped; or if the joint chi-squared has not converged
-                within ``max_iter`` sweeps. That last one is an error rather
+                is mis-shaped; or if the joint negative log posterior has not
+                settled within ``max_iter`` sweeps. That last one is an error rather
                 than a flag *here* and a flag rather than an error at
                 :meth:`sample`, and the asymmetry is deliberate: a chain has
                 ``r_hat`` to scream with, and a point estimate has nothing.
@@ -1072,7 +1568,7 @@ class SamplingPlan:
                 f"estimate() needs 1 <= min_sweeps <= max_iter, got {min_sweeps!r} and "
                 f"{max_iter!r}. A min_sweeps above the cap means the test is never "
                 "consulted, so the run always exhausts max_iter and always refuses — "
-                "including on a model it converged on at sweep two."
+                "including on a model that had already settled."
             )
         cond, values = self._prepare(
             pipeline, state_template, observed, noise, check_identifiability,
@@ -1081,7 +1577,29 @@ class SamplingPlan:
         report = None
         residuals: dict[tuple[str, ...], float] = {}
         programs: dict[Any, Any] = {}
-        chi2 = [float(cond.chi2(values))]
+        monitor = programs.get(_MONITOR_TAG)
+        if monitor is None:
+            monitor = programs[_MONITOR_TAG] = _monitor_programs(cond, RESOLUTION_EPS)
+        measure, change = monitor
+        chi2_now, objective_now, terms, scales = measure(values)
+        chi2 = [float(chi2_now)]
+        objective = [float(objective_now)]
+        effective = None if tol is None else _effective_tol(tol, objective_now)
+        gap_state, gap, rho, resolution = _GapState(), None, None, None
+        measured, last_rise, changed = None, None, False
+        attempt, attempts, wait, backoff = None, 0, 0, 1
+        tightened = solve_tol
+        closed = any(engine in CLOSED_FORM for _, engine in self._assign)
+        # Named apart from the sweep's `floor`, which is the CG TOLERANCE's:
+        # the two are both floors and neither is the other's. Asked only where
+        # it can matter, since below DENSE_MAX the decrement measures the
+        # curvature itself and proving a floor would cost a linearity check
+        # this run has no use for.
+        curvature = (
+            self._curvature_floor(cond)
+            if certify.real_size(values) > certify.DENSE_MAX
+            else None
+        )
         converged = None if tol is None else False
         # "once" is "due now, and never again"; "each_sweep" is "due every time".
         due, repeat = check_identifiability is not False, (
@@ -1094,18 +1612,55 @@ class SamplingPlan:
                 due = repeat
             values = self._update(
                 cond, values, draw=False, key=None, adapt=False,
-                solve_tol=solve_tol, solve_guard=solve_guard,
+                solve_tol=tightened, solve_guard=solve_guard,
                 tuning={}, residuals=residuals, programs=programs,
             )
-            chi2.append(float(cond.chi2(values)))
-            progress = chi2[-2] - chi2[-1]
-            if (
-                tol is not None
-                and sweep >= min_sweeps
-                and progress <= tol * max(abs(chi2[-1]), 1.0)
-            ):
+            chi2_now, objective_now, following, following_scales = measure(values)
+            decrease, resolution = change(terms, scales, following, following_scales)
+            terms, scales = following, following_scales
+            decrease, resolution = float(decrease), float(resolution)
+            chi2.append(float(chi2_now))
+            objective.append(float(objective_now))
+            gap_state, screened, gap, rho = _gap_step(
+                gap_state, decrease, resolution, gap_tol
+            )
+            if gap_state.contraction is not None:
+                measured = gap_state.contraction
+            floor = _solve_tol_floor(objective_now)
+            if decrease < -resolution:
+                last_rise = (sweep, -decrease)
+                # An exact block update cannot raise the objective, so a rise
+                # the arithmetic resolves is an inexact inner solve: tighten
+                # the closed-form blocks' CG before it keeps the change test
+                # from ever settling. Measured on the bilinear basis fixture at
+                # noise 0.28, float64: rises of 4e-5 nats at solve_tol = 1e-6
+                # held every sweep off the pre-screen for 3000 sweeps.
+                if closed:
+                    tightened = max(tightened * _SOLVE_TOL_STEP, floor)
+            changed = effective is not None and _settled(objective[1:], effective)
+            # The schedule: the change settled, and the gap pre-screen passed
+            # or the decrease sank below what the arithmetic resolves (a rise
+            # it resolves is neither). The first decrease is measured from the
+            # starting values, which are not a sweep's output, so it seeds the
+            # contraction and schedules nothing.
+            quiet = sweep >= 2 and (screened or abs(decrease) <= resolution)
+            if not (changed and sweep >= min_sweeps and quiet):
+                continue
+            if wait > 0:
+                wait -= 1
+                continue
+            attempt = _certify(programs, cond, values, gap_tol, sweep, curvature)
+            attempts += 1
+            if attempt.certified:
                 converged = True
                 break
+            # Not certified. If the plan has closed-form blocks, their CG
+            # tolerance is the likeliest reason the sweep's fixed point is off
+            # the objective's minimum: tighten it, and back off before asking
+            # again so a stalled run pays O(log max_iter) decrements.
+            if closed:
+                tightened = max(tightened * _SOLVE_TOL_STEP, floor)
+            wait, backoff = backoff, 2 * backoff
 
         if converged is False:
             worst = max(
@@ -1122,14 +1677,13 @@ class SamplingPlan:
                 else ""
             )
             raise ParameterSpaceError(
-                f"SamplingPlan.estimate did not converge: after {max_iter} sweeps the "
-                f"JOINT chi-squared is still falling by "
-                f"{chi2[-2] - chi2[-1]:.6g} per sweep (chi2 = {chi2[-1]:.6g}), which "
-                f"is above tol={tol:g}. " + hidden + "Slow convergence here "
-                "means the blocks are correlated — group the correlated latents into ONE "
-                "Block, which resolves them in a single solve, or raise max_iter. "
-                "identifiability(space, pipeline, state, names=...) reports how much the "
-                "partition is costing. Pass tol=None to accept an unconverged answer."
+                _not_converged_message(
+                    max_iter=max_iter, tol=tol, gap_tol=gap_tol,
+                    effective=effective, changed=changed, objective=objective,
+                    chi2=chi2, contraction=measured, gap=gap,
+                    rise=last_rise, attempt=attempt, solve_tol=tightened,
+                    dtype=jnp.result_type(objective_now), hidden=hidden,
+                )
             )
 
         return Estimate(
@@ -1142,6 +1696,16 @@ class SamplingPlan:
                 block_residuals=dict(residuals),
                 identifiability=report,
                 noise_depends_on_prediction=bool(cond.noise.depends_on_prediction),
+                objective=np.asarray(objective, dtype=np.float64),
+                effective_tol=effective,
+                contraction=rho,
+                distance_bound=None if attempt is None else attempt.measured.distance,
+                certificate_iterations=(
+                    None if attempt is None else attempt.measured.products
+                ),
+                certificate_attempts=attempts,
+                solve_tol=tightened,
+                floor_source=None if attempt is None else attempt.measured.floor_source,
             ),
         )
 
@@ -1273,10 +1837,14 @@ __all__ = [
     "CHECK_EACH_SWEEP",
     "CHECK_ONCE",
     "DEFAULT_CHI2_TOL",
+    "DEFAULT_GAP_TOL",
     "DEFAULT_MAX_ITER",
     "DEFAULT_RHAT_MAX",
+    "EARLIEST_CONVERGED_SWEEP",
     "MIN_DRAWS",
     "MIN_SWEEPS",
+    "OBJECTIVE_FLOOR_EPS",
+    "RESOLUTION_EPS",
     "Block",
     "Draws",
     "Estimate",

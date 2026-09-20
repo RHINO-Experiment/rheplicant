@@ -250,16 +250,20 @@ matplotlib, because rhino-cal's `gcr` imports each, as well as
 three: the file's five tests pass; with MomentRFI absent the three skip on
 `No module named 'MomentRFI'`.
 
-**bayesmith is declared `>=0.10,<0.11`, and the range holds two numbers.** The
-capability floor is 0.6, the highest release whose surface this package uses:
+**bayesmith is declared `>=0.10,<0.11`, and the range holds two numbers that
+are, since 0.10, the same number.** The capability floor is 0.10, the highest
+release whose surface this package uses:
 0.2 `first_fit` and `exact.loglinear`; 0.3 `AffinityRefused`'s structured
 payload and `ComplexNormal`; 0.4 `observe(..., mask=)` and the node field
 `Probabilistic.observed_mask`; 0.5 `local_block(..., priors=True)`; 0.6
 `marginal.chain.smooth` assembled as a square root, whose 0.5 spelling returns
-`nan` on a stiff chain. Below 0.5, `rheplicant.inference` fails at import,
-because `bayesmith.marginal` first ships in 0.5. A 0.5 install imports and
-fails only in behaviour, and the 0.4 and 0.5 keyword arguments are each a
-`TypeError` at the call on the release below.
+`nan` on a stiff chain; 0.10 `optimize.certify`, the convergence certificate
+`inference.plan` stops an estimate on. Below 0.5, `rheplicant.inference` fails
+at import, because `bayesmith.marginal` first ships in 0.5; below 0.10,
+`rheplicant.inference.plan` fails the same way on `optimize.certify`, because
+the local copy was lifted upstream and there is nothing to fall back on. A 0.5
+install imports and fails only in behaviour, and the 0.4 and 0.5 keyword
+arguments are each a `TypeError` at the call on the release below.
 `tests/test_bayesmith_floor.py` asserts each level by capability, not by
 version. The range starts at 0.10 because the stable baseline relies on
 bayesmith 0.10's stability contract and is tested only against it, and it is
@@ -267,6 +271,15 @@ closed at 0.11 because a pre-1.0 minor may move the deep module paths this
 package imports. 0.10 moved one: `bayesmith.optimize` became a package, so
 `from bayesmith.optimize import minimize` still resolves while the module file
 that name used to live in is gone.
+
+**`rheplicant.inference.certify` no longer exists here.** It was this package's
+module, and bayesmith 0.10 took it byte for byte as `bayesmith.optimize.certify`
+because it knew nothing about instruments: plain callables and pytrees, no
+rheplicant import. Its 50 unit tests went with it. What stayed is the
+acceptance tier, `tests/inference/test_estimate_reaches_map.py`, which drives a
+whole estimate to its MAP and does need this package's models. Do not
+reintroduce a local copy: two spellings of one bound is the shape this repo
+keeps paying for.
 
 **0.10.0 is a local release and not on PyPI** (built 2026-09-20; 0.9.0 was not
 published either, and the index stopped at 0.8.0 when it was checked on

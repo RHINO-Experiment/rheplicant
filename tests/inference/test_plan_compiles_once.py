@@ -165,3 +165,36 @@ def test_the_transition_is_compiled_once_per_run(mixed) -> None:
         "compile is ~300 ms and the leapfrog work it wraps is ~0.3 ms. See "
         "docs/superpowers/plans/2026-08-07-samplingplan-compiles-once.md."
     )
+
+
+def _estimate(mixed, max_iter):
+    plan, fit, state, observed = mixed
+    return lambda: plan.estimate(
+        fit, state, observed, noise=0.5, max_iter=max_iter, tol=None,
+    )
+
+
+def test_estimate_compiles_once_per_run(mixed) -> None:
+    """The point-estimate exit, which the repair above did not reach.
+
+    ``gradient_estimate`` rebuilt its potential closure every sweep and was
+    never jitted, and the plan handed it no ``programs`` cache, so each sweep
+    compiled afresh: measured by the T-002 verifier (A10-1), 12 compilations
+    at 10 sweeps against 42 at 40, 98 identical recompiles at 100 sweeps and
+    84 % of the wall clock.
+
+    ``tol=None`` so every run takes exactly ``max_iter`` sweeps. The warm-up
+    makes both measurements steady state, as for the sampler above. The
+    ``+ 2`` allows end-of-run programs whose shapes depend on the sweep count;
+    what must not scale is the per-sweep count, one or more per extra sweep
+    before the repair.
+    """
+    _count_compiles(_estimate(mixed, 5))
+    few = _count_compiles(_estimate(mixed, 10))
+    many = _count_compiles(_estimate(mixed, 40))
+    assert many <= few + 2, (
+        f"{few} XLA compilations over 10 estimate sweeps and {many} over 40: "
+        f"{(many - few) / 30:.2f} compilations per extra sweep. The gradient "
+        "block's estimate transition is being rebuilt each sweep instead of "
+        "served from the run's programs cache."
+    )
