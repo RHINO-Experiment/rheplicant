@@ -117,7 +117,7 @@ _A47_TAIL = (
 def _routes(document: Mapping[str, Any]) -> list[tuple[str, Mapping, bool]]:
     """``(prefix, node specs, whether composition keys are honoured)``.
 
-    Plan §0.3 E.10: ``preflight/model.py::_nodes`` reads ``document["model"]``
+    Plan §0.3 E.10: ``sections/compose.py::model_nodes`` reads ``document["model"]``
     and nothing else, but ``inference.twin.replace.<node>`` reaches the same
     ``build_node_operator`` (``sections/twin.py:67-69``), so a check walking
     only ``model:`` guards one route of two.
@@ -135,9 +135,9 @@ def _routes(document: Mapping[str, Any]) -> list[tuple[str, Mapping, bool]]:
     A ``replace:`` that is not a mapping is left alone: ``sections/twin.py:62``
     refuses it with the shape it got, and this pass has nothing better to say.
     """
-    from rheplicant.config.preflight.model import _nodes
+    from rheplicant.config.sections.compose import model_nodes
 
-    routes: list[tuple[str, Mapping, bool]] = [("model", _nodes(document), True)]
+    routes: list[tuple[str, Mapping, bool]] = [("model", model_nodes(document), True)]
     inference = document.get("inference")
     twin = inference.get("twin") if isinstance(inference, Mapping) else None
     replace = twin.get("replace") if isinstance(twin, Mapping) else None
@@ -618,9 +618,10 @@ def _region_key(layer: Mapping[str, Any]) -> Iterable[Finding]:
     ``_t5_placement`` answers before the shape is asked about.
     """
     from rheplicant.config.paths import refuse_misaddressed_region
-    from rheplicant.config.preflight.model import _nodes, _t5_claims
+    from rheplicant.config.preflight.model import _t5_claims
+    from rheplicant.config.sections.compose import model_nodes
 
-    for key, spec in _nodes(layer).items():
+    for key, spec in model_nodes(layer).items():
         if not isinstance(key, str):
             continue
         try:

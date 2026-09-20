@@ -40,13 +40,12 @@ from rheplicant.config.preflight.model import (
     _double_count,
     _graph_shape,
     _lit,
-    _nodes,
     _stochastic_in_fit_twin,
     _tone_placement,
     _two_at_one_node,
     stochastic_nodes,
 )
-from rheplicant.config.sections.compose import build_model, node_specs
+from rheplicant.config.sections.compose import build_model, model_nodes, node_specs
 from rheplicant.config.sections.model import operator_table
 from rheplicant.core.graph import AssemblyError
 from rheplicant.radio import CWCalibrationOperator
@@ -590,7 +589,7 @@ class TestTheGraphShapeChecks:
             build_model({"noise": spec, "gain": GAIN}, BARE, switch_order=())
 
     def test_a_pipeline_model_declares_no_graph_nodes(self):
-        # `kind: pipeline` has no node registry.  A `_nodes` that ignored
+        # `kind: pipeline` has no node registry.  A `model_nodes` that ignored
         # `kind:` would report `stages` as an unknown node id and refuse a
         # legal document.
         document = preflight_document()
@@ -614,7 +613,7 @@ class TestTheGraphShapeChecks:
 
 
 class TestTheReadersEveryModelCheckStartsFrom:
-    """``_nodes`` and ``_lit``, which Tasks 5 and 11 import rather than
+    """``model_nodes`` and ``_lit``, which Tasks 5 and 11 import rather than
     rewrite (§3.1 rule 1).
 
     Neither has a caller in this task that could fail without them -- ``_lit``
@@ -632,20 +631,20 @@ class TestTheReadersEveryModelCheckStartsFrom:
     def test_nodes_is_empty_for_every_shape_that_declares_none(self, document):
         # Kills `document["model"]` (a KeyError that aborts the pass on a
         # document `_structural` never sees -- Task 5 and Task 11 call these
-        # readers directly), and kills a `_nodes` that hands a pipeline's
+        # readers directly), and kills a `model_nodes` that hands a pipeline's
         # `stages:` back as if it were a node id.
-        assert _nodes(document) == {}
+        assert model_nodes(document) == {}
 
     def test_nodes_drops_the_section_level_keys_and_keeps_the_rest(self):
         section = {"gain": GAIN, "kind": "graph",
                    "acknowledge_double_count": True}
-        assert _nodes({"model": section}) == {"gain": GAIN}
+        assert model_nodes({"model": section}) == {"gain": GAIN}
 
     def test_a_kind_this_layer_does_not_know_declares_no_nodes_either(self):
         """``!= "graph"`` and not ``== "pipeline"``.
 
         ``kind: banana`` is ``build_model``'s own refusal ("kind: is 'graph'
-        (the default) or 'pipeline'").  A ``_nodes`` written as "everything
+        (the default) or 'pipeline'").  A ``model_nodes`` written as "everything
         that is not a pipeline has nodes" reads the rest of that section as
         node ids and answers A2 about ``gian`` -- a true statement about a key
         the reader has no reason to look at, in front of the one fault that
@@ -654,7 +653,7 @@ class TestTheReadersEveryModelCheckStartsFrom:
         """
         document = preflight_document()
         document["model"] = {"kind": "banana", "gian": GAIN}
-        assert _nodes(document) == {}
+        assert model_nodes(document) == {}
         assert [one for one in preflight(document).refusals()
                 if one.check in MINE] == []
 
@@ -674,7 +673,7 @@ class TestTheReadersEveryModelCheckStartsFrom:
         so the claim is asserted against a real assembly rather than trusted.
 
         The region cell discriminates a ``_lit`` written as
-        ``set(_nodes(document))``: measured, an ``at: [noise_wave, cw_tone]``
+        ``set(model_nodes(document))``: measured, an ``at: [noise_wave, cw_tone]``
         region lights BOTH covered nodes, and the obvious reading misses
         ``noise_wave``, which is precisely the interior node A8's reachability
         question is about.
@@ -2230,7 +2229,7 @@ class TestTheReVoicedChecksInThePass:
 
         It does NOT show A31 surviving, and an earlier version of this comment
         said it did.  Measured: with ``model:`` a list, a string or an int,
-        ``_nodes`` is ``{}``, ``_lit`` is empty and A31 cannot fire whatever
+        ``model_nodes`` is ``{}``, ``_lit`` is empty and A31 cannot fire whatever
         happens -- ``preflight(...).checks()`` is empty for all three.  The
         ``observation.data`` on these documents is inert, and it is kept only
         so the shapes match the rest of the class.
@@ -2793,7 +2792,7 @@ class TestTheStochasticFitTwin:
         assert "A30" not in preflight(document).checks()
 
     def test_a_pipeline_model_has_no_nodes_to_read(self):
-        # `_nodes` answers {} for kind: pipeline, and reading a pipeline's
+        # `model_nodes` answers {} for kind: pipeline, and reading a pipeline's
         # stages: as node ids would report every stage as a node.
         document = _t11_fit(twin=None)
         document["model"] = {"kind": "pipeline", "stages": []}

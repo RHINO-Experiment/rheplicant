@@ -45,7 +45,7 @@ def node_specs(section: Mapping) -> dict[str, Any]:
     """The node keys of a ``model:`` section; everything else is section level.
 
     One binding, two callers: :func:`build_model` below, and
-    ``config.preflight.model._nodes``.  The rule here is which keys are NOT
+    ``model_nodes`` below.  The rule here is which keys are NOT
     nodes, and a second copy of it means that the day a third section-level
     key is added the pre-flight pass refuses it as an unknown node id while
     the build accepts it -- the two-validators-for-one-property shape this
@@ -53,6 +53,34 @@ def node_specs(section: Mapping) -> dict[str, Any]:
     """
     return {key: value for key, value in section.items() if key not in _SECTION_KEYS}
 
+
+def model_nodes(document: Mapping[str, Any]) -> dict[str, Any]:
+    """The ``model:`` section's node specs, or ``{}``.
+
+    EVERY model check in Tasks 4, 5 and 11 starts here, and none of them
+    defines its own (§3.1, rule 1).  It lived in ``preflight/model.py`` under
+    the name ``_nodes`` until 2026-09-20 and moved here beside
+    :func:`node_specs`, the binding it wraps, when a second subject outside
+    pre-flight needed it: the
+    ``capabilities.json`` record walks the same nodes to state each one's
+    maturity, and a check and a published record disagreeing about what the
+    document's nodes ARE is the failure neither would report.
+    ``tests/test_module_sizes.py`` rules that ``preflight/model.py`` is "a
+    dozen independent passes sharing one node walk; the walk is the module",
+    so this is the first piece of that split rather than a move of
+    convenience.  ``{}`` for the three shapes that declare
+    no graph nodes at all: no ``model:`` at all (which ``_structural`` refuses
+    before any check runs, but this is called directly too), a ``model:`` that
+    is not a mapping (the build refuses it, with the type it got), and ``kind:
+    pipeline``, which has no node registry -- reading a pipeline's ``stages:``
+    as node ids would report every stage as an unknown node.
+    """
+    section = document.get("model")
+    if not isinstance(section, Mapping):
+        return {}
+    if section.get("kind", "graph") != "graph":
+        return {}
+    return node_specs(section)
 
 def node_placement_problems(specs: Mapping[str, Any], graph) -> list[tuple[str, str, str]]:
     """Checks A2, A3 and A4 over a ``model:`` mapping -- text and graph only.

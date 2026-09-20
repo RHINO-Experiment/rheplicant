@@ -151,6 +151,7 @@ bundle is a 404 nothing else would catch.
 | Audit provenance document | `1` | `provenance-v1.schema.json`, `format_version.const` |
 | Audit diagnostics document | `1` | `diagnostics-v1.schema.json`, `format_version.const` |
 | Scientific product manifest | `1` | `products-v1.schema.json`, `format_version.const` |
+| Capability record | `1` | `capabilities-v1.schema.json`, `format_version.const` |
 | Inference archive | `3` | `rheplicant.inference.archive` |
 | Generated script | `1` | `_rheplicant_bootstrap.script.SCRIPT_FORMAT_VERSION` |
 
@@ -158,6 +159,19 @@ A published script carries its format version in the call it makes, and a
 script written before versions existed is refused with the command that
 regenerates it — the embedded source bytes in the old file are unchanged and
 still the author's.
+
+`capabilities.json` names, per resolved layer, every node the document places
+and the maturity of the class it resolves to, so an archived run says which of
+its physics was a stand-in without anyone reading prose. Check A53 says the
+same thing in a report-severity finding, which is for a person; this is the
+same resolution as a record. It is written on the success path only -- it is a
+view of the resolved layers, and a document refused before it resolves has
+none.
+
+It is a separate file rather than a field in `provenance.json` for the reason
+`integrity.json` and the published preset sources are: `provenance-v1` is
+closed and requires every property it declares, so a new field there is a
+`format_version` bump on a schema that ships in the wheel.
 
 `products.json` names every scientific product a run published, the requests
 that asked for them and the omissions, so a reader of an archived tree can see

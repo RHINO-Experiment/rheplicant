@@ -181,7 +181,7 @@ class TestA14AnOrderWithNoLoadsBehindIt:
         the operator at the ``cal_loads`` node -- ``twin.lit`` is
         ``('global_signal', 'uniform_sky', 'cal_loads', 'gain', 'noise')``,
         carrying ``cal_loads`` and not ``bandpass``. Kills
-        ``"cal_loads" in _nodes(document)``, which refuses that document while
+        ``"cal_loads" in model_nodes(document)``, which refuses that document while
         the package builds it: the same key-instead-of-placement mistake Task
         5's carry-forward records ``_lit`` making, one check over.
         """
@@ -247,7 +247,7 @@ class TestA14AnOrderWithNoLoadsBehindIt:
         mapping (Task 4's carry-forward). ``build_model`` answers with the type
         it got; a row of "declare model.cal_loads" one phase earlier names a
         fix that cannot be typed into a string. Kills a check that reads
-        ``_nodes`` (which answers ``{}`` here) without asking what the section
+        ``model_nodes`` (which answers ``{}`` here) without asking what the section
         is."""
         assert list(_switch_order(preflight_document(observation=switching(),
                                                      model="graph"))) == []
@@ -615,7 +615,7 @@ class TestA15TheRowCountOnEveryPath:
 
         Kills reading ``inference.twin.replace`` without asking what the
         model is: the model half already answers ``{}`` here through
-        ``_nodes``, so this guard is the twin half's alone and nothing else
+        ``model_nodes``, so this guard is the twin half's alone and nothing else
         in this class reaches it.
         """
         doc = pipeline_document(

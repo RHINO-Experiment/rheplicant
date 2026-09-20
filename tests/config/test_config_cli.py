@@ -374,3 +374,49 @@ def test_an_inherited_value_carries_the_origin_of_the_entry_that_writes_it(
         "_rheplicant_resolved"]["numeric"]
     assert numeric["resources.beams.flat_child.maps"]["origin"] == "user"
     assert numeric["resources.beams.gauss_child.sigma_deg"]["origin"] == "user"
+
+
+def test_the_documented_output_tree_lists_what_a_run_publishes(tmp_path):
+    """``docs/config-cli.md``'s tree against a real publication.
+
+    It was stale in the only direction that misleads: ``integrity.json`` and
+    ``capabilities.json`` were both published and neither was listed, so a
+    reader verifying a tree against the page would have found two files the
+    documentation called additions.
+
+    Only one direction is asserted. The page also lists conditional and
+    example paths -- products, reports, variants, presets -- and a run without
+    them is not a stale page; a file the page does not mention is.
+    """
+    import re
+
+    from _rheplicant_bootstrap.cli import main
+
+    target = tmp_path / "result"
+    config = tmp_path / "config.yaml"
+    write_document(config, document(output=target))
+    assert main(["run", str(config)]) == 0
+
+    page = (
+        Path(__file__).resolve().parents[2] / "docs" / "config-cli.md"
+    ).read_text(encoding="utf-8")
+    block = re.search(r"```text\nconfig\.results/\n(.*?)```", page, re.S)
+    assert block, "docs/config-cli.md no longer carries the output tree"
+    documented = {
+        line.split("#")[0].strip()
+        for line in (
+            re.sub(r"^[├└│─\s]+", "", row) for row in block.group(1).splitlines()
+        )
+        if line.strip()
+    }
+
+    published = {
+        str(path.relative_to(target))
+        for path in target.rglob("*")
+        if path.is_file()
+    }
+    missing = published - documented
+    assert not missing, (
+        f"docs/config-cli.md's tree does not list {sorted(missing)}, which a "
+        "plain successful run publishes"
+    )

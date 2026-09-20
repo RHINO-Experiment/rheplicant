@@ -57,6 +57,21 @@ def _validate_file_pair(relative_path: object, payload: object) -> None:
 #: collision.
 RESERVED_BUNDLE_PATHS = ("provenance.json", "diagnostics.json", INTEGRITY_NAME)
 
+#: Audit metadata produced ABOVE this layer and merged in as ordinary bundle
+#: files. They are not in :data:`RESERVED_BUNDLE_PATHS`, because that tuple
+#: names the three files the transaction replaces and merging onto one of
+#: those is refused -- these are merged, so listing them there would refuse
+#: their own producer. They are reserved against SCIENTIFIC PRODUCTS for the
+#: same reason ``integrity.json`` is: a product claiming one of these names
+#: would be overwritten without warning.
+#:
+#: The names live here rather than beside their producers because the check
+#: that enforces them is in this layer, and a reserved name spelled once in
+#: the reserver and once in the producer is two strings that can drift.
+PRODUCTS_NAME = "products.json"
+CAPABILITIES_NAME = "capabilities.json"
+MERGED_METADATA_PATHS = (PRODUCTS_NAME, CAPABILITIES_NAME)
+
 
 def with_integrity(bundle: AuditBundle) -> AuditBundle:
     """Append ``integrity.json``, covering every other file in the bundle.

@@ -51,7 +51,7 @@ recorded in the plan's Executor's notes:
   task bodies are what need correcting and the pinned section does not.  This
   module imports Task 11's binding and writes no second predicate.
 * A52's reference leg reads the ``model:`` section as TEXT rather than through
-  ``_nodes``.  Measured: ``_nodes`` is ``{}`` for a ``kind: pipeline`` model
+  ``model_nodes``.  Measured: ``model_nodes`` is ``{}`` for a ``kind: pipeline`` model
   (it has no node registry), and a pipeline stage referencing a projector with
   no ``observation.pointing`` **builds today**.  ``node_specs`` drops only
   ``kind`` and ``acknowledge_double_count``, neither of which can hold a
@@ -476,7 +476,7 @@ def _pointing_none(document: Mapping[str, Any]) -> Iterable[Finding]:
     line, and ``raise_if_refused`` quotes the first and counts the rest.
 
     The reference leg reads ``model:`` as TEXT rather than through
-    :func:`~rheplicant.config.preflight.model._nodes`, which is ``{}`` for a
+    :func:`~rheplicant.config.sections.compose.model_nodes`, which is ``{}`` for a
     ``kind: pipeline`` model -- and measured, a pipeline stage referencing a
     projector with no pointing builds today.  ``node_specs`` drops only
     ``kind`` and ``acknowledge_double_count``, neither of which can hold a

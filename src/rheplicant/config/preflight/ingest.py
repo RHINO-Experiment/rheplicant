@@ -44,7 +44,7 @@ map warns on the canonical working document.
 
 **``inference.twin.replace.<node>`` is walked by all three** (§0.3 E.10).
 That route reaches the same ``build_node_operator`` and is outside
-``preflight/model.py::_nodes``.  Measured with an empty pre-flight report:
+``sections/compose.py::model_nodes``.  Measured with an empty pre-flight report:
 ``replace.noise_wave.switch_key: nope`` LOADS CLEAN and detonates at fit
 time, and ``replace.cal_loads: {from: thermistors, label: ghost}`` reaches
 the reader's own ``DataIngestionError``.  A10 walks it by walking every
@@ -286,14 +286,15 @@ def _a45_sites(document: Mapping[str, Any]) -> list[tuple[str, str, Any]]:
     The ``inference.twin.replace`` half needs the graph model guard of its
     own: ``build_fit_twin`` refuses the whole ``inference.twin:`` block on a
     ``kind: pipeline`` model, so a ``switch_key`` inside a block about to be
-    rejected wholesale is not this check's sentence.  ``_nodes`` already
+    rejected wholesale is not this check's sentence.  ``model_nodes`` already
     answers ``{}`` for such a model, so the model half needs no guard.
     """
-    from rheplicant.config.preflight.model import _nodes, _t4_entries, _t4_graph
+    from rheplicant.config.preflight.model import _t4_entries, _t4_graph
+    from rheplicant.config.sections.compose import model_nodes
 
     graph = _t4_graph()
     sites: list[tuple[str, str, Any]] = []
-    for node_id, spec in _nodes(document).items():
+    for node_id, spec in model_nodes(document).items():
         if node_id not in graph.nodes:
             continue
         for path, entry in _t4_entries(node_id, spec,
@@ -349,7 +350,8 @@ def _a46_loads(document: Mapping[str, Any]) -> tuple[list[tuple[str, str]],
     node and never touches the recording, and the second is
     ``sections/model.py``'s own refusal, which names the key.
     """
-    from rheplicant.config.preflight.model import _nodes, _t4_entries
+    from rheplicant.config.preflight.model import _t4_entries
+    from rheplicant.config.sections.compose import model_nodes
 
     def labelled(where: str, spec: Any) -> tuple[str, str] | None:
         if not isinstance(spec, Mapping) or spec.get("from") != _A46_ROUTE:
@@ -360,7 +362,7 @@ def _a46_loads(document: Mapping[str, Any]) -> tuple[list[tuple[str, str]],
         return (where, label)
 
     model_loads: list[tuple[str, str]] = []
-    spec = _nodes(document).get(_A46_NODE)
+    spec = model_nodes(document).get(_A46_NODE)
     if spec is not None:
         for path, entry in _t4_entries(_A46_NODE, spec, many=True):
             found = labelled(f"model.{path}", entry)

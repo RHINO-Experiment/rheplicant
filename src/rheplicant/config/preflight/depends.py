@@ -434,12 +434,13 @@ def _typed_entries(layer: Mapping[str, Any]) -> Iterable[tuple[str, Any]]:
     Both halves of §0.3 E.10's ruling: ``model:``'s four routes through
     ``preflight/model.py::_t4_entries`` (single, ``compose: stages``, a ``many``
     node's list and its FAN entries), **and** ``inference.twin.replace``, which
-    ``_nodes()`` cannot see and which reaches the same builder.
+    ``model_nodes()`` cannot see and which reaches the same builder.
     """
-    from rheplicant.config.preflight.model import _nodes, _t4_entries, _t4_graph
+    from rheplicant.config.preflight.model import _t4_entries, _t4_graph
+    from rheplicant.config.sections.compose import model_nodes
 
     graph = _t4_graph()
-    for node_id, spec in _nodes(layer).items():
+    for node_id, spec in model_nodes(layer).items():
         node = graph.nodes.get(node_id)
         many = bool(node.many) if node is not None else False
         for where, entry in _t4_entries(node_id, spec, many=many):

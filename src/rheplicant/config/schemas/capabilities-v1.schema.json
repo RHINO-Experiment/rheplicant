@@ -1,0 +1,120 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rheplicant.invalid/schemas/capabilities-v1.schema.json",
+  "title": "rheplicant capabilities v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "format_version",
+    "layers"
+  ],
+  "properties": {
+    "format_version": {
+      "const": 1
+    },
+    "layers": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/layerRecord"
+      }
+    }
+  },
+  "$defs": {
+    "layer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "name"
+      ],
+      "properties": {
+        "kind": {
+          "enum": [
+            "base",
+            "variant"
+          ]
+        },
+        "name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "level": {
+      "enum": [
+        "maintained",
+        "experimental",
+        "placeholder",
+        "unavailable"
+      ]
+    },
+    "levelReason": {
+      "enum": [
+        "spec_not_a_mapping",
+        "unresolved_type"
+      ]
+    },
+    "node": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "node_id",
+        "type",
+        "level",
+        "level_reason"
+      ],
+      "properties": {
+        "node_id": {
+          "type": "string"
+        },
+        "type": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "level": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/level"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "level_reason": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/levelReason"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "layerRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "layer",
+        "nodes"
+      ],
+      "properties": {
+        "layer": {
+          "$ref": "#/$defs/layer"
+        },
+        "nodes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/node"
+          }
+        }
+      }
+    }
+  }
+}

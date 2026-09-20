@@ -38,6 +38,7 @@ from collections.abc import Iterable, Mapping
 from typing import Any
 
 from _rheplicant_bootstrap.path_syntax import longest_legal_prefix
+from rheplicant.config.capability_record import at_level, node_levels
 from rheplicant.config.errors import ConfigError
 from rheplicant.config.findings import Finding, refuse, report
 from rheplicant.config.paths import parse_path
@@ -47,8 +48,8 @@ from rheplicant.config.sections.compose import (
     cal_load_order_problem,
     double_count_problem,
     many_shape_problem,
+    model_nodes,
     node_placement_problems,
-    node_specs,
 )
 from rheplicant.config.sections.model import (
     ambiguous_class_problem,
@@ -57,7 +58,6 @@ from rheplicant.config.sections.model import (
 from rheplicant.config.sections.transforms import _NAMED
 from rheplicant.core.capability import Maturity
 from rheplicant.core.contract import RANDOMNESS
-from rheplicant.radio import capabilities
 
 
 def _t4_graph():
@@ -72,25 +72,6 @@ def _t4_graph():
     from rheplicant.radio.graph import RADIO_GRAPH
 
     return RADIO_GRAPH
-
-
-def _nodes(document: Mapping[str, Any]) -> dict[str, Any]:
-    """The ``model:`` section's node specs, or ``{}``.
-
-    EVERY model check in Tasks 4, 5 and 11 starts here, and none of them
-    defines its own (§3.1, rule 1).  ``{}`` for the three shapes that declare
-    no graph nodes at all: no ``model:`` at all (which ``_structural`` refuses
-    before any check runs, but this is called directly too), a ``model:`` that
-    is not a mapping (the build refuses it, with the type it got), and ``kind:
-    pipeline``, which has no node registry -- reading a pipeline's ``stages:``
-    as node ids would report every stage as an unknown node.
-    """
-    section = document.get("model")
-    if not isinstance(section, Mapping):
-        return {}
-    if section.get("kind", "graph") != "graph":
-        return {}
-    return node_specs(section)
 
 
 def _t4_at_nodes(spec: Any) -> tuple[str, ...]:
@@ -167,7 +148,7 @@ def _lit(document: Mapping[str, Any]) -> frozenset[str]:
     """
     graph = _t4_graph()
     lit: set[str] = set()
-    for key, spec in _nodes(document).items():
+    for key, spec in model_nodes(document).items():
         if key not in graph.nodes:
             continue
         placed = _t5_claims(key, spec)
@@ -246,7 +227,7 @@ def _graph_shape(document: Mapping[str, Any]) -> Iterable[Finding]:
     down and everything registered after it with it.
     """
     graph = _t4_graph()
-    specs = _nodes(document)
+    specs = model_nodes(document)
     table = None
     for check, where, message in node_placement_problems(specs, graph):
         yield refuse(check, where, f"{message} (check {check}).")
@@ -294,7 +275,7 @@ def _double_count(document: Mapping[str, Any]) -> Iterable[Finding]:
     if not isinstance(section, Mapping):
         return
     problem = double_count_problem(
-        _nodes(document), section.get("acknowledge_double_count"))
+        model_nodes(document), section.get("acknowledge_double_count"))
     if problem is not None:
         yield refuse("A32", "model", problem)
 
@@ -327,35 +308,25 @@ def _capability_level(document: Mapping[str, Any]) -> Iterable[Finding]:
     skipped in silence, the same decline :func:`_t5_radio_class` documents; a
     decline can only lose a notice, never invent one. An ambiguous or
     misspelled ``type:`` is A7's to refuse and is not re-reported here.
+
+    **The resolution itself moved out on 2026-09-20 and this check now reads
+    it.** ``capabilities.json`` publishes the same node-to-level answer as a
+    machine-readable record, and two copies of that resolution would be two
+    things that can disagree about the same document -- a notice naming a node
+    the published record calls maintained, with nothing rendering the two side
+    by side. :func:`~rheplicant.config.capability_record.node_levels` is the
+    one resolution; this check is a view of it that keeps its own editorial
+    decisions, which are what levels are worth a sentence and how to word it.
     """
-    specs = _nodes(document)
-    if not specs:
+    rows = node_levels(document)
+    if not rows:
         return
-    levels = capabilities()
-    table = None
-    placeholders: list[str] = []
-    experimental: list[str] = []
-    for node_id, spec in specs.items():
-        if not isinstance(spec, Mapping):
-            continue
-        if table is None:
-            table = operator_table()
-        classes = table.get(node_id)
-        declared = spec.get("type")
-        if isinstance(declared, str):
-            chosen = next(
-                (cls for cls in (classes or ()) if cls.__name__ == declared), None)
-        elif classes and len(classes) == 1:
-            chosen = classes[0]
-        else:
-            chosen = None
-        if chosen is None or chosen.__name__ not in levels:
-            continue
-        level = levels[chosen.__name__]
-        if level is Maturity.PLACEHOLDER:
-            placeholders.append(f"{node_id} ({chosen.__name__})")
-        elif level is Maturity.EXPERIMENTAL:
-            experimental.append(f"{node_id} ({chosen.__name__})")
+    placeholders = [
+        f"{row.node_id} ({row.type})" for row in at_level(rows, Maturity.PLACEHOLDER)
+    ]
+    experimental = [
+        f"{row.node_id} ({row.type})" for row in at_level(rows, Maturity.EXPERIMENTAL)
+    ]
     if not placeholders and not experimental:
         return
     parts = []
@@ -456,7 +427,7 @@ def _a14_cal_load_keys(document: Mapping[str, Any]) -> Iterable[Finding]:
     ``model.cal_loads`` at all -- and two functions cannot claim one slot.
     ``Finding.check`` stays the bare ``A14``.
     """
-    spec = _nodes(document).get("cal_loads")
+    spec = model_nodes(document).get("cal_loads")
     if not isinstance(spec, Mapping):
         # Not declared, or declared with the wrong shape -- which is A6's
         # sentence, yielded by `_graph_shape`, and the build asks the shape
@@ -722,7 +693,7 @@ def _two_at_one_node(document: Mapping[str, Any]) -> Iterable[Finding]:
     being sent there in the first place.
     """
     graph = _t4_graph()
-    specs = _nodes(document)
+    specs = model_nodes(document)
     claims: dict[str, list[str]] = {}
     for key, spec in specs.items():
         placed = _t5_claims(key, spec)
@@ -831,7 +802,7 @@ def _tone_placement(document: Mapping[str, Any]) -> Iterable[Finding]:
     """
     graph = _t4_graph()
     lit = _lit(document)
-    for key, spec in _nodes(document).items():
+    for key, spec in model_nodes(document).items():
         if key not in graph.nodes:
             continue
         placed = _t5_claims(key, spec)
@@ -988,7 +959,7 @@ def _no_source_and_no_data(document: Mapping[str, Any]) -> Iterable[Finding]:
     A model A2, A3 or A4 already refuses stands down too: a misspelled
     ``uniform_skyy:`` is one fault, and "lights no source" would send the
     reader after a second.  ``kind: pipeline`` is not an assembly and has no
-    ``has_source``; ``_nodes`` returns ``{}`` for it.
+    ``has_source``; ``model_nodes`` returns ``{}`` for it.
 
     Data is declared by a non-null ``observation.data`` or by
     ``observation.from_file``, whose recording becomes ``state.data``.
@@ -1012,7 +983,7 @@ def _no_source_and_no_data(document: Mapping[str, Any]) -> Iterable[Finding]:
         return
     if section.get("data") is not None or "from_file" in section:
         return
-    specs = _nodes(document)
+    specs = model_nodes(document)
     graph = _t4_graph()
     if not specs or node_placement_problems(specs, graph):
         return
@@ -1246,7 +1217,7 @@ def _a30_placements(document: Mapping[str, Any],
     """node id -> ``(the site that put it there, the class name)``.
 
     **Keyed by NODE, not by the model key**, and that is the whole reason this
-    is a function rather than a dict comprehension over :func:`_nodes`:
+    is a function rather than a dict comprehension over :func:`model_nodes`:
     ``inference.twin.without:`` names node ids -- it calls
     ``Assembly.without`` (``core/graph.py:526``, from ``twin.py:59-60``) --
     and a ``python:`` entry lands where its class declares rather than under
@@ -1273,7 +1244,7 @@ def _a30_placements(document: Mapping[str, Any],
     has to be stable.
     """
     claims: dict[str, list[tuple[str, str]]] = {}
-    for key, spec in _nodes(document).items():
+    for key, spec in model_nodes(document).items():
         placed = _t5_claims(key, spec)
         if not placed:
             continue

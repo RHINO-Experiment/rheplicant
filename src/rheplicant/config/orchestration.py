@@ -74,6 +74,7 @@ from _rheplicant_bootstrap.variants import (
     LayerRef,
     enumerate_layers_once,
 )
+from rheplicant.config.capability_record import capabilities_manifest
 from rheplicant.config.context import using_resolution_audit
 from rheplicant.config.dimensions import (
     DimensionEnvironment,
@@ -120,6 +121,7 @@ __all__ = [
     "RunExecution",
     "base_parsed_schedule",
     "build_product_bundle",
+    "capabilities_manifest",
     "canonical_layers",
     "complete_all_postflight",
     "deletions_for",

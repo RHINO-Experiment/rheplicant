@@ -7,11 +7,12 @@ from pathlib import Path
 import jsonschema
 import pytest
 
+import rheplicant.config.schemas
 from _rheplicant_bootstrap.audit.diagnostics import RUN_STATUSES
 from _rheplicant_bootstrap.audit.provenance import ARTEFACT_REASONS, STATUSES
 from _rheplicant_bootstrap.audit.trace import STAGES
 from _rheplicant_bootstrap.types import UNAVAILABLE_REASONS
-from rheplicant.config.schemas import load_schema
+from rheplicant.config.schemas import SCHEMA_NAMES, load_schema
 from tests.config.schema_walk import (
     at_pointer,
     declared_array_pointers,
@@ -20,6 +21,7 @@ from tests.config.schema_walk import (
 )
 
 GOLDEN = Path(__file__).with_name("golden")
+SCHEMAS = Path(rheplicant.config.schemas.__file__).parent
 
 
 def walk_schema(node):
@@ -32,14 +34,60 @@ def walk_schema(node):
             yield from walk_schema(child)
 
 
-@pytest.mark.parametrize("name", ("provenance-v1", "diagnostics-v1"))
+def is_map(node):
+    """A map types its VALUES and declares no field names; a record does both.
+
+    Two spellings mean the same thing and both appear in the packaged
+    schemas: ``patternProperties: {".*": <schema>}`` (the audit documents) and
+    ``additionalProperties: <schema>`` (``products-v1``).
+    """
+    if node.get("properties") or node.get("required"):
+        return False
+    return bool(node.get("patternProperties")) or isinstance(
+        node.get("additionalProperties"), dict
+    )
+
+
+@pytest.mark.parametrize("name", SCHEMA_NAMES)
 def test_every_object_schema_is_closed_and_complete(name):
+    """Every RECORD is closed and requires every field it declares.
+
+    Parametrized over every packaged schema rather than over two named ones,
+    which is what it was. ``products-v1`` was outside it and stayed outside it
+    silently -- a schema added to the wheel joined nothing.
+
+    The map exemption is derived rather than listed. Reading it as "objects
+    are closed" and allowlisting the exceptions would have been an allowlist
+    of three today and a wrong answer the first time a fourth map appeared;
+    reading it as "a thing that declares field names must name them all" is
+    the rule the formats actually follow.
+    """
     schema = load_schema(name)
     jsonschema.Draft202012Validator.check_schema(schema)
+    records = 0
     for node in walk_schema(schema):
-        if node.get("type") == "object":
-            assert node["additionalProperties"] is False
-            assert set(node["required"]) == set(node["properties"])
+        if node.get("type") != "object" or is_map(node):
+            continue
+        records += 1
+        assert node["additionalProperties"] is False
+        assert set(node["required"]) == set(node["properties"])
+    assert records, f"{name} declares no record objects at all"
+
+
+def test_the_packaged_schema_names_are_the_packaged_files():
+    """``SCHEMA_NAMES`` is a tuple beside the files it names, so it can drift.
+
+    Every test in this module is parametrized over it, so a schema shipped in
+    the wheel and missing from the tuple is a schema nothing here checks --
+    and ``load_schema`` refuses it by name, so the omission also breaks the
+    reader rather than only the tests.
+    """
+    packaged = {
+        path.name.removesuffix(".schema.json")
+        for path in SCHEMAS.iterdir()
+        if path.name.endswith(".schema.json")
+    }
+    assert packaged == set(SCHEMA_NAMES)
 
 
 def goldens(kind):
@@ -149,10 +197,11 @@ def test_unknown_properties_are_refused_at_every_present_object_path(kind, path)
     closed = tuple(path for path, (shut, _where) in verdicts.items() if shut)
     assert closed
 
-    # An object that is NOT closed has to be a MAP -- no declared properties,
-    # keys matched by a pattern -- and never a record with a field list. All
+    # An object that is NOT closed has to be a MAP -- it types its values and
+    # declares no field names -- and never a record with a field list. All
     # three open definitions here (`jsonObject`, `intMap`, `stringMap`) have
-    # exactly that shape, so the rule is read off them rather than listed.
+    # that shape, and so do the three in `products-v1`, which spell it with
+    # `additionalProperties` instead; `is_map` reads both.
     #
     # Without this line the loop below would silently shrink: opening a closed
     # `$def` would take its objects out of the census instead of failing it,
@@ -161,10 +210,7 @@ def test_unknown_properties_are_refused_at_every_present_object_path(kind, path)
         if shut:
             continue
         for pointer in where:
-            node = at_pointer(schema, pointer)
-            assert not node.get("properties"), (path, pointer)
-            assert not node.get("required"), (path, pointer)
-            assert node.get("patternProperties"), (path, pointer)
+            assert is_map(at_pointer(schema, pointer)), (path, pointer)
 
     for path in closed:
         mutated = copy.deepcopy(value)

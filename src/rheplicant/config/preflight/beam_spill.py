@@ -88,7 +88,7 @@ already refuses every other engine by name and by class -- measured,
 ``GeneralPointingProjector`` -- and that sentence is better than anything this
 layer could write about a projector kind that has no horizon cut at all.
 
-**The route ``preflight/model.py::_nodes`` cannot see IS walked here**
+**The route ``sections/compose.py::model_nodes`` cannot see IS walked here**
 (§0.3 E.10).  ``inference.twin.replace.beam_spill`` reaches the same
 ``build_node_operator`` -> ``_from_route`` -> ``from_projector`` path, so both
 legs fire on it, and the ``where`` and the message name that path rather than

@@ -376,7 +376,7 @@ class TestBeamSpillFromProjectorSpeaksConfig:
 
         ``inference.twin.replace.<node>`` reaches ``build_node_operator``
         (``sections/twin.py:69``), which is the route ``preflight/model.py``'s
-        ``_nodes()`` cannot see and the hole that ruling is about.  This fix
+        ``model_nodes()`` cannot see and the hole that ruling is about.  This fix
         does not walk ``model:`` as text -- it sits INSIDE ``_from_route``,
         below ``build_node_operator`` -- so both routes are covered by
         construction and neither can drift from the other.

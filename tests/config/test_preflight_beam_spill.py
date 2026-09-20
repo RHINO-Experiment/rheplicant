@@ -448,7 +448,7 @@ class TestTheRouteNodesCannotSee:
 
     ``inference.twin.replace.beam_spill`` reaches the same
     ``build_node_operator`` -> ``_from_route`` -> ``from_projector`` path as
-    ``model.beam_spill``, and ``preflight/model.py::_nodes`` cannot see it.
+    ``model.beam_spill``, and ``sections/compose.py::model_nodes`` cannot see it.
     Walking it is affordable here precisely because A50 is INVENTED: a
     verbatim hoist would have carried ``model.beam_spill`` into the sentence
     and named the wrong section on this route.

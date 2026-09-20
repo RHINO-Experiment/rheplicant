@@ -824,9 +824,10 @@ class TestTheTwins:
     def test_inference_twin_replace_reaches_the_same_builder(self, monkeypatch):
         """§0.3 E.10, and it is a real candidate rather than a formality:
         ``twin.py:69`` sends ``replace.<node>`` into ``build_node_operator``,
-        the same function ``model.<node>`` reaches, and ``preflight/model.py::
-        _nodes`` cannot see it.  The message names the section it FOUND, which
-        a verbatim hoist of A13's ``f"model.{node_id}: "`` could not."""
+        the same function ``model.<node>`` reaches, and
+        ``sections/compose.py::model_nodes`` cannot see it.  The message names
+        the section it FOUND, which a verbatim hoist of A13's
+        ``f"model.{node_id}: "`` could not."""
         blocked(monkeypatch, "rhino_cal_jax")
         document = preflight_document(
             inference={"twin": {"without": ["noise"],

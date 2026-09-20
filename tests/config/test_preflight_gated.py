@@ -520,7 +520,7 @@ class TestSigmaFamiliesStandsDown:
         # `stages:` is an unknown key the build names itself.
         {"kind": "pipeline", "stages": [], "noise": MODEL_NOISE}])
     def test_C18_kind_stands_down_on_a_pipeline_model(self, model):
-        """``preflight/model.py::_nodes`` gates on ``kind: graph`` for the
+        """``sections/compose.py::model_nodes`` gates on ``kind: graph`` for the
         same reason: reading a pipeline's keys as graph nodes invents a
         placement the build does not make."""
         assert mine(sigma_document(MODEL_NOISE, RADIOMETER,

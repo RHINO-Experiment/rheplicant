@@ -110,7 +110,7 @@ def _where(replaced: tuple[str, ...], node_id: str) -> str:
     """The document key that built this node, on this twin.
 
     ``model.<node>`` unless ``inference.twin.replace`` rebuilt it, which is the
-    route §0.3 E.10 records ``preflight/model.py::_nodes`` cannot see.  It
+    route §0.3 E.10 records ``sections/compose.py::model_nodes`` cannot see.  It
     reaches ``build_node_operator`` down the same path and it is a real,
     separately-editable document line, so it gets its own ``where`` rather than
     being folded into ``model:``'s.

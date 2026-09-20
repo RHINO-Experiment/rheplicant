@@ -32,6 +32,12 @@ from rheplicant.radio import capabilities
 #: so neither ``import ... .model`` inside a function nor monkeypatch's dotted
 #: string form can walk to it -- both were tried and both raised.
 _MODEL_PASS = sys.modules["rheplicant.config.preflight.model"]
+#: Where ``capabilities()`` is READ. It moved out of the check on 2026-09-20,
+#: when ``capabilities.json`` began publishing the same node-to-level answer
+#: and the resolution became one function both read. Patching the check's own
+#: module would now patch a name it no longer looks up -- silently, because an
+#: unused patch raises nothing and the notice would simply not change.
+_LEVEL_SOURCE = sys.modules["rheplicant.config.capability_record"]
 _capability_level = _MODEL_PASS._capability_level
 
 
@@ -124,7 +130,7 @@ class TestItReadsTheRegistry:
         """
         real = capabilities()
         monkeypatch.setattr(
-            _MODEL_PASS, "capabilities",
+            _LEVEL_SOURCE, "capabilities",
             lambda: {**real, "SkyOperator": Maturity.MAINTAINED})
         assert _findings(_graph(uniform_sky={"amplitude": 1.0, "n_pix": 4})) == []
 
@@ -132,7 +138,7 @@ class TestItReadsTheRegistry:
         """The other direction, so the test cannot pass by never firing."""
         real = capabilities()
         monkeypatch.setattr(
-            _MODEL_PASS, "capabilities",
+            _LEVEL_SOURCE, "capabilities",
             lambda: {**real, "AntennaLossOperator": Maturity.PLACEHOLDER})
         found = _findings(_graph(antenna_loss={"efficiency": 0.9}))
         assert len(found) == 1

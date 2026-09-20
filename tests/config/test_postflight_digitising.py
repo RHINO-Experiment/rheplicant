@@ -584,7 +584,7 @@ def test_t5_limit_matches_the_operators_own_clip_point(n_bits):
     assert float(jnp.min(out.data)) == -limit
 
 
-def test_upstream_of_adc_is_27_of_33_nodes():
+def test_upstream_of_adc_is_27_of_33model_nodes():
     """The measurement this whole module's escalator design rests on.
 
     Pinned as a regression: if ``RADIO_GRAPH`` ever changes shape around

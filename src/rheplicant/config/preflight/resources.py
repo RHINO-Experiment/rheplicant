@@ -50,7 +50,7 @@ this very section by layer.
 
 **Where this module does NOT look, and why it is not a false negative.**
 ``inference.twin.replace.<node>`` reaches ``build_node_operator`` and is the
-route ``preflight/model.py::_nodes`` cannot see (§0.3 E.10).  It replaces an
+route ``sections/compose.py::model_nodes`` cannot see (§0.3 E.10).  It replaces an
 OPERATOR, not a resource: there is no ``resources:`` block under
 ``inference.twin`` and no spelling of one, so a beam or projector entry can
 only ever arrive through ``resources:`` on some layer, which is exactly what

@@ -12,6 +12,7 @@ import zipfile
 import pytest
 import yaml
 
+from rheplicant.config.schemas import SCHEMA_NAMES
 from tests.config.test_config_cli import document
 from tests.config.test_config_document import synthetic_document
 from tests.config.wheel_support import (
@@ -23,11 +24,11 @@ from tests.config.wheel_support import (
 )
 
 PRESET = PROJECT_ROOT / "src/rheplicant/config/presets/rhino_v1.yaml"
-SCHEMAS = (
-    "provenance-v1.schema.json",
-    "diagnostics-v1.schema.json",
-    "products-v1.schema.json",
-)
+#: Derived, not listed. The list here was three names while the package
+#: shipped four, so ``capabilities-v1`` would have gone into the wheel with
+#: nothing checking it arrived -- and a schema absent from an install fails at
+#: the reader, not here.
+SCHEMAS = tuple(f"{name}.schema.json" for name in SCHEMA_NAMES)
 
 
 @pytest.fixture(scope="session")
@@ -41,7 +42,7 @@ def fresh_install(tmp_path):
 
 
 def _resource_probe(install: Install) -> dict[str, object]:
-    program = """
+    program = f"SCHEMA_FILES = {list(SCHEMAS)!r}\n" + """
 import base64
 import importlib.util
 import json
@@ -52,11 +53,7 @@ snapshot = read_installed_preset("rhino_v1")
 spec = importlib.util.find_spec("rheplicant")
 root = Path(tuple(spec.submodule_search_locations)[0])
 schemas = {}
-for name in (
-    "provenance-v1.schema.json",
-    "diagnostics-v1.schema.json",
-    "products-v1.schema.json",
-):
+for name in SCHEMA_FILES:
     schemas[name] = base64.b64encode(
         (root / "config" / "schemas" / name).read_bytes()
     ).decode("ascii")

@@ -54,7 +54,7 @@ voices, which is exactly what §0.3 E.4 ruling 6 avoids.
 **``inference.twin.replace`` is NOT walked, and that is not a false
 negative** (plan §0.3 E.10).  That ruling is about text checks that walk
 ``model:``: ``inference.twin.replace.<node>`` reaches the same
-``build_node_operator`` path and is outside ``preflight/model.py::_nodes``.
+``build_node_operator`` path and is outside ``sections/compose.py::model_nodes``.
 Neither check here reads ``model:``.  Both read ``inference.noise``, which is
 the likelihood's noise and not the graph node ``model.noise`` -- two different
 things share the word, and ``sections/noise.py``'s own docstring opens by

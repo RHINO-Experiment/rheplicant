@@ -341,7 +341,7 @@ class TestA10TheUnitIsAskedBeforeTheFileIsOpened:
 
     def test_the_twin_replace_route_is_walked_too(self):
         """§0.3 E.10: ``inference.twin.replace.<node>`` reaches the same
-        builders and is outside ``preflight/model.py::_nodes``.
+        builders and is outside ``sections/compose.py::model_nodes``.
 
         A10 walks it because it walks every section but ``variants:``.
 
@@ -606,7 +606,7 @@ class TestA45TheSwitchKeyNamesAKeyTheRunWrites:
 
         Kills: dropping the ``model.kind != graph`` guard on the replace half
         -- measured, that mutant makes A45 fire inside a pipeline document's
-        twin block and survives the suite.  (``_nodes`` already answers ``{}``
+        twin block and survives the suite.  (``model_nodes`` already answers ``{}``
         for such a model, so the MODEL half needs no guard and this is the
         only place the question arises.)"""
         document = preflight_document()

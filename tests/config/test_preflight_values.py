@@ -12,7 +12,7 @@ the next reader inherits a decision rather than a discovery:
   body, so the two task bodies are what need correcting.  This module imports
   Task 11's binding and defines no second predicate.
 * A52's reference leg reads the ``model:`` section as TEXT rather than through
-  ``_nodes``.  Measured: ``_nodes`` is ``{}`` for a ``kind: pipeline`` model,
+  ``model_nodes``.  Measured: ``model_nodes`` is ``{}`` for a ``kind: pipeline`` model,
   and a pipeline stage referencing a projector with no ``observation.pointing``
   BUILDS today -- so the node-shaped walk the task body describes is blind to
   a live case.
@@ -1027,7 +1027,7 @@ class TestA52APointingOfNoneAndAProjectorAnyway:
             "model.filters[0].projector", "model.filters[1].projector"]
 
     def test_a_pipeline_model_that_references_a_projector_is_refused_too(self):
-        """The measured hole in the task body's own design: ``_nodes`` is
+        """The measured hole in the task body's own design: ``model_nodes`` is
         ``{}`` for a ``kind: pipeline`` model, and a pipeline stage that
         references a projector with no ``observation.pointing`` **builds
         today** -- measured, ``load_document`` returns a ``ConfiguredRun``.

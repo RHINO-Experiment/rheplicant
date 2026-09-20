@@ -86,12 +86,12 @@ from rheplicant.config.findings import Finding, refuse
 from rheplicant.config.modifiers import NOISE_AXES
 from rheplicant.config.preflight import register
 from rheplicant.config.preflight.model import (
-    _nodes,
     _t4_graph,
     _t4_switch_order,
     _t5_placement,
     _t5_radio_class,
 )
+from rheplicant.config.sections.compose import model_nodes
 from rheplicant.config.sections.model import _pick_class, operator_table
 
 #: Forms whose shape is the form's own value: ``{zeros: [4, 8]}``.
@@ -284,7 +284,7 @@ def _a15_sites(document: Mapping[str, Any]) -> list[tuple[str, Mapping]]:
     (``twin.py:46-50``) refuses the whole ``inference.twin:`` block on a
     ``kind: pipeline`` model -- *"A pipeline is rebuilt, not repaired"* -- so
     a row count inside a block that is about to be rejected wholesale would
-    be answering about a document nobody can fix that way.  ``_nodes``
+    be answering about a document nobody can fix that way.  ``model_nodes``
     already answers ``{}`` for such a model, so the model half needs no guard
     of its own; this one is the twin half's.
 
@@ -296,7 +296,7 @@ def _a15_sites(document: Mapping[str, Any]) -> list[tuple[str, Mapping]]:
     """
     sites: list[tuple[str, Mapping]] = []
     table = operator_table()
-    for key, spec in _nodes(document).items():
+    for key, spec in model_nodes(document).items():
         if isinstance(spec, Mapping) and _a15_carries_gamma(
                 _a15_declared_class(key, spec, table)):
             sites.append((f"model.{key}", spec))
@@ -397,7 +397,7 @@ def _switch_order(document: Mapping[str, Any]) -> Iterable[Finding]:
     if not isinstance(model, Mapping) or model.get("kind", "graph") != "graph":
         return findings
     placements = [_t5_placement(key, spec)
-                  for key, spec in _nodes(document).items()]
+                  for key, spec in model_nodes(document).items()]
     if any(placed is None for placed in placements):
         return findings
     if any(placed == ("cal_loads",) for placed in placements):

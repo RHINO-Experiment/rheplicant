@@ -52,13 +52,22 @@ config.results/
 ├── config.input.yaml
 ├── config.resolved.yaml
 ├── variants/<encoded-name>/config.resolved.yaml
+├── presets/<name>.yaml                   # when the document layers a preset
+├── capabilities.json
 ├── products.json                         # when a product/report is requested
 ├── runs/<encoded-run>/arrays.npz         # example run product
 ├── layers/base/assembly.json             # example layer product
 ├── report.txt                            # optional report
+├── integrity.json
 ├── provenance.json
 └── diagnostics.json
 ```
+
+`integrity.json` and `capabilities.json` were both absent from this listing
+until 2026-09-20, and had been published for some time. A tree that omits a
+file teaches a reader to treat it as an addition, so the listing is now
+checked against a real run by
+`tests/config/test_config_cli.py::test_the_documented_output_tree_lists_what_a_run_publishes`.
 
 A refusal or internal error after publication trust is established uses a
 non-clobbering sibling such as `config.results.refused-<stamp>-<pid>/` or

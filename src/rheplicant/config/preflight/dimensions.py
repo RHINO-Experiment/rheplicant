@@ -163,14 +163,16 @@ def _operator_entries(
                 yield f"model.stages[{index}]", None, entry
         elif kind == "graph":
             from rheplicant.config.preflight.model import (
-                _nodes,
                 _t4_entries,
                 _t4_graph,
             )
-            from rheplicant.config.sections.compose import many_shape_problem
+            from rheplicant.config.sections.compose import (
+                many_shape_problem,
+                model_nodes,
+            )
 
             graph = _t4_graph()
-            nodes = _nodes(document)
+            nodes = model_nodes(document)
             for node_id, spec in nodes.items():
                 node = graph.nodes.get(node_id)
                 if node is None:

@@ -11,6 +11,9 @@ from typing import Literal, TextIO, cast
 
 from _rheplicant_bootstrap.audit import AuditTrace
 from _rheplicant_bootstrap.audit.bundle import (
+    CAPABILITIES_NAME,
+    MERGED_METADATA_PATHS,
+    PRODUCTS_NAME,
     RESERVED_BUNDLE_PATHS,
     candidate_serialization_snapshot,
     merge_bundle_files,
@@ -685,6 +688,17 @@ def dispatch_request(
         presets = presets_bundle_files(prepared)
         if presets:
             additional_files = dict(presets)
+        # A7-1: which of this run's physics was a stand-in, as a record rather
+        # than as the English of check A53's notice. A separate file for the
+        # reason the preset SOURCES are one -- putting it in provenance.json
+        # would be a format_version bump on a closed published schema, and the
+        # comment above says what that costs.
+        additional_files = {
+            **(additional_files or {}),
+            CAPABILITIES_NAME: orchestration.capabilities_manifest(
+                trace.snapshot().resolved_layers
+            ),
+        }
         if request.products or request.report is not None:
             try:
                 scientific = orchestration.build_product_bundle(
@@ -711,7 +725,8 @@ def dispatch_request(
                         f"{PRESETS_DIRECTORY}/."
                     )
                 reserved = sorted(
-                    set(product_files) & {"products.json", *RESERVED_BUNDLE_PATHS}
+                    set(product_files)
+                    & {*MERGED_METADATA_PATHS, *RESERVED_BUNDLE_PATHS}
                 )
                 if reserved:
                     raise ConfigError(
@@ -719,7 +734,7 @@ def dispatch_request(
                         "the audit tree."
                     )
                 additional_files = {**(additional_files or {}), **product_files}
-                additional_files["products.json"] = scientific.manifest
+                additional_files[PRODUCTS_NAME] = scientific.manifest
             except Exception as original:
                 failure_status = (
                     "refused" if isinstance(original, REFUSALS) else "error"

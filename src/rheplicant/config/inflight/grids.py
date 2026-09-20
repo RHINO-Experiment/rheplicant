@@ -126,13 +126,13 @@ def _routes(document: Mapping[str, Any]) -> list[tuple[str, Mapping[str, Any]]]:
 
     §0.3 E.10's global ruling: ``inference.twin.replace.<node>`` reaches
     ``build_node_operator`` down the same path ``model.<node>`` does and is
-    outside ``preflight/model.py::_nodes``, so a check that walks only
+    outside ``sections/compose.py::model_nodes``, so a check that walks only
     ``model:`` guards one route of two.  Every check in this module walks
     both, and each says so in its own docstring.
     """
-    from rheplicant.config.preflight.model import _nodes
+    from rheplicant.config.sections.compose import model_nodes
 
-    routes: list[tuple[str, Mapping[str, Any]]] = [("model", _nodes(document))]
+    routes: list[tuple[str, Mapping[str, Any]]] = [("model", model_nodes(document))]
     inference = document.get("inference")
     twin = inference.get("twin") if isinstance(inference, Mapping) else None
     replace = twin.get("replace") if isinstance(twin, Mapping) else None

@@ -801,7 +801,7 @@ class TestA13sBandLegs:
 class TestA13WalksBothRoutesToTheSameOperator:
     """§0.3 E.10's global ruling: ``inference.twin.replace.<node>`` reaches
     ``build_node_operator`` down the same path ``model.<node>`` does, and is
-    outside ``preflight/model.py::_nodes``."""
+    outside ``sections/compose.py::model_nodes``."""
 
     def test_the_replace_route_is_decided_too(self):
         found = axis_only(replacing({"cw_tone": {"line_width": 1.0}},
