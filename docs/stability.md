@@ -148,6 +148,8 @@ bundle is a 404 nothing else would catch.
 |---|---|---|
 | Configuration document schema | `"1"` | `json_schema()["schemaVersion"]` |
 | Audit bundle integrity manifest | `1` | `_rheplicant_bootstrap.audit.integrity.INTEGRITY_FORMAT_VERSION` |
+| Audit provenance document | `1` | `provenance-v1.schema.json`, `format_version.const` |
+| Audit diagnostics document | `1` | `diagnostics-v1.schema.json`, `format_version.const` |
 | Inference archive | `3` | `rheplicant.inference.archive` |
 | Generated script | `1` | `_rheplicant_bootstrap.script.SCRIPT_FORMAT_VERSION` |
 
@@ -155,6 +157,21 @@ A published script carries its format version in the call it makes, and a
 script written before versions existed is refused with the command that
 regenerates it — the embedded source bytes in the old file are unchanged and
 still the author's.
+
+The two audit documents are **closed**: every object in them sets
+`additionalProperties: false` and requires every property it declares, so a
+field cannot be added or removed without raising the version — and the schemas
+ship in the wheel, where an out-of-repo consumer reads them. The exceptions are
+three map definitions (`jsonObject`, `intMap`, `stringMap`), which take
+arbitrary keys because arbitrary keys are what they capture.
+
+`tests/config/test_audit_schemas.py` holds both halves against the goldens in
+`tests/config/golden/`. Closure is checked at every object path a golden
+reaches, and every array the schemas declare must carry an item in at least one
+golden — an empty array validates against any item type, so a corpus with all
+arrays empty checks no item schema at all. `provenance-populated.json` and
+`diagnostics-populated.json` are the goldens that answer for the item shapes;
+the three status goldens are byte-identical whatever an item becomes.
 
 Each is compared **type-exactly** where it is read. `3.0 != 3` is False in
 Python and so is `True != 1`, so a manifest storing either would otherwise be

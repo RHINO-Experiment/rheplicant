@@ -1,0 +1,146 @@
+{
+  "artefacts": {
+    "diagnostics": {
+      "bytes": null,
+      "reason": "boundary_not_reached",
+      "relative_path": "diagnostics.json",
+      "sha256": null,
+      "written": false
+    },
+    "input": {
+      "bytes": 18,
+      "reason": null,
+      "relative_path": "config.input.yaml",
+      "sha256": "5c9536c0f64193f535c425baf9f2c7431b89eb46bab5fb85d4bfcffabb565f43",
+      "written": true
+    },
+    "journal": {
+      "bytes": null,
+      "reason": "transaction_not_reached",
+      "relative_path": ".rheplicant-journal",
+      "sha256": null,
+      "written": false
+    },
+    "lock": {
+      "bytes": null,
+      "reason": "transaction_not_reached",
+      "relative_path": ".rheplicant-lock",
+      "sha256": null,
+      "written": false
+    },
+    "marker": {
+      "bytes": null,
+      "reason": "boundary_not_reached",
+      "relative_path": ".rheplicant-results.json",
+      "sha256": null,
+      "written": false
+    },
+    "provenance": {
+      "bytes": null,
+      "reason": "boundary_not_reached",
+      "relative_path": "provenance.json",
+      "sha256": null,
+      "written": false
+    },
+    "resolved_base": {
+      "bytes": null,
+      "reason": "layer_not_complete",
+      "relative_path": "config.resolved.yaml",
+      "sha256": null,
+      "written": false
+    },
+    "resolved_variants": [
+      {
+        "bytes": null,
+        "reason": "layer_not_complete",
+        "relative_path": "variants/n-76/config.resolved.yaml",
+        "sha256": null,
+        "written": false
+      }
+    ]
+  },
+  "completed_boundaries": [
+    {
+      "layer": null,
+      "stage": "source"
+    },
+    {
+      "layer": {
+        "kind": "base",
+        "name": null
+      },
+      "stage": "preflight"
+    },
+    {
+      "layer": null,
+      "stage": "serialization"
+    }
+  ],
+  "deferred_validations": [
+    {
+      "checks": [
+        "B4",
+        "B7"
+      ],
+      "descriptor": {
+        "index": 0,
+        "kind": "nuts",
+        "name": "fit",
+        "variant": null
+      },
+      "layer": {
+        "kind": "base",
+        "name": null
+      }
+    }
+  ],
+  "error": null,
+  "findings": [
+    {
+      "check": "A30",
+      "message": "the gain prior is wider than the calibrator supports",
+      "severity": "warn",
+      "where": "model.gain"
+    },
+    {
+      "check": "A53",
+      "message": "this document's physics is partly a stand-in",
+      "severity": "report",
+      "where": "sky.model"
+    }
+  ],
+  "format_version": 1,
+  "gates": [
+    {
+      "declared_mode": "auto",
+      "effective_state": "enabled",
+      "layer": {
+        "kind": "base",
+        "name": null
+      },
+      "name": "conjugate",
+      "reason": null,
+      "schema_id": "gate/conjugate/v1"
+    }
+  ],
+  "runs": [
+    {
+      "capture_scope": null,
+      "exception_message": null,
+      "exception_type": null,
+      "index": 0,
+      "is_dirt_error": null,
+      "kind": "nuts",
+      "layer": {
+        "kind": "base",
+        "name": null
+      },
+      "name": "fit",
+      "phases": [],
+      "status": "ok",
+      "variant": null,
+      "wall_time_ns": 1234567
+    }
+  ],
+  "status": "ok"
+}

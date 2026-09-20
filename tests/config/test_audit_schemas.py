@@ -12,6 +12,12 @@ from _rheplicant_bootstrap.audit.provenance import ARTEFACT_REASONS, STATUSES
 from _rheplicant_bootstrap.audit.trace import STAGES
 from _rheplicant_bootstrap.types import UNAVAILABLE_REASONS
 from rheplicant.config.schemas import load_schema
+from tests.config.schema_walk import (
+    at_pointer,
+    declared_array_pointers,
+    object_verdicts,
+    walk,
+)
 
 GOLDEN = Path(__file__).with_name("golden")
 
@@ -36,12 +42,45 @@ def test_every_object_schema_is_closed_and_complete(name):
             assert set(node["required"]) == set(node["properties"])
 
 
-@pytest.mark.parametrize("kind", ("provenance", "diagnostics"))
-@pytest.mark.parametrize("status", STATUSES)
-def test_every_golden_validates_against_packaged_schema(kind, status):
+def goldens(kind):
+    """Every golden of a kind, taken from the directory rather than listed.
+
+    Parametrizing over ``STATUSES`` was the older spelling and it silently
+    excluded any golden whose name is not a status -- which is exactly what
+    ``{kind}-populated.json`` is. A golden that no test validates is a file
+    that looks like evidence.
+    """
+    rows = sorted(GOLDEN.glob(f"{kind}-*.json"))
+    assert rows, kind
+    return rows
+
+
+GOLDEN_CASES = tuple(
+    (path.stem.split("-", 1)[0], path)
+    for kind in ("provenance", "diagnostics")
+    for path in goldens(kind)
+)
+
+
+@pytest.mark.parametrize(
+    ("kind", "path"), GOLDEN_CASES, ids=[path.stem for _kind, path in GOLDEN_CASES]
+)
+def test_every_golden_validates_against_packaged_schema(kind, path):
     schema = load_schema(f"{kind}-v1")
-    value = json.loads((GOLDEN / f"{kind}-{status}.json").read_bytes())
-    jsonschema.validate(value, schema)
+    jsonschema.validate(json.loads(path.read_bytes()), schema)
+
+
+def test_the_golden_corpus_covers_every_status_and_the_populated_case():
+    """The corpus is read from the directory, so this is what pins its shape.
+
+    Without it, deleting ``provenance-populated.json`` would remove the only
+    document that carries an item in most of these arrays, and every test above
+    would keep passing over the three that remain.
+    """
+    for kind in ("provenance", "diagnostics"):
+        assert {path.stem for path in goldens(kind)} == {
+            f"{kind}-{status}" for status in STATUSES
+        } | {f"{kind}-populated"}
 
 
 def test_the_presets_shape_is_covered_by_a_populated_case():
@@ -60,6 +99,13 @@ def test_the_presets_shape_is_covered_by_a_populated_case():
     record is ever widened to carry a digest, this test is the one that must be
     updated deliberately -- alongside a schema version bump -- rather than
     discovering afterwards that nothing noticed.
+
+    The argument generalized on 2026-09-20:
+    ``test_every_declared_array_is_populated_by_some_golden`` now asks it of
+    every array both schemas declare, and ``provenance-populated.json`` answers
+    for ``presets`` with a real producer's output rather than a copy edited
+    here. What this test still adds is the NEGATIVE direction -- that a widened
+    item is refused -- which a populated golden cannot state.
     """
     schema = load_schema("provenance-v1")
     value = json.loads((GOLDEN / "provenance-ok.json").read_bytes())
@@ -87,26 +133,40 @@ def test_schema_vocabularies_are_the_runtime_vocabularies():
     assert tuple(provenance["$defs"]["unavailableReason"]["enum"]) == UNAVAILABLE_REASONS
 
 
-@pytest.mark.parametrize("kind", ("provenance", "diagnostics"))
-def test_unknown_properties_are_refused_at_every_present_object_path(kind):
+@pytest.mark.parametrize(
+    ("kind", "path"), GOLDEN_CASES, ids=[path.stem for _kind, path in GOLDEN_CASES]
+)
+def test_unknown_properties_are_refused_at_every_present_object_path(kind, path):
     schema = load_schema(f"{kind}-v1")
-    value = json.loads((GOLDEN / f"{kind}-ok.json").read_bytes())
-
-    def object_paths(node, path=()):
-        if isinstance(node, dict):
-            yield path
-            for key, child in node.items():
-                yield from object_paths(child, (*path, key))
-        elif isinstance(node, list):
-            for index, child in enumerate(node):
-                yield from object_paths(child, (*path, index))
+    value = json.loads(path.read_bytes())
 
     def error_tree(error):
         yield error
         for child in error.context:
             yield from error_tree(child)
 
-    for path in object_paths(value):
+    verdicts = object_verdicts(schema, value)
+    closed = tuple(path for path, (shut, _where) in verdicts.items() if shut)
+    assert closed
+
+    # An object that is NOT closed has to be a MAP -- no declared properties,
+    # keys matched by a pattern -- and never a record with a field list. All
+    # three open definitions here (`jsonObject`, `intMap`, `stringMap`) have
+    # exactly that shape, so the rule is read off them rather than listed.
+    #
+    # Without this line the loop below would silently shrink: opening a closed
+    # `$def` would take its objects out of the census instead of failing it,
+    # which is the same blind spot in a new place.
+    for path, (shut, where) in verdicts.items():
+        if shut:
+            continue
+        for pointer in where:
+            node = at_pointer(schema, pointer)
+            assert not node.get("properties"), (path, pointer)
+            assert not node.get("required"), (path, pointer)
+            assert node.get("patternProperties"), (path, pointer)
+
+    for path in closed:
         mutated = copy.deepcopy(value)
         target = mutated
         for segment in path:
@@ -116,3 +176,46 @@ def test_unknown_properties_are_refused_at_every_present_object_path(kind):
         errors = [error for root in roots for error in error_tree(root)]
         assert errors
         assert any(tuple(error.absolute_path) == path for error in errors)
+
+@pytest.mark.parametrize("kind", ("provenance", "diagnostics"))
+def test_every_declared_array_is_populated_by_some_golden(kind):
+    """An empty array validates against ANY item type, so a corpus of goldens
+    whose arrays are all empty checks no item schema at all.
+
+    ``test_the_presets_shape_is_covered_by_a_populated_case`` makes that
+    argument for one field. This is the general case. Measured 2026-09-20: of
+    the sixteen arrays ``provenance-v1`` declares, exactly one
+    (``completed_boundaries``) had ever been seen carrying an item, and of the
+    eight in ``diagnostics-v1`` likewise one. The other twenty-two item schemas
+    -- every input, capture member, plugin, distribution, python target, seed,
+    variant, resource, run, path encoding, preset, finding, gate, deferred
+    validation and resolved-variant artefact the producer can emit -- were
+    declared and never once exercised.
+
+    The census is derived from the schema rather than listed here, so declaring
+    a new array is enough to require a golden that fills it. The one exemption
+    is derived too: an array the schema pins at ``maxItems: 0`` is a reserved
+    slot with no item type to exercise.
+
+    The assertion is an equality rather than a subset on purpose. A subset
+    would stay green if the populated golden were deleted -- those arrays would
+    simply stop being reached, and a clause that cannot be reached is the shape
+    this repository keeps finding behind a passing test.
+    """
+    root = load_schema(f"{kind}-v1")
+    declared = set(declared_array_pointers(root, root))
+    required = {
+        pointer for pointer in declared if at_pointer(root, pointer).get("maxItems") != 0
+    }
+
+    populated = set()
+    for path in goldens(kind):
+        value = json.loads(path.read_bytes())
+        for _path, pointer, node, item in walk(root, value, root):
+            if node.get("type") == "array" and item:
+                populated.add(pointer)
+
+    assert populated == required, {
+        "declared but never populated": sorted(required - populated),
+        "populated but not declared": sorted(populated - required),
+    }

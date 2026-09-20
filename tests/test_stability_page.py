@@ -26,6 +26,7 @@ import pytest
 
 from _rheplicant_bootstrap.audit.integrity import INTEGRITY_FORMAT_VERSION
 from rheplicant.config.schema import json_schema
+from rheplicant.config.schemas import load_schema
 from rheplicant.core.capability import Maturity
 from rheplicant.inference.archive import _FORMAT_VERSION
 from rheplicant.radio import capabilities
@@ -107,6 +108,14 @@ def test_the_page_states_the_real_contract_versions(page):
         (f'`"{json_schema()["schemaVersion"]}"`', "the schema version"),
         (f"| `{INTEGRITY_FORMAT_VERSION}` |", "the integrity version"),
         (f"| `{_FORMAT_VERSION}` |", "the archive version"),
+        *(
+            (
+                f"| Audit {name} document | "
+                f"`{load_schema(f'{name}-v1')['properties']['format_version']['const']}` |",
+                f"the {name} document version",
+            )
+            for name in ("provenance", "diagnostics")
+        ),
     ):
         assert version in page, f"{PAGE.name} does not state {what} as {version}"
 
@@ -131,6 +140,7 @@ def test_the_page_names_the_guards_that_hold_its_claims(page):
         "tests/test_public_surface.py",
         "tests/test_cross_package_privates.py",
         "tests/test_bayesmith_floor.py",
+        "tests/config/test_audit_schemas.py",
     ):
         assert guard in page, f"{PAGE.name} does not name {guard}"
         assert (ROOT / guard).exists(), f"{PAGE.name} names {guard}, which is gone"

@@ -8,9 +8,19 @@ declares ``"format_version": {"const": 1}``, and sets
 object it defines. ``tests/config/test_audit_schemas.py`` enforces it.
 
 So a field cannot be added here, and cannot be removed here, without a
-``format_version`` bump -- and the shape is served verbatim by an out-of-repo
-consumer (``rheplicant-compute``'s schema RPC), so the bump is a cross-repository
-change rather than a local one.
+``format_version`` bump.
+
+**Whether that bump is also a cross-repository change is UNVERIFIED from this
+checkout, and this paragraph used to assert that it is.** It said the shape is
+served verbatim by ``rheplicant-compute``'s schema RPC. That repository is not
+present on this machine (checked 2026-09-20), so the claim could not be
+measured here; the verbatim-serving case that IS pinned by a test is the
+configuration grammar, in ``tests/config/test_schema.py``, which is a different
+schema. Treat the cost of a bump as unknown until someone with that checkout
+answers it -- `grep` its schema RPC for ``provenance-v1`` -- and read an
+unverified dependency as a reason to look, not as a reason to assume either
+number. A cost written down as certain is how a cheap change gets deferred and
+an expensive one gets made.
 
 Three separate review findings collided with this in one sitting, each filed as
 a small independent fix, none of them small:

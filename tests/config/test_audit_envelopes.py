@@ -27,6 +27,7 @@ from _rheplicant_bootstrap.audit.diagnostics import (
 )
 from _rheplicant_bootstrap.audit.integrity import INTEGRITY_NAME
 from _rheplicant_bootstrap.audit.json import canonical_json_bytes
+from _rheplicant_bootstrap.audit.names import encode_name
 from _rheplicant_bootstrap.audit.provenance import (
     ARTEFACT_REASONS,
     ARTEFACT_RECORD_KEYS,
@@ -38,6 +39,7 @@ from _rheplicant_bootstrap.audit.resolved import ResolvedArtefact
 from _rheplicant_bootstrap.audit.software import collect_software
 from _rheplicant_bootstrap.audit.trace import STAGES
 from _rheplicant_bootstrap.audit.types import (
+    ArtefactMaterialization,
     ArtefactRecord,
     ArtefactTable,
     DeferredValidationRecord,
@@ -48,6 +50,7 @@ from _rheplicant_bootstrap.audit.types import (
     PathEncoding,
     ResolvedLayerRecord,
     RunOutcomeRecord,
+    empty_artefact_table,
 )
 from _rheplicant_bootstrap.errors import ConfigError
 from _rheplicant_bootstrap.layering import OriginNode
@@ -129,6 +132,198 @@ def snapshot(status="ok"):
     return trace, trace.snapshot()
 
 
+#: One of everything the producer can emit, for the goldens that pin the ITEM
+#: schemas. :func:`snapshot` deliberately records the least a bundle can carry,
+#: which is why its three goldens have every array empty; this one is the other
+#: end. ``test_every_declared_array_is_populated_by_some_golden`` in
+#: ``test_audit_schemas.py`` is the guard that keeps the two in step: declare a
+#: new array in either schema and it fails until a golden fills it.
+MEMBER_SHA = "b" * 64
+VARIANT_SHA = "c" * 64
+
+
+def populated_snapshot():
+    """A snapshot whose every array carries at least one item."""
+    base = LayerIdentity("base", None)
+    variant = LayerIdentity("variant", "v")
+    descriptor = {"index": 0, "name": "fit", "kind": "nuts", "variant": None}
+    trace = AuditTrace()
+    trace.record_bootstrap(
+        {
+            "protocol_version": 1,
+            "launch_mode": "cli",
+            "input_sha256": INPUT_SHA,
+            "presets": ("rhino_v1", "rhino_v1_extended"),
+            "source_name": "config.yaml",
+            "source_path": "/work/config.yaml",
+            "source_realpath": "/work/config.yaml",
+            "base_dir": "/work",
+            "invocation_outputs_dir": "/work/out",
+            "invocation_outputs_write": ("config.input.yaml", "provenance.json"),
+        }
+    )
+    trace.record_software(software_row())
+    trace.record_runtime(
+        {
+            "requested": {"jax_enable_x64": True, "platform": "cpu"},
+            "actual": {"jax_enable_x64": True, "backend": "cpu"},
+            "prior_environment": {"jax_enable_x64": None, "jax_platforms": None},
+        }
+    )
+    trace.configure_artefacts(
+        dataclasses.replace(
+            empty_artefact_table(),
+            resolved_variants=(
+                ArtefactRecord(
+                    "variants/n-76/config.resolved.yaml",
+                    False,
+                    None,
+                    None,
+                    "layer_not_complete",
+                ),
+            ),
+        )
+    )
+    trace.record_input(
+        base,
+        {
+            "document_path": "observation.beams",
+            "path": "/work/beams",
+            "realpath": "/work/beams",
+            "format": "cst",
+            "kind": "directory",
+            "sha256": INPUT_SHA,
+            "members": (
+                {
+                    "relative_path": "port1.txt",
+                    "path": "/work/beams/port1.txt",
+                    "realpath": "/work/beams/port1.txt",
+                    "sha256": MEMBER_SHA,
+                },
+            ),
+        },
+    )
+    trace.record_python_target(
+        base,
+        {
+            "document_path": "sky.model",
+            "target": "mypackage.sky:build",
+            "code_hash": None,
+            "unobserved_io": True,
+        },
+    )
+    trace.record_seed(base, {"root": 11, "named": {"noise": 12, "sky": 13}})
+    trace.record_variant(variant, {
+        "encoded_name": encode_name("v"),
+        "status": "ok",
+        "resolved_sha256": VARIANT_SHA,
+    })
+    trace.record_resource(
+        base,
+        {
+            "build_order": ("beam", "sky"),
+            "shared_objects": {"beam": "instrument.beam"},
+        },
+    )
+    trace.record_plugin(
+        {
+            "name": "rheplicant_demo_plugin",
+            "already_imported": False,
+            "origin": "/work/plugin/__init__.py",
+            "origin_reason": None,
+            "loader_type": "SourceFileLoader",
+            "loader_type_reason": None,
+            "resolved_path": "/work/plugin/__init__.py",
+            "resolved_path_reason": None,
+            "distributions": (
+                {
+                    "name": "rheplicant-demo-plugin",
+                    "version": "0.3.1",
+                    "version_reason": None,
+                    # A nested list here is not decoration: `direct_url` is
+                    # frozen arbitrary JSON, and this is the only place a
+                    # provenance document can reach the recursive ARRAY branch
+                    # of `$defs/jsonValue`. With every direct_url flat, that
+                    # branch was declared and never once validated.
+                    "direct_url": {
+                        "url": "file:///work/plugin",
+                        "dir_info": {"editable": True},
+                        "subdirectory_candidates": ["src", "src/plugin"],
+                    },
+                    "direct_url_reason": None,
+                },
+            ),
+            "distributions_reason": None,
+            "code_hash": "d" * 64,
+            "code_hash_reason": None,
+            "unobserved_io": True,
+        }
+    )
+    trace.record_path_encoding(
+        {"kind": "variant", "document_name": "v", "encoded_name": encode_name("v")}
+    )
+    trace.record_path_encoding(
+        {"kind": "run", "document_name": "fit", "encoded_name": encode_name("fit")}
+    )
+    trace.record_findings(
+        "preflight",
+        base,
+        [
+            {
+                "check": "A30",
+                "severity": "warn",
+                "where": "model.gain",
+                "message": "the gain prior is wider than the calibrator supports",
+            },
+            {
+                "check": "A53",
+                "severity": "report",
+                "where": "sky.model",
+                "message": "this document's physics is partly a stand-in",
+            },
+        ],
+    )
+    trace.record_gate(
+        base,
+        {
+            "name": "conjugate",
+            "schema_id": "gate/conjugate/v1",
+            "declared_mode": "auto",
+            "effective_state": "enabled",
+            "reason": None,
+        },
+    )
+    trace.record_parsed_run(
+        base,
+        {
+            "descriptor": descriptor,
+            "resolved_options": {"draws": 100},
+            "deferred_checks": ("B4",),
+        },
+    )
+    trace.record_deferred_validation(
+        base, {"descriptor": descriptor, "checks": ("B4", "B7")}
+    )
+    trace.record_run_outcome(
+        base,
+        {
+            "descriptor": descriptor,
+            "status": "ok",
+            "wall_time_ns": 1_234_567,
+            "exception_type": None,
+            "exception_message": None,
+            "capture_scope": None,
+            "is_dirt_error": None,
+        },
+    )
+    trace.boundary_completed("source")
+    trace.boundary_completed("preflight", base)
+    trace.record_artefact_materialized(
+        ArtefactMaterialization("input", None, "config.input.yaml", len(INPUT), INPUT_SHA)
+    )
+    return trace, trace.snapshot()
+
+
 def test_canonical_json_contract():
     value = {"雪": [1, -0.0], "a": True}
     assert canonical_json_bytes(value) == (
@@ -158,6 +353,27 @@ def test_envelopes_match_exact_goldens(status):
     assert bundle.files["config.input.yaml"] is bundle.input
     assert bundle.files["provenance.json"] is bundle.provenance
     assert bundle.files["diagnostics.json"] is bundle.diagnostics
+
+
+def test_the_populated_envelope_matches_its_golden():
+    """The byte golden for the snapshot that carries one of everything.
+
+    The three status goldens cannot pin an item shape, because the arrays they
+    carry are empty: change the projection of a seed, a plugin distribution or
+    a run outcome and all three stay byte-identical. That is how a
+    ``format_version`` 1 breaking change to ``presets`` reached the tree
+    unnoticed once already, recorded in
+    ``test_the_presets_shape_is_covered_by_a_populated_case``.
+    """
+    _trace, initial = populated_snapshot()
+    bundle = serialize_bundle(
+        candidate_serialization_snapshot(initial),
+        status="ok",
+        input_bytes=INPUT,
+        resolved=(),
+    )
+    assert bundle.provenance == (GOLDEN / "provenance-populated.json").read_bytes()
+    assert bundle.diagnostics == (GOLDEN / "diagnostics-populated.json").read_bytes()
 
 
 def test_candidate_and_bundle_are_pure():

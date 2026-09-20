@@ -1,0 +1,292 @@
+{
+  "artefacts": {
+    "diagnostics": {
+      "bytes": null,
+      "reason": "boundary_not_reached",
+      "relative_path": "diagnostics.json",
+      "sha256": null,
+      "written": false
+    },
+    "input": {
+      "bytes": 18,
+      "reason": null,
+      "relative_path": "config.input.yaml",
+      "sha256": "5c9536c0f64193f535c425baf9f2c7431b89eb46bab5fb85d4bfcffabb565f43",
+      "written": true
+    },
+    "journal": {
+      "bytes": null,
+      "reason": "transaction_not_reached",
+      "relative_path": ".rheplicant-journal",
+      "sha256": null,
+      "written": false
+    },
+    "lock": {
+      "bytes": null,
+      "reason": "transaction_not_reached",
+      "relative_path": ".rheplicant-lock",
+      "sha256": null,
+      "written": false
+    },
+    "marker": {
+      "bytes": null,
+      "reason": "boundary_not_reached",
+      "relative_path": ".rheplicant-results.json",
+      "sha256": null,
+      "written": false
+    },
+    "provenance": {
+      "bytes": null,
+      "reason": "boundary_not_reached",
+      "relative_path": "provenance.json",
+      "sha256": null,
+      "written": false
+    },
+    "resolved_base": {
+      "bytes": null,
+      "reason": "layer_not_complete",
+      "relative_path": "config.resolved.yaml",
+      "sha256": null,
+      "written": false
+    },
+    "resolved_variants": [
+      {
+        "bytes": null,
+        "reason": "layer_not_complete",
+        "relative_path": "variants/n-76/config.resolved.yaml",
+        "sha256": null,
+        "written": false
+      }
+    ]
+  },
+  "bootstrap": {
+    "base_dir": "/work",
+    "input_sha256": "5c9536c0f64193f535c425baf9f2c7431b89eb46bab5fb85d4bfcffabb565f43",
+    "invocation_outputs_dir": "/work/out",
+    "invocation_outputs_write": [
+      "config.input.yaml",
+      "provenance.json"
+    ],
+    "launch_mode": "cli",
+    "presets": [
+      "rhino_v1",
+      "rhino_v1_extended"
+    ],
+    "protocol_version": 1,
+    "source_name": "config.yaml",
+    "source_path": "/work/config.yaml",
+    "source_realpath": "/work/config.yaml"
+  },
+  "completed_boundaries": [
+    {
+      "layer": null,
+      "stage": "source"
+    },
+    {
+      "layer": {
+        "kind": "base",
+        "name": null
+      },
+      "stage": "preflight"
+    },
+    {
+      "layer": null,
+      "stage": "serialization"
+    }
+  ],
+  "format_version": 1,
+  "inputs": [
+    {
+      "document_path": "observation.beams",
+      "format": "cst",
+      "kind": "directory",
+      "layer": {
+        "kind": "base",
+        "name": null
+      },
+      "members": [
+        {
+          "path": "/work/beams/port1.txt",
+          "realpath": "/work/beams/port1.txt",
+          "relative_path": "port1.txt",
+          "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      ],
+      "path": "/work/beams",
+      "realpath": "/work/beams",
+      "sha256": "5c9536c0f64193f535c425baf9f2c7431b89eb46bab5fb85d4bfcffabb565f43"
+    }
+  ],
+  "path_encodings": [
+    {
+      "document_name": "v",
+      "encoded_name": "n-76",
+      "kind": "variant"
+    },
+    {
+      "document_name": "fit",
+      "encoded_name": "n-666974",
+      "kind": "run"
+    }
+  ],
+  "plugins": [
+    {
+      "already_imported": false,
+      "code_hash": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "code_hash_reason": null,
+      "distributions": [
+        {
+          "direct_url": {
+            "dir_info": {
+              "editable": true
+            },
+            "subdirectory_candidates": [
+              "src",
+              "src/plugin"
+            ],
+            "url": "file:///work/plugin"
+          },
+          "direct_url_reason": null,
+          "name": "rheplicant-demo-plugin",
+          "version": "0.3.1",
+          "version_reason": null
+        }
+      ],
+      "distributions_reason": null,
+      "loader_type": "SourceFileLoader",
+      "loader_type_reason": null,
+      "name": "rheplicant_demo_plugin",
+      "origin": "/work/plugin/__init__.py",
+      "origin_reason": null,
+      "resolved_path": "/work/plugin/__init__.py",
+      "resolved_path_reason": null,
+      "unobserved_io": true
+    }
+  ],
+  "python_targets": [
+    {
+      "code_hash": null,
+      "document_path": "sky.model",
+      "layer": {
+        "kind": "base",
+        "name": null
+      },
+      "target": "mypackage.sky:build",
+      "unobserved_io": true
+    }
+  ],
+  "resources": [
+    {
+      "build_order": [
+        "beam",
+        "sky"
+      ],
+      "layer": {
+        "kind": "base",
+        "name": null
+      },
+      "shared_objects": {
+        "beam": "instrument.beam"
+      }
+    }
+  ],
+  "runs": [
+    {
+      "index": 0,
+      "kind": "nuts",
+      "layer": {
+        "kind": "base",
+        "name": null
+      },
+      "name": "fit",
+      "status": "ok",
+      "variant": null,
+      "wall_time_ns": 1234567
+    }
+  ],
+  "runtime": {
+    "actual": {
+      "backend": "cpu",
+      "jax_enable_x64": true
+    },
+    "prior_environment": {
+      "jax_enable_x64": null,
+      "jax_platforms": null
+    },
+    "requested": {
+      "jax_enable_x64": true,
+      "platform": "cpu"
+    }
+  },
+  "seeds": [
+    {
+      "layer": {
+        "kind": "base",
+        "name": null
+      },
+      "named": {
+        "noise": 12,
+        "sky": 13
+      },
+      "root": 11
+    }
+  ],
+  "software": {
+    "dependencies": {
+      "equinox": {
+        "reason": null,
+        "version": "1.0"
+      },
+      "jax": {
+        "reason": null,
+        "version": "1.0"
+      },
+      "jaxlib": {
+        "reason": null,
+        "version": "1.0"
+      },
+      "numpy": {
+        "reason": null,
+        "version": "1.0"
+      },
+      "numpyro": {
+        "reason": null,
+        "version": "1.0"
+      }
+    },
+    "host": {
+      "machine": "test",
+      "release": "1",
+      "system": "TestOS"
+    },
+    "python": {
+      "executable": "/python",
+      "implementation": "CPython",
+      "version": "3.12.0"
+    },
+    "rheplicant": {
+      "dirty": false,
+      "dirty_reason": null,
+      "git_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "git_commit_reason": null,
+      "source_root": "/src",
+      "source_root_reason": null,
+      "tracked_diff_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "tracked_diff_sha256_reason": null,
+      "version": "1.0",
+      "version_reason": null
+    }
+  },
+  "status": "ok",
+  "variants": [
+    {
+      "encoded_name": "n-76",
+      "layer": {
+        "kind": "variant",
+        "name": "v"
+      },
+      "resolved_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "status": "ok"
+    }
+  ]
+}
