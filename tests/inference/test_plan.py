@@ -924,6 +924,48 @@ class TestConvergence:
                 pipeline, state, observed, noise=NOISE, max_iter=5, min_sweeps=6
             )
 
+    def test_min_sweeps_is_not_policed_when_no_verdict_is_asked_for(
+        self, basis_setup, state
+    ):
+        """``min_sweeps`` is the floor under a VERDICT, so with ``tol=None``
+        there is no verdict for it to floor and the pair above is not the
+        caller's mistake: the run takes its sweeps and returns, making no
+        convergence claim.
+
+        The twin of :meth:`test_a_min_sweeps_above_the_cap_is_refused`, and
+        the cell that names the stand-down. Without it, deleting ``tol is not
+        None and`` from that guard still turns tests red — but only tests
+        that pass ``tol=None`` with a cap below the default ``min_sweeps``
+        while asking about something else entirely, so their greenness rests
+        on a fixture nobody chose for this.
+        """
+        from rheplicant.inference.plan import EARLIEST_CONVERGED_SWEEP
+
+        space, pipeline, observed = basis_setup
+        plan = SamplingPlan(space, Block("gain"), Block("t_coeff"))
+        common = {"noise": NOISE, "tol": None, "solve_guard": None}
+
+        free = plan.estimate(pipeline, state, observed, max_iter=5,
+                             min_sweeps=6, **common)
+        assert free.diagnostics.converged is None
+        assert free.diagnostics.sweeps == 5
+
+        # and below the earliest sweep a verdict could be reached at all,
+        # where a run WITH a tol can only refuse
+        early = plan.estimate(pipeline, state, observed,
+                              max_iter=EARLIEST_CONVERGED_SWEEP - 1,
+                              min_sweeps=EARLIEST_CONVERGED_SWEEP + 3, **common)
+        assert early.diagnostics.converged is None
+        assert early.diagnostics.sweeps == EARLIEST_CONVERGED_SWEEP - 1
+        # asserted without a `match=`, because the sentence belongs to
+        # test_a_min_sweeps_above_the_cap_is_refused and the refusal census
+        # counts each one once
+        with pytest.raises(ParameterSpaceError) as refused:
+            plan.estimate(pipeline, state, observed, noise=NOISE,
+                          max_iter=EARLIEST_CONVERGED_SWEEP - 1,
+                          min_sweeps=EARLIEST_CONVERGED_SWEEP + 3)
+        assert "min_sweeps <= max_iter" in str(refused.value)
+
     @pytest.mark.parametrize("max_iter", [0, -1, 2.0])
     def test_a_nonsense_sweep_cap_is_refused(self, basis_setup, state, max_iter):
         space, pipeline, observed = basis_setup

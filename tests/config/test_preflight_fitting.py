@@ -3090,21 +3090,30 @@ class TestCounts:
         assert [f.check for f in
                 _counted(_warmed(min_sweeps=9, max_iter=2))] == ["A25"]
 
-    def test_the_tol_gate_covers_min_sweeps_and_NOTHING_else(self):
+    def test_a_null_tol_stands_down_the_min_sweeps_clause_and_NOTHING_else(self):
         # `plan.py:909` gates only the `min_sweeps` clause; `max_iter` is
-        # refused unconditionally at `:900`.  Kills widening `_A25_TOL_GATED`
-        # to `{"min_sweeps", "max_iter"}`, under which `max_iter: 2.5` beside
-        # `tol: null` goes unchecked and reaches the user as `plan.py:900`'s
-        # FALSE "needs max_iter >= 1, got 2.5" -- the very message this
-        # task's headline claims to fix.
-        from rheplicant.config.preflight.fitting import _A25_TOL_GATED
-
-        assert _A25_TOL_GATED == frozenset({"min_sweeps"})
+        # refused unconditionally at `:900`.  Kills gating any other row on
+        # the live `tol`, under which `max_iter: 2.5` beside `tol: null` goes
+        # unchecked and reaches the user as `plan.py:900`'s FALSE "needs
+        # max_iter >= 1, got 2.5" -- the very message this task's headline
+        # claims to fix.
+        #
+        # Split from the constant pin below deliberately: while the two lived
+        # in one test, widening `_A25_TOL_GATED` failed on the pin's line and
+        # this half was never evaluated against that mutant at all.
         found = _counted(_estimate(max_iter=2.5, tol=None))
         assert [f.check for f in found] == ["A25"]
         assert "is a whole number" in found[0].message
         assert [f.check for f in
                 _counted(_estimate(solve_tol=-1.0, tol=None))] == ["A25"]
+
+    def test_the_tol_gate_is_the_one_row_and_is_pinned_where_it_is_written(self):
+        # The constant behind the behaviour above, asserted on its own so
+        # that a widened gate fails BOTH: this one on its spelling, that one
+        # on what a document does.
+        from rheplicant.config.preflight.fitting import _A25_TOL_GATED
+
+        assert _A25_TOL_GATED == frozenset({"min_sweeps"})
 
     def test_the_run_site_is_reported_before_the_warm_site(self):
         # `_a25_sites` appends; `insert(0, ...)` would put the warm start
