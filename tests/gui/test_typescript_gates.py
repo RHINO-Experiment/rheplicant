@@ -28,7 +28,7 @@ import subprocess
 import pytest
 
 _ROOT = pathlib.Path(__file__).resolve().parents[2]
-_REACT = _ROOT / "tools/config_gui_spike/react"
+_REACT = _ROOT / "tools/gui/react"
 
 #: Each gate, exactly as ``AGENTS.md`` spells it. ``test:session`` takes the
 #: separating ``--`` because it forwards to vitest, which otherwise watches.

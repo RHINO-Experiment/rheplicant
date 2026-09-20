@@ -6,7 +6,7 @@ import subprocess
 
 _ROOT = pathlib.Path(__file__).resolve().parents[2]
 _E2E = (_ROOT / "tests/gui/e2e").resolve()
-_REACT = _ROOT / "tools/config_gui_spike/react"
+_REACT = _ROOT / "tools/gui/react"
 _SCRIPT = "tsc --noEmit -p tsconfig.e2e.json"
 _GLOB = "../../../tests/gui/e2e/**/*.ts"
 

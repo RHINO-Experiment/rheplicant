@@ -141,7 +141,7 @@ public becomes a decision someone takes rather than a line that slips through.
 
 ## The GUI's HTTP API is internal
 
-Twenty-two routes under `/api`, consumed by the React client bundled beside
+Twenty routes under `/api`, consumed by the React client bundled beside
 them in `src/rheplicant/gui/static/`. It is versioned **with that client**, not
 on its own, and carries no compatibility promise to any other consumer.
 

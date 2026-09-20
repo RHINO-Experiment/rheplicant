@@ -14,7 +14,7 @@ import subprocess
 
 _ROOT = pathlib.Path(__file__).resolve().parents[2]
 _SUITE = (_ROOT / "tests/gui/react").resolve()
-_REACT = _ROOT / "tools/config_gui_spike/react"
+_REACT = _ROOT / "tools/gui/react"
 _SCRIPT = "tsc --noEmit -p tsconfig.tests.json"
 _SETUP = "src/test-setup.ts"
 _GLOBS = [

@@ -23,7 +23,6 @@ from _rheplicant_bootstrap.audit.software import package_version
 from _rheplicant_bootstrap.errors import ConfigError
 from _rheplicant_bootstrap.gui_limits import MAX_RETAINED_JOBS
 from rheplicant.gui.document import EditorSnapshot, snapshot
-from rheplicant.gui.document_edits import set_node
 from rheplicant.gui.jobs import (
     JobKind,
     JobRunner,
@@ -61,12 +60,6 @@ class _ClosedModel(BaseModel):
 
 class YamlPayload(_ClosedModel):
     yaml_text: str
-
-
-class NodeEditPayload(YamlPayload):
-    enabled: bool
-    settings: dict[str, object] | list[dict[str, object]] | None = None
-    variant: str | None = None
 
 
 class RevisionPayload(_ClosedModel):
@@ -337,28 +330,6 @@ def create_app(
     @app.get("/api/starter")
     def get_starter() -> dict[str, str]:
         return {"yaml_text": STARTER_YAML}
-
-    @app.post("/api/snapshot")
-    def document_snapshot(payload: YamlPayload) -> dict[str, object]:
-        try:
-            return _snapshot_body(snapshot(payload.yaml_text))
-        except ConfigError as error:
-            raise HTTPException(status_code=422, detail=str(error)) from error
-
-    @app.patch("/api/nodes/{node_id}")
-    def edit_node(node_id: str, payload: NodeEditPayload) -> dict[str, object]:
-        try:
-            return _snapshot_body(
-                set_node(
-                    payload.yaml_text,
-                    node_id,
-                    enabled=payload.enabled,
-                    settings=payload.settings,
-                    variant=payload.variant,
-                )
-            )
-        except ConfigError as error:
-            raise HTTPException(status_code=422, detail=str(error)) from error
 
     @app.post("/api/sessions", status_code=201)
     def create_session(payload: YamlPayload) -> dict[str, object]:

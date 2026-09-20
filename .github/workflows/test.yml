@@ -129,10 +129,10 @@ jobs:
         with:
           node-version: "20"
           cache: npm
-          cache-dependency-path: tools/config_gui_spike/react/package-lock.json
+          cache-dependency-path: tools/gui/react/package-lock.json
 
       - name: Install the frontend toolchain
-        working-directory: tools/config_gui_spike/react
+        working-directory: tools/gui/react
         run: npm ci
 
       # `sh: 1: playwright: not found` was the first symptom and `npm ci`
@@ -141,7 +141,7 @@ jobs:
       # run on the default. `--with-deps` because a bare runner has none of
       # the shared libraries chromium links against.
       - name: Install the browser Playwright drives
-        working-directory: tools/config_gui_spike/react
+        working-directory: tools/gui/react
         run: npx playwright install --with-deps chromium
 
       - name: Report environment completeness BEFORE judging any number
@@ -270,14 +270,14 @@ jobs:
         with:
           node-version: "20"
           cache: npm
-          cache-dependency-path: tools/config_gui_spike/react/package-lock.json
+          cache-dependency-path: tools/gui/react/package-lock.json
 
       - name: Install the frontend toolchain
-        working-directory: tools/config_gui_spike/react
+        working-directory: tools/gui/react
         run: npm ci
 
       - name: Install the browser Playwright drives
-        working-directory: tools/config_gui_spike/react
+        working-directory: tools/gui/react
         run: npx playwright install --with-deps chromium
 
       - name: Measure coverage serially

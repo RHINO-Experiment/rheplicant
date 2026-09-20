@@ -146,16 +146,16 @@ rhino = ["h5py"]
 # Python >= 3.11, the floor this package already declares:
 #   uv pip install -e ".[uvbeam]"
 uvbeam = ["pyuvdata>=3.0"]
-# Plan 5's two-candidate spike keeps both web stacks optional: neither the
-# scientific package nor the JAX-free command boundary imports them.  The
-# selected stack will become the documented ``gui`` extra after the spike;
-# these named extras keep the comparison reproducible in the meantime.
-gui-panel = ["panel>=1.9,<2"]
+# Plan 5 compared two web stacks behind two extras. The comparison is over:
+# React was selected, the Panel candidate and its ``gui-panel`` extra were
+# removed with the spike (A10-5), and this is the one web stack.
+#
+# ``httpx2`` is here solely for Starlette's test client. It is in ``gui-react``
+# and deliberately NOT in ``gui``: the shipped server talks HTTP through
+# uvicorn, and a test dependency must not become a runtime requirement. CI
+# installs ``gui-react`` for that reason -- installing ``gui`` alone once cost
+# 118 statements of GUI coverage without a single test failing.
 gui-react = ["fastapi>=0.116,<1", "uvicorn>=0.35,<1", "httpx2"]
-# The selected Plan 5 editor. ``gui-react`` remains the reproducible spike and
-# includes ``httpx2`` solely for Starlette's test client; the shipped server
-# talks HTTP through uvicorn and does not make that test dependency a runtime
-# requirement.
 gui = ["fastapi>=0.116,<1", "uvicorn>=0.35,<1"]
 docs = [
     "sphinx>=7",

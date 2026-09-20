@@ -256,14 +256,28 @@ Treat a YAML file like a program submitted to the account running the editor.
 Review its plugins, paths, runs and outputs before pressing an explicit job
 button.
 
+## Why React, and what became of the other candidate
+
+Plan 5 compared two web stacks behind two optional extras, `gui-panel` and
+`gui-react`, so the comparison stayed reproducible while it was live. React was
+selected. The Panel candidate, its extra, its seven tests and the two HTTP
+routes that existed only for it — `POST /api/snapshot` and
+`PATCH /api/nodes/{node_id}` — were removed on 2026-09-20 (A10-5, A10-6).
+
+Removing it took one trap with it. The toolchain's `npm test` ran the spike's
+own much smaller vitest config, not the component suite, and the working notes
+had to warn people to type `npm run test:session` instead. There is no second
+config now, so there is nothing to confuse.
+
 ## Development build
 
-The TypeScript source lives in `src/rheplicant/gui/react/`; the reproducible
-spike toolchain remains under `tools/config_gui_spike/react/`. Rebuild the
-tracked production assets with:
+The TypeScript source lives in `src/rheplicant/gui/react/`; the toolchain that
+builds it is `tools/gui/react/` — moved there from `tools/config_gui_spike/`
+with the spike, because a production build should not live under a path that
+calls itself an experiment. Rebuild the tracked production assets with:
 
 ```bash
-npm --prefix tools/config_gui_spike/react run build:production
+npm --prefix tools/gui/react run build:production
 ```
 
 The build emits only `index.html` plus hashed JavaScript and CSS under

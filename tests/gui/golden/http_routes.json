@@ -1,9 +1,5 @@
 [
   {
-    "method": "PATCH",
-    "path": "/api/nodes/{node_id}"
-  },
-  {
     "method": "POST",
     "path": "/api/sessions"
   },
@@ -78,10 +74,6 @@
   {
     "method": "PUT",
     "path": "/api/sessions/{session_id}/yaml"
-  },
-  {
-    "method": "POST",
-    "path": "/api/snapshot"
   },
   {
     "method": "GET",

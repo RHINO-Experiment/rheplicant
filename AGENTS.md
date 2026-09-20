@@ -207,13 +207,10 @@ CI did not have it and nothing said so: its `httpx2` is what
 of GUI coverage without a single test failing.
 
 It also means **`pyuvdata`** (the `uvbeam` extra) and **`pygdsm`**, both on
-PyPI, which `tests/config` importorskips; **`panel`** (the `gui-panel` extra),
-which the seven GUI spike tests in `tests/gui/test_panel_spike.py` and
-`tests/gui/test_candidate_parity.py` importorskip, and which leaves with the
-spike when it is removed as scheduled; **`MomentRFI`** with **`MomentEmu`**,
+PyPI, which `tests/config` importorskips; **`MomentRFI`** with **`MomentEmu`**,
 below; **`matplotlib`**, which rhino-cal's `gcr.data_processing` imports; and
 the **Node toolchain**, `npm` on `PATH` and `npm ci` run in
-`tools/config_gui_spike/react`. Without `node_modules`,
+`tools/gui/react`. Without `node_modules`,
 `tests/gui/test_typescript_gates.py` skips its three gates, and the closure
 case in each of `tests/gui/test_e2e_typecheck.py` and
 `tests/gui/test_react_test_typecheck.py` fails with `FileNotFoundError:
@@ -240,8 +237,10 @@ import names is absent: `h5py`, `rhino_cal_jax`, `limtod_jax`,
 `numpyro`, `pyuvdata`, `pygdsm` and `MomentRFI`, the workflow-level
 `REQUIRED_IMPORTS` in `.github/workflows/test.yml`. They also install the
 `gui-react` extra and the Node toolchain without checking either by name.
-They install neither `panel` nor `matplotlib`, so on CI the seven spike tests
-skip, and neither opt-in variable is set.
+They do not install `matplotlib`, and neither opt-in variable is set. `panel`
+used to be named here too, for seven GUI spike tests that skipped without it;
+the Panel spike was removed on 2026-09-20 (A10-5) along with its extra, its
+tests and the two HTTP routes that existed only for it.
 
 The three `DataHandler` comparisons in
 `tests/radio/test_ingestion_vs_reference.py` need both MomentRFI and
@@ -398,7 +397,7 @@ length, is what shapes `form_catalog.py`.
 `src/rheplicant/gui/react/**` that is not followed by
 
 ```bash
-cd tools/config_gui_spike/react && npm run build:production
+cd tools/gui/react && npm run build:production
 ```
 
 leaves the whole Playwright suite green while testing the previous release.
@@ -414,7 +413,13 @@ npm run check:e2e        # the Playwright specs
 npm run test:session      -- --run   # the 400+ component tests
 ```
 
-`npm test` alone runs a different, much smaller config — use `test:session`.
+`npm test` used to run a different, much smaller config and this line warned
+people off it. The script is gone: it belonged to the Panel/React spike, which
+was removed on 2026-09-20 along with its own vitest config, so `test:session`
+is the only component suite there is and there is nothing left to confuse it
+with. The toolchain moved with it, from `tools/config_gui_spike/react` to
+`tools/gui/react`; the depth is the same, so every `../../../` inside its
+configs survived the move untouched.
 
 ### Screenshot baselines
 

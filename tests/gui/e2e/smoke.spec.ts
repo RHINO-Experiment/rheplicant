@@ -58,7 +58,7 @@ test("harness fixes the source server and four viewport projects", async ({}, te
   });
 
   const source = await readFile(
-    resolve(repository, "tools/config_gui_spike/react/playwright.config.ts"),
+    resolve(repository, "tools/gui/react/playwright.config.ts"),
     "utf8",
   );
   expect(source).toContain('snapshotPathTemplate: "{testDir}/snapshots/{arg}{ext}"');
@@ -76,7 +76,7 @@ test("harness fixes the source server and four viewport projects", async ({}, te
 });
 
 test("package scripts and development dependencies retain exact pins", async () => {
-  const packageRoot = resolve(repository, "tools/config_gui_spike/react");
+  const packageRoot = resolve(repository, "tools/gui/react");
   const manifest = JSON.parse(await readFile(resolve(packageRoot, "package.json"), "utf8"));
   const lock = JSON.parse(await readFile(resolve(packageRoot, "package-lock.json"), "utf8"));
 

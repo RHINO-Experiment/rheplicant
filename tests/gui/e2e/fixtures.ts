@@ -2,14 +2,14 @@ import { lstat, mkdtemp, realpath, rm } from "node:fs/promises";
 import { basename, join, resolve, sep } from "node:path";
 import { tmpdir } from "node:os";
 
-import AxeBuilder from "../../../tools/config_gui_spike/react/node_modules/@axe-core/playwright/dist/index.js";
+import AxeBuilder from "../../../tools/gui/react/node_modules/@axe-core/playwright/dist/index.js";
 import {
   expect,
   test as base,
   type Locator,
   type Page,
   type Request,
-} from "../../../tools/config_gui_spike/react/node_modules/@playwright/test/index.js";
+} from "../../../tools/gui/react/node_modules/@playwright/test/index.js";
 
 export const STARTER_YAML = `schema_version: 1
 runtime:

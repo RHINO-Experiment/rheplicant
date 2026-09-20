@@ -629,7 +629,7 @@ def test_fresh_gui_wheel_passes_playwright(
         env = dict(install.env)
         env["RHEPLICANT_E2E_BASE_URL"] = base_url
         completed = subprocess.run(
-            ["npm", "--prefix", "tools/config_gui_spike/react", "run", "test:e2e"],
+            ["npm", "--prefix", "tools/gui/react", "run", "test:e2e"],
             cwd=PROJECT_ROOT,
             env=env,
             text=True,

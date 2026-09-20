@@ -17,10 +17,12 @@ which reads as a stated API version and was only a placeholder. It now reports
 the package's version and the description says the API is internal, so nobody
 reads a promise into it.
 
-**Two routes here are on their way out.** `POST /api/snapshot` and `PATCH
-/api/nodes/{node_id}` belong to the retired config-GUI spike (A10-5, A10-6).
-They are in the snapshot because they exist; when the spike goes they leave
-this file in the same commit, which is exactly the visibility being bought.
+**Two routes left on 2026-09-20 and this file is how that is visible.** `POST
+/api/snapshot` and `PATCH /api/nodes/{node_id}` existed only for the config-GUI
+spike (A10-5, A10-6); removing the spike removed them, and the snapshot went
+red naming both before anything else noticed. A3-8's count of 22 is now 20.
+That is the whole argument for pinning an internal API: not that it cannot
+change, but that it cannot change quietly.
 """
 
 from __future__ import annotations
@@ -92,4 +94,24 @@ def test_every_route_is_under_the_api_prefix_or_is_a_mount():
     assert not stray, (
         f"these routes are outside /api and are not mounts: {stray}. The "
         "client is mounted at / and a bare path can shadow one of its routes"
+    )
+
+
+def test_the_stability_page_states_the_real_route_count():
+    """The page's number, against the snapshot rather than against memory.
+
+    It said twenty-two for as long as there were twenty-two, and nothing would
+    have told anyone when that stopped being true. Removing the spike's two
+    routes is exactly the edit that makes a written-out count wrong.
+    """
+    words = {
+        18: "Eighteen", 19: "Nineteen", 20: "Twenty", 21: "Twenty-one",
+        22: "Twenty-two", 23: "Twenty-three", 24: "Twenty-four",
+    }
+    count = len(json.loads(GOLDEN.read_bytes()))
+    page = (
+        pathlib.Path(__file__).resolve().parents[2] / "docs" / "stability.md"
+    ).read_text(encoding="utf-8")
+    assert f"{words[count]} routes under `/api`" in page, (
+        f"docs/stability.md does not say there are {count} routes"
     )
