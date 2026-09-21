@@ -326,6 +326,15 @@ coefficients the noise-wave model consumes.
 
 .. automodule:: rheplicant.inference.chain
    :members:
+
+.. automodule:: rheplicant.inference.chain_transition
+   :members:
+
+.. automodule:: rheplicant.inference.chain_recursion
+   :members:
+
+.. automodule:: rheplicant.inference.chain_blocks
+   :members:
    :show-inheritance:
 
 .. automodule:: rheplicant.inference.diagnostics

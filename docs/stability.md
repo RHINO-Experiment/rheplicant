@@ -229,7 +229,7 @@ every run rather than an intention.
 |---|---|
 | `rheplicant.inference.sqrtinfo` — `SqrtInfo`, `marginalise` | `tests/crosscheck/test_sqrtinfo_agrees.py` |
 | `rheplicant.inference.linear` — the affinity criterion and the linear solve | `tests/crosscheck/test_linear.py` |
-| `rheplicant.inference.chain._zeta_joint` — the joint covariance | `tests/crosscheck/test_provenance.py` |
+| `rheplicant.inference.chain_recursion._zeta_joint` — the joint covariance | `tests/crosscheck/test_provenance.py` |
 
 Those paths are in **bayesmith's** repository, because the comparison belongs
 to whichever side is checking the other and running it here would be this

@@ -57,11 +57,6 @@ LARGE: dict[str, tuple[str, str]] = {
         "schema §6's model checks are a dozen independent passes sharing "
         "one node walk; the walk is the module and the passes are not",
     ),
-    "rheplicant/inference/chain.py": (
-        SPLIT,
-        "the drift model and the recursion that integrates it are "
-        "different subjects with different test shapes",
-    ),
     "rheplicant/core/graph.py": (
         SPLIT,
         "the template grammar and graph-guided assembly are two halves "
