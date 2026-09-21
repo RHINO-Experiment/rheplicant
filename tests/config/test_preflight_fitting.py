@@ -3962,9 +3962,14 @@ class TestCounts:
         # hits from a comment while the code it counted could be deleted).
         import inspect
 
-        from rheplicant.inference import SamplingPlan
+        # plan_draws.run_sample, not SamplingPlan.sample: the draw exit was
+        # lifted out of the class in the section 3.2 split and the method left
+        # behind is a forwarding stub. Reading the stub finds no guard line at
+        # all, and `assert len(lines) == 1` is what says so rather than this
+        # passing vacuously.
+        from rheplicant.inference.plan_draws import run_sample
 
-        source = inspect.getsource(SamplingPlan.sample)
+        source = inspect.getsource(run_sample)
         lines = [
             line
             for line in source.splitlines()
@@ -4170,9 +4175,11 @@ class TestCounts:
         # pass refusing a document the package runs.
         import inspect
 
-        from rheplicant.inference.plan import SamplingPlan
+        # plan_blocks.prepare_conditioning, for the reason above: `_prepare`
+        # was lifted out of SamplingPlan and the method is now a stub.
+        from rheplicant.inference.plan_blocks import prepare_conditioning
 
-        source = inspect.getsource(SamplingPlan._prepare)
+        source = inspect.getsource(prepare_conditioning)
         lines = [
             line.strip()
             for line in source.splitlines()

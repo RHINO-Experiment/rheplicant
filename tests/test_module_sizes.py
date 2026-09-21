@@ -1,10 +1,12 @@
 """Every source file over 800 lines is either split, or justified here.
 
 ``CLAUDE.md``'s own style note asks for many small files, 200-400 typical and
-800 maximum. Thirty files in ``src/`` are over it. A rule with thirty silent
-exceptions is not a rule, so each one is written down with a status and a
-reason, and both directions are asserted: a file that grows past the threshold
-lands here as a red test, and a file that shrinks below it must leave.
+800 maximum. Thirty files in ``src/`` were over it when this table was
+written; seventeen are now, and every one of those is a decision rather than a
+debt. A rule with thirty silent exceptions is not a rule, so each is written
+down with a status and a reason, and both directions are asserted: a file that
+grows past the threshold lands here as a red test, and a file that shrinks
+below it must leave.
 
 Two statuses, and the difference is a decision rather than a degree.
 
@@ -14,14 +16,20 @@ Two statuses, and the difference is a decision rather than a degree.
     is the ratchet: the number may fall and may not rise, so the next person
     to grow one of these past the threshold has to say so.
 
+    **There are none left.** A1 ruled nine, section 3.2 split all nine on
+    2026-09-21, and the ratchet now holds the count at zero -- which is what
+    makes it worth keeping: the next file to earn a SPLIT ruling raises the
+    number from zero, and no one can lower it by quietly restating a debt as a
+    decision.
+
 ``SINGLE``
     One file on purpose. The burden is a reason that survives a sceptical
     reader -- "it is cohesive" is not one, and the length floor below is there
     to catch that sentence being pasted in.
 
 What this file does NOT do is assert a line count per file. Pinning 2937 would
-make every edit to ``layering.py`` a red test for no benefit, and the number
-that matters is the threshold, not the distance past it.
+make every edit a red test for no benefit, and the number that matters is the
+threshold, not the distance past it.
 """
 
 from __future__ import annotations
