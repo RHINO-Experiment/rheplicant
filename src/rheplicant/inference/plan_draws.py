@@ -66,7 +66,7 @@ def run_sample(
 
     Args:
         pipeline, state_template, observed, noise: as for
-        :meth:`~rheplicant.inference.plan.SamplingPlan.estimate`.
+            :meth:`~rheplicant.inference.plan.SamplingPlan.estimate`.
         key: PRNG key. Required — that is the point of this being a separate
             method rather than ``estimate(key=...)``.
         n_sweeps: total sweeps, warmup included.

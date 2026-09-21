@@ -294,7 +294,17 @@ Any install that resolves this package's dependencies needs
 `--find-links ../bayesmith/runs/t004/dist`. The wheel was built at bayesmith's
 `8aefb3e` and that repository's HEAD has moved on; the manifest's shas describe
 the build, so an install checked against them is reproducible even though the
-wheel is byte-stale against HEAD. The wheel replaces
+wheel is byte-stale against HEAD.
+
+**bayesmith has settled at 0.10 and is not moving to 0.11 during this work**
+(confirmed by that repository's own session, 2026-09-21). Two things follow
+and both were measured rather than assumed. The wheel on disk is still the one
+every seam result here was obtained against -- sha256 `129f3db13fd0c56d…`,
+identical in bayesmith's `release-manifest.json`, in this repository's, and on
+disk -- so their later commits did not rebuild it. And 0.10.0 is still **not
+on PyPI**: the index stopped at 0.8.0 when checked on 2026-09-21, so
+`pip install rheplicant` still cannot resolve and the README still says so.
+"Settled" means the version stopped moving, not that it was published. The wheel replaces
 the editable install from `../bayesmith` this checkout used while the two
 repositories were developed against each other: an editable install runs
 whatever the sibling working tree holds and reports the version its metadata

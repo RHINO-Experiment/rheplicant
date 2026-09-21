@@ -51,6 +51,13 @@ watches both halves of that reason and fails if either changes.
 
 The declared range is `bayesmith>=0.10,<0.11`.
 
+**bayesmith has settled at 0.10.** It is not moving to 0.11 while this
+baseline is being cut, so the range describes a version that has stopped
+rather than one still in flight. Settled is not published: 0.10.0 exists as a
+local wheel and the PyPI index stopped at 0.8.0 when it was checked on
+2026-09-21, which is why [the install section](https://github.com/RHINO-Experiment/rheplicant#install)
+says `pip install rheplicant` cannot resolve yet.
+
 **It is closed at 0.11 because bayesmith is pre-1.0**, where a minor release
 may move the deep module paths this package imports — and 0.10 moved one:
 `bayesmith.optimize` became a package, so `from bayesmith.optimize import

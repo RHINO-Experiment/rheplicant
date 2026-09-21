@@ -271,8 +271,8 @@ class SamplingPlan:
 
     Args:
         space: the parameter declaration this plan partitions.
-        *blocks: the :class:`~rheplicant.inference.plan_results.Block` s, in the order a sweep
-        visits them.
+        *blocks: the :class:`~rheplicant.inference.plan_results.Block` s, in the
+            order a sweep visits them.
 
     Raises:
         ParameterSpaceError: if no blocks are given; if a block names something

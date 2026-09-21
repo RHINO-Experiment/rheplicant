@@ -441,8 +441,8 @@ def split_rhat(trace: Any) -> float:
         values.
 
     Raises:
-        ParameterSpaceError: if fewer than :data:`~rheplicant.inference.plan_settings.MIN_DRAWS`
-        values are given.
+        ParameterSpaceError: if fewer than
+            :data:`~rheplicant.inference.plan_settings.MIN_DRAWS` values are given.
     """
     values = np.asarray(trace, dtype=np.float64).ravel()
     if values.size < MIN_DRAWS:
