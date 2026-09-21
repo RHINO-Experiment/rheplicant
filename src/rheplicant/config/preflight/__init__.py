@@ -321,7 +321,7 @@ def _check_where(check: str, finding: Finding) -> None:
 # comment can, and did.  An earlier version said `model` "registers A2 (which
 # decides A2, A3, A4, A6 and A7)" -- false, and consequentially so: A2, A3,
 # A4, A6 and A7 are five registry SLOTS bound to one function variadically
-# (`preflight/model.py::_graph_shape`), which is what stops a later function claiming one of
+# (`preflight/model_walk.py::_graph_shape`), which is what stops a later function claiming one of
 # them.  Plan 3A's Task 13 predicted 29 slots and 27 bare ids by counting
 # from that sentence, against a measured 34 and 31.  Count from `CHECKS`:
 #
@@ -339,6 +339,10 @@ from rheplicant.config.preflight import gated as _gated_checks  # noqa: E402,F40
 from rheplicant.config.preflight import ingest as _ingest_checks  # noqa: E402,F401
 from rheplicant.config.preflight import instrument as _instrument_checks  # noqa: E402,F401
 from rheplicant.config.preflight import model as _model_checks  # noqa: E402,F401
+from rheplicant.config.preflight import model_radio as _model_radio_checks  # noqa: E402,F401
+from rheplicant.config.preflight import model_sources as _model_sources_checks  # noqa: E402,F401
+from rheplicant.config.preflight import model_stochastic as _stochastic_checks  # noqa: E402,F401
+from rheplicant.config.preflight import model_walk as _model_walk_checks  # noqa: E402,F401
 from rheplicant.config.preflight import noise as _noise_checks  # noqa: E402,F401
 from rheplicant.config.preflight import observing as _observing_checks  # noqa: E402,F401
 from rheplicant.config.preflight import resources as _resources_checks  # noqa: E402,F401

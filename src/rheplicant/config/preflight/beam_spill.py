@@ -94,7 +94,7 @@ layer could write about a projector kind that has no horizon cut at all.
 legs fire on it, and the ``where`` and the message name that path rather than
 ``model.beam_spill``.  Walking it is affordable precisely because A50 is
 invented: a verbatim hoist would have carried the wrong section name into the
-sentence.  ``preflight/model.py::_t4_entries`` supplies the other route a
+sentence.  ``preflight/model_walk.py::_t4_entries`` supplies the other route a
 single node has, ``compose: {stages: [...]}``.
 """
 

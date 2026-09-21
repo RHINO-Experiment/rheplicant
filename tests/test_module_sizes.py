@@ -47,11 +47,6 @@ LARGE: dict[str, tuple[str, str]] = {
         "the checks needing runs[] and inference: together, which is a "
         "join rather than a subject -- the per-run and per-block halves split",
     ),
-    "rheplicant/config/preflight/model.py": (
-        SPLIT,
-        "schema §6's model checks are a dozen independent passes sharing "
-        "one node walk; the walk is the module and the passes are not",
-    ),
     # --- Grew past the threshold AFTER the audit drew its list.
     "rheplicant/inference/plan.py": (
         SPLIT,

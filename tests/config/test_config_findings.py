@@ -677,7 +677,8 @@ class TestNoFindingInThisLayerIsIdLess:
         ("gating.py", "AUTO_SKIP_ID"),
         ("gating.py", "check"),
         ("inflight/axes.py", "check"),
-        ("preflight/model.py", "check"),
+        # `_capability_level` moved with the node walk when model.py was split.
+        ("preflight/model_walk.py", "check"),
         ("findings.py", "check"),
     }
 

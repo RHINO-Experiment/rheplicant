@@ -444,6 +444,18 @@ prose; these are the signatures.
 .. automodule:: rheplicant.config.preflight
    :members:
 
+.. automodule:: rheplicant.config.preflight.model_walk
+   :members:
+
+.. automodule:: rheplicant.config.preflight.model_radio
+   :members:
+
+.. automodule:: rheplicant.config.preflight.model_sources
+   :members:
+
+.. automodule:: rheplicant.config.preflight.model_stochastic
+   :members:
+
 .. automodule:: rheplicant.config.sections.inference
    :members:
 

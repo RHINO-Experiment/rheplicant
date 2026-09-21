@@ -1075,7 +1075,7 @@ class TestTheTwins:
     def test_the_python_spelling_of_a_node_is_the_type_spelling_s_twin(self, monkeypatch):
         """``{python: 'rheplicant.radio:NoiseWaveOperator'}`` builds the same
         class as ``{type: NoiseWaveOperator}`` and 3A's tests already exercise
-        it.  Resolved through ``preflight/model.py::_t5_radio_class``, which
+        it.  Resolved through ``preflight/model_radio.py::_t5_radio_class``, which
         imports nothing -- the class is already in ``sys.modules`` because
         ``import rheplicant.config`` imports ``rheplicant.radio``."""
         blocked(monkeypatch, "rhino_cal_jax")

@@ -451,7 +451,7 @@ def _typed_entries(layer: Mapping[str, Any]) -> Iterable[tuple[str, Any]]:
     """``(where, spec)`` for every entry that reaches ``build_node_operator``.
 
     Both halves of §0.3 E.10's ruling: ``model:``'s four routes through
-    ``preflight/model.py::_t4_entries`` (single, ``compose: stages``, a ``many``
+    ``preflight/model_walk.py::_t4_entries`` (single, ``compose: stages``, a ``many``
     node's list and its FAN entries), **and** ``inference.twin.replace``, which
     ``model_nodes()`` cannot see and which reaches the same builder.
     """

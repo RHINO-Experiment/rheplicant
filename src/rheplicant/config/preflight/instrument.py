@@ -196,7 +196,7 @@ def _entry_class(node_id: str, entry: Any, table: Mapping[str, Any]) -> type | N
     be this module deciding that nothing may ever add a class at runtime.
 
     Three routes, in ``build_node_operator``'s own order.  A ``python:`` entry
-    resolves through ``preflight/model.py::_t5_radio_class``, which imports
+    resolves through ``preflight/model_radio.py::_t5_radio_class``, which imports
     nothing and declines a foreign target -- §2.4's boundary, and the decline
     can only lose a check, never invent one.  A ``type:`` entry is matched
     against the classes ``operator_table()`` registers at the node, so a
@@ -267,7 +267,7 @@ def _unknown_field(entry: Mapping, specs: Mapping[str, Any], composed: bool) -> 
 def _tone_class():
     """``CWCalibrationOperator``, imported where it is used.
 
-    ``preflight/model.py::_t4_graph``'s convention, and for its reason:
+    ``preflight/model_walk.py::_t4_graph``'s convention, and for its reason:
     ``import rheplicant.config`` already imports ``rheplicant.radio``
     (``projectors.py``), so the import costs nothing at call
     time, and deferring it means this module is not the one that pins that.
@@ -597,7 +597,7 @@ def _region_key(layer: Mapping[str, Any]) -> Iterable[Finding]:
     region)`` is already a module-level pure function taking two plain
     arguments, so this calls it and converts.
 
-    **Decided through ``preflight/model.py::_t5_claims``, never off a raw
+    **Decided through ``preflight/model_radio.py::_t5_claims``, never off a raw
     ``at:`` list** -- §2.3's first named stand-down, and the reason is that
     ``compose._single`` refuses three other shapes more precisely and
     ``_t5_claims`` already answers ``()`` for all three: an ``at:`` with no

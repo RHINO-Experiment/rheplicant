@@ -86,10 +86,11 @@ REASONS = {
     ): "one refusal helper, shared so the axis pass and core answer a stored "
     "dtype the same way rather than twice",
     (
-        "rheplicant/config/preflight/model.py",
+        "rheplicant/config/preflight/model_radio.py",
         "rheplicant.core",
     ): "the graph descendant walk, shared so pre-flight and the build agree "
-    "about what a node reaches",
+    "about what a node reaches; the route moved off model.py with the Task 5 "
+    "passes when that file was split",
     (
         "rheplicant/gui/form_catalog.py",
         "_rheplicant_bootstrap",
@@ -129,7 +130,7 @@ ALLOWED: dict[tuple[str, str], frozenset[str]] = {
             "_refuse_a_time_axis_the_stored_dtype_cannot_carry",
         }
     ),
-    ("rheplicant/config/preflight/model.py", "rheplicant.core"): frozenset(
+    ("rheplicant/config/preflight/model_radio.py", "rheplicant.core"): frozenset(
         {
             "_descendants",
         }
