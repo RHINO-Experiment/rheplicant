@@ -50,6 +50,12 @@ it.
 
 .. automodule:: rheplicant.core.graph
    :members:
+
+.. automodule:: rheplicant.core.graph_template
+   :members:
+
+.. automodule:: rheplicant.core.graph_placement
+   :members:
    :show-inheritance:
 
 .. automodule:: rheplicant.core.basis

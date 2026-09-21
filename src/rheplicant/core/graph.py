@@ -49,26 +49,50 @@ With one instance nothing changes — ``x`` is still the address, and a
 untouched until a sibling actually arrives.
 """
 
-import dataclasses
-from collections.abc import Iterable, Mapping, Sequence
-from typing import Literal
+from collections.abc import Iterable
 
 import equinox as eqx
 import jax
 
-from rheplicant.core.combinators import SelectOperator, SumOperator
 from rheplicant.core.errors import AmbiguousNodeError, AssemblyError
 from rheplicant.core.fold import (
     _check_ordering,
     _check_slot_kinds,
-    _declared_node,
     _fold_graph,
-    _instance_names,
-    _validate_region,
 )
 from rheplicant.core.operator import AbstractOperator
-from rheplicant.core.pipeline import Pipeline, validate_operators
+from rheplicant.core.pipeline import validate_operators
 from rheplicant.core.state import State
+
+from .graph_placement import _check_disjoint_claims as _check_disjoint_claims
+from .graph_placement import (
+    _check_promised_ids,
+    _children,
+    _find_named,
+    _fold_duplicates,
+    _LeafPath,
+    _live_span,
+    _placement_addresses,
+    _resolve,
+)
+from .graph_placement import _claimed_nodes as _claimed_nodes
+from .graph_placement import _descend_to_own_stage as _descend_to_own_stage
+from .graph_placement import _place_at_node as _place_at_node
+from .graph_placement import _positions as _positions
+from .graph_template import _GRAPHS as _GRAPHS
+from .graph_template import _MERMAID_THEMES as _MERMAID_THEMES
+from .graph_template import (
+    At,
+    SignalGraph,
+    get_graph,
+)
+
+# Re-exported so this module's importers keep working. `X as X` is the
+# explicit re-export form: a plain import of a name this file does not
+# itself use is F401, and `ruff --fix` deletes it whatever the comment
+# on the line says.
+from .graph_template import NodeSpec as NodeSpec
+from .graph_template import register_graph as register_graph
 
 # The fold lives in `core/fold.py` and the arrow points ONE way: this module
 # imports those six, and nothing there imports this one. `SignalGraph` and
@@ -93,268 +117,6 @@ from rheplicant.core.state import State
 # all vanished from the API page, silently, because a member that is not
 # documented raises no warning. If an `__all__` is ever wanted here it has to
 # be the module's whole public surface.
-
-
-@dataclasses.dataclass(frozen=True)
-class NodeSpec:
-    """One node of a signal-path template.
-
-    Attributes:
-        kind: ``"source"`` (creates data; in-degree 0), ``"transform"``
-            (data -> data; in-degree at most 1), ``"junction"`` (sum point), or
-            ``"selector"`` (switched point: one branch selected per time
-            sample via ``coords.extra[<node_id>]``). Junctions and selectors
-            have in-degree >= 2 and are never operator slots.
-        doc: one-line description shown in renderings.
-        many: sources only — allow multiple instances. They compose the way
-            their CONSUMER composes: sibling Sum branches into a junction,
-            sibling *selector* branches into a selector (one switch position
-            each, in the order they were provided). For the sink-side
-            ``filters``-style transform chain use ``many`` on a transform:
-            instances chain in call order.
-        segment: grouping label for rendering (e.g. "forward", "processing").
-        reserved: node exists in the physics but has no shipped operator yet
-            (an equivalent-entry placeholder leaf).
-    """
-
-    kind: Literal["source", "transform", "junction", "selector"]
-    doc: str = ""
-    many: bool = False
-    segment: str = "forward"
-    reserved: bool = False
-
-
-@dataclasses.dataclass(frozen=True)
-class At:
-    """Place ``op`` at ``node`` regardless of its class registration.
-
-    ``node`` may also be a tuple of node ids: the operator then *covers* that
-    contiguous region of the template (it implements all of those stages at
-    once). Regions are atomic — no other live branch may feed their interior —
-    and are addressed by their LAST covered node id in the assembly.
-
-    "Regardless of its class registration" stops at the node's *kind*: an
-    operator that declares a ``graph_node`` may be moved to any other node of
-    the same kind, and not across the source/transform line. A source at a
-    transform node discards the signal reaching that node, and a transform at a
-    source node is handed ``data=None``; neither is a placement, and
-    :func:`assemble` refuses both — see
-    :func:`~rheplicant.core.fold._check_slot_kinds`.
-    """
-
-    node: str | tuple[str, ...]
-    op: AbstractOperator
-
-
-#: Mermaid's own three-class palette, one triplet per theme. Deliberately
-#: separate from :data:`rheplicant.core.render._THEMES`, which keys on the five
-#: SVG roles: mermaid has no wire colour and no per-kind fill, so the two
-#: cannot share a table without one of them drifting to fit the other.
-#: Each value is ``(fill, stroke, text)``.
-_MERMAID_THEMES: dict[str, dict[str, tuple[str, str, str]]] = {
-    "light": {
-        "lit": ("#FAC775", "#854F0B", "#412402"),
-        "wire": ("#F1EFE8", "#854F0B", "#444441"),
-        "dim": ("#F1EFE8", "#B4B2A9", "#B4B2A9"),
-    },
-    "dark": {
-        "lit": ("#4A3A12", "#E3B341", "#F0D896"),
-        "wire": ("#1C1F24", "#8B949E", "#C9D1D9"),
-        "dim": ("#1C1F24", "#3D4148", "#6E7681"),
-    },
-}
-
-
-class SignalGraph:
-    """An immutable signal-path template (DAG with a single sink).
-
-    Args:
-        name: template identifier (used by Assembly metadata / renderers).
-        nodes: ordered ``{node_id: NodeSpec}`` mapping (order fixes ``lit``
-            ordering and toposort tie-breaking).
-        edges: ``(src, dst)`` pairs following signal flow. Edge declaration
-            order is part of the contract: it fixes junction branch order.
-
-    Validated at construction: DAG-ness; every node reaches a unique sink;
-    junctions have in-degree >= 2; sources have in-degree 0; transforms have
-    in-degree AT MOST 1 — a parentless transform is permitted, because it is
-    not a defect the template has to catch (see ``__check_init__``).
-    """
-
-    def __init__(
-        self,
-        name: str,
-        nodes: dict[str, NodeSpec],
-        edges: Sequence[tuple[str, str]],
-    ):
-        self.name = name
-        self.nodes = dict(nodes)
-        self.edges = tuple(edges)
-        if len(set(self.edges)) != len(self.edges):
-            dupes = sorted({e for e in self.edges if self.edges.count(e) > 1})
-            raise AssemblyError(f"SignalGraph {name!r} declares duplicate edges: {dupes}.")
-        self._in: dict[str, tuple[str, ...]] = {n: () for n in self.nodes}
-        self._out: dict[str, tuple[str, ...]] = {n: () for n in self.nodes}
-        for a, b in self.edges:
-            if a not in self.nodes or b not in self.nodes:
-                raise AssemblyError(f"Edge ({a!r}, {b!r}) references an unknown node.")
-            self._in[b] = self._in[b] + (a,)
-            self._out[a] = self._out[a] + (b,)
-        self._topo = self._toposort()
-        self._validate()
-
-    # -- template validation -------------------------------------------------
-
-    def _toposort(self) -> tuple[str, ...]:
-        indeg = {n: len(self._in[n]) for n in self.nodes}
-        # stable Kahn: repeatedly take the first declaration-order node with indeg 0
-        order, remaining = [], dict(indeg)
-        while remaining:
-            ready = [n for n in self.nodes if n in remaining and remaining[n] == 0]
-            if not ready:
-                raise AssemblyError(f"SignalGraph {self.name!r} contains a cycle.")
-            n = ready[0]
-            del remaining[n]
-            order.append(n)
-            for m in self._out[n]:
-                remaining[m] -= 1
-        return tuple(order)
-
-    def _validate(self):
-        sinks = [n for n in self.nodes if not self._out[n]]
-        if len(sinks) != 1:
-            raise AssemblyError(
-                f"SignalGraph {self.name!r} must have exactly one sink, found {sinks}."
-            )
-        self.sink = sinks[0]
-        for n, spec in self.nodes.items():
-            indeg = len(self._in[n])
-            if spec.kind == "source" and indeg != 0:
-                raise AssemblyError(f"Source node {n!r} must have in-degree 0, got {indeg}.")
-            if spec.kind == "transform" and indeg > 1:
-                # `> 1`, not `!= 1`, and deliberately. A PARENTLESS transform is
-                # not a defect this container has to refuse. Measured: with
-                # nothing placed on it the node contracts to identity and the
-                # model runs; with an operator placed on it, assembly refuses
-                # via the guard that names the real problem -- "Transform 't'
-                # feeds junction 'j' with no live source upstream". Refusing it
-                # here would reject legitimate templates in order to restate a
-                # check that already exists, from further away and with less
-                # information to phrase it well.
-                raise AssemblyError(f"Transform node {n!r} must have in-degree <= 1, got {indeg}.")
-            if spec.kind in ("junction", "selector") and indeg < 2:
-                raise AssemblyError(
-                    f"{spec.kind.capitalize()} node {n!r} must have in-degree >= 2, got {indeg}."
-                )
-
-    # -- rendering -----------------------------------------------------------
-
-    def to_mermaid(
-        self,
-        lit: Iterable[str] = (),
-        skipped: Iterable[str] = (),
-        counts: Mapping[str, int] | None = None,
-        theme: str = "light",
-    ) -> str:
-        """Render the template as a mermaid flowchart with lit/dim styling.
-
-        ``lit`` nodes are highlighted, ``skipped`` (traversed-as-identity)
-        nodes are half-lit, everything else is dimmed — the signal-path view
-        of what an assembly simulates.
-
-        ``counts`` maps a node id to the number of operator instances sitting
-        on it. A ``many`` node is one box however many instances it carries,
-        so the count is shown in the label: an unannotated box would render
-        two components as one.
-
-        Operators are **boxes**; the two composition operations are **symbols
-        the wire runs through** and are given shapes of their own — a circled
-        plus for a sum, a rhombus for a switch. Mermaid has no line art, so the
-        shape carries the distinction here; ``to_svg`` draws the switch's lever.
-        Both used to be circles differing only in their label, which made two
-        operations *on* operators look like two more operators.
-
-        ``theme`` is ``"light"`` or ``"dark"``, matching :meth:`to_svg` and
-        :meth:`to_html`. An unknown name raises rather than falling back to a
-        default, because a silently-light diagram in a dark page is exactly the
-        failure the argument exists to prevent.
-        """
-        lit, skipped = set(lit), set(skipped)
-        counts = dict(counts or {})
-        lines = ["flowchart TD"]
-        for n, spec in self.nodes.items():
-            label = n.replace("_", " ")
-            if counts.get(n, 1) > 1:
-                label = f"{label} (x{counts[n]})"
-            if spec.kind == "junction":
-                shape = '(("+"))'  # circle + plus = the summing-junction symbol
-            elif spec.kind == "selector":
-                shape = '{"/"}'  # rhombus + lever = the switch symbol
-            else:
-                shape = f'["{label}"]'
-            lines.append(f"  {n}{shape}")
-        for a, b in self.edges:
-            lines.append(f"  {a} --> {b}")
-        palette = _MERMAID_THEMES[theme]  # KeyError names the unknown theme
-        for cls in ("lit", "wire", "dim"):
-            fill, stroke, text = palette[cls]
-            lines.append(f"  classDef {cls} fill:{fill},stroke:{stroke},color:{text};")
-        for n in self.nodes:
-            cls = "lit" if n in lit else ("wire" if n in skipped else "dim")
-            lines.append(f"  class {n} {cls};")
-        return "\n".join(lines)
-
-    def to_html(
-        self,
-        lit: Iterable[str] = (),
-        skipped: Iterable[str] = (),
-        title: str | None = None,
-        counts: Mapping[str, int] | None = None,
-        theme: str = "light",
-    ) -> str:
-        """Standalone HTML page of the template with lit/dim signal-path styling."""
-        from rheplicant.core.render import signal_path_html
-
-        return signal_path_html(
-            self, lit=lit, skipped=skipped, title=title, counts=counts, theme=theme
-        )
-
-    def to_svg(
-        self,
-        lit: Iterable[str] = (),
-        skipped: Iterable[str] = (),
-        title: str | None = None,
-        counts: Mapping[str, int] | None = None,
-        theme: str = "light",
-    ) -> str:
-        """Self-contained ``<svg>`` of the template, for embedding (docs, notebooks).
-
-        ``theme`` is ``"light"`` or ``"dark"``. An ``<img>``-embedded SVG cannot
-        read the host page's theme, so a page that switches renders a pair.
-        """
-        from rheplicant.core.render import signal_path_svg
-
-        return signal_path_svg(
-            self, lit=lit, skipped=skipped, title=title, counts=counts, theme=theme
-        )
-
-    def __repr__(self) -> str:
-        return f"SignalGraph({self.name!r}, {len(self.nodes)} nodes, {len(self.edges)} edges)"
-
-
-_GRAPHS: dict[str, SignalGraph] = {}
-
-
-def register_graph(graph: SignalGraph) -> SignalGraph:
-    """Register a template so Assembly.to_mermaid can find it by name."""
-    _GRAPHS[graph.name] = graph
-    return graph
-
-
-def get_graph(name: str) -> SignalGraph:
-    if name not in _GRAPHS:
-        raise KeyError(f"No registered SignalGraph named {name!r}; known: {list(_GRAPHS)}")
-    return _GRAPHS[name]
 
 
 # ---------------------------------------------------------------------------
@@ -629,37 +391,6 @@ class Assembly(AbstractOperator):
         )
 
 
-def _find_named(op: AbstractOperator, name: str) -> AbstractOperator | None:
-    # Breadth-first, so graph-node labels (outermost fold levels) win over
-    # identically-named stages inside user-provided nested composites.
-    queue: list[AbstractOperator] = [op]
-    while queue:
-        next_level: list[AbstractOperator] = []
-        for current in queue:
-            if isinstance(current, (Pipeline, SumOperator, SelectOperator)):
-                parts = current.stages if isinstance(current, Pipeline) else current.branches
-                for part_name, part in zip(current.names, parts, strict=True):
-                    if part_name == name:
-                        return _descend_to_own_stage(part, name)
-                    next_level.append(part)
-        queue = next_level
-    return None
-
-
-def _children(op: AbstractOperator) -> tuple[AbstractOperator, ...]:
-    """The fold's composite spine, in one place: what holds operators.
-
-    Everything that walks a fold by identity descends through exactly these,
-    so a new composite type has one place to be taught rather than several to
-    be forgotten in.
-    """
-    if isinstance(op, Pipeline):
-        return tuple(op.stages)
-    if isinstance(op, (SumOperator, SelectOperator)):
-        return tuple(op.branches)
-    return ()
-
-
 def _children_through_assemblies(op: AbstractOperator) -> tuple[AbstractOperator, ...]:
     """:func:`_children`, also stepping into an Assembly's folded operator.
 
@@ -693,20 +424,6 @@ def _spine_pairs(
             queue.extend(zip(children, _children_through_assemblies(twin), strict=True))
 
 
-class _LeafPath:
-    """One tagged leaf path, wrapped so that flattening cannot expand it.
-
-    ``tree_map_with_path`` writing the bare path would leave a *tuple* in leaf
-    position, and any later ``tree_leaves`` would flatten it into its
-    components. An opaque object is a leaf, so the path reads back out whole.
-    """
-
-    __slots__ = ("path",)
-
-    def __init__(self, path: tuple):
-        self.path = path
-
-
 def _aliased_leaf_paths(pipeline: AbstractOperator) -> dict[tuple, str]:
     """``{leaf key path: node id}`` for every leaf an aliased node owns.
 
@@ -738,212 +455,6 @@ def _aliased_leaf_paths(pipeline: AbstractOperator) -> dict[tuple, str]:
                         (tag.path, node_id) for tag in jax.tree_util.tree_leaves(below_twin)
                     )
     return owned
-
-
-def _positions(root: AbstractOperator, target: AbstractOperator) -> int:
-    """How many positions of the folded tree ``target`` occupies (by identity)."""
-    count = 0
-    queue: list[AbstractOperator] = [root]
-    while queue:
-        current = queue.pop()
-        if current is target:
-            count += 1
-        queue.extend(_children(current))
-    return count
-
-
-def _fold_duplicates(
-    root: AbstractOperator,
-    placement: dict[str, list[AbstractOperator]],
-    regions: Sequence[tuple[tuple[str, ...], AbstractOperator]],
-) -> dict[str, int]:
-    """Nodes whose operator the FOLD put at more than one position, and how many.
-
-    A node whose contribution reaches the sink by several paths is folded in
-    once per path. ``_find_named`` reaches one of those positions and
-    ``eqx.tree_at`` rewrites that one, so writing through the node id leaves
-    the other copies live — a finite, correctly-shaped, wrong forward model.
-
-    Placing ONE operator object at several nodes is deliberate and not this, so
-    the occurrence count is compared against how often the caller placed it
-    rather than against 1.
-    """
-    slots: list[tuple[str, AbstractOperator]] = [
-        (nid, op) for nid, ops_at in placement.items() for op in ops_at
-    ]
-    slots += [(path[-1], op) for path, op in regions]
-    placed: dict[int, int] = {}
-    for _, op in slots:
-        placed[id(op)] = placed.get(id(op), 0) + 1
-    duplicates: dict[str, int] = {}
-    for nid, op in slots:
-        found = _positions(root, op)
-        if found > placed[id(op)]:
-            duplicates[nid] = max(duplicates.get(nid, 0), found)
-    return duplicates
-
-
-def _check_promised_ids(
-    root: AbstractOperator,
-    multi: dict[str, tuple[str, ...]],
-    placement: dict[str, list[AbstractOperator]],
-    duplicates: dict[str, int],
-) -> None:
-    """Every per-instance id the assembly will hand out must reach its instance.
-
-    :func:`~rheplicant.core.fold._instance_names` mints ``x_1..x_n``;
-    :func:`~rheplicant.core.fold._dedup` independently mints
-    ``x, x_2, x_3, ...`` for repeated branch labels, and the two overlap
-    from ``_2`` on. Both arise from the same graph shape — a node reaching a
-    fold by several paths — so the collision is reported as what it is rather
-    than as a naming accident. An id that resolves to something other than the
-    operator placed there would be handed to the caller BY
-    :class:`~rheplicant.core.errors.AmbiguousNodeError` and then written
-    through, which is worse than saying nothing.
-    """
-    for nid, names in multi.items():
-        if nid in duplicates:
-            raise AssemblyError(
-                f"Node {nid!r} carries {len(names)} operator instances, and its "
-                f"contribution reaches the sink by {duplicates[nid]} paths — so the "
-                f"fold embeds each instance {duplicates[nid]} times and labels the "
-                f"repeated branches {nid!r}, {nid + '_2'!r}, ... . Those labels "
-                f"collide with the per-instance ids {list(names)}, leaving no id that "
-                f"names one instance: reading {nid + '_2'!r} would reach a whole "
-                "branch and writing it would rewrite that branch instead. Give the "
-                "paths their own nodes so each instance has one home; placing ONE "
-                f"composed operator at {nid!r} also removes the ambiguity, though a "
-                "node folded in twice stays unwritable."
-            )
-        for index, (name, op) in enumerate(zip(names, placement[nid], strict=True), 1):
-            found = _find_named(root, name)
-            if found is not op:
-                raise AssemblyError(
-                    f"Node {nid!r} would report {name!r} as the id of instance "
-                    f"{index} ({type(op).__name__}), but that id resolves to "
-                    f"{type(found).__name__ if found is not None else 'nothing'} in "
-                    "the assembled operator — it addresses the wrong part of the "
-                    "forward model, and replace_node/ParameterSpace would rewrite "
-                    f"that part. Re-assemble with one operator at {nid!r}."
-                )
-
-
-def _descend_to_own_stage(part: AbstractOperator, name: str) -> AbstractOperator:
-    """Resolve a name that labels a FOLD rooted at a node to the node itself.
-
-    A branch spanning ``sky -> spill`` is labelled by its first node, so a
-    sibling Sum names it ``sky`` while the Pipeline inside it also has a stage
-    named ``sky``. ``assembly["sky"]`` must be the operator AT that node, not
-    the fold that starts there — otherwise ``eqx.tree_at(lambda a: a["sky"].amp,
-    ...)`` reaches a Pipeline and fails on an attribute the caller can see in
-    the source. Descending while the match keeps re-naming itself resolves it.
-    """
-    while isinstance(part, Pipeline) and name in part.names:
-        part = part.stages[part.names.index(name)]
-    return part
-
-
-def _claimed_nodes(graph: SignalGraph, item: AbstractOperator | At) -> tuple[str, ...]:
-    """The template nodes ``item`` claims: from ``At(...)``, or its registration.
-
-    One node for an ordinary placement, several for a region claim. Every id is
-    checked against the template here, before anything downstream asks what kind
-    of node it is — an unknown id has no kind to answer with, and the message
-    that names the known nodes is the one a typo needs.
-    """
-    if isinstance(item, At):
-        node, op = item.node, item.op
-    else:
-        op = item
-        node = _declared_node(op)
-        if node is None:
-            raise AssemblyError(
-                f"{type(op).__name__} declares no graph_node and no At(...) wrapper "
-                f"was given; wrap it as At(node_id, op). Known nodes: {list(graph.nodes)}"
-            )
-    nodes = (node,) if isinstance(node, str) else tuple(node)
-    for n in nodes:
-        if n not in graph.nodes:
-            raise AssemblyError(
-                f"{type(op).__name__}: {n!r} is not a node of graph "
-                f"{graph.name!r}; known nodes: {list(graph.nodes)}"
-            )
-    return nodes
-
-
-def _place_at_node(
-    graph: SignalGraph,
-    node: str,
-    op: AbstractOperator,
-    placement: dict[str, list[AbstractOperator]],
-) -> None:
-    """Record ``op`` at a single-node slot, refusing what is not one.
-
-    Junctions and selectors are never slots — they materialize from the branches
-    that reach them — and a node that is not ``many`` holds one operator, so a
-    second one is a mistake rather than a composition.
-    """
-    spec = graph.nodes[node]
-    if spec.kind in ("junction", "selector"):
-        raise AssemblyError(
-            f"Node {node!r} is a {spec.kind} — junctions/selectors are never "
-            "operator slots; they materialize automatically as "
-            "SumOperator/SelectOperator."
-        )
-    existing = placement.setdefault(node, [])
-    if existing and not spec.many:
-        raise AssemblyError(
-            f"Two operators provided for node {node!r} "
-            f"({type(existing[0]).__name__} and {type(op).__name__}); this node "
-            "accepts a single instance. Compose them explicitly and wrap with "
-            "At(...) if that is intended."
-        )
-    existing.append(op)
-
-
-def _check_disjoint_claims(
-    placement: dict[str, list[AbstractOperator]],
-    regions: Sequence[tuple[tuple[str, ...], AbstractOperator]],
-) -> None:
-    """Regions are atomic: no node may belong to two claims of any kind.
-
-    Checked over the whole provided set rather than per item, because the
-    conflict is between claims and either one may be read first.
-    """
-    seen: dict[str, str] = {n: f"operator at {n!r}" for n in placement}
-    for path, op in regions:
-        for n in path:
-            if n in seen:
-                raise AssemblyError(
-                    f"Node {n!r} is claimed both by the region {path} of "
-                    f"{type(op).__name__} and by {seen[n]} — claims must be disjoint."
-                )
-        for n in path:
-            seen[n] = f"the region {path} of {type(op).__name__}"
-
-
-def _resolve(
-    graph: SignalGraph, operators: Sequence[AbstractOperator | At]
-) -> tuple[dict[str, list[AbstractOperator]], list[tuple[tuple[str, ...], AbstractOperator]]]:
-    # `Pipeline` and both combinators screen their members through this; before
-    # `must_precede` landed, a non-operator here reached the fold and failed
-    # there. It now fails earlier and worse, on `op.must_precede` — so the
-    # screen belongs at the top of the one route that skipped it.
-    validate_operators(
-        tuple(item.op if isinstance(item, At) else item for item in operators), "assemble"
-    )
-    placement: dict[str, list[AbstractOperator]] = {}
-    regions: list[tuple[tuple[str, ...], AbstractOperator]] = []
-    for item in operators:
-        op = item.op if isinstance(item, At) else item
-        nodes = _claimed_nodes(graph, item)
-        if len(nodes) > 1:
-            _validate_region(graph, nodes, op)
-            regions.append((nodes, op))
-        else:
-            _place_at_node(graph, nodes[0], op, placement)
-    _check_disjoint_claims(placement, regions)
-    return placement, regions
 
 
 def assemble(graph: SignalGraph, *operators: AbstractOperator | At) -> Assembly:
@@ -1022,53 +533,3 @@ def assemble(graph: SignalGraph, *operators: AbstractOperator | At) -> Assembly:
         aliased=tuple(n for n in graph.nodes if n in duplicates),
         placements=_placement_addresses(graph, placement, regions),
     )
-
-
-def _placement_addresses(
-    graph: SignalGraph,
-    placement: dict[str, list[AbstractOperator]],
-    regions: Sequence[tuple[tuple[str, ...], AbstractOperator]],
-) -> tuple[tuple[tuple[str, ...], str], ...]:
-    """``(template nodes, address)`` per placed operator — the recipe `without` re-runs.
-
-    The address is the id ``Assembly.__getitem__`` reaches that operator by:
-    the node id for a single instance, the minted instance id when several sit
-    on a ``many`` node (:func:`~rheplicant.core.fold._instance_names` decides
-    both, so the two cannot drift), and the LAST covered node for a region,
-    which is how the class
-    docstring says regions are addressed.
-
-    Sorted by TEMPLATE order, not by the order the operators were provided in.
-    ``assemble`` promises that argument order is irrelevant — two assemblies of
-    the same operator set compare equal — and this field is part of the
-    Assembly, so a record that remembered the call would quietly break that.
-    """
-    order = {nid: i for i, nid in enumerate(graph.nodes)}
-    entries = [
-        ((nid,), address)
-        for nid, ops_at in placement.items()
-        for address in _instance_names(nid, len(ops_at))
-    ]
-    entries += [(path, path[-1]) for path, _ in regions]
-    return tuple(sorted(entries, key=lambda entry: (order[entry[0][0]], entry[1])))
-
-
-def _live_span(graph: SignalGraph, lit: tuple[str, ...]) -> set[str]:
-    """Nodes lying on a path between two lit nodes (for skip reporting)."""
-    reach_from_lit: set[str] = set()
-    frontier = set(lit)
-    while frontier:
-        n = frontier.pop()
-        for m in graph._out[n]:
-            if m not in reach_from_lit:
-                reach_from_lit.add(m)
-                frontier.add(m)
-    reaches_lit: set[str] = set()
-    frontier = set(lit)
-    while frontier:
-        n = frontier.pop()
-        for m in graph._in[n]:
-            if m not in reaches_lit:
-                reaches_lit.add(m)
-                frontier.add(m)
-    return reach_from_lit & reaches_lit

@@ -57,11 +57,6 @@ LARGE: dict[str, tuple[str, str]] = {
         "schema §6's model checks are a dozen independent passes sharing "
         "one node walk; the walk is the module and the passes are not",
     ),
-    "rheplicant/core/graph.py": (
-        SPLIT,
-        "the template grammar and graph-guided assembly are two halves "
-        "that only meet at the compiled result",
-    ),
     "_rheplicant_bootstrap/output/manager.py": (
         SPLIT,
         "the output grammar, descriptor preflight and A34 lease "
