@@ -402,6 +402,18 @@ prose; these are the signatures.
 .. automodule:: rheplicant.config.dimensions
    :members:
 
+.. automodule:: rheplicant.config.dimension_algebra
+   :members:
+
+.. automodule:: rheplicant.config.dimension_registry
+   :members:
+
+.. automodule:: rheplicant.config.dimension_environment
+   :members:
+
+.. automodule:: rheplicant.config.dimension_inference
+   :members:
+
 .. automodule:: rheplicant.config.preflight
    :members:
 

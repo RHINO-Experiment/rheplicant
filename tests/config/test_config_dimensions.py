@@ -331,7 +331,13 @@ def test_environment_uses_bindings_and_plugin_formula_outputs(monkeypatch, clean
         operands=(),
         producers=(qualified,),
     )
-    monkeypatch.setattr(dimensions, "operator_table", lambda: {"adc": (PluginOperator,)})
+    # Patched on dimension_inference, not on `dimensions`: `operator_table` is
+    # called from there, and a bare name resolves in the globals of the module
+    # where the code was DEFINED. Aimed at the facade this patches an alias
+    # nothing reads, and the test passes while testing nothing.
+    from rheplicant.config import dimension_inference
+
+    monkeypatch.setattr(dimension_inference, "operator_table", lambda: {"adc": (PluginOperator,)})
     environment = dimensions.dimension_environment_for(
         {
             "model": {"adc": {"type": "PluginOperator"}},

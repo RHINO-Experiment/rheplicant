@@ -62,10 +62,6 @@ LARGE: dict[str, tuple[str, str]] = {
         "the drift model and the recursion that integrates it are "
         "different subjects with different test shapes",
     ),
-    "rheplicant/config/dimensions.py": (
-        SPLIT,
-        "the normalized signature and the closed A9 registries are related by use, not by subject",
-    ),
     "rheplicant/core/graph.py": (
         SPLIT,
         "the template grammar and graph-guided assembly are two halves "

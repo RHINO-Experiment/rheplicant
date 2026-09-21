@@ -763,7 +763,11 @@ def test_multilayer_preflight_evaluates_each_selector_match_once(monkeypatch):
         calls[(pattern, actual)] += 1
         return selector_matches(pattern, actual)
 
-    monkeypatch.setattr(dimension_module, "_selector_matches", counted)
+    # Same reason as above: `matching_dimension_rows` lives in
+    # dimension_registry and resolves `_selector_matches` there.
+    from rheplicant.config import dimension_registry
+
+    monkeypatch.setattr(dimension_registry, "_selector_matches", counted)
     assert not _a9(preflight(document))
     assert calls
     assert max(calls.values()) == 1
