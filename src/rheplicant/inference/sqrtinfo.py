@@ -264,7 +264,7 @@ def marginalise_arrays(
 
     What it hands back instead is the evidence: ``pivots``, as data. An eager
     caller judges them (:func:`marginalise` does). A chain does not need to,
-    because :class:`~rheplicant.inference.chain.LinearGaussianTransition`
+    because :class:`~rheplicant.inference.chain_transition.LinearGaussianTransition`
     refuses a non-positive ``process_std`` or ``initial_std`` at construction
     and those rows are what constrain every ``zeta_e`` -- one eager check at
     declaration instead of one traced check per epoch. A caller that has

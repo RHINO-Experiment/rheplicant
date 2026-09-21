@@ -19,7 +19,8 @@ confident, wrong posterior instead of an error.
 Second, ``A`` and ``Aᵀ`` are available without ever forming a matrix:
 ``jax.linearize`` gives the forward action and ``jax.vjp`` the adjoint, at the
 cost of one trace. :func:`linear_operator` packages them as a
-:class:`LinearBlock`, which is the whole interface the conjugate-Gaussian
+:class:`~rheplicant.inference.linear_block.LinearBlock`, which is the whole interface the
+conjugate-Gaussian
 routines here need: :func:`wiener_solve` for the posterior mean and
 :func:`gcr_sample` for an exact posterior draw.
 
@@ -73,7 +74,8 @@ case the prior is for — ``λ_min(M)`` is exactly ``1/prior_std²`` and κ runs
 1e6 and beyond. A solve can then sit at a relative residual of 1e-7 with the
 prior-dominated directions untouched, and a draw comes back with almost no
 scatter where it should have carried the whole prior width. So the guard on
-these solves bounds the *error*, ``κ · residual``, and :func:`condition_estimate`
+these solves bounds the *error*, ``κ · residual``, and
+:func:`~rheplicant.inference.linear_solve.condition_estimate`
 exposes κ for choosing ``tol``.
 """
 
@@ -369,7 +371,8 @@ def linear_operator(
             CG here, where alternation converges at the rate of their
             correlation while reporting a converged residual and a κ of ~1 at
             every step. The joint κ that
-            :func:`condition_estimate` reports for this block is the honest one.
+            :func:`~rheplicant.inference.linear_solve.condition_estimate` reports for this block is
+            the honest one.
         at: values for the latents OUTSIDE the block, fixing where it is built.
             Defaults to the declared initial values — right exactly once, so a
             Gibbs sweep must pass the current values here every sweep.

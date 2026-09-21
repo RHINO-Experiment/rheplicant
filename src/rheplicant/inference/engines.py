@@ -7,8 +7,8 @@ one block, given everything outside it held fixed.
 There are three, and the split is not a taxonomy — it is the same split the rest
 of the package already makes. A block whose latents are all declared
 ``linear=True`` is a linear-Gaussian conditional, so its point estimate is
-:func:`~rheplicant.inference.linear.wiener_solve` and its draw is
-:func:`~rheplicant.inference.linear.gcr_sample`, which is an **exact**
+:func:`~rheplicant.inference.linear_solve.wiener_solve` and its draw is
+:func:`~rheplicant.inference.linear_solve.gcr_sample`, which is an **exact**
 conditional draw. A block whose prediction is ``exp`` of an affine map is the
 same thing once the DATA is taken to logs, under the multiplicative noise the
 radiometer equation gives — :data:`LOG_CONJUGATE`, and
@@ -116,7 +116,7 @@ class Conditioning:
     """The model, closed over once, with everything a block update needs.
 
     Deliberately a plain frozen dataclass and not an ``eqx.Module``, for the
-    reason :class:`~rheplicant.inference.linear.LinearBlock` is: it holds a
+    reason :class:`~rheplicant.inference.linear_block.LinearBlock` is: it holds a
     traced closure (``forward``) and is built where it is needed rather than
     carried around as a differentiable pytree.
 
@@ -246,7 +246,7 @@ def _objective_terms(
     rounding magnitude: the term itself, plus ``|r| |mu| / sigma`` for a
     data term, which is how far a rounding of the prediction moves it.
 
-    Written per term so that :meth:`SamplingPlan.estimate` can take the
+    Written per term so that :meth:`~rheplicant.inference.plan.SamplingPlan.estimate` can take the
     change between two sweeps as a sum of per-term differences. The
     difference of two totals is resolved only to ``eps * |f|``, and ``|f|``
     grows with the number of samples and with every prior's normalizing
@@ -554,7 +554,7 @@ def _conjugate_update(
 
     ``check=False`` because the linearity claim is checked once per run, before
     the loop — the bargain
-    :func:`~rheplicant.inference.linear.gcr_sample`'s own docstring recommends
+    :func:`~rheplicant.inference.linear_solve.gcr_sample`'s own docstring recommends
     for a Gibbs sweep.
 
     ``programs`` is the caller's compiled-transition cache; see

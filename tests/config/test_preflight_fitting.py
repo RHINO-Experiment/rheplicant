@@ -196,7 +196,8 @@ class TestBlocks:
         # as non-linear beside the linear 'd'), and an implementation that
         # derives the engine first tells the user their block "mixes
         # declared-linear latents ['d'] with non-linear ones ['zzz']" -- about
-        # a latent that does not exist.  `plan_settings.py::_not_converged_message` argues the order in
+        #  a latent that does not exist.  `plan_settings.py::_not_converged_message` argues the
+        # order in
         # as many words; this is that argument as an assertion.
         found = _found(_doc([{"names": ["d", "zzz"]}, {"names": ["a", "w"]}]))
         assert {f.check for f in found} == {"A16"}

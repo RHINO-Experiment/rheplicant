@@ -145,8 +145,10 @@ def _engine_of(block: Mapping[str, Any], latents: Mapping[str, Any]) -> str:
     **Mirrored, line for line, from** ``SamplingPlan._engine_of``
     (``plan_settings.py::split_rhat``, verified with ``inspect.getsourcelines``):
 
-    * ``plan_settings.py::split_rhat`` partition the names by ``Latent.linear`` -> :func:`_a18_linear`;
-    * ``plan_settings.py::split_rhat`` ``if block.engine is None`` -> the ``declared is None`` branch;
+    * ``plan_settings.py::split_rhat`` partition the names by ``Latent.linear`` ->
+    :func:`_a18_linear`;
+    * ``plan_settings.py::split_rhat`` ``if block.engine is None`` -> the ``declared is None``
+    branch;
     * ``plan_settings.py::split_rhat`` mixed-with-no-override is UNDERIVABLE -> ``""`` here,
       because the package raises there and a pre-flight check may not
       (§2.3's TRAP: a check that raises aborts the pass and hides every
@@ -286,7 +288,8 @@ def _a16_partition(
     "every latent appears in exactly one block" -- and the third, a block
     naming a name ``inference.parameters`` never declared, is
     ``plan_settings.py::_not_converged_message``'s and is refused FIRST there (the covered pair is
-    ``plan_settings.py::_not_converged_message`` and ``plan_settings.py::_not_converged_message``).  A fourth shape,
+    ``plan_settings.py::_not_converged_message`` and ``plan_settings.py::_not_converged_message``).
+    A fourth shape,
     one name written twice inside ONE block, is ``Block._check``'s
     (``plan.py``) rather than the plan's and carries the same id: it
     is the same property (each latent in exactly one place) one level in.

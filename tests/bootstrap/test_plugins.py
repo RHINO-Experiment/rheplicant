@@ -20,6 +20,8 @@ from types import MappingProxyType, ModuleType
 
 import pytest
 
+from _rheplicant_bootstrap import plugins as plugin_module
+from _rheplicant_bootstrap import plugins_projection, plugins_records, plugins_vocabulary
 from _rheplicant_bootstrap.errors import ConfigError
 from _rheplicant_bootstrap.plugins import (
     PLUGIN_DISTRIBUTION_ROW_KEYS,
@@ -30,9 +32,6 @@ from _rheplicant_bootstrap.plugins import (
     plugin_audit_row,
 )
 from _rheplicant_bootstrap.types import UNAVAILABLE_REASONS
-from _rheplicant_bootstrap import plugins as plugin_module
-
-from _rheplicant_bootstrap import plugins_projection, plugins_records, plugins_vocabulary
 
 #: The plugins family, after section 3.2 split `plugins.py` into its three
 #: subjects. A bare name resolves in the globals of the module where the code
@@ -2117,7 +2116,6 @@ def test_oversized_json_integer_is_rejected_before_exact_copy(
 
 
 def test_direct_url_integer_limit_is_derived_from_the_one_mibibyte_budget():
-    from _rheplicant_bootstrap import plugins as plugin_module
 
     expected = math.ceil((1024 * 1024) * math.log2(10))
     assert _family_attr("_DIRECT_URL_INTEGER_BIT_LIMIT") == expected
@@ -2148,7 +2146,6 @@ def test_direct_url_nodes_consume_the_shared_metadata_budget(monkeypatch):
 def test_direct_url_freeze_consumes_the_shared_budget_before_nested_copy(
     monkeypatch,
 ):
-    from _rheplicant_bootstrap import plugins as plugin_module
 
     class CountingSequence:
         emissions = 0
@@ -2176,7 +2173,6 @@ def test_direct_url_freeze_consumes_the_shared_budget_before_nested_copy(
 def test_plugin_record_direct_url_copy_uses_the_remaining_aggregate_budget(
     monkeypatch,
 ):
-    from _rheplicant_bootstrap import plugins as plugin_module
 
     class CountingSequence:
         emissions = 0
@@ -2208,7 +2204,6 @@ def test_plugin_record_direct_url_copy_uses_the_remaining_aggregate_budget(
 
 
 def test_shared_direct_url_budget_precedes_mapping_pair_unpack(monkeypatch):
-    from _rheplicant_bootstrap import plugins as plugin_module
 
     class BrokenPair:
         unpack_calls = 0
@@ -2682,7 +2677,6 @@ def test_plugin_records_validate_malformed_direct_construction():
 def test_plugin_record_distribution_limit_is_checked_before_any_copy(
     monkeypatch,
 ):
-    from _rheplicant_bootstrap import plugins as plugin_module
 
     def distribution(index):
         return _valid_distribution(
@@ -2719,7 +2713,6 @@ def test_plugin_record_distribution_limit_is_checked_before_any_copy(
 def test_plugin_record_uses_one_shared_budget_for_nested_direct_urls(
     monkeypatch,
 ):
-    from _rheplicant_bootstrap import plugins as plugin_module
 
     distribution = _valid_distribution(name="budgeted-direct-url", direct_url={"a": 1})
     _family_patch(monkeypatch, "_METADATA_EVIDENCE_LIMIT", 5)
@@ -2731,7 +2724,6 @@ def test_plugin_record_uses_one_shared_budget_for_nested_direct_urls(
 
 
 def test_plugin_record_charges_each_repeated_tuple_edge(monkeypatch):
-    from _rheplicant_bootstrap import plugins as plugin_module
 
     shared = "shared scalar"
     distribution = _valid_distribution(
@@ -2760,7 +2752,6 @@ def test_aggregate_direct_url_copy_preserves_each_roots_logical_depth():
 
 
 def test_plugin_record_reuses_one_prevalidated_shared_direct_url(monkeypatch):
-    from _rheplicant_bootstrap import plugins as plugin_module
 
     direct_url = {"leaf": True}
     for _ in range(20):
@@ -2832,7 +2823,6 @@ def test_plugin_record_reuses_one_prevalidated_shared_direct_url(monkeypatch):
 def test_plugin_record_aggregate_copy_preserves_cross_root_shared_children(
     monkeypatch,
 ):
-    from _rheplicant_bootstrap import plugins as plugin_module
 
     deep = {"leaf": True}
     for _ in range(20):
@@ -3071,7 +3061,6 @@ def test_plugin_projection_validates_the_detached_snapshot_after_copy(
     message,
     monkeypatch,
 ):
-    from _rheplicant_bootstrap import plugins as plugin_module
 
     backing = {"stable": True}
     forged_url = MappingProxyType(backing)
@@ -3103,7 +3092,6 @@ def test_plugin_projection_validates_the_detached_snapshot_after_copy(
 def test_plugin_record_rebudgets_a_direct_url_that_grows_at_snapshot(
     monkeypatch,
 ):
-    from _rheplicant_bootstrap import plugins as plugin_module
 
     backing = {"stable": True}
     distribution = _valid_distribution(
@@ -3262,7 +3250,6 @@ class _PairMapping(Mapping):
 
 
 def _validate_forged_proxy_pair(pair: object) -> None:
-    from _rheplicant_bootstrap import plugins as plugin_module
 
     _family_attr("_validate_frozen_json")(
         MappingProxyType(_PairMapping(pair)),
@@ -3275,7 +3262,6 @@ def _validate_forged_proxy_pair(pair: object) -> None:
 def test_direct_url_budget_stops_before_unpacking_the_limit_plus_one_pair(
     monkeypatch,
 ):
-    from _rheplicant_bootstrap import plugins as plugin_module
 
     pair = _BrokenJsonPair()
     _family_patch(monkeypatch, "_METADATA_EVIDENCE_LIMIT", 1)
@@ -3319,7 +3305,6 @@ def test_plugin_record_detaches_a_forged_mappingproxy_backing():
 
 
 def test_plugin_record_copy_does_not_swallow_baseexception(monkeypatch):
-    from _rheplicant_bootstrap import plugins as plugin_module
 
     distribution = _valid_distribution(direct_url=None, direct_url_reason="missing_direct_url")
 

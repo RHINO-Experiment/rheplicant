@@ -176,7 +176,8 @@ def run_estimate(
     * **the certificate**: the Newton decrement of ``f`` over every
       latent, ``sqrt(g^T H^-1 g)``, at most ``sqrt(2 gap_tol)`` posterior
       sigma (0.1 by default) once the error its conjugate gradients may
-      have left is added (see :data:`DEFAULT_GAP_TOL` and ``_certify``).
+      have left is added (see :data:`~rheplicant.inference.plan_settings.DEFAULT_GAP_TOL` and
+      ``_certify``).
       It does not grow with the number of data, and it sees every mode,
       the slow ones included.
     * **the schedule**: the decrement is computed only on a sweep whose
@@ -199,7 +200,8 @@ def run_estimate(
     refuses) the closed-form blocks' tolerance is divided by
     ``1 / _SOLVE_TOL_STEP`` down to a floor set by the dtype, and the
     value the run ended at is recorded as
-    :attr:`PlanDiagnostics.solve_tol`. A model that certifies at the
+    :attr:`~rheplicant.inference.plan_results.PlanDiagnostics.solve_tol`. A model that certifies at
+    the
     caller's ``solve_tol`` is never tightened.
 
     **Migration (T-002 reviews).** Until the certificate, the change test
@@ -231,15 +233,18 @@ def run_estimate(
             sigma (wrapped as
             :class:`~rheplicant.inference.noise.HomoscedasticNoise`).
         max_iter: sweep cap. With a ``tol``, a verdict needs
-            :data:`EARLIEST_CONVERGED_SWEEP` (3) sweeps (see
+            :data:`~rheplicant.inference.plan_settings.EARLIEST_CONVERGED_SWEEP` (3) sweeps (see
             ``min_sweeps``), so ``max_iter`` of 1 or 2 can never converge
             and always refuses.
         tol: relative change in the joint negative log posterior below
             which the run has converged, required on two consecutive
-            sweep-to-sweep changes — see :data:`DEFAULT_CHI2_TOL`. It is
-            floored at :data:`OBJECTIVE_FLOOR_EPS` machine epsilons of the
+            sweep-to-sweep changes — see
+            :data:`~rheplicant.inference.plan_settings.DEFAULT_CHI2_TOL`. It is
+            floored at :data:`~rheplicant.inference.plan_settings.OBJECTIVE_FLOOR_EPS` machine
+            epsilons of the
             objective's dtype, and the value applied is recorded as
-            :attr:`PlanDiagnostics.effective_tol`. ``None`` runs exactly
+            :attr:`~rheplicant.inference.plan_results.PlanDiagnostics.effective_tol`. ``None`` runs
+            exactly
             ``max_iter`` sweeps and makes no convergence claim at all — the
             only way to get an answer back without one.
         min_sweeps: sweeps taken before the test is consulted. The test
@@ -254,25 +259,28 @@ def run_estimate(
         solve_tol: CG tolerance for conjugate blocks, at the start: the run
             tightens it when its solves are inexact (see above).
         solve_guard: bound on each conjugate solve's relative ERROR, as for
-            :func:`~rheplicant.inference.linear.wiener_solve`. ``None`` skips
+            :func:`~rheplicant.inference.linear_solve.wiener_solve`. ``None`` skips
             the condition-number estimate, which is what a 10^6-coefficient
             block wants — see that function's own note on the bargain.
         gap_tol: the certificate's threshold, in nats of the joint
             negative log posterior: the Newton decrement must be at most
-            ``2 gap_tol`` — see :data:`DEFAULT_GAP_TOL`. The last
+            ``2 gap_tol`` — see :data:`~rheplicant.inference.plan_settings.DEFAULT_GAP_TOL`. The
+            last
             decrement's upper bound is recorded as
-            :attr:`PlanDiagnostics.distance_bound`, in posterior sigma.
+            :attr:`~rheplicant.inference.plan_results.PlanDiagnostics.distance_bound`, in posterior
+            sigma.
             Not consulted when ``tol`` is ``None``.
 
     Returns:
-        An :class:`Estimate`.
+        An :class:`~rheplicant.inference.plan_results.Estimate`.
 
     Raises:
         ParameterSpaceError: if the model is not identified; if ``observed``
             is mis-shaped; or if the joint negative log posterior has not
             settled within ``max_iter`` sweeps. That last one is an error rather
             than a flag *here* and a flag rather than an error at
-            :meth:`sample`, and the asymmetry is deliberate: a chain has
+            :meth:`~rheplicant.inference.plan.SamplingPlan.sample`, and the asymmetry is deliberate:
+            a chain has
             ``r_hat`` to scream with, and a point estimate has nothing.
     """
     if not isinstance(max_iter, int) or max_iter < 1:

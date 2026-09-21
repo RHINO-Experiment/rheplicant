@@ -31,7 +31,8 @@ from .linear_priors import (
 )
 
 #: The observed node this adapter presents to bayesmith. Upstream a
-#: :class:`LinearBlock` predicts ONE array and the data arrives as an argument
+#:  :class:`~rheplicant.inference.linear_block.LinearBlock` predicts ONE array and the data arrives
+#: as an argument
 #: to the solve; downstream a block is keyed by observed-node name, because
 #: there a block is cut out of a graph that may carry several. One name is
 #: therefore enough, and it never reaches a caller: every public exit in this
@@ -148,7 +149,8 @@ def _from_far_domain(block: LinearBlock, solution: dict[str, Any]) -> Any:
     """The far side's ``{name: array}`` back in this block's own spelling.
 
     A ``name=`` block's answer is a bare array and a ``names=`` group's is a
-    dict, and the two are not interchangeable -- :meth:`LinearBlock.as_dict`
+    dict, and the two are not interchangeable --
+    :meth:`~rheplicant.inference.linear_block.LinearBlock.as_dict`
     exists because six downstream consumers index by latent name and all six
     raise on the bare form. The far side only has the dict, so this is where
     the distinction is restored.
@@ -278,7 +280,7 @@ def wiener_solve(
     side and costs exactly the same solve.
 
     Args:
-        block: from :func:`linear_operator`.
+        block: from :func:`~rheplicant.inference.linear.linear_operator`.
         observed: the data, shaped like ``block.offset``.
         noise_std: noise standard deviation — a scalar, or an array whose
             SHAPE says which axis of the data it runs along: ``(n_time, 1)``
@@ -332,7 +334,7 @@ def wiener_solve(
             where the conditioning barely moves from sweep to sweep, call
             :func:`condition_estimate` once outside the loop, choose ``tol``
             from it, and pass ``require_convergence=None`` inside — the same
-            bargain :func:`linear_operator`'s ``check`` offers.
+            bargain :func:`~rheplicant.inference.linear.linear_operator`'s ``check`` offers.
 
     Returns:
         ``(x̂, relative_residual)``, the residual being ``‖M x̂ - b‖ / ‖b‖``
@@ -346,10 +348,11 @@ def wiener_solve(
         :meth:`~rheplicant.inference.parameters.ParameterSpace.bind`,
         :func:`~rheplicant.inference.uncertainty.fisher_information`,
         :func:`~rheplicant.inference.identifiability.identifiability`'s ``at=``,
-        :func:`linear_operator`'s own ``at=`` and
+        :func:`~rheplicant.inference.linear.linear_operator`'s own ``at=`` and
         :func:`~rheplicant.inference.engines.conditional_potential` all index by
         latent name and all six raise on it. Wrap it as ``{block.name: x̂}``
-        first; :meth:`LinearBlock.as_dict` is that call, and does nothing to the
+        first; :meth:`~rheplicant.inference.linear_block.LinearBlock.as_dict` is that call, and does
+        nothing to the
         grouped form, so it is correct either way.
 
     Note:
@@ -447,7 +450,7 @@ def condition_bound(
     :func:`condition_estimate` costs, and forms no matrix.
 
     Args:
-        block: from :func:`linear_operator`.
+        block: from :func:`~rheplicant.inference.linear.linear_operator`.
         noise_std: as for :func:`condition_estimate`, with the same refusals.
         prior_std: as for :func:`condition_estimate`.
         iterations: power-iteration steps for ``λ_max``.
@@ -516,7 +519,7 @@ def condition_estimate(
     :func:`condition_bound` costs half that, measuring only the top.
 
     Args:
-        block: from :func:`linear_operator`.
+        block: from :func:`~rheplicant.inference.linear.linear_operator`.
         noise_std: the same decided sigma array those solves take, and a
             :class:`~rheplicant.inference.noise.NoiseModel` is as wrong here as
             it is there — a κ is the conditioning of one particular normal
@@ -594,7 +597,7 @@ def gcr_sample(
     module returned a silently over-confident posterior for.
 
     Args:
-        block: from :func:`linear_operator`.
+        block: from :func:`~rheplicant.inference.linear.linear_operator`.
         observed: the data, shaped like ``block.offset``.
         noise_std: noise standard deviation, exactly as for
             :func:`wiener_solve` — the same axis contract on a 1-D sigma
@@ -634,7 +637,7 @@ def gcr_sample(
 
         ``x`` carries the block's domain, dict or bare array, exactly as
         :func:`wiener_solve`'s does; see the note there, and
-        :meth:`LinearBlock.as_dict` for the wrap.
+        :meth:`~rheplicant.inference.linear_block.LinearBlock.as_dict` for the wrap.
 
     Note:
         ``S`` is read off ``Latent(prior=...)`` when the keywords are omitted;

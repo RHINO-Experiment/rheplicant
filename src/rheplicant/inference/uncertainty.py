@@ -325,7 +325,7 @@ def _declared_gaussian_priors(
     independent of where it is evaluated — the one prior family whose
     contribution to the information is a constant matrix and not a function of
     the expansion point. That is exactly the family
-    :func:`~rheplicant.inference.linear.wiener_solve` calls conjugate, so
+    :func:`~rheplicant.inference.linear_solve.wiener_solve` calls conjugate, so
     reading the SAME declaration here is what keeps the Fisher forecast and the
     conjugate solve talking about one posterior.
 
@@ -523,7 +523,7 @@ def fisher_information(
     posterior run under informative priors. That distinction used to be
     invisible, and it mattered: ``Latent(prior=...)`` is the package's one
     statement of what a latent is a priori and every other exit reads it —
-    :func:`~rheplicant.inference.linear.wiener_solve` solves with it as ``S``
+    :func:`~rheplicant.inference.linear_solve.wiener_solve` solves with it as ``S``
     and refuses a prior-free linear latent by name — while this function never
     saw the :class:`~rheplicant.inference.parameters.ParameterSpace` at all.
     Tightening a declared prior by a factor of 5,000,000 moved the reported

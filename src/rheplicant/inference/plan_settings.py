@@ -22,7 +22,7 @@ CHECK_ONCE: str = "once"
 #: ``check_identifiability="each_sweep"`` — at every parameter tuple visited.
 CHECK_EACH_SWEEP: str = "each_sweep"
 
-#: Sweep cap for :meth:`SamplingPlan.estimate`.
+#: Sweep cap for :meth:`~rheplicant.inference.plan.SamplingPlan.estimate`.
 DEFAULT_MAX_ITER: int = 100
 
 #: Relative CHANGE in the JOINT negative log posterior below which a point
@@ -117,7 +117,7 @@ OBJECTIVE_FLOOR_EPS: int = certify.OBJECTIVE_FLOOR_EPS
 #: needs within the effective tolerance. See :func:`_settled`.
 _SETTLED_CHANGES: int = certify.SETTLED_CHANGES
 
-#: The first sweep at which :meth:`SamplingPlan.estimate` can report
+#: The first sweep at which :meth:`~rheplicant.inference.plan.SamplingPlan.estimate` can report
 #: converged, whatever ``min_sweeps`` says below it. The changes are counted
 #: between sweep OUTPUTS, never from the starting values, so
 #: ``_SETTLED_CHANGES`` changes need one more sweep than that. A run with
@@ -183,7 +183,7 @@ _DECREMENT_TAG: tuple[str] = ("decrement",)
 #: or a candidate stop the decrement refuses), and where that stops, from
 #: :mod:`~bayesmith.optimize.certify`. Measured here: the bilinear basis
 #: fixture's worst case certifies at 1e-8, six digits above the float64
-#: floor. See :meth:`SamplingPlan.estimate`, ``solve_tol``.
+#: floor. See :meth:`~rheplicant.inference.plan.SamplingPlan.estimate`, ``solve_tol``.
 _SOLVE_TOL_STEP = certify.SOLVE_TOL_STEP
 
 _solve_tol_floor = certify.solve_tol_floor
@@ -285,7 +285,7 @@ def _not_converged_message(
     dtype: Any,
     hidden: str,
 ) -> str:
-    """:meth:`SamplingPlan.estimate`'s refusal at ``max_iter``.
+    """:meth:`~rheplicant.inference.plan.SamplingPlan.estimate`'s refusal at ``max_iter``.
 
     Two shapes. If a sweep passed the pre-screen and the Newton decrement was
     computed, the message is about the decrement: the distance it measured,
@@ -390,7 +390,8 @@ def _halves(values: np.ndarray) -> np.ndarray:
     Written ``values[values.size - half:]`` and not ``values[-half:]``. Those
     are the same slice for every positive ``half`` and are NOT the same slice
     when ``half`` is 0: ``values[-0:]`` is ``values[0:]``, the whole trace. The
-    minimum :data:`MIN_DRAWS` imposes makes that unreachable through
+    minimum :data:`~rheplicant.inference.plan_settings.MIN_DRAWS` imposes makes that unreachable
+    through
     :func:`split_rhat` today, which is exactly why it is written correctly here
     — a slice that is only right because a caller upstream never passes the
     length that breaks it is a bug waiting for someone to lower a constant. Its
@@ -421,7 +422,8 @@ def split_rhat(trace: Any) -> float:
     and stopped.
 
     **A trace too short to halve is refused, not answered.**
-    ``SamplingPlan.sample`` enforces :data:`MIN_DRAWS` on the draws it keeps
+    ``SamplingPlan.sample`` enforces :data:`~rheplicant.inference.plan_settings.MIN_DRAWS` on the
+    draws it keeps
     and this function is public and exported, so it enforces the same minimum
     rather than trusting its one in-package caller. What it refuses used to be
     returned: two halves of one have no within-half variance, so ``ddof=1`` gave
@@ -439,7 +441,8 @@ def split_rhat(trace: Any) -> float:
         values.
 
     Raises:
-        ParameterSpaceError: if fewer than :data:`MIN_DRAWS` values are given.
+        ParameterSpaceError: if fewer than :data:`~rheplicant.inference.plan_settings.MIN_DRAWS`
+        values are given.
     """
     values = np.asarray(trace, dtype=np.float64).ravel()
     if values.size < MIN_DRAWS:

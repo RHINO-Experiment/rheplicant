@@ -56,7 +56,7 @@ class At:
     the same kind, and not across the source/transform line. A source at a
     transform node discards the signal reaching that node, and a transform at a
     source node is handed ``data=None``; neither is a placement, and
-    :func:`assemble` refuses both — see
+    :func:`~rheplicant.core.graph.assemble` refuses both — see
     :func:`~rheplicant.core.fold._check_slot_kinds`.
     """
 

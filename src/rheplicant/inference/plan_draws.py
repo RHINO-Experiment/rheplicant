@@ -58,14 +58,15 @@ def run_sample(
     """Posterior draws: a Gibbs sweep over the same partition.
 
     Each conjugate block is drawn EXACTLY by
-    :func:`~rheplicant.inference.linear.gcr_sample`, so a plan of conjugate
+    :func:`~rheplicant.inference.linear_solve.gcr_sample`, so a plan of conjugate
     blocks is an exact Gibbs sampler with nothing tuned. A gradient block
     takes ``steps`` NUTS steps instead, which makes the whole scheme
-    Metropolis-within-Gibbs — see :class:`Block`'s ``steps`` and
+    Metropolis-within-Gibbs — see :class:`~rheplicant.inference.plan_results.Block`'s ``steps`` and
     :func:`~rheplicant.inference.engines.gradient_draw`.
 
     Args:
-        pipeline, state_template, observed, noise: as for :meth:`estimate`.
+        pipeline, state_template, observed, noise: as for
+        :meth:`~rheplicant.inference.plan.SamplingPlan.estimate`.
         key: PRNG key. Required — that is the point of this being a separate
             method rather than ``estimate(key=...)``.
         n_sweeps: total sweeps, warmup included.
@@ -73,23 +74,26 @@ def run_sample(
             tuning for gradient blocks adapts through warmup and is **frozen**
             afterwards, because a kernel that keeps adapting from the states
             it visits is no longer a valid transition.
-        check_identifiability: as for :meth:`estimate`.
+        check_identifiability: as for :meth:`~rheplicant.inference.plan.SamplingPlan.estimate`.
         rhat_max: split-``r_hat`` of the post-warmup joint chi-squared above
-            which :attr:`PlanDiagnostics.converged` is ``False``. Reported,
+            which :attr:`~rheplicant.inference.plan_results.PlanDiagnostics.converged` is ``False``.
+            Reported,
             not raised: unlike a point estimate, a chain hands you the
             diagnostic along with the draws, and throwing away expensive
             draws over a scalar summary would be the worse trade.
-        solve_tol, solve_guard: as for :meth:`estimate`.
+        solve_tol, solve_guard: as for :meth:`~rheplicant.inference.plan.SamplingPlan.estimate`.
 
     Returns:
-        A :class:`Draws`. **Read ``diagnostics.rhat``.** The measured
+        A :class:`~rheplicant.inference.plan_results.Draws`. **Read ``diagnostics.rhat``.** The
+        measured
         difference between a non-identified gain and the same model with an
         identifying tone is 1.824 against 1.002.
 
     Raises:
         ParameterSpaceError: if the model is not identified; if ``observed``
             is mis-shaped; if ``n_sweeps`` or ``warmup`` is not a sensible
-            count; if fewer than :data:`MIN_DRAWS` draws would be kept; or if
+            count; if fewer than :data:`~rheplicant.inference.plan_settings.MIN_DRAWS` draws would
+            be kept; or if
             a gradient block has a member with no declared prior.
     """
     if not isinstance(n_sweeps, int) or n_sweeps < 1:

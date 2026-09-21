@@ -76,7 +76,7 @@ time and ``n_data · n_par`` float64 words of memory. This is a design-time
 diagnostic for tens to a few thousand parameters — the size a Gibbs partition
 is *chosen* at — not something to run inside a sweep over a 10⁶-coefficient sky
 block. For that block the matrix-free relative is
-:func:`~rheplicant.inference.linear.condition_estimate`, which reports the
+:func:`~rheplicant.inference.linear_solve.condition_estimate`, which reports the
 conditioning of one block without forming anything.
 """
 
@@ -222,7 +222,7 @@ class IdentifiabilityReport:
     """What the joint Jacobian's rank says about a set of latents.
 
     Deliberately a plain frozen dataclass rather than an ``eqx.Module``, for
-    the same reason :class:`~rheplicant.inference.linear.LinearBlock` is: this
+    the same reason :class:`~rheplicant.inference.linear_block.LinearBlock` is: this
     is a derived linear-algebra verdict, not a differentiable model. It holds
     **numpy** arrays, not JAX ones — a float64 JAX array that escapes the x64
     context truncates, with a warning, the moment a default-precision caller

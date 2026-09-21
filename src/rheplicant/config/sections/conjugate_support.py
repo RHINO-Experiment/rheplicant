@@ -3,7 +3,7 @@
 The conjugate family is four exits -- ``conjugate.wiener``, ``conjugate.gcr``,
 ``conjugate.gls`` and ``condition`` (schema §4.7.9) -- and every one of them
 starts the same way: turn ``names:`` into a
-:class:`~rheplicant.inference.linear.LinearBlock`, turn
+:class:`~rheplicant.inference.linear_block.LinearBlock`, turn
 ``prior_std:``/``prior_mean:`` into the per-member mappings a grouped solve
 takes, and coerce whichever solver knobs the document declared.  That shared
 opening lives here; the executors that go on to do four different things with

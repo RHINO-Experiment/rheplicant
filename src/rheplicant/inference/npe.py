@@ -1,7 +1,7 @@
 """Amortized neural posterior estimation: inference that never writes a likelihood.
 
 Every other engine in this package evaluates a likelihood. NUTS does it once
-per leapfrog step; :func:`~rheplicant.inference.linear.gcr_sample` exploits its
+per leapfrog step; :func:`~rheplicant.inference.linear_solve.gcr_sample` exploits its
 conjugate form. Simulation-based inference does not evaluate one at all: it
 draws pairs ``(theta, x)`` from the prior and the simulator, fits a conditional
 density ``q(theta | x)`` to them, and then reads the posterior off ``q`` at the
@@ -23,7 +23,7 @@ posterior has **no internal notion of being wrong** — a badly-trained ``q``
 returns a confident, smooth, incorrect distribution and reports nothing amiss.
 So this module is deliberately built to be checkable: on a linear-Gaussian
 problem the exact posterior is available from
-:func:`~rheplicant.inference.linear.gcr_sample`, and the package's tests hold
+:func:`~rheplicant.inference.linear_solve.gcr_sample`, and the package's tests hold
 the estimator to it. Validate on a case you can solve before trusting one you
 cannot.
 

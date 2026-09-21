@@ -29,13 +29,14 @@ class Block:
     ``Block("t_nw", "t_ant")`` puts two latents in one conjugate solve;
     ``Block("gain")`` is a block of one. Which engine a block takes is
     **derived** from ``Latent(..., linear=True)`` and is not restated here —
-    see :class:`SamplingPlan` for the derivation and for when ``engine=`` is a
+    see :class:`~rheplicant.inference.plan.SamplingPlan` for the derivation and for when ``engine=``
+    is a
     legitimate override.
 
     Attributes:
         names: the latents in this block, in the caller's own order.
         steps: inner steps for a **gradient** block — Adam steps at
-            :meth:`SamplingPlan.estimate`, NUTS steps at
+            :meth:`~rheplicant.inference.plan.SamplingPlan.estimate`, NUTS steps at
             ``SamplingPlan.sample``. ``None`` takes
             :data:`~rheplicant.inference.engines.DEFAULT_GRADIENT_STEPS`.
 
@@ -50,7 +51,8 @@ class Block:
         engine: ``"conjugate"``, ``"gradient"``, or ``None`` to derive. An
             override, not the norm.
         learning_rate: Adam step size for a **gradient** block at
-            :meth:`SamplingPlan.estimate`, as a fraction of ``max|init|``.
+            :meth:`~rheplicant.inference.plan.SamplingPlan.estimate`, as a fraction of
+            ``max|init|``.
             ``None`` takes
             :data:`~rheplicant.inference.engines.DEFAULT_LEARNING_RATE`.
             It sets how far the Adam steps travel in a sweep; the Newton steps
@@ -145,14 +147,16 @@ class PlanDiagnostics:
 
     Attributes:
         chi2: the JOINT chi-squared, one entry per sweep, the first at the
-            starting values. For :meth:`SamplingPlan.estimate` it is reported
+            starting values. For :meth:`~rheplicant.inference.plan.SamplingPlan.estimate` it is
+            reported
             data and not the stop rule: with a prior it can RISE as the run
             approaches the MAP. For ``SamplingPlan.sample`` it fluctuates
             around a stationary value, which is what :attr:`rhat` tests.
         sweeps: sweeps actually run.
         converged: for a point estimate, whether the Newton decrement at the
             returned point certified it within ``gap_tol`` of the objective's
-            minimum (see :data:`DEFAULT_GAP_TOL`; ``None`` when the test was
+            minimum (see :data:`~rheplicant.inference.plan_settings.DEFAULT_GAP_TOL`; ``None`` when
+            the test was
             disabled). For a draw,
             whether :attr:`rhat` came in under the caller's threshold. **False
             here means the answer is not what it looks like** — the same
@@ -180,7 +184,8 @@ class PlanDiagnostics:
             ``None`` for a draw.
         effective_tol: the relative tolerance the stop rule applied,
             ``max(tol, OBJECTIVE_FLOOR_EPS * eps)`` for the objective's dtype
-            (see :data:`OBJECTIVE_FLOOR_EPS`). ``None`` for a draw and for a
+            (see :data:`~rheplicant.inference.plan_settings.OBJECTIVE_FLOOR_EPS`). ``None`` for a
+            draw and for a
             point estimate run with ``tol=None``.
         contraction: the per-sweep contraction of the objective's decrease the
             gap pre-screen used at the last sweep (see ``_gap_step``), or
@@ -198,7 +203,8 @@ class PlanDiagnostics:
         certificate_attempts: how many decrements the run computed (0 when no
             sweep was a candidate). ``None`` for a draw.
         solve_tol: the closed-form blocks' CG tolerance at the end of the run,
-            after any tightening (see :meth:`SamplingPlan.estimate`). ``None``
+            after any tightening (see :meth:`~rheplicant.inference.plan.SamplingPlan.estimate`).
+            ``None``
             for a draw.
         floor_source: where the last certificate's curvature floor came from —
             ``"dense"`` (the formed Hessian's own smallest eigenvalue),

@@ -281,7 +281,7 @@ def prepare_conditioning(
 
     Builds the forward function ONCE, refuses a mis-shaped ``observed``,
     and checks each conjugate block's linearity claim once — the bargain
-    :func:`~rheplicant.inference.linear.gcr_sample` recommends for a sweep,
+    :func:`~rheplicant.inference.linear_solve.gcr_sample` recommends for a sweep,
     which is what lets every rebuild inside the loop pass ``check=False``.
     """
     if check is not False and check not in (CHECK_ONCE, CHECK_EACH_SWEEP):

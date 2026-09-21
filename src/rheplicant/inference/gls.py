@@ -1,7 +1,7 @@
 """Iteratively reweighted least squares: finding the covariance to solve at.
 
-:func:`~rheplicant.inference.linear.gcr_sample` is a linear sampler *given* a
-covariance, and :func:`~rheplicant.inference.linear.wiener_solve` is the
+:func:`~rheplicant.inference.linear_solve.gcr_sample` is a linear sampler *given* a
+covariance, and :func:`~rheplicant.inference.linear_solve.wiener_solve` is the
 corresponding mean. Both take ``noise_std`` and neither cares where it came
 from. Under :class:`~rheplicant.inference.noise.HomoscedasticNoise` it comes
 from the caller and there is nothing more to say.
@@ -25,7 +25,7 @@ recompute the weights at the new prediction, repeat. It is the same
 iteratively-reweighted GLS as hydra-tod's
 ``hydra_tod.linear_sampler.iterative_gls``, but **matrix-free** — hydra-tod
 forms a dense design matrix ``U`` and a dense ``N_inv``, while here the same
-algorithm runs on the :class:`~rheplicant.inference.linear.LinearBlock`'s JVP
+algorithm runs on the :class:`~rheplicant.inference.linear_block.LinearBlock`'s JVP
 and VJP, which is what makes a block with 10^6 degrees of freedom possible at
 all.
 
@@ -73,12 +73,12 @@ class GLSResult(NamedTuple):
 
     * ``noise_std`` — the converged sigma: **the covariance**, and the whole
       point of the exercise. Feed it to
-      :func:`~rheplicant.inference.linear.gcr_sample` or
-      :func:`~rheplicant.inference.linear.wiener_solve` as ``noise_std=``.
+      :func:`~rheplicant.inference.linear_solve.gcr_sample` or
+      :func:`~rheplicant.inference.linear_solve.wiener_solve` as ``noise_std=``.
     * ``solution`` — the GLS point estimate at that covariance, shaped like the
       latent.
     * ``residual`` — relative CG residual of the final solve. Not an accuracy;
-      see :func:`~rheplicant.inference.linear.wiener_solve`.
+      see :func:`~rheplicant.inference.linear_solve.wiener_solve`.
     * ``iterations`` — reweighting steps taken, the first solve included.
     * ``delta`` — relative change of the last step, ``‖x_new - x‖ / ‖x_new‖``.
     * ``converged`` — whether ``delta`` fell below ``reweight_tol`` within

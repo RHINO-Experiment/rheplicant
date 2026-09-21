@@ -573,7 +573,8 @@ def gls_product(run=None, **kwargs):
 #: :func:`two_latent_document`'s pair, reweighted.  ``require_convergence:
 #: null`` is part of the template rather than of each caller's run: this pair
 #: is ill-conditioned enough that the package's own default guard fires on it
-#: (it compares residual x kappa, linear_solve.py::_check_solve_arguments), so every test that is not
+#:  (it compares residual x kappa, linear_solve.py::_check_solve_arguments), so every test that is
+#: not
 #: ABOUT the guard would otherwise spend its first line turning it off.
 GLS_PAIR = {
     "name": "gls",

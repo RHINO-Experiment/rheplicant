@@ -280,7 +280,8 @@ class TestTheSeedRunsTheOtherWay:
 
     ``gcr_sample``'s key is a REQUIRED keyword-only argument with no default;
     ``condition_estimate``'s is ``key: jax.Array | None = None`` and falls
-    back to ``jax.random.key(0)`` (linear_priors.py::_refuse_a_noise_model_at_the_conjugate_seam).  So
+    back to ``jax.random.key(0)`` (linear_priors.py::_refuse_a_noise_model_at_the_conjugate_seam).
+    So
     ``seed:`` is optional
     on a condition run and A29 does not make it required -- schema §4.7.9
     lists ``seed`` among this kind's four keys, and A29's own row names

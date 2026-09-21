@@ -15,9 +15,9 @@ refuses it and the only route is a gradient block — NUTS, and inside a
 :class:`~rheplicant.inference.plan.SamplingPlan` a gradient block's potential
 carries no ``sum log sigma``, so it targets the GLS-flavoured posterior rather
 than the full one. In log space the same block is an ordinary
-:class:`~rheplicant.inference.linear.LinearBlock`, so it gets
-:func:`~rheplicant.inference.linear.wiener_solve` and an exact
-:func:`~rheplicant.inference.linear.gcr_sample` draw instead.
+:class:`~rheplicant.inference.linear_block.LinearBlock`, so it gets
+:func:`~rheplicant.inference.linear_solve.wiener_solve` and an exact
+:func:`~rheplicant.inference.linear_solve.gcr_sample` draw instead.
 
 **And the log-space sigma does not depend on the prediction.**
 ``Var[log(1 + f w)]`` is a function of ``f`` alone — measured at prediction
@@ -35,7 +35,7 @@ For ``d = g (T_ant + T_nw + tone)``, ``log`` of the sum is not affine in the
 sky coefficients — but the GAIN block does not need it to be. Conditional on
 the sky, ``log d = log g + log S`` with ``log S`` a known constant, and a known
 constant added to the prediction is exactly what
-:attr:`~rheplicant.inference.linear.LinearBlock.offset` holds. So the gain is
+:attr:`~rheplicant.inference.linear_block.LinearBlock.offset` holds. So the gain is
 log-linear whatever the sky is made of, and the sky block stays an ordinary
 linear block in the original space. Each block takes the space its own
 conditional is affine in.
@@ -470,11 +470,11 @@ def log_linear_operator(
 ) -> LinearBlock:
     """Export ``log(prediction)`` as a linear block, for data taken to logs.
 
-    The returned :class:`~rheplicant.inference.linear.LinearBlock` is an
+    The returned :class:`~rheplicant.inference.linear_block.LinearBlock` is an
     ordinary one — nothing downstream knows or needs to know that its ``offset``
     is ``log`` of something. Feed it to
-    :func:`~rheplicant.inference.linear.wiener_solve` or
-    :func:`~rheplicant.inference.linear.gcr_sample` with the data and sigma that
+    :func:`~rheplicant.inference.linear_solve.wiener_solve` or
+    :func:`~rheplicant.inference.linear_solve.gcr_sample` with the data and sigma that
     :func:`to_log_space` returns::
 
         block = log_linear_operator(space, twin, state, "log_gain", at=values)
@@ -499,7 +499,7 @@ def log_linear_operator(
         scales, rtol: forwarded to the check.
 
     Returns:
-        A :class:`~rheplicant.inference.linear.LinearBlock` over log space.
+        A :class:`~rheplicant.inference.linear_block.LinearBlock` over log space.
     """
     if check:
         check_log_linearity(

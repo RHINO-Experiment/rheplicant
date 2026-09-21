@@ -88,7 +88,7 @@ more than one, and the prior's job there may be to select between them, which
 is not a displacement and is not measured here.
 
 It reads the **declared** prior only. A ``linear=True`` latent whose prior
-arrives as :func:`~rheplicant.inference.linear.wiener_solve`'s ``prior_std=``
+arrives as :func:`~rheplicant.inference.linear_solve.wiener_solve`'s ``prior_std=``
 keyword is refused by name rather than reported as prior-free — see
 :func:`prior_sensitivity`'s ``Raises``.
 

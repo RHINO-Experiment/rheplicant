@@ -1,8 +1,8 @@
 """Sampling plans: one declared partition, two exits — a point estimate and a draw.
 
 Everything under :mod:`rheplicant.inference` up to here builds *one* block's
-answer. :func:`~rheplicant.inference.linear.wiener_solve` is a linear-Gaussian
-block's posterior mean and :func:`~rheplicant.inference.linear.gcr_sample` is an
+answer. :func:`~rheplicant.inference.linear_solve.wiener_solve` is a linear-Gaussian
+block's posterior mean and :func:`~rheplicant.inference.linear_solve.gcr_sample` is an
 exact draw from the same conditional, sharing one private solve that differs by
 a single argument. This module promotes that: a
 :class:`SamplingPlan` says how the whole space is partitioned into blocks, and
@@ -24,7 +24,7 @@ Two methods, not a mode flag. ``key=None | k`` is the right *implementation* and
 the wrong *interface*: a caller's intent is "give me the best fit" or "give me
 draws", not "here is a PRNG key". Making them two methods also makes the invalid
 combinations unrepresentable rather than validated — ``key`` is required on
-``SamplingPlan.sample`` and absent from :meth:`~SamplingPlan.estimate`, so
+``SamplingPlan.sample`` and absent from :meth:`~rheplicant.inference.plan.SamplingPlan.estimate`, so
 "asked for samples and forgot the key" cannot be written down; ``n_sweeps`` and
 ``warmup`` belong to one and ``max_iter`` and ``tol`` to the other because they
 mean nothing to the other. And the layer below already names the two exits
@@ -67,7 +67,7 @@ blocks and refuses the model before a sweep runs, naming the degenerate
 directions by latent; and the convergence monitor is a **joint** quantity at
 the current parameter tuple across sweeps, never a per-block residual — which
 is precisely the number that read ~1e-7 on an answer thousands of kelvin wrong.
-For :meth:`SamplingPlan.estimate` that quantity is the joint negative log
+For :meth:`~rheplicant.inference.plan.SamplingPlan.estimate` that quantity is the joint negative log
 posterior (:meth:`~rheplicant.inference.engines.Conditioning.neg_log_posterior`),
 the objective every block update descends; the joint chi-squared is recorded
 beside it, and ``SamplingPlan.sample`` tests its mixing on the chi-squared
@@ -271,7 +271,8 @@ class SamplingPlan:
 
     Args:
         space: the parameter declaration this plan partitions.
-        *blocks: the :class:`Block` s, in the order a sweep visits them.
+        *blocks: the :class:`~rheplicant.inference.plan_results.Block` s, in the order a sweep
+        visits them.
 
     Raises:
         ParameterSpaceError: if no blocks are given; if a block names something
@@ -448,7 +449,7 @@ class SamplingPlan:
 
         Builds the forward function ONCE, refuses a mis-shaped ``observed``,
         and checks each conjugate block's linearity claim once — the bargain
-        :func:`~rheplicant.inference.linear.gcr_sample` recommends for a sweep,
+        :func:`~rheplicant.inference.linear_solve.gcr_sample` recommends for a sweep,
         which is what lets every rebuild inside the loop pass ``check=False``.
         """
         return prepare_conditioning(
@@ -568,7 +569,8 @@ class SamplingPlan:
         * **the certificate**: the Newton decrement of ``f`` over every
           latent, ``sqrt(g^T H^-1 g)``, at most ``sqrt(2 gap_tol)`` posterior
           sigma (0.1 by default) once the error its conjugate gradients may
-          have left is added (see :data:`DEFAULT_GAP_TOL` and ``_certify``).
+          have left is added (see :data:`~rheplicant.inference.plan_settings.DEFAULT_GAP_TOL` and
+          ``_certify``).
           It does not grow with the number of data, and it sees every mode,
           the slow ones included.
         * **the schedule**: the decrement is computed only on a sweep whose
@@ -591,7 +593,8 @@ class SamplingPlan:
         refuses) the closed-form blocks' tolerance is divided by
         ``1 / _SOLVE_TOL_STEP`` down to a floor set by the dtype, and the
         value the run ended at is recorded as
-        :attr:`PlanDiagnostics.solve_tol`. A model that certifies at the
+        :attr:`~rheplicant.inference.plan_results.PlanDiagnostics.solve_tol`. A model that certifies
+        at the
         caller's ``solve_tol`` is never tightened.
 
         **Migration (T-002 reviews).** Until the certificate, the change test
@@ -623,15 +626,18 @@ class SamplingPlan:
                 sigma (wrapped as
                 :class:`~rheplicant.inference.noise.HomoscedasticNoise`).
             max_iter: sweep cap. With a ``tol``, a verdict needs
-                :data:`EARLIEST_CONVERGED_SWEEP` (3) sweeps (see
+                :data:`~rheplicant.inference.plan_settings.EARLIEST_CONVERGED_SWEEP` (3) sweeps (see
                 ``min_sweeps``), so ``max_iter`` of 1 or 2 can never converge
                 and always refuses.
             tol: relative change in the joint negative log posterior below
                 which the run has converged, required on two consecutive
-                sweep-to-sweep changes — see :data:`DEFAULT_CHI2_TOL`. It is
-                floored at :data:`OBJECTIVE_FLOOR_EPS` machine epsilons of the
+                sweep-to-sweep changes — see
+                :data:`~rheplicant.inference.plan_settings.DEFAULT_CHI2_TOL`. It is
+                floored at :data:`~rheplicant.inference.plan_settings.OBJECTIVE_FLOOR_EPS` machine
+                epsilons of the
                 objective's dtype, and the value applied is recorded as
-                :attr:`PlanDiagnostics.effective_tol`. ``None`` runs exactly
+                :attr:`~rheplicant.inference.plan_results.PlanDiagnostics.effective_tol`. ``None``
+                runs exactly
                 ``max_iter`` sweeps and makes no convergence claim at all — the
                 only way to get an answer back without one.
             min_sweeps: sweeps taken before the test is consulted. The test
@@ -646,18 +652,20 @@ class SamplingPlan:
             solve_tol: CG tolerance for conjugate blocks, at the start: the run
                 tightens it when its solves are inexact (see above).
             solve_guard: bound on each conjugate solve's relative ERROR, as for
-                :func:`~rheplicant.inference.linear.wiener_solve`. ``None`` skips
+                :func:`~rheplicant.inference.linear_solve.wiener_solve`. ``None`` skips
                 the condition-number estimate, which is what a 10^6-coefficient
                 block wants — see that function's own note on the bargain.
             gap_tol: the certificate's threshold, in nats of the joint
                 negative log posterior: the Newton decrement must be at most
-                ``2 gap_tol`` — see :data:`DEFAULT_GAP_TOL`. The last
+                ``2 gap_tol`` — see :data:`~rheplicant.inference.plan_settings.DEFAULT_GAP_TOL`. The
+                last
                 decrement's upper bound is recorded as
-                :attr:`PlanDiagnostics.distance_bound`, in posterior sigma.
+                :attr:`~rheplicant.inference.plan_results.PlanDiagnostics.distance_bound`, in
+                posterior sigma.
                 Not consulted when ``tol`` is ``None``.
 
         Returns:
-            An :class:`Estimate`.
+            An :class:`~rheplicant.inference.plan_results.Estimate`.
 
         Raises:
             ParameterSpaceError: if the model is not identified; if ``observed``
@@ -702,10 +710,11 @@ class SamplingPlan:
         """Posterior draws: a Gibbs sweep over the same partition.
 
         Each conjugate block is drawn EXACTLY by
-        :func:`~rheplicant.inference.linear.gcr_sample`, so a plan of conjugate
+        :func:`~rheplicant.inference.linear_solve.gcr_sample`, so a plan of conjugate
         blocks is an exact Gibbs sampler with nothing tuned. A gradient block
         takes ``steps`` NUTS steps instead, which makes the whole scheme
-        Metropolis-within-Gibbs — see :class:`Block`'s ``steps`` and
+        Metropolis-within-Gibbs — see :class:`~rheplicant.inference.plan_results.Block`'s ``steps``
+        and
         :func:`~rheplicant.inference.engines.gradient_draw`.
 
         Args:
@@ -719,21 +728,24 @@ class SamplingPlan:
                 it visits is no longer a valid transition.
             check_identifiability: as for :meth:`estimate`.
             rhat_max: split-``r_hat`` of the post-warmup joint chi-squared above
-                which :attr:`PlanDiagnostics.converged` is ``False``. Reported,
+                which :attr:`~rheplicant.inference.plan_results.PlanDiagnostics.converged` is
+                ``False``. Reported,
                 not raised: unlike a point estimate, a chain hands you the
                 diagnostic along with the draws, and throwing away expensive
                 draws over a scalar summary would be the worse trade.
             solve_tol, solve_guard: as for :meth:`estimate`.
 
         Returns:
-            A :class:`Draws`. **Read ``diagnostics.rhat``.** The measured
+            A :class:`~rheplicant.inference.plan_results.Draws`. **Read ``diagnostics.rhat``.** The
+            measured
             difference between a non-identified gain and the same model with an
             identifying tone is 1.824 against 1.002.
 
         Raises:
             ParameterSpaceError: if the model is not identified; if ``observed``
                 is mis-shaped; if ``n_sweeps`` or ``warmup`` is not a sensible
-                count; if fewer than :data:`MIN_DRAWS` draws would be kept; or if
+                count; if fewer than :data:`~rheplicant.inference.plan_settings.MIN_DRAWS` draws
+                would be kept; or if
                 a gradient block has a member with no declared prior.
         """
         return run_sample(

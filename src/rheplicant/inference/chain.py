@@ -21,8 +21,10 @@ inferred correlation time is still linear-Gaussian, so a caveat phrased that way
 is satisfied while its claim fails: ``Q(theta)``, ``phi(theta)`` and the Schur
 complement all become functions of theta, and a filter run at compression time
 pins them silently. The distinction lives in the *type*: a
-:class:`LinearGaussianTransition` holds numbers and the theta posterior is exact
-under filtering; a :class:`HyperTransition` holds a builder and is resolved
+:class:`~rheplicant.inference.chain_transition.LinearGaussianTransition` holds numbers and the theta
+posterior is exact
+under filtering; a :class:`~rheplicant.inference.chain_transition.HyperTransition` holds a builder
+and is resolved
 **inside** the theta likelihood, so the whole recursion is a differentiable
 ``lax.scan`` over the stored per-epoch blocks. One code path serves both, because
 the recursion is traceable either way -- which is also why the fixed case is
@@ -452,7 +454,8 @@ class ChainMemory(eqx.Module):
 
         ``at`` is required rather than defaulted, for the reason
         :meth:`~rheplicant.inference.memory.BayesMemory.fisher` refuses to
-        default it one layer along: with a :class:`HyperTransition` the marginal
+        default it one layer along: with a
+        :class:`~rheplicant.inference.chain_transition.HyperTransition` the marginal
         curvature is a function of theta, and a fixed default point would be a
         linearisation nobody declared and nothing could see -- the matrix comes
         back finite, symmetric and PSD whichever point it was taken at.

@@ -1,7 +1,8 @@
 """SignalGraph: declarative signal-path templates and graph-guided assembly.
 
 The composition of a physical forward model is implicit in its signal path.
-A :class:`SignalGraph` records that path once — sources, transforms, and sum
+A :class:`~rheplicant.core.graph_template.SignalGraph` records that path once — sources, transforms,
+and sum
 junctions — and :func:`assemble` compiles a *set* of operator instances into
 the ordinary ``Pipeline`` / ``SumOperator`` nesting induced by the provided
 nodes:
@@ -21,7 +22,8 @@ Assembly is inspectable, differentiable, and replaceable exactly like the
 hand-built composite it compiles to.
 
 Operators declare their home node via the ``graph_node`` ClassVar (resolved
-through the MRO, so subclasses inherit it); :class:`At` overrides placement
+through the MRO, so subclasses inherit it); :class:`~rheplicant.core.graph_template.At` overrides
+placement
 per instance — freely between nodes of the same kind, and not across the
 source/transform line, because a node's kind is what says whether the operator
 there creates the data or acts on data reaching it. ``has_source``, the
@@ -339,7 +341,8 @@ class Assembly(AbstractOperator):
     def to_mermaid(self, theme: str = "light") -> str:
         """Lit/dim mermaid rendering via the registered template.
 
-        ``theme`` is ``"light"`` or ``"dark"``; see :meth:`SignalGraph.to_mermaid`.
+        ``theme`` is ``"light"`` or ``"dark"``; see
+        :meth:`~rheplicant.core.graph_template.SignalGraph.to_mermaid`.
         """
         return get_graph(self.graph_name).to_mermaid(
             lit=self.lit, skipped=self.skipped, counts=self._counts, theme=theme
@@ -358,7 +361,8 @@ class Assembly(AbstractOperator):
     def to_svg(self, title: str | None = None, theme: str = "light") -> str:
         """Self-contained ``<svg>`` with this assembly's nodes lit, for embedding.
 
-        ``theme`` is ``"light"`` or ``"dark"``; see :meth:`SignalGraph.to_svg`.
+        ``theme`` is ``"light"`` or ``"dark"``; see
+        :meth:`~rheplicant.core.graph_template.SignalGraph.to_svg`.
         """
         return get_graph(self.graph_name).to_svg(
             lit=self.lit,

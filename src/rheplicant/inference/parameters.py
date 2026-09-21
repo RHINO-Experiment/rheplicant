@@ -224,8 +224,8 @@ class Latent(eqx.Module):
             bridge (a parameter with no prior has no place in a posterior).
             Read by every inference exit, not only the sampler: a Gaussian
             declared here is the ``S`` that
-            :func:`~rheplicant.inference.linear.wiener_solve` and
-            :func:`~rheplicant.inference.linear.gcr_sample` solve with, so the
+            :func:`~rheplicant.inference.linear_solve.wiener_solve` and
+            :func:`~rheplicant.inference.linear_solve.gcr_sample` solve with, so the
             two routes to a posterior cannot drift apart. A prior with no
             conjugate Gaussian form is fine — it is simply an error at those
             exits rather than silently ignored there.

@@ -124,7 +124,7 @@ from rheplicant.core.errors import StateValidationError
 #: ``x**14`` and ``x**16`` agree to a few percent over most of [-1, 1] — and
 #: that condition number lands directly on ``kappa`` of the block's normal
 #: operator, which is what
-#: :func:`~rheplicant.inference.linear.wiener_solve`'s convergence guard bounds
+#: :func:`~rheplicant.inference.linear_solve.wiener_solve`'s convergence guard bounds
 #: the error by. So: ``"legendre"`` for a smooth quantity, and ``"polynomial"``
 #: only when a caller needs the raw monomial coefficients themselves (comparing
 #: against ``numpy.polyfit``, say). The ordering is pinned by
@@ -295,7 +295,7 @@ class SeparableBasis:
     """A separable expansion of a ``(n_time, n_freq)`` field: ``time @ C @ freq.T``.
 
     Deliberately a plain dataclass rather than an ``eqx.Module``, for the same
-    reason :class:`~rheplicant.inference.linear.LinearBlock` is: this is a
+    reason :class:`~rheplicant.inference.linear_block.LinearBlock` is: this is a
     derived linear-algebra *handle*, something you build where you need it, not
     a pytree to carry through a model. An ``eqx.Module`` would be actively
     wrong here, and specifically at the pattern this class exists to serve —

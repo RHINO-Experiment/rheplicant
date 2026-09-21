@@ -58,8 +58,9 @@ def chain_marginal(
             shape per iteration; ``SqrtInfo.combine(SqrtInfo.null(...), info)``
             is the padding, and it is the same QR the accumulator uses, so the
             offset it produces is the one this consumes, corner included.
-        transition: a :class:`LinearGaussianTransition` or a
-            :class:`HyperTransition`. Resolved once, here, against ``values`` --
+        transition: a :class:`~rheplicant.inference.chain_transition.LinearGaussianTransition` or a
+            :class:`~rheplicant.inference.chain_transition.HyperTransition`. Resolved once, here,
+            against ``values`` --
             which is what makes an inferred correlation time inferred rather
             than pinned at compression time.
         values: the global latents. Read for the transition's hyperparameters

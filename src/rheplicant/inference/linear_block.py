@@ -105,7 +105,7 @@ class LinearBlock:
         ``forward``, :meth:`~rheplicant.inference.parameters.ParameterSpace.bind`,
         :func:`~rheplicant.inference.uncertainty.fisher_information`,
         :func:`~rheplicant.inference.identifiability.identifiability`'s ``at=``,
-        :func:`linear_operator`'s ``at=`` and
+        :func:`~rheplicant.inference.linear.linear_operator`'s ``at=`` and
         :func:`~rheplicant.inference.engines.conditional_potential` all index by
         latent name, and all six raise on the bare form — with six *different*
         exceptions, none of which names the actual mistake
