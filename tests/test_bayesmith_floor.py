@@ -387,11 +387,44 @@ def test_upstream_still_calls_its_descent_engine_experimental():
 #: local symbol can be deleted or renamed, and the far-side file can be
 #: retired when its module switches, and the page would go on saying both are
 #: there.
+#: Each row is ``local symbol -> (where it is held, the file, the ENTRY POINT
+#: that comparison goes through)``. ``where`` is ``"bayesmith"`` for a file in
+#: the sibling repository's ``tests/crosscheck/`` and ``"here"`` for one of
+#: ours.
+#:
+#: The entry point is the part that makes this checkable. A cross-check need
+#: not name the private symbol it exercises -- ``test_linear.py`` compares
+#: through ``check_linearity`` and never writes ``_worse`` -- so asserting
+#: that the file names the SYMBOL would be false. Asserting that it names the
+#: entry point is true, and is the thing a reader would look for.
 REFERENCE_IMPLEMENTATIONS = {
-    "rheplicant.inference.sqrtinfo:SqrtInfo": "test_sqrtinfo_agrees.py",
-    "rheplicant.inference.sqrtinfo:marginalise": "test_sqrtinfo_agrees.py",
-    "rheplicant.inference.linear:_worse": "test_linear.py",
-    "rheplicant.inference.chain:_zeta_joint": "test_provenance.py",
+    "rheplicant.inference.sqrtinfo:SqrtInfo": (
+        "bayesmith",
+        "test_sqrtinfo_agrees.py",
+        "SqrtInfo",
+    ),
+    "rheplicant.inference.sqrtinfo:marginalise": (
+        "bayesmith",
+        "test_sqrtinfo_agrees.py",
+        "marginalise",
+    ),
+    "rheplicant.inference.linear:_worse": (
+        "bayesmith",
+        "test_linear.py",
+        "check_linearity",
+    ),
+    # NOT a bayesmith cross-check, and the row said it was until 2026-09-21.
+    # `_zeta_joint` exists on both sides, but `_joint_covariance` -- the only
+    # thing that uses it here -- has no counterpart upstream, so there is
+    # nothing to compare against. It is held by a dense oracle in THIS
+    # repository. The old row named `test_provenance.py`, which holds nothing
+    # in agreement: it is a per-symbol provenance table and never mentions
+    # `_zeta_joint`.
+    "rheplicant.inference.chain_recursion:_zeta_joint": (
+        "here",
+        "tests/evidence/test_chain_smoother.py",
+        "_joint_covariance",
+    ),
 }
 
 
@@ -407,26 +440,49 @@ def test_every_labelled_reference_implementation_is_here(target):
     )
 
 
-@pytest.mark.parametrize("crosscheck", sorted(set(REFERENCE_IMPLEMENTATIONS.values())))
-def test_every_labelled_reference_implementation_is_still_crosschecked(crosscheck):
+@pytest.mark.parametrize("target", sorted(REFERENCE_IMPLEMENTATIONS))
+def test_every_labelled_reference_implementation_is_still_held(target):
     """The far half, which is the half that makes the label mean anything.
 
     A copy kept "because a cross-check holds it" and no cross-check is just a
-    copy. Needs the sibling checkout; skips loudly without it, because a
-    thinner environment is not a passing one.
-    """
-    from tests.config.wheel_support import BAYESMITH_CHECKOUT
+    copy.
 
-    directory = BAYESMITH_CHECKOUT / "tests" / "crosscheck"
-    if not directory.is_dir():
-        pytest.skip(
-            f"{directory} is absent, so the cross-checks that hold this "
-            "package's deliberate reference implementations in agreement "
-            "cannot be seen from here"
-        )
-    assert (directory / crosscheck).is_file(), (
-        f"docs/stability.md names {crosscheck} as what holds a reference "
-        "implementation in agreement, and it is not in the cross-check suite"
+    **Asserting the file EXISTS is not asserting it checks anything**, and
+    that was this test until 2026-09-21. `_zeta_joint` was recorded as held by
+    `test_provenance.py`; that file exists, so this passed, and it is a
+    per-symbol provenance table that never mentions `_zeta_joint` and compares
+    no arithmetic at all. Existence is the cheapest possible proxy for the
+    claim and it was wrong about a quarter of the table.
+
+    So the entry point is read out of the file too. A bayesmith cross-check
+    needs the sibling checkout and skips loudly without it, because a thinner
+    environment is not a passing one; a local one is always readable.
+    """
+    where, filename, entry = REFERENCE_IMPLEMENTATIONS[target]
+    root = pathlib.Path(__file__).resolve().parents[1]
+
+    if where == "bayesmith":
+        from tests.config.wheel_support import BAYESMITH_CHECKOUT
+
+        directory = BAYESMITH_CHECKOUT / "tests" / "crosscheck"
+        if not directory.is_dir():
+            pytest.skip(
+                f"{directory} is absent, so the cross-checks that hold this "
+                "package's deliberate reference implementations in agreement "
+                "cannot be seen from here"
+            )
+        path = directory / filename
+    else:
+        path = root / filename
+
+    assert path.is_file(), (
+        f"docs/stability.md names {filename} as what holds {target} in "
+        "agreement, and it is not there"
+    )
+    assert entry in path.read_text(encoding="utf-8"), (
+        f"{filename} is named as what holds {target} in agreement, and it "
+        f"does not mention {entry!r} -- the entry point that comparison is "
+        "supposed to go through. A file that exists is not a file that checks."
     )
 
 
@@ -437,8 +493,8 @@ def test_the_page_lists_exactly_the_labelled_reference_implementations():
     section = page.split("## Deliberate reference implementations", 1)
     assert len(section) == 2, "docs/stability.md no longer has that section"
     body = section[1].split("## ", 1)[0]
-    for crosscheck in set(REFERENCE_IMPLEMENTATIONS.values()):
-        assert crosscheck in body, f"the page does not name {crosscheck}"
+    for _, filename, _ in REFERENCE_IMPLEMENTATIONS.values():
+        assert filename in body, f"the page does not name {filename}"
     for target in REFERENCE_IMPLEMENTATIONS:
         module_name, _, attribute = target.partition(":")
         assert attribute in body or module_name in body, target

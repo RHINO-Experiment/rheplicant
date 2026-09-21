@@ -229,11 +229,25 @@ every run rather than an intention.
 |---|---|
 | `rheplicant.inference.sqrtinfo` — `SqrtInfo`, `marginalise` | `tests/crosscheck/test_sqrtinfo_agrees.py` |
 | `rheplicant.inference.linear` — the affinity criterion and the linear solve | `tests/crosscheck/test_linear.py` |
-| `rheplicant.inference.chain_recursion._zeta_joint` — the joint covariance | `tests/crosscheck/test_provenance.py` |
+| `rheplicant.inference.chain_recursion._zeta_joint` — the joint covariance | `tests/evidence/test_chain_smoother.py`, against a dense oracle **here** |
 
-Those paths are in **bayesmith's** repository, because the comparison belongs
-to whichever side is checking the other and running it here would be this
-package against itself.
+The first two paths are in **bayesmith's** repository, because that comparison
+belongs to whichever side is checking the other and running it here would be
+this package against itself.
+
+**The third is not, and the difference matters.** `_zeta_joint` exists on both
+sides, but the thing that uses it here — `_joint_covariance` — has no
+counterpart upstream (measured: `grep -rn joint_covariance src/bayesmith/`
+returns nothing). So there is no cross-check to hold the two in agreement, and
+none is claimed: it is held against `tests/evidence/chain_bank`'s dense
+oracle, in this repository. `chain_recursion`'s own docstring has said so all
+along — "the far side has no counterpart to that … checked against the dense
+oracle rather than against each other".
+
+This row used to name `tests/crosscheck/test_provenance.py`, which holds
+nothing in agreement: it is a per-symbol provenance table, and `_zeta_joint`
+appears nowhere in it. The guard could not see that, because it asserted the
+FILE existed and never that the file checked the symbol.
 
 The cost of the arrangement is real and worth stating: a copy can drift, and
 one had. `linear.py`'s `_worse` had lost a case its far side kept (A4-5). What
