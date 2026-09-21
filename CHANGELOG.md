@@ -66,6 +66,35 @@ filter by severity, or by `check == "A53"`, rather than requiring emptiness.
 resolves to this release and meets both changes without choosing to. A
 pre-1.0 dependency wants an upper bound.
 
+### What bayesmith's cross-check needs updating for
+
+Nine files were split into thirty-three under section 3.2. The package's
+public surface is unchanged -- every split was checked for that -- but
+bayesmith's `tests/crosscheck/test_provenance.py` names rheplicant symbols by
+MODULE, and six of its rows now point at files those symbols have left.
+Measured against this release's wheel: 101 passed, 6 failed, and each failure
+is that guard reporting a move rather than a defect.
+
+| the row says | the symbol is now in |
+|---|---|
+| `rheplicant.inference.linear.wiener_solve` | `rheplicant.inference.linear_solve` |
+| `rheplicant.inference.linear.condition_bound` | `rheplicant.inference.linear_solve` |
+| `rheplicant.inference.linear.condition_estimate` | `rheplicant.inference.linear_solve` |
+| `rheplicant.inference.linear.gcr_sample` | `rheplicant.inference.linear_solve` |
+| `rheplicant.inference.plan.Block` | `rheplicant.inference.plan_results` |
+
+The sixth is different and worth reading before it is edited.
+`rheplicant.inference.plan.SamplingPlan` "no longer reaches bayesmith at all",
+and that is true of the CLASS's own source: the estimate and draw exits were
+lifted into `plan_estimate` and `plan_draws`, and the bayesmith calls went
+with them. The delegation is intact -- `plan_estimate`, `plan_blocks` and
+`plan_settings` all import bayesmith -- so the row wants repointing at
+`plan_estimate.run_estimate`, not deleting. The guard's own message says as
+much, and says why deleting the row would be the wrong reading.
+
+Nothing here was changed in bayesmith from this side: that repository has one
+writer and it is not this one.
+
 ### The browser editor is now a persistent scientific workbench
 
 Config Plans 6A–6C retain exact YAML as the sole scientific state while
