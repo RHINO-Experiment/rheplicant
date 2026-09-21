@@ -57,7 +57,6 @@ from .dimension_registry import (  # noqa: F401  # re-exported: this module is a
     _FORMULA_REGISTRY,
     ContextualResolver,
     DimensionDisposition,
-    DimensionFormula,
     DimensionSelector,
     DimensionSpec,
     FormulaOperand,

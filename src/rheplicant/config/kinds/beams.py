@@ -65,14 +65,6 @@ BEAM_FORMATS: tuple[str, ...] = (
     "python",
 )
 BEAM_NORMALIZATIONS: tuple[str, ...] = ("none", "pixel_sum", "solid_angle")
-RAW_ARRAY_FORMATS: tuple[str, ...] = (
-    "healpix",
-    "npy",
-    "npz",
-    "inline",
-    "gaussian",
-    "python",
-)
 
 register_capture_route("cst", owner="resources.beams:cst")
 register_capture_route("uvbeam", owner="resources.beams:uvbeam")
@@ -169,12 +161,12 @@ def _a11_chart_keys(name: str, spec: Mapping[str, Any]) -> str | None:
     3. every other format REFUSES ``phi0_deg``/``phi_sense``.
     4. every other format REQUIRES ``frame``.
 
-    **Legs 3 and 4 are written out rather than driven off**
-    :data:`RAW_ARRAY_FORMATS`.  That tuple has one definition and zero readers
-    (measured: ``grep -rn RAW_ARRAY_FORMATS src/ tests/``); it happens to
-    equal this ``else`` today, which is exactly why keying the gate on it
-    would create a second source of truth that nothing would ever notice
-    diverging.
+    **Legs 3 and 4 are written out, format by format, on purpose.** There
+    used to be a ``RAW_ARRAY_FORMATS`` tuple here that equalled this ``else``
+    and had zero readers; keying the gate on it would have created a second
+    source of truth that nothing would notice diverging, and keeping it unread
+    made it that anyway. A10-7 deleted it. The membership this branch means is
+    the branch.
 
     **Stands down when ``format:`` is not one of** :data:`BEAM_FORMATS`.  The
     format-value refusal above is more specific and is not this check's row,

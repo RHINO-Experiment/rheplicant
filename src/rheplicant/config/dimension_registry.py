@@ -17,7 +17,7 @@ from collections.abc import Mapping, Sequence
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
-from typing import Literal, TypeAlias
+from typing import Literal
 
 from _rheplicant_bootstrap.types import DestinationDescriptor, DimensionDomain
 from rheplicant.config.errors import ConfigError
@@ -74,8 +74,6 @@ class OperatorFormulaBinding:
     formulas: tuple[str, ...]
     output_formula: str
 
-
-DimensionFormula: TypeAlias = FormulaRegistration
 
 _DIMENSION_REGISTRY: dict[DimensionSelector, DimensionSpec] = {}
 

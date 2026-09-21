@@ -639,9 +639,11 @@ class TestA11HasFourLegsAndTheyDisagreeAboutFrame:
         ],
     )
     def test_every_raw_array_format_requires_frame(self, fmt, extra):
-        """Written out rather than driven off ``RAW_ARRAY_FORMATS``, which
-        has zero readers and would be a second source of truth: this is the
-        ``else`` branch's own membership, format by format."""
+        """Written out format by format, which is the point: there is no
+        constant to drive this off, and A10-7 deleted the one there was --
+        it had zero readers and equalled this branch, so it was a second
+        source of truth that nothing compared. This is the ``else``
+        branch's own membership."""
         doc = preflight_document(
             resources=_beams(horn={"format": fmt, "nside": 4, "normalize": "none", **extra})
         )
