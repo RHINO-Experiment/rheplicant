@@ -658,7 +658,7 @@ class TestThePagesSayWhatTheLayerDoes:
         "plan.estimate": ({"blocks": [{"names": ["g"]}]}, False),
         # `n_sweeps: 8, warmup: 4` and not `2, 1`: this row is about WHICH
         # refusal fires, and a run keeping one draw is now refused by A24
-        # (`preflight/fitting.py::_counts`) before the noise check is
+        # (`preflight/fitting_counts.py::_counts`) before the noise check is
         # reached at all -- correctly, since the package refuses it too
         # (`plan.py::SamplingPlan._partition`), just three phases later.  Four kept draws is
         # `MIN_DRAWS` exactly, so the document gets past P-1 and the row
@@ -1611,7 +1611,7 @@ class TestPlan3BsWiringAndItsSurface:
         **What this actually pins, said plainly, because the plan's own
         framing of it was wrong.** A20, A21 and A23 are bound by ONE
         ``@register("A20", "A21", "A23")`` on ONE function
-        (``preflight/fitting.py::_prior_gates``), and ``passes.sweep``
+        (``preflight/fitting_priors.py::_prior_gates``), and ``passes.sweep``
         de-duplicates by ``id(fn)`` -- so the pass calls that function once
         and there is no "A20 runs, then A23 runs" sequence in the pass at all.
         The ordering that matters is INSIDE the function's body, where A20 and

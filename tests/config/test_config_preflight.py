@@ -3393,8 +3393,30 @@ class TestTheFootImportCannotRot:
         the alternative is a silent hole shaped exactly like the one that
         shipped.
         """
+        #: Modules here that own no check ON PURPOSE, each with its reason.
+        #: The docstring above asks for exactly this -- a helper module says so
+        #: by editing this test -- and the entry is asserted in BOTH
+        #: directions below, so one that starts registering checks fails too.
+        #: An exemption nobody re-reads is the hole this test exists to close.
+        HELPERS = {
+            # The shared vocabulary `fitting.py`'s five modules agree in: the
+            # engine names, the noise kinds, the block keys, and the walks that
+            # answer "which runs" and "which latents". It holds no check
+            # because it IS the join the fitting ruling named, and putting it
+            # in any one of the five would make that one import the others.
+            "fitting_vocabulary",
+        }
         present = {path.stem for path in _PREFLIGHT_DIR.glob("*.py") if path.stem != "__init__"}
         contributing = {fn.__module__.rsplit(".", 1)[-1] for fn in CHECKS.values()}
+        assert HELPERS <= present, (
+            f"{sorted(HELPERS - present)} are exempted here and no longer exist"
+        )
+        assert not (HELPERS & contributing), (
+            f"{sorted(HELPERS & contributing)} are exempted as helpers and DO "
+            "register checks now. Remove the exemption rather than leaving a "
+            "permission nothing needs."
+        )
+        present -= HELPERS
         assert present <= contributing, (
             f"{sorted(present - contributing)} live under preflight/ and own "
             "no slot in CHECKS, so nothing they contain ever runs and the "

@@ -335,6 +335,11 @@ from rheplicant.config.preflight import depends as _depends_checks  # noqa: E402
 from rheplicant.config.preflight import dimensions as _dimension_checks  # noqa: E402,F401
 from rheplicant.config.preflight import document as _document_checks  # noqa: E402,F401
 from rheplicant.config.preflight import fitting as _fitting_checks  # noqa: E402,F401
+from rheplicant.config.preflight import fitting_counts as _fitting_counts  # noqa: E402,F401
+from rheplicant.config.preflight import fitting_engines as _fitting_engines  # noqa: E402,F401
+from rheplicant.config.preflight import fitting_priors as _fitting_priors  # noqa: E402,F401
+from rheplicant.config.preflight import fitting_seeds as _fitting_seeds  # noqa: E402,F401
+from rheplicant.config.preflight import fitting_vocabulary as _fitting_vocab  # noqa: E402,F401
 from rheplicant.config.preflight import gated as _gated_checks  # noqa: E402,F401
 from rheplicant.config.preflight import ingest as _ingest_checks  # noqa: E402,F401
 from rheplicant.config.preflight import instrument as _instrument_checks  # noqa: E402,F401

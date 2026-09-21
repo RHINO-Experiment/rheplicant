@@ -122,7 +122,7 @@ def _t11_bindings(
     measured LIVE: ``bindings: [{latents: ['ghost'], into:
     'bandpass.bandpass'}]`` earned A33 and was told to declare ``transform:
     unit_mean_bandpass``, which cannot help a latent that does not exist.
-    This is ``_a23_prior_free``'s rule (``preflight/fitting.py::_t7_engines``: *"``names``
+    This is ``_a23_prior_free``'s rule (``preflight/fitting_engines.py::_t7_engines``: *"``names``
     must already be names the document DECLARES WELL"*) applied on the side
     A33 left open -- A33's own docstring gates both path HEADS against
     ``_lit`` for exactly this shape and left the NAME ungated, which is 2C's

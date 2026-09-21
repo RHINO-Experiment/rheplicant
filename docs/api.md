@@ -447,6 +447,21 @@ prose; these are the signatures.
 .. automodule:: rheplicant.config.preflight.model_walk
    :members:
 
+.. automodule:: rheplicant.config.preflight.fitting_vocabulary
+   :members:
+
+.. automodule:: rheplicant.config.preflight.fitting_engines
+   :members:
+
+.. automodule:: rheplicant.config.preflight.fitting_priors
+   :members:
+
+.. automodule:: rheplicant.config.preflight.fitting_seeds
+   :members:
+
+.. automodule:: rheplicant.config.preflight.fitting_counts
+   :members:
+
 .. automodule:: rheplicant.config.preflight.model_radio
    :members:
 

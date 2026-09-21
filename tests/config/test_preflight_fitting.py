@@ -99,7 +99,9 @@ CLEAN = [{"names": ["d", "a"], "engine": "gradient"}, {"names": ["w"]}]
 #:
 #: A LITERAL rather than a comprehension over `CHECKS`: a set derived from
 #: `fn.__module__` would follow a check that moved modules, and following it
-#: is exactly what must not happen silently.
+#: is exactly what must not happen silently. The re-measurement below is
+#: scoped to the fitting FAMILY -- `fitting.py` is five modules since the
+#: section 3.2 split and this file tests all five.
 #: :func:`test_the_scope_set_is_this_module_s_own` re-measures it.
 MINE = frozenset(
     {"A16", "A17", "A18", "A19", "A20", "A21", "A23", "A24", "A25", "A27", "A28", "A29"}
@@ -603,10 +605,17 @@ class TestBlocks:
         goes red and names both directions, which is a decision for whoever
         moved it.
         """
+        # The FAMILY, not the one file. `fitting.py` was split into five
+        # modules on 2026-09-21 (section 3.2) and this module tests all of
+        # them, so the scope is every module whose name starts with
+        # `...preflight.fitting`. That still reports a check leaving the
+        # family, which is what the paragraph above asks for -- what it no
+        # longer reports is a check moving between two files this same test
+        # module already covers.
         registered = frozenset(
             slot
             for slot, fn in CHECKS.items()
-            if fn.__module__ == "rheplicant.config.preflight.fitting"
+            if fn.__module__.startswith("rheplicant.config.preflight.fitting")
         )
         assert MINE == registered, (
             f"MINE claims {sorted(MINE - registered)} that preflight/fitting.py "

@@ -42,11 +42,6 @@ SINGLE = "single"
 LARGE: dict[str, tuple[str, str]] = {
     # --- Stage 1's A1 audit ruled these nine should be split (evidence:
     # .agents/evidence/T-002/audit/ledger_raw.md, "Large files: 9 split").
-    "rheplicant/config/preflight/fitting.py": (
-        SPLIT,
-        "the checks needing runs[] and inference: together, which is a "
-        "join rather than a subject -- the per-run and per-block halves split",
-    ),
     # --- Grew past the threshold AFTER the audit drew its list.
     "rheplicant/inference/plan.py": (
         SPLIT,
