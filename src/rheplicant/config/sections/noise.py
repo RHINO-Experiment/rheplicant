@@ -7,7 +7,7 @@ Plan 3's, per ``RadiometerNoiseOperator``'s own docstring).
 
 ``radiometer_frozen`` exists nowhere in src/ on purpose: it is this layer's
 construct.  The sigma is DECIDED into an array -- the one form the conjugate
-seam accepts (``linear.py::_as_far_block``) -- from ``|observed|`` or the starting
+seam accepts (``linear_solve.py::_as_far_block``) -- from ``|observed|`` or the starting
 prediction, once Task 6 has either in hand (:func:`freeze_sigma`).
 
 ``include_logdet`` is parsed and checked here (A49, both directions) and

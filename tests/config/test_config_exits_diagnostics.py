@@ -3,7 +3,7 @@
 ``condition`` is the exit a user is supposed to run BEFORE paying for a fit:
 kappa is what says how much a solver's residual understates its error, and
 ``condition_estimate``'s own docstring is blunt about the consequence -- "a
-residual of 1e-6 against kappa=1e7 certifies nothing at all" (linear.py::_resolve_prior).
+residual of 1e-6 against kappa=1e7 certifies nothing at all" (linear_priors.py::_resolve_prior).
 A diagnostic that returned the same number for a well-posed and an ill-posed
 design would be worth nothing, so the two documents here differ by seven
 orders of magnitude in kappa and by one line of YAML.
@@ -47,7 +47,7 @@ from tests.config.test_config_document import synthetic_document
 # Two constant-in-time temperatures summed at t_ant_sum, so the prediction is
 # jointly affine in BOTH coefficients.  (A gain latent alongside one of them
 # would be bilinear, and check_linearity refuses that block by name -- "is not
-# affine in them JOINTLY", linear.py::_group_probe.probe_at.)
+# affine in them JOINTLY", linear_probe.py::_group_probe.probe_at.)
 #
 # ORTHOGONAL: the second design column alternates sign channel to channel, so
 # the two columns of A are orthogonal and of equal norm -- kappa is exactly 1.
@@ -55,7 +55,7 @@ ORTHOGONAL = [[1.0 if channel % 2 == 0 else -1.0] for channel in range(8)]
 # DEGENERATE: the second column is the first tilted by 1e-4 per channel, so the
 # two are parallel to one part in 1e4 and only the prior holds their difference
 # down.  This is the honest ill-conditioned case: lambda_min is 1/prior_std**2
-# and lambda_max is set by the data, exactly as linear.py::_resolve_prior describes.
+# and lambda_max is set by the data, exactly as linear_priors.py::_resolve_prior describes.
 DEGENERATE = [[1.0 + 1.0e-4 * channel] for channel in range(8)]
 
 #: A third latent that is declared linear and is not: the prediction is a
@@ -82,7 +82,7 @@ def condition_document(run, freq_basis=DEGENERATE, sigma=0.5, extra=None, checks
     """A document with two linear temperatures, a sigma, and NO observed data.
 
     ``condition_estimate`` takes no ``observed`` and never calls
-    ``_check_solve_arguments`` (linear.py::_require_prior_std), so a document with no
+    ``_check_solve_arguments`` (linear_priors.py::_require_prior_std), so a document with no
     ``inference.observed:`` is the normal case for this exit -- it is what a
     user runs before the data exists.
 
@@ -163,7 +163,7 @@ class TestTheNumberItReports:
         assert ill / kappa_of(KAPPA, freq_basis=ORTHOGONAL) > 1.0e6
 
     def test_the_product_is_a_bare_scalar_not_a_tuple(self):
-        """condition_estimate returns a scalar array (linear.py::_require_prior_std).
+        """condition_estimate returns a scalar array (linear_priors.py::_require_prior_std).
 
         Its three siblings return a 2-tuple or a GLSResult; an executor that
         copied one of them and unpacked would raise here, and one that wrapped
@@ -280,7 +280,7 @@ class TestTheSeedRunsTheOtherWay:
 
     ``gcr_sample``'s key is a REQUIRED keyword-only argument with no default;
     ``condition_estimate``'s is ``key: jax.Array | None = None`` and falls
-    back to ``jax.random.key(0)`` (linear.py::_refuse_a_noise_model_at_the_conjugate_seam).  So
+    back to ``jax.random.key(0)`` (linear_priors.py::_refuse_a_noise_model_at_the_conjugate_seam).  So
     ``seed:`` is optional
     on a condition run and A29 does not make it required -- schema §4.7.9
     lists ``seed`` among this kind's four keys, and A29's own row names

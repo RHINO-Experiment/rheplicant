@@ -3982,7 +3982,7 @@ class TestCounts:
         # passthrough tuples (`exits.py::_parse_optimize`) and nowhere else.  So a
         # negative one is forwarded raw -- `tol: -1.0` into a comparison the
         # run can never satisfy, the other two into a solver whose bound is
-        # the `eqx.error_if` at `linear.py::wiener_solve`, inside jit, at P3, behind
+        # the `eqx.error_if` at `linear_solve.py::wiener_solve`, inside jit, at P3, behind
         # the beam.  (`engines.py::_monitor_programs` is the DOCSTRING describing how
         # that surfaces, not the guard.)
         found = _counted(_estimate(**{key: -1.0}))

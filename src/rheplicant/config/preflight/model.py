@@ -650,7 +650,7 @@ def _two_at_one_node(document: Mapping[str, Any]) -> Iterable[Finding]:
     """Check A5: two operators claim one node that holds a single instance.
 
     ``compose:`` is the document's spelling of the ``At(...)`` route
-    ``core/graph.py::_place_at_node`` names, so this message ends where that one does.
+    ``core/graph_placement.py::_place_at_node`` names, so this message ends where that one does.
     A ``many`` node is skipped: several operators there is what ``many``
     MEANS, and so is a REGION -- an entry claiming two or more nodes is
     ``_check_disjoint_claims``' and check A47's, in their own words.

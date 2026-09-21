@@ -373,8 +373,8 @@ class TestTheSixRefusals:
 
     def test_6_a_region_key_that_is_not_the_last_covered_node_is_refused(self):
         """Refusal 6, check A47. At((a, b, c), op) is addressed by its LAST
-        covered node id (core/graph.py::At, confirmed at fold.py::_fold_region
-        and core/graph.py::_placement_addresses); a config key naming any other node resolves to
+        covered node id (core/graph_template.py::At, confirmed at fold.py::_fold_region
+        and core/graph_placement.py::_placement_addresses); a config key naming any other node resolves to
         nothing, and the failure is a plain KeyError rather than the message
         the schema promised."""
         from rheplicant.config.paths import refuse_misaddressed_region

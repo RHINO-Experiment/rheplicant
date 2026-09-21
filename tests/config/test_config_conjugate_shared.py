@@ -423,7 +423,7 @@ class TestTheDecidedSigma:
     def test_a_radiometer_document_is_check_A27(self):
         """Both routes by name, and in the layer's own voice.
 
-        The package refuses this too (linear.py::_as_far_block) but with a
+        The package refuses this too (linear_solve.py::_as_far_block) but with a
         ParameterSpaceError, and only once a block exists; ConfigError here
         is the assertion.
         """

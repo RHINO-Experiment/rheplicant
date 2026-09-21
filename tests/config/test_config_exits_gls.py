@@ -438,7 +438,7 @@ class TestWhatReachesTheLoop:
         # with the guard asked for this same call raises rather than returning.
         #
         # Both halves DECLARE the key: the shipped default became null when
-        # kappa became a bound (inference/linear.py::condition_bound), so
+        # kappa became a bound (inference/linear_solve.py::condition_bound), so
         # omitting it would make the two halves the same call.
         with pytest.raises(eqx.EquinoxRuntimeError, match="wiener_solve/gcr_sample"):
             gls_product({"tol": 2.0, "require_convergence": 1e-3})

@@ -245,6 +245,18 @@ coefficients the noise-wave model consumes.
 .. automodule:: rheplicant.inference.linear
    :members:
 
+.. automodule:: rheplicant.inference.linear_block
+   :members:
+
+.. automodule:: rheplicant.inference.linear_probe
+   :members:
+
+.. automodule:: rheplicant.inference.linear_priors
+   :members:
+
+.. automodule:: rheplicant.inference.linear_solve
+   :members:
+
 .. automodule:: rheplicant.inference.graph_bridge
    :members:
 

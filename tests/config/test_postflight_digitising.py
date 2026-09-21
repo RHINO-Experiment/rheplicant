@@ -18,7 +18,7 @@ the COMPOSED half is not.**  This module's earlier draft deleted the whole
 test on the grounds that ``adc`` is ``many=False`` (D-20 / this task's brief
 §4.1): ``adc``'s ``NodeSpec`` on ``RADIO_GRAPH`` (``radio/graph.py::RADIO_GRAPH``)
 never sets ``many=True``, and ``NodeSpec.many`` defaults to ``False``
-(``core/graph.py::NodeSpec``), so ``Assembly.__getitem__`` (``core/
+(``core/graph_template.py::NodeSpec``), so ``Assembly.__getitem__`` (``core/
 core/graph.py::Assembly.__getitem__``) can never raise ``AmbiguousNodeError`` for this node --
 that branch fires only for a node holding SEVERAL instances, which a
 ``many=False`` node structurally cannot.  **That argument covers

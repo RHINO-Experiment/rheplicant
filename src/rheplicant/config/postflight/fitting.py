@@ -47,9 +47,9 @@ which is the substitution this whole layer exists to prevent.
 
 **WARNING, measured, for anyone driving these predicates on a hand-built
 space.**  ``check_linearity`` runs ``_isolate`` BEFORE ``_require_inexact``
-(``linear.py::_probe_anchor`` then ``linear.py::_probe_anchor``; the ``names=`` branch is the second
+(``linear_probe.py::_probe_anchor`` then ``linear_probe.py::_probe_anchor``; the ``names=`` branch is the second
 pair at
-``linear.py::_single_probe.probe_at`` and ``linear.py::_single_probe.probe_at``), and ``_isolate``
+``linear_probe.py::_single_probe.probe_at`` and ``linear_probe.py::_single_probe.probe_at``), and ``_isolate``
 validates the space against the
 pipeline.  So on a space whose latent binds DIRECTLY into a real leaf, the
 refusal a complex or integer latent earns from C12 is a **bind** message --

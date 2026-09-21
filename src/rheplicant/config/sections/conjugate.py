@@ -535,7 +535,7 @@ def _wiener_product(
     if width == "fisher":
         _require_the_whole_space(where, space, block)
     solution, residual = wiener_solve(block, observed, noise_std=sigma, **prior, **solve)
-    # as_dict is the idempotent wrap (linear.py::LinearBlock.names): the product's shape is
+    # as_dict is the idempotent wrap (linear_block.py::LinearBlock.names): the product's shape is
     # the mapping six downstream consumers read, whichever spelling built the
     # block.  Over a GROUPED block -- the only one this layer compiles -- it
     # is a no-op, so no test can distinguish it from `solution`; it is here
@@ -594,7 +594,7 @@ def _gcr_product(
     draws, residual = jax.vmap(
         lambda one: gcr_sample(block, observed, noise_std=sigma, key=one, **prior, **solve)
     )(keys)
-    # as_dict is the idempotent wrap (linear.py::LinearBlock.names), here for the same reason
+    # as_dict is the idempotent wrap (linear_block.py::LinearBlock.names), here for the same reason
     # as in :func:`_wiener_product` and just as unobservable: over a GROUPED
     # block -- the only one this layer compiles -- gcr_sample already returns
     # the mapping, so no test can distinguish this from `draws` (measured: the
@@ -829,7 +829,7 @@ def _run_gls(run: ParsedRun, built: Any, previous: Any = None) -> Any:
     # iterations/delta/converged are jax.Arrays on the way out (gls.py::iterative_gls);
     # _gls_record casts all three, so neither a report nor diagnostics.json
     # ever sees a traced value -- gls_gcr.py is the idiom.
-    # as_dict is the idempotent wrap (linear.py::LinearBlock.names), here for the same reason
+    # as_dict is the idempotent wrap (linear_block.py::LinearBlock.names), here for the same reason
     # as in _wiener_product and just as unobservable: over a GROUPED block --
     # the only one this layer compiles -- the solution already IS the mapping,
     # so no test can distinguish this from `found.solution` (measured: the
@@ -841,7 +841,7 @@ def _run_gls(run: ParsedRun, built: Any, previous: Any = None) -> Any:
 def _run_condition(run: ParsedRun, built: Any, previous: Any = None) -> Any:
     """kappa for the block a conjugate exit would solve -- and no data at all.
 
-    ``condition_estimate`` (linear.py::_per_member) takes no ``observed`` and no
+    ``condition_estimate`` (linear_priors.py::_per_member) takes no ``observed`` and no
     ``prior_mean``, and never calls ``_check_solve_arguments``: a block and a
     decided sigma are the whole input, which is why :func:`_conjugate_block`
     runs with ``needs_observed=False`` -- this is its one caller that does.  It

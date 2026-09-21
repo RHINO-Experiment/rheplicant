@@ -172,7 +172,7 @@ class TestTheSolve:
         # hard-coded null never raises on the first.
         #
         # 1e-3 is DECLARED rather than defaulted: the shipped default became
-        # null when kappa became a bound (inference/linear.py::condition_bound),
+        # null when kappa became a bound (inference/linear_solve.py::condition_bound),
         # so leaving it out would make both halves of this pair the same call.
         with pytest.raises(eqx.EquinoxRuntimeError, match="wiener_solve/gcr_sample"):
             run_document(
@@ -468,7 +468,7 @@ class TestTheNoiseSeam:
     def test_radiometer_frozen_is_the_route_that_works(self):
         # Measured: g = 1.5 against the injected 1.5.  A frozen radiometer
         # sigma is per-sample, so this also proves an ARRAY reached
-        # noise_std= and not a NoiseModel, which linear.py::_as_far_block refuses.
+        # noise_std= and not a NoiseModel, which linear_solve.py::_as_far_block refuses.
         product = run_product(wiener_document(WIENER, noise=FROZEN))
         assert float(product["mean"]["g"]) == pytest.approx(TRUTH_G, abs=1e-4)
 

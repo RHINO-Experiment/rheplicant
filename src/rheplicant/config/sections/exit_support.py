@@ -571,7 +571,7 @@ def _decided_sigma(run: Any, built: Any) -> Any:
 
     ``wiener_solve``, ``gcr_sample`` and ``condition_estimate`` compute
     ``1/sigma**2`` directly and refuse a NoiseModel outright
-    (``linear.py::_as_far_block``).  A constant-sigma model is decided here -- its
+    (``linear_solve.py::_as_far_block``).  A constant-sigma model is decided here -- its
     ``std`` ignores the prediction by contract
     (``depends_on_prediction`` is False), so evaluating it on the run's own
     grid gives the full-shaped array, which is also the one shape

@@ -47,11 +47,6 @@ LARGE: dict[str, tuple[str, str]] = {
         "the checks needing runs[] and inference: together, which is a "
         "join rather than a subject -- the per-run and per-block halves split",
     ),
-    "rheplicant/inference/linear.py": (
-        SPLIT,
-        "checking a linearity claim and exporting the operator are two "
-        "jobs; the solve helpers are a third",
-    ),
     "rheplicant/config/preflight/model.py": (
         SPLIT,
         "schema §6's model checks are a dozen independent passes sharing "

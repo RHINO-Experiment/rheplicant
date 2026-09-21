@@ -1495,7 +1495,7 @@ class TestASecondOperatorAtOneNode:
     def test_the_assemblys_own_refusal_is_still_the_backstop(self):
         """This task adds a refusal; it removes none.
 
-        ``_place_at_node`` (``core/graph.py::_place_at_node``) is what catches the
+        ``_place_at_node`` (``core/graph_placement.py::_place_at_node``) is what catches the
         collisions text cannot see -- a ``python:`` target outside
         ``rheplicant.radio``, which this layer will not import.  Deleting it
         because "preflight covers it now" leaves those documents building two

@@ -3,7 +3,7 @@
 The reader table is a registry rather than an ``if`` chain for one reason: a
 registry means the refusal for an unknown format lists what is actually
 available today instead of a set someone remembered to update. That is the
-shape ``core/graph.py::_GRAPHS`` ``register_graph`` established.
+shape ``core/graph_template.py::_GRAPHS`` ``register_graph`` established.
 
 Plan 1B registers exactly one new format here, ``touchstone`` -- an object
 reader (``array=False``: it returns a

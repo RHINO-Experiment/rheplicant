@@ -32,10 +32,10 @@ is the end-to-end partner that goes red the day that stops being true.
 refusal shape depends on it: the space here binds its single latent DIRECTLY
 into the float leaf ``gain.gain``, so ``ParameterSpace.validate`` refuses the
 dtype KIND mismatch before ``check_linearity``'s own ``_require_inexact``
-(``linear.py::_probe_anchor`` runs ``_isolate`` before ``linear.py::_probe_anchor``'s
+(``linear_probe.py::_probe_anchor`` runs ``_isolate`` before ``linear_probe.py::_probe_anchor``'s
 ``_require_inexact``; the ``names=`` branch is the second pair at
-``linear.py::_single_probe.probe_at``
-and ``linear.py::_single_probe.probe_at``).  Measured, that refusal reads *"Bind for ('g',) produces
+``linear_probe.py::_single_probe.probe_at``
+and ``linear_probe.py::_single_probe.probe_at``).  Measured, that refusal reads *"Bind for ('g',) produces
 complex values for `into` selector 0, but that leaf is float."* -- a sentence
 naming neither the check nor the gate.
 """

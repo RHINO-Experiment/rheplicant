@@ -307,8 +307,8 @@ def refuse_misaddressed_region(config_key: str, region: Iterable[str]) -> None:
 
     ``At`` with a tuple of node ids covers a contiguous region, and the fold
     labels the covering operator with the LAST node id
-    (``core/graph.py::At``, implemented at ``fold.py::_fold_region`` and
-    ``core/graph.py::_placement_addresses``). A config key naming any other covered node
+    (``core/graph_template.py::At``, implemented at ``fold.py::_fold_region`` and
+    ``core/graph_placement.py::_placement_addresses``). A config key naming any other covered node
     resolves to nothing, and the failure is a bare ``KeyError`` rather than
     the refusal the schema promised.
     """

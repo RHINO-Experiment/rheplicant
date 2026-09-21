@@ -419,7 +419,7 @@ def _resolve_shorthand(text: str) -> ResolvedValue:
 
 
 #: Form key -> resolver. Populated by the modules that own each form, in the
-#: shape core/graph.py::_GRAPHS established: registration is an expression, the key
+#: shape core/graph_template.py::_GRAPHS established: registration is an expression, the key
 #: comes off the thing registered, and the refusal lists what is known.
 _RESOLVERS: dict[str, Any] = {}
 

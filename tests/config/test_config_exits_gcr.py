@@ -167,7 +167,7 @@ class TestGcrDraws:
         # called.  It says tol arrived; the second half says
         # require_convergence: null did too, and pins what the draw becomes.
         # Both halves DECLARE the key now: the shipped default became null
-        # when kappa became a bound (inference/linear.py::condition_bound).
+        # when kappa became a bound (inference/linear_solve.py::condition_bound).
         with pytest.raises(eqx.EquinoxRuntimeError, match="wiener_solve/gcr_sample"):
             gcr_product({"n_draws": 4, "tol": 2.0, "require_convergence": 1e-3})
         product = gcr_product({"n_draws": 4, "tol": 2.0, "require_convergence": None})

@@ -5,7 +5,7 @@ forms, file readers, derivations, resource kinds -- and every "unknown X"
 refusal lists what is available. A module-level ``tuple(_TABLE)`` would freeze
 that list at import time and quietly go short as later modules register, so
 the message would name a set the loader does not actually have. This is the
-same discipline ``core/graph.py::_GRAPHS``'s ``get_graph`` applies by listing
+same discipline ``core/graph_template.py::_GRAPHS``'s ``get_graph`` applies by listing
 ``list(_GRAPHS)`` inside the refusal rather than beside it.
 """
 

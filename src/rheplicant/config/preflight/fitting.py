@@ -1477,7 +1477,7 @@ _A25_CHECK_MODES: tuple[Any, ...] = (False, _T9_CHECK_ONCE, _T9_CHECK_EACH_SWEEP
 #: ``config/`` refuses a negative one -- grepped: ``solve_tol`` and
 #: ``solve_guard`` appear only in the key sets and the passthrough tuples --
 #: so it is forwarded raw into a solver whose bound is the ``eqx.error_if`` at
-#: ``linear.py::wiener_solve``, inside jit -- ``engines.py::_monitor_programs`` is the DOCSTRING
+#: ``linear_solve.py::wiener_solve``, inside jit -- ``engines.py::_monitor_programs`` is the DOCSTRING
 #: that describes how that surfaces, not the guard itself.
 #: ``rhat_max`` carries ``0.0`` and NOT a strictly-positive floor: see
 #: :func:`_counts`' residues.

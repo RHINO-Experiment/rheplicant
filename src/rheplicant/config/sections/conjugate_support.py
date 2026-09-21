@@ -132,7 +132,7 @@ def _conjugate_block(
 
     ``needs_observed`` says whether this exit's solve reads data:
     ``condition`` estimates kappa from the operator alone
-    (``linear.py::_per_member`` takes no ``observed``), while the three solves do.
+    (``linear_priors.py::_per_member`` takes no ``observed``), while the three solves do.
     Where it is True the missing-observation refusal fires BEFORE the
     operator is built, so a document with no ``inference.observed`` hears
     about the data it did not declare rather than about its latents; where it
