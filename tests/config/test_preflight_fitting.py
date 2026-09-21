@@ -28,7 +28,7 @@ this task's brief said.**  Fifteen documents were driven directly through
   module said it was.  Measured: ``Block('d','a', learning_rate=0.1)`` --
   a block that DERIVES conjugate -- is **ACCEPTED**, and only the explicit
   ``engine='conjugate', learning_rate=...`` pair is refused
-  (``plan.py::MIN_DRAWS``), because ``Block._check`` sees the DECLARED engine
+  (``plan_settings.py::MIN_DRAWS``), because ``Block._check`` sees the DECLARED engine
   and never the derived one.  A17 is conjugate by derivation *or* by
   declaration, so implementing ``learning_rate`` "at A17's shape" would
   have refused a document the package builds and runs.
@@ -177,7 +177,7 @@ class TestBlocks:
         # A16's third leg, which schema line 1193's wording does not describe.
         # Kills an implementation that only walks `latents` and asks "is it
         # owned" -- `zzz` is in no `latents` iteration, so that direction
-        # never sees it and the run is refused at P3 by `plan.py::_not_converged_message`.
+        # never sees it and the run is refused at P3 by `plan_settings.py::_not_converged_message`.
         found = _found(_doc([{"names": ["d", "a", "w", "zzz"]}]))
         assert [f.check for f in found] == ["A16"]
         assert "'zzz'" in found[0].message
@@ -196,7 +196,7 @@ class TestBlocks:
         # as non-linear beside the linear 'd'), and an implementation that
         # derives the engine first tells the user their block "mixes
         # declared-linear latents ['d'] with non-linear ones ['zzz']" -- about
-        # a latent that does not exist.  `plan.py::_not_converged_message` argues the order in
+        # a latent that does not exist.  `plan_settings.py::_not_converged_message` argues the order in
         # as many words; this is that argument as an assertion.
         found = _found(_doc([{"names": ["d", "zzz"]}, {"names": ["a", "w"]}]))
         assert {f.check for f in found} == {"A16"}
@@ -233,7 +233,7 @@ class TestBlocks:
 
     @pytest.mark.parametrize("steps", [0, True, "5", 1.5], ids=["zero", "bool", "string", "float"])
     def test_a_steps_the_package_refuses_outright_still_fires_but_says_so(self, steps):
-        """The guard is ``steps is not None`` -- ``plan.py::Block``'s own -- and
+        """The guard is ``steps is not None`` -- ``plan_results.py::Block``'s own -- and
         the message is not the same message.
 
         Two mutations, and the second is the one the brief shipped.  Written
@@ -290,7 +290,7 @@ class TestBlocks:
         assert "['w']" in found[0].message
 
     def test_a_mixed_block_asking_for_conjugate_fires_A19_and_not_A17(self):
-        # The package raises A19 at `plan.py::split_rhat` and never reaches A17 at
+        # The package raises A19 at `plan_settings.py::split_rhat` and never reaches A17 at
         # `:674` -- measured on exactly this block.  Kills an implementation
         # that collects both: two findings about one block is one error
         # described twice, and the second one names a fix (drop steps:) that
@@ -412,8 +412,8 @@ class TestBlocks:
     def test_the_pass_agrees_with_the_package_on_every_case(self, label, blocks):
         """The differential that catches mirroring drift.
 
-        `_engine_of` mirrors `plan.py::split_rhat` and `_a16_partition` mirrors
-        `plan.py::_not_converged_message` (the three legs at `:545-558`, `:560-574` and
+        `_engine_of` mirrors `plan_settings.py::split_rhat` and `_a16_partition` mirrors
+        `plan_settings.py::_not_converged_message` (the three legs at `:545-558`, `:560-574` and
         `:576-584`).  Mirrored logic drifts, and every test above would
         stay green while the pass and the run disagreed about which engine a
         block takes -- a document refused at P-1 for a reason the run would
@@ -443,7 +443,7 @@ class TestBlocks:
           `Block._check` (`plan.py`) refuses every one; A17's rule is
           about a CONJUGATE block, so none of them is A17's. A numeric bound
           on `steps:` is A24/A25's row, not this function's;
-        * `learning_rate:` -- `0.0` on any block (`plan.py::MIN_DRAWS`), and any
+        * `learning_rate:` -- `0.0` on any block (`plan_settings.py::MIN_DRAWS`), and any
           value beside an explicit `engine: conjugate` (`:375-381`).
 
         Every one is a GAP (a refusal that stays at P3, behind the beam),
@@ -1533,9 +1533,9 @@ class TestPriorGates:
     def test_a_joint_prior_beside_a_plan_run_is_refused(self):
         # Measured at P3 today: ParameterSpaceError, "This space declares
         # JeffreysPrior(over=['d', 'a']) ..., and no block would step it at
-        # all", from `plan.py::split_rhat` -- after every beam.  Kills an
+        # all", from `plan_settings.py::split_rhat` -- after every beam.  Kills an
         # implementation gated on the partition SPLITTING the joint prior:
-        # `_refuse_split_joint_prior` is unconditional (`plan.py::split_rhat`
+        # `_refuse_split_joint_prior` is unconditional (`plan_settings.py::split_rhat`
         # chooses only the wording) and the un-split case is the silent one.
         found = _gates(
             preflight_document(
@@ -3496,7 +3496,7 @@ class TestCounts:
         assert "n_sweeps: must be >= 1" in found[0].message
 
     def test_a_count_that_is_not_whole_is_told_it_is_not_whole(self):
-        # The message this task FIXES, not merely moves.  `plan.py::Estimate`
+        # The message this task FIXES, not merely moves.  `plan_results.py::Estimate`
         # tests `not isinstance(max_iter, int) or max_iter < 1` and reports
         # only the second half, so `max_iter: 2.5` reaches the user as
         # "estimate() needs max_iter >= 1, got 2.5" -- a false sentence,
@@ -3529,7 +3529,7 @@ class TestCounts:
         assert found[0].message.startswith("runs['fit']: max_iter:")
 
     def test_min_sweeps_above_max_iter_is_refused_only_when_tol_is_live(self):
-        # BOTH directions in one test.  `plan.py::Estimate.names` gates the pair on
+        # BOTH directions in one test.  `plan_results.py::Estimate.names` gates the pair on
         # `tol is not None`, and `:943-946` short-circuits the same way, so
         # with `tol: null` the pair is never consulted.  Kills an ungated
         # pair check, which refuses a document the package runs, and kills
@@ -3539,7 +3539,7 @@ class TestCounts:
         assert [f.check for f in found] == ["A25"]
         assert "min_sweeps: 9 is above max_iter: 2" in found[0].message
         assert _counted(_estimate(min_sweeps=9, max_iter=2, tol=None)) == []
-        # THE BOUNDARY, both sides.  `plan.py::Estimate.names` reads
+        # THE BOUNDARY, both sides.  `plan_results.py::Estimate.names` reads
         # `not 1 <= min_sweeps <= max_iter`, so EQUALITY is legal and only
         # `floor > cap` is not.  Kills the guard written `floor >= cap` --
         # which refuses a document the package runs and which `9 > 2` cannot
@@ -3597,7 +3597,7 @@ class TestCounts:
         ],
     )
     def test_the_pair_uses_the_packages_defaults_when_a_half_is_absent(self, options, said):
-        # `plan.py::Estimate.names` compares against MIN_SWEEPS and DEFAULT_MAX_ITER,
+        # `plan_results.py::Estimate.names` compares against MIN_SWEEPS and DEFAULT_MAX_ITER,
         # so `max_iter: 1` with no `min_sweeps` IS refused there -- and a
         # clause that fired only when both keys were written, which is what
         # shipped, misses one of the four clauses A25's own schema row names.
@@ -3646,10 +3646,10 @@ class TestCounts:
         assert [f.check for f in _counted(_warmed(min_sweeps=9, max_iter=2))] == ["A25"]
 
     def test_a_null_tol_stands_down_the_min_sweeps_clause_and_NOTHING_else(self):
-        # `plan.py::Estimate.names` gates only the `min_sweeps` clause; `max_iter` is
+        # `plan_results.py::Estimate.names` gates only the `min_sweeps` clause; `max_iter` is
         # refused unconditionally at `:900`.  Kills gating any other row on
         # the live `tol`, under which `max_iter: 2.5` beside `tol: null` goes
-        # unchecked and reaches the user as `plan.py::Estimate`'s FALSE "needs
+        # unchecked and reaches the user as `plan_results.py::Estimate`'s FALSE "needs
         # max_iter >= 1, got 2.5" -- the very message this task's headline
         # claims to fix.
         #
@@ -3714,7 +3714,7 @@ class TestCounts:
     def test_the_min_sweeps_ROW_is_gated_on_tol_as_well_as_the_pair(self):
         # The plan's own measurement table says `min_sweeps: 0` with
         # `tol: null` earns NO REFUSAL from the package, and reading
-        # `plan.py::Estimate.names` and `:943-946` says why: both are `tol is not None
+        # `plan_results.py::Estimate.names` and `:943-946` says why: both are `tol is not None
         # and ...`, so a `min_sweeps` beside `tol: null` is forwarded,
         # validated by nothing and consulted by nothing.  Kills the
         # ungated `("min_sweeps", int, 1)` row the task body shipped, which
@@ -3974,7 +3974,7 @@ class TestCounts:
         assert "warmup is None" in lines[0]
 
     def test_a_tolerance_that_is_not_a_number_is_refused_here(self):
-        # `plan.py::Draws.std` is `progress <= tol * max(abs(chi2[-1]), 1.0)`, so
+        # `plan_results.py::Draws.std` is `progress <= tol * max(abs(chi2[-1]), 1.0)`, so
         # `tol: "banana"` reaches the user as a bare `TypeError: can't
         # multiply sequence by non-int of type 'float'` naming no run and no
         # key.  Kills dropping the three tolerance rows from `_A25_KNOBS`.
@@ -4009,7 +4009,7 @@ class TestCounts:
             assert f"{key}: must be >= 0" in sampled[0].message
 
     def test_solve_guard_null_stays_legal(self):
-        # `plan.py::PlanResult`: `solve_guard=None` skips the condition-number
+        # `plan_results.py::PlanResult`: `solve_guard=None` skips the condition-number
         # estimate, which is what a 10^6-coefficient block wants.  Kills
         # `if key in run:` without the `is None` arm, which would refuse a
         # document that works and take the package's own "turn the guard
@@ -4141,7 +4141,7 @@ class TestCounts:
         assert _counted(_estimate(solve_guard=float("inf"))) == []
 
     def test_check_identifiability_is_a_closed_enum_read_from_the_package(self):
-        # Kills a hand-written set: `plan.py::Block` accepts exactly False,
+        # Kills a hand-written set: `plan_results.py::Block` accepts exactly False,
         # 'once' and 'each_sweep', and a fourth mode shipping there would be
         # refused here while the package ran it.
         from rheplicant.config.preflight.fitting import _A25_CHECK_MODES
@@ -4183,7 +4183,7 @@ class TestCounts:
         ], lines
 
     def test_a_check_identifiability_the_package_refuses_by_IDENTITY(self):
-        # `plan.py::Block` reads `check is not False`, an IDENTITY test, so
+        # `plan_results.py::Block` reads `check is not False`, an IDENTITY test, so
         # `check_identifiability: 0` is refused there.  A frozenset carrying
         # `False` cannot see that: `hash(0) == hash(False)` and `0 == False`,
         # so `0 in frozenset({False, ...})` is True -- measured -- and the

@@ -43,11 +43,6 @@ LARGE: dict[str, tuple[str, str]] = {
     # --- Stage 1's A1 audit ruled these nine should be split (evidence:
     # .agents/evidence/T-002/audit/ledger_raw.md, "Large files: 9 split").
     # --- Grew past the threshold AFTER the audit drew its list.
-    "rheplicant/inference/plan.py": (
-        SPLIT,
-        "crossed 800 with the G1 estimate work and was never assessed "
-        "by A1; the point-estimate and draw exits are the natural seam",
-    ),
     # --- One file on purpose.
     "_rheplicant_bootstrap/output/transaction.py": (
         SINGLE,

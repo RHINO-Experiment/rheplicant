@@ -32,7 +32,7 @@ from .fitting_vocabulary import (
 #: ``test_check_identifiability_is_a_closed_enum_read_from_the_package``
 #: imports both names in the TEST, and
 #: ``test_the_package_guard_this_enum_mirrors_is_still_that_guard`` reads
-#: ``plan.py::Block``'s expression itself, so a third accepted mode turns those
+#: ``plan_results.py::Block``'s expression itself, so a third accepted mode turns those
 #: red rather than leaving this pass refusing a document the package runs.
 _T9_CHECK_ONCE: str = "once"
 
@@ -83,7 +83,7 @@ _T9_EARLIEST_CONVERGED_SWEEP: int = 3
 #: ``check_identifiability: [once]`` is a document a user can write, and
 #: inside the pass a ``TypeError`` becomes "check A25 RAISED" and discards
 #: every other finding.  And ``0 in frozenset({False, ...})`` is ``True``,
-#: because ``hash(0) == hash(False)``, while ``plan.py::Block`` tests ``check is
+#: because ``hash(0) == hash(False)``, while ``plan_results.py::Block`` tests ``check is
 #: not False`` -- an IDENTITY -- and so refuses ``check_identifiability: 0``.
 #: A frozenset would therefore accept a document the package refuses AND
 #: crash on another.  :func:`_a25_check_mode` mirrors the package's two-part
@@ -100,8 +100,8 @@ _A25_CHECK_MODES: tuple[Any, ...] = (False, _T9_CHECK_ONCE, _T9_CHECK_EACH_SWEEP
 #: package's sentence at P3.  ``check_identifiability`` is the one of the
 #: eight that is not numeric, and :data:`_A25_CHECK_MODES` has it.
 #:
-#: The floors are the package's own: ``plan.py::Estimate`` (``max_iter >= 1``),
-# : ``plan.py::Estimate.names`` (``1 <= min_sweeps <= max_iter``),
+#: The floors are the package's own: ``plan_results.py::Estimate`` (``max_iter >= 1``),
+# : ``plan_results.py::Estimate.names`` (``1 <= min_sweeps <= max_iter``),
 # ``plan.py::SamplingPlan._partition`` (``n_sweeps >=
 # : 1``), ``plan.py::SamplingPlan._partition`` (``warmup >= 0``), ``nuts.py::_parse_nuts`` (both
 # nuts counts
@@ -133,8 +133,8 @@ _A25_KNOBS: dict[str, tuple[tuple[str, type, float | None], ...]] = {
 }
 
 #: The one row of :data:`_A25_KNOBS` the package does not read
-#: unconditionally.  ``plan.py::Estimate.names`` gates ``min_sweeps`` on ``tol is not
-#: None`` and ``plan.py::Draws.std`` short-circuits on the same test, so beside ``tol:
+#: unconditionally.  ``plan_results.py::Estimate.names`` gates ``min_sweeps`` on ``tol is not
+#: None`` and ``plan_results.py::Draws.std`` short-circuits on the same test, so beside ``tol:
 #: null`` a ``min_sweeps`` is forwarded, validated by nothing and consulted
 #: by nothing: ``min_sweeps: 0`` with ``tol: null`` RUNS.  Checking it anyway
 #: would refuse a document the package runs, for a knob that does nothing --
@@ -145,8 +145,8 @@ _A25_TOL_GATED: frozenset[str] = frozenset({"min_sweeps"})
 #: The rows where ``null`` is the package's OWN off-switch rather than a typo,
 #: DERIVED rather than judged: they are exactly the ``SamplingPlan.estimate``
 #: and ``.sample`` parameters whose annotation admits ``None`` -- ``tol:
-#: float | None`` (no convergence test at all, ``plan.py::PlanDiagnostics``),
-#: ``solve_guard: float | None`` (no condition-number estimate, ``plan.py::PlanResult``)
+#: float | None`` (no convergence test at all, ``plan_results.py::PlanDiagnostics``),
+#: ``solve_guard: float | None`` (no condition-number estimate, ``plan_results.py::PlanResult``)
 #: and ``warmup: int | None`` (the ``n_sweeps // 2`` default, ``plan.py::SamplingPlan._partition``).
 #: ``test_the_nullable_rows_are_the_packages_own_optional_parameters`` reads
 #: those signatures back out, so a fourth optional parameter turns it red.
@@ -194,7 +194,7 @@ def _t9_whole_number(value: Any) -> bool:
 
 
 def _a25_check_mode(mode: Any) -> bool:
-    """``plan.py::Block``'s own test, mirrored and negated -- ``check is not
+    """``plan_results.py::Block``'s own test, mirrored and negated -- ``check is not
     False and check not in (CHECK_ONCE, CHECK_EACH_SWEEP)``.
 
     Identity on ``False`` and ``==`` membership over a TUPLE for the two
@@ -223,7 +223,7 @@ def _a25_bounded(
     for one property disagreeing, and a third written here would be that
     defect with a new name.
 
-    It also fixes a message.  ``plan.py::Estimate`` reads ``not isinstance(
+    It also fixes a message.  ``plan_results.py::Estimate`` reads ``not isinstance(
     max_iter, int) or max_iter < 1`` and reports only the second half, so
     ``max_iter: 2.5`` reaches the user as *"estimate() needs max_iter >= 1,
     got 2.5"* -- false, since 2.5 IS >= 1, and the real fault is the
@@ -543,9 +543,9 @@ def _counts(document: Mapping[str, Any]) -> Iterable[Finding]:
 
             if rows_kind == "plan.estimate":
                 # Gated on ``tol``, and the gate is the package's:
-                # ``plan.py::Estimate.names`` reads ``tol is not None and ...``, because
+                # ``plan_results.py::Estimate.names`` reads ``tol is not None and ...``, because
                 # with no convergence test there is no floor for
-                # ``min_sweeps`` to raise.  ``plan.py::Estimate.names`` is ``not 1 <=
+                # ``min_sweeps`` to raise.  ``plan_results.py::Estimate.names`` is ``not 1 <=
                 # min_sweeps <= max_iter``, so EQUALITY is legal and only
                 # ``floor > cap`` is not.  ``spec``, never ``run``: on a warm
                 # start the two `tol`s genuinely differ, because `tol` is not
@@ -555,7 +555,7 @@ def _counts(document: Mapping[str, Any]) -> Iterable[Finding]:
                 # `spec.get("min_sweeps")` and `spec.get("max_iter")` and so
                 # fired only when BOTH keys were written -- which skips
                 # `max_iter: 1` and `max_iter: 2`, ordinary documents that
-                # `plan.py::Estimate.names` refuses against MIN_SWEEPS = 3, and
+                # `plan_results.py::Estimate.names` refuses against MIN_SWEEPS = 3, and
                 # `min_sweeps: 101` against DEFAULT_MAX_ITER = 100.  That is
                 # one of the four clauses A25's own schema row names.  They
                 # are WRITTEN OUT rather than deferred-imported: measured, a

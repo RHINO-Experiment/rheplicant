@@ -140,25 +140,25 @@ def _a18_linear(latents: Mapping[str, Any], name: str) -> bool:
 
 
 def _engine_of(block: Mapping[str, Any], latents: Mapping[str, Any]) -> str:
-    """The engine a block takes, derived from text -- ``plan.py::split_rhat``.
+    """The engine a block takes, derived from text -- ``plan_settings.py::split_rhat``.
 
     **Mirrored, line for line, from** ``SamplingPlan._engine_of``
-    (``plan.py::split_rhat``, verified with ``inspect.getsourcelines``):
+    (``plan_settings.py::split_rhat``, verified with ``inspect.getsourcelines``):
 
-    * ``plan.py::split_rhat`` partition the names by ``Latent.linear`` -> :func:`_a18_linear`;
-    * ``plan.py::split_rhat`` ``if block.engine is None`` -> the ``declared is None`` branch;
-    * ``plan.py::split_rhat`` mixed-with-no-override is UNDERIVABLE -> ``""`` here,
+    * ``plan_settings.py::split_rhat`` partition the names by ``Latent.linear`` -> :func:`_a18_linear`;
+    * ``plan_settings.py::split_rhat`` ``if block.engine is None`` -> the ``declared is None`` branch;
+    * ``plan_settings.py::split_rhat`` mixed-with-no-override is UNDERIVABLE -> ``""`` here,
       because the package raises there and a pre-flight check may not
       (§2.3's TRAP: a check that raises aborts the pass and hides every
       later finding);
-    * ``plan.py::split_rhat`` ``engine = CONJUGATE if linear else GRADIENT`` -> verbatim,
+    * ``plan_settings.py::split_rhat`` ``engine = CONJUGATE if linear else GRADIENT`` -> verbatim,
       through :data:`_T7_CONJUGATE` and :data:`_T7_GRADIENT`;
-    * ``plan.py::split_rhat`` the override wins, unvalidated -> returned as declared, so
+    * ``plan_settings.py::split_rhat`` the override wins, unvalidated -> returned as declared, so
       :func:`_blocks` can refuse an engine outside :data:`_ENGINES` itself;
-    * ``plan.py::split_rhat`` conjugate-over-non-linear is A19's and stays in
+    * ``plan_settings.py::split_rhat`` conjugate-over-non-linear is A19's and stays in
       :func:`_blocks`, because it is a REFUSAL and this function returns a
       string;
-    * ``plan.py::Block`` conjugate-plus-steps is A17's, same reason.
+    * ``plan_results.py::Block`` conjugate-plus-steps is A17's, same reason.
 
     **The risk this mirroring carries is drift**: the package can change
     ``_engine_of`` and every test written against our messages stays green
@@ -280,13 +280,13 @@ def _a16_partition(
     entries: tuple[Mapping[str, Any], ...],
     latents: Mapping[str, Any],
 ) -> Iterable[Finding]:
-    """A16: the partition, in the order ``plan.py::_not_converged_message`` settles it.
+    """A16: the partition, in the order ``plan_settings.py::_not_converged_message`` settles it.
 
     Three legs, one id.  The schema row (line 1193) describes two of them --
     "every latent appears in exactly one block" -- and the third, a block
     naming a name ``inference.parameters`` never declared, is
-    ``plan.py::_not_converged_message``'s and is refused FIRST there (the covered pair is
-    ``plan.py::_not_converged_message`` and ``plan.py::_not_converged_message``).  A fourth shape,
+    ``plan_settings.py::_not_converged_message``'s and is refused FIRST there (the covered pair is
+    ``plan_settings.py::_not_converged_message`` and ``plan_settings.py::_not_converged_message``).  A fourth shape,
     one name written twice inside ONE block, is ``Block._check``'s
     (``plan.py``) rather than the plan's and carries the same id: it
     is the same property (each latent in exactly one place) one level in.
@@ -402,7 +402,7 @@ def _t7_engines(
     broken partition they answer about names that do not exist -- an
     undeclared name reads as non-linear (:func:`_a18_linear` returns False for
     an absent latent) and produces an A18 *"mixes linear with non-linear"*
-    refusal naming a latent nobody declared.  That is ``plan.py::_not_converged_message``'s
+    refusal naming a latent nobody declared.  That is ``plan_settings.py::_not_converged_message``'s
     own argument: *"a block naming an undeclared latent cannot have its engine
     derived at all, so the partition is settled first"*.
 

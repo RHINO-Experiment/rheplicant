@@ -1657,7 +1657,7 @@ class TestGradientEngine:
         them apart, and this is exactly the sort of branch that ships pinned on
         one side.
         """
-        import rheplicant.inference.plan as plan_module
+        import rheplicant.inference.plan_estimate as plan_module
 
         space, pipeline, observed = line_setup
         plan = SamplingPlan(space, Block("amp"), Block("centre", steps=4))

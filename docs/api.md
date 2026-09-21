@@ -309,6 +309,21 @@ coefficients the noise-wave model consumes.
 ```{eval-rst}
 .. automodule:: rheplicant.inference.plan
    :members:
+
+.. automodule:: rheplicant.inference.plan_settings
+   :members:
+
+.. automodule:: rheplicant.inference.plan_results
+   :members:
+
+.. automodule:: rheplicant.inference.plan_blocks
+   :members:
+
+.. automodule:: rheplicant.inference.plan_estimate
+   :members:
+
+.. automodule:: rheplicant.inference.plan_draws
+   :members:
    :show-inheritance:
 
 .. automodule:: rheplicant.inference.partition

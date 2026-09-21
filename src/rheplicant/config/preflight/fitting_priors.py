@@ -263,7 +263,7 @@ def _prior_gates(document: Mapping[str, Any]) -> Iterable[Finding]:
     **The order inside this function is the decision §2.6 item 4 records, and
     it is structural rather than positional.**  A20 refuses
     ``inference.joint_prior`` beside ANY ``kind: plan.*``
-    (``plan.py::_halves``, unconditional -- ``_refuse_split_joint_prior``
+    (``plan_settings.py::_halves``, unconditional -- ``_refuse_split_joint_prior``
     chooses only its wording from whether the partition splits the prior) and
     A21 refuses it beside ``fisher`` with ``space: true``
     (``uncertainty.py::_declared_gaussian_priors`` -- ``inference/``, not

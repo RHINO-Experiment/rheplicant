@@ -70,7 +70,7 @@ def test_block_refuses_a_learning_rate_on_a_conjugate_block():
 
 def test_the_declared_rate_reaches_gradient_estimate(monkeypatch):
     """The plumbing test: intercept the engine and read what it was handed."""
-    import rheplicant.inference.plan as plan_mod
+    import rheplicant.inference.plan_estimate as plan_mod
 
     seen = {}
     real = plan_mod.gradient_estimate
@@ -88,7 +88,7 @@ def test_the_declared_rate_reaches_gradient_estimate(monkeypatch):
 
 
 def test_an_undeclared_rate_reaches_the_engine_default(monkeypatch):
-    import rheplicant.inference.plan as plan_mod
+    import rheplicant.inference.plan_estimate as plan_mod
 
     seen = {}
     real = plan_mod.gradient_estimate
