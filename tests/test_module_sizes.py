@@ -57,11 +57,6 @@ LARGE: dict[str, tuple[str, str]] = {
         "schema §6's model checks are a dozen independent passes sharing "
         "one node walk; the walk is the module and the passes are not",
     ),
-    "_rheplicant_bootstrap/output/manager.py": (
-        SPLIT,
-        "the output grammar, descriptor preflight and A34 lease "
-        "management are three, and the lease is the one with its own lifecycle",
-    ),
     # --- Grew past the threshold AFTER the audit drew its list.
     "rheplicant/inference/plan.py": (
         SPLIT,

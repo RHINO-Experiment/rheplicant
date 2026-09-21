@@ -281,7 +281,13 @@ def test_target_swap_after_marker_read_is_refused(tmp_path, monkeypatch):
         replacement.mkdir(mode=0o700)
         return result
 
-    monkeypatch.setattr(manager, "_read_owned_marker", read_then_swap)
+    # Patched on output_lease, not on manager: verify_a34_under_lease calls
+    # `_read_owned_marker` and both now live there, so a bare name resolves in
+    # that module's globals. Aimed at manager this patches an alias nothing
+    # reads, and the swap the test is trying to force never happens.
+    from _rheplicant_bootstrap.output import output_lease
+
+    monkeypatch.setattr(output_lease, "_read_owned_marker", read_then_swap)
     try:
         with pytest.raises(ConfigError, match="identity changed"):
             verify_a34_under_lease(publication, platform)
