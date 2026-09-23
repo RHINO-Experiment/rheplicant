@@ -288,7 +288,7 @@ def _unknown_from_keys(node_id: str, route: str, spec: Mapping) -> list[str]:
     return sorted(set(spec) - {"from", *FROM_ROUTES[(node_id, route)]})
 
 
-def _from_route(node_id: str, spec: Mapping, context: ResolutionContext):
+def _from_route(node_id: str, spec: Mapping, context: ResolutionContext, where: str):
     route = spec["from"]
     if node_id == "beam_spill" and route == "projector":
         from rheplicant.radio import BeamSpillOperator
@@ -331,9 +331,7 @@ def _from_route(node_id: str, spec: Mapping, context: ResolutionContext):
                 f"model.t_sys_extra.basis: is {{ref: resources.bases.<name>}}; got {node!r}."
             )
         basis = resolve_reference(node["ref"], context)
-        coeff = _field_value(
-            "t_sys_extra", BasisTemperatureOperator, "coeff", spec["coeff"], context
-        )
+        coeff = _field_value(where, BasisTemperatureOperator, "coeff", spec["coeff"], context)
         return BasisTemperatureOperator.from_basis(basis, coeff)
     if node_id == "cal_loads" and route == "thermistors":
         unknown = _unknown_from_keys(node_id, route, spec)
@@ -451,22 +449,36 @@ def _read_eqx_leaves(path, spec: dict):
         return eqx.tree_deserialise_leaves(handle, like=template)
 
 
-def build_node_operator(node_id: str, spec: Any, context: ResolutionContext):
-    """One node spec -> one operator (composition keys already stripped)."""
+def build_node_operator(
+    node_id: str, spec: Any, context: ResolutionContext, *, where: str | None = None
+):
+    """One node spec -> one operator (composition keys already stripped).
+
+    ``node_id`` chooses the class from the registry; ``where`` is the spec's
+    path under ``model.`` -- ``foregrounds[0]``, ``cal_loads.hot``,
+    ``gain.stages[1]`` -- and defaults to ``node_id`` for a single node. Every
+    delivered field's destination is built from ``where``, and the command
+    line's origin audit looks that destination up in the document as written,
+    so an entry of a list, a FAN or a ``stages:`` list named by its bare node
+    has no origin and the whole document is refused.
+    """
+    where = node_id if where is None else where
     if not isinstance(spec, Mapping):
         raise ConfigError(
-            f"model.{node_id}: a node spec is a mapping of the operator's own "
+            f"model.{where}: a node spec is a mapping of the operator's own "
             f"constructor fields; got {type(spec).__name__} ({spec!r})."
         )
     if "python" in spec:
-        return _python_operator(node_id, spec, context)
+        return _python_operator(where, spec, context)
     if "from" in spec:
-        return _from_route(node_id, spec, context)
+        return _from_route(node_id, spec, context, where)
     classes = operator_table().get(node_id)
     if not classes:
         raise ConfigError(
             f"model.{node_id}: no shipped operator registers at this node; "
             "python: (or at: from another node) is the route."
         )
+    # Which class is a question about the node, and pre-flight check A7 asks
+    # it in the node's words; only the delivered fields are the entry's own.
     cls = _pick_class(node_id, classes, spec)
-    return _construct(node_id, cls, spec, context)
+    return _construct(where, cls, spec, context)

@@ -38,7 +38,12 @@ class _MutableOrigin:
     children: dict[str | int, _MutableOrigin]
 
 
-_PATH_PART = re.compile(r"([^\[\]]+)(\[\])?")
+#: One dotted part of a default's path: a key, then optionally ``[]`` (every
+#: entry of the list or mapping there) or ``[<n>]`` (entry ``n`` of a list).
+#: The model layer records a list node's per-entry defaults at the entry the
+#: user wrote -- ``model.foregrounds[1].amplitude.as`` -- because two entries
+#: of one list can be different classes with different fields.
+_PATH_PART = re.compile(r"([^\[\]]+)(?:\[(\d*)\])?")
 _SCHEMA_ROOTS = frozenset(("runtime", "observation", "resources", "model", "inference", "runs"))
 
 
@@ -105,15 +110,16 @@ def _freeze_origins(node: _MutableOrigin) -> OriginNode:
     )
 
 
-def _tokens(path: str) -> tuple[str, ...]:
-    tokens: list[str] = []
+def _tokens(path: str) -> tuple[str | int, ...]:
+    tokens: list[str | int] = []
     for part in path.split("."):
         match = _PATH_PART.fullmatch(part)
         if match is None:
             return ()
         tokens.append(match.group(1))
-        if match.group(2) is not None:
-            tokens.append("[]")
+        index = match.group(2)
+        if index is not None:
+            tokens.append(int(index) if index else "[]")
     return tuple(tokens)
 
 
@@ -142,6 +148,10 @@ def _apply_default(
             for key, child in pairs:
                 apply(child, node.children[key], offset + 1)
             return
+        if isinstance(token, int):
+            if isinstance(current, list) and token < len(current):
+                apply(current[token], node.children[token], offset + 1)
+            return
         if not isinstance(current, dict):
             return
         final = offset == len(tokens) - 1
@@ -152,7 +162,7 @@ def _apply_default(
                 node.children[token] = _default_origin(copied)
             return
         if token not in current:
-            if "[]" in tokens[offset + 1 :]:
+            if any(later == "[]" or isinstance(later, int) for later in tokens[offset + 1 :]):
                 return
             current[token] = {}
             node.children[token] = _default_origin({})

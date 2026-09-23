@@ -338,7 +338,7 @@ def _stage_operator(label: str, spec: Any, context: ResolutionContext, node_id: 
         raise ConfigError(problem)
     spec = {key: value for key, value in spec.items() if key != "name"}
     if node_id is not None:
-        return build_node_operator(node_id, spec, context)
+        return build_node_operator(node_id, spec, context, where=label)
     # kind: pipeline -- no node registry; the class is named directly.
     if "python" in spec:
         return build_node_operator(label, spec, context)
@@ -451,9 +451,16 @@ def _many(node_id: str, spec: Any, context: ResolutionContext, switch_order: tup
         problem = cal_load_order_problem(spec, switch_order)
         if problem is not None:
             raise ConfigError(problem)
-        return [build_node_operator("cal_loads", entry, context) for entry in spec.values()]
-    # foregrounds / t_sys_extra (SUM) and filters (CHAIN): a list.
-    return [build_node_operator(node_id, entry, context) for entry in spec]
+        return [
+            build_node_operator("cal_loads", entry, context, where=f"cal_loads.{label}")
+            for label, entry in spec.items()
+        ]
+    # foregrounds / t_sys_extra (SUM) and filters (CHAIN): a list, each entry
+    # addressed by its index, as the document and its origins tree address it.
+    return [
+        build_node_operator(node_id, entry, context, where=f"{node_id}[{index}]")
+        for index, entry in enumerate(spec)
+    ]
 
 
 def _build_pipeline(section: Mapping, context: ResolutionContext):
