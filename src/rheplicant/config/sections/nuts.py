@@ -78,6 +78,9 @@ numpyro's own signatures), :func:`_init_choice` (the ``init:`` vocabulary
 and ref-availability check, split out of :func:`_init_strategy` so the
 parser raises it without building the strategy) and :func:`_parse_nuts`
 (the kind's parser, which is what the ``@register`` decorator now names).
+
+*One more for non-scalar latents*, plus the ``numpy`` import it needs:
+:func:`_per_element`, which keeps a diagnostic row shaped like its latent.
 The three ``chain_method`` words numpyro takes stay a LOCAL, now inside
 :func:`_parse_nuts`, so this inventory stays exhaustive.
 
@@ -90,6 +93,8 @@ from __future__ import annotations
 
 import warnings
 from typing import Any, NamedTuple
+
+import numpy as np
 
 from rheplicant.config.errors import ConfigError
 from rheplicant.config.sections.exit_support import (
@@ -169,8 +174,11 @@ class NutsProduct(NamedTuple):
     ``samples`` carries ``space.names`` AND NOTHING ELSE -- in particular not
     the deterministic ``"prediction"`` site.
 
-    ``diagnostics`` is ``{latent: {"r_hat": float, "n_eff": float}}`` and
-    ``divergences`` the number of divergent transitions across every chain.
+    ``diagnostics`` is ``{latent: {"r_hat": ..., "n_eff": ...}}``, each value
+    shaped like its latent: a ``float`` for a scalar latent and a read-only
+    float64 array of the latent's shape otherwise, one entry per element.
+    Per element rather than a max/min, because the element that did not mix
+    is the finding.  ``divergences`` the number of divergent transitions across every chain.
     A diverging chain returns finite, plausible, WRONG draws, so the count is
     carried here and warned about, never silently dropped.  It is NOT a
     refusal: the number at which it becomes fatal is a judgement this layer
@@ -185,6 +193,23 @@ class NutsProduct(NamedTuple):
     n_chain: int
     diagnostics: dict[str, Any]
     divergences: int
+
+
+def _per_element(value: Any) -> float | np.ndarray:
+    """One ``summary`` statistic, shaped like the latent it describes.
+
+    ``summary`` reports ``r_hat`` and ``n_eff`` per element: a numpy scalar
+    for a scalar latent, an array of the latent's shape for anything else.
+    ``float(...)`` on the second raised ``TypeError: only length-1 arrays can
+    be converted to Python scalars`` after the chain had run.  A scalar stays
+    a ``float``; an array is copied to float64 and frozen, so the product
+    does not share a buffer with numpyro and cannot be edited through it.
+    """
+    array = np.array(value, dtype=np.float64)
+    if array.ndim == 0:
+        return float(array)
+    array.flags.writeable = False
+    return array
 
 
 def _init_choice(run: Any, built: Any, space: Any) -> str:
@@ -425,9 +450,9 @@ def _run_nuts(run: ParsedRun, built: Any, previous: Any = None) -> Any:
     # is: run over everything `get_samples` returns it would summarise the
     # deterministic "prediction" site too, 200 x 16 x 8 of it, and hand back a
     # row under a key no latent owns.  `r_hat` and `n_eff` are two of the
-    # seven keys it returns, and both arrive as numpy scalars, which is why
-    # `float(...)` sits on each below rather than after someone finds a numpy
-    # scalar in a message.  No `prob=` argument: the plan's snippet passed
+    # seven keys it returns, one entry per element of the latent: a numpy
+    # scalar for a scalar latent, an array of its shape otherwise.
+    # `_per_element` turns the first into a `float` and freezes the second.  No `prob=` argument: the plan's snippet passed
     # `prob=0.9`, which IS the package default and controls only the
     # '5.0%'/'95.0%' rows the comprehension below discards -- restating a
     # default two lines above the comment refusing to restate one.
@@ -453,7 +478,7 @@ def _run_nuts(run: ParsedRun, built: Any, previous: Any = None) -> Any:
         n_draw=int(samples[space.names[0]].shape[0]),
         n_chain=int(mcmc.num_chains),
         diagnostics={
-            name: {"r_hat": float(row["r_hat"]), "n_eff": float(row["n_eff"])}
+            name: {"r_hat": _per_element(row["r_hat"]), "n_eff": _per_element(row["n_eff"])}
             for name, row in table.items()
         },
         divergences=divergences,

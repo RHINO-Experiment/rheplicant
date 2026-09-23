@@ -389,6 +389,19 @@ NPE_TRIO = {
 }
 
 
+#: One scalar latent beside one ``(16,)`` latent, on :data:`VECTOR_GAIN_MODEL`:
+#: the smallest document on which ``kind: nuts`` summarises a non-scalar
+#: latent, with a scalar row next to it to show the two shapes coexist.
+VECTOR_AND_SCALAR = {
+    "parameters": {
+        "d": NPE_TRIO["parameters"]["d"],
+        "m": NPE_TRIO["parameters"]["m"],
+    },
+    "noise": HOMOSCEDASTIC,
+    "observed": {"from": "simulation"},
+}
+
+
 def trio_npe_document():
     """The three-latent, one-vector document the unravel is measured on.
 

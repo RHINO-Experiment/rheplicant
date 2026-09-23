@@ -377,6 +377,9 @@ rather than failing.
   the kernel. The product carries the latents **and not** the deterministic
   prediction site — `get_samples()` returns that too, and its per-sample shape
   is the whole data grid — beside `r_hat`, `n_eff` and a divergence count.
+  `r_hat` and `n_eff` are per element and shaped like their latent: one number
+  for a scalar latent, sixteen for a `(16,)` gain, so an element that did not
+  mix is visible by index rather than hidden in a maximum.
   Unlike the conjugate family it takes the noise **model**, not a decided sigma
   array: a prediction-dependent sigma is the point on this route, because the
   likelihood's own `-log σ` becomes part of the potential automatically.

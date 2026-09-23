@@ -2,6 +2,7 @@
 
 import warnings
 
+import numpy as np
 import pytest
 
 from rheplicant.config.errors import ConfigError
@@ -23,6 +24,8 @@ from tests.config.exit_helpers import (
 )
 from tests.config.posterior_helpers import (
     NEEDLE,
+    VECTOR_AND_SCALAR,
+    VECTOR_GAIN_MODEL,
     nuts_built,
     nuts_document,
     nuts_product,
@@ -805,6 +808,48 @@ class TestTheDiagnostics:
         # is that some did, so the warning fired at all.
         assert 0 < drawn.divergences <= 100, drawn.divergences
         assert drawn.n_draw == 100
+
+    def test_a_vector_latent_gets_one_r_hat_per_element(self):
+        """A non-scalar latent's row is shaped like the latent, not collapsed.
+
+        `summary` returns an array per latent, one entry per element, and
+        `float(row["r_hat"])` on a (16,) array raised `TypeError: only
+        length-1 arrays can be converted to Python scalars` after the chain
+        had already run: `kind: nuts` failed for every non-scalar latent.
+        Per element rather than a max/min, because the element that did not
+        mix is the finding.  The scalar latent beside it keeps its `float`.
+
+        Through `_run_diagnostics` as well, because that is what writes the
+        numbers to `diagnostics.json`: the row must reach JSON as a list of
+        16, not as something the extractor refuses.
+        """
+        from rheplicant.config.products.extractors import _run_diagnostics
+
+        drawn = product(
+            {"num_warmup": 50, "num_samples": 50},
+            model=VECTOR_GAIN_MODEL,
+            inference=VECTOR_AND_SCALAR,
+        )
+        assert set(drawn.diagnostics) == {"d", "m"}
+        assert isinstance(drawn.diagnostics["d"]["r_hat"], float)
+        assert isinstance(drawn.diagnostics["d"]["n_eff"], float)
+        shape = drawn.samples["m"].shape[1:]
+        assert shape == (16,)
+        for key in ("r_hat", "n_eff"):
+            value = drawn.diagnostics["m"][key]
+            assert isinstance(value, np.ndarray), type(value)
+            assert value.shape == shape
+            assert value.dtype == np.float64
+            assert not value.flags.writeable
+            assert np.all(np.isfinite(value))
+        # Sixteen distinct numbers, so the row is per element and not one
+        # summary broadcast to the latent's shape.
+        assert len(set(drawn.diagnostics["m"]["n_eff"].tolist())) > 1
+
+        record = _run_diagnostics(drawn, None, {}).value["per_latent"]
+        assert isinstance(record["d"]["r_hat"], float)
+        assert len(record["m"]["r_hat"]) == 16
+        assert record["m"]["n_eff"] == drawn.diagnostics["m"]["n_eff"].tolist()
 
 
 class TestTheParserInjectedDefaultsAreThePackagesOwn:
