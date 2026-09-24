@@ -75,6 +75,14 @@ CAPABILITIES_FORMAT_VERSION = 1
 #: document does declare one, and
 #: ``tests/config/test_capability_record.py`` asserts it rather than leaving a
 #: vocabulary entry nothing can produce.
+#:
+#: ``unresolved_type`` covers a ``python:`` node as well as a ``type:`` that
+#: matches nothing: in both, the walk cannot settle the class without
+#: importing. A ``python:`` node got this reason at every node id where the
+#: table holds zero or several classes before 2026-09-23, when the one-class
+#: case was brought into line. A separate entry for it would widen the
+#: ``capabilities-v1`` enum that shipped in 0.9.0, which is a
+#: ``format_version`` bump.
 LEVEL_REASONS = ("spec_not_a_mapping", "unresolved_type")
 
 
@@ -100,6 +108,10 @@ def node_levels(document: Mapping[str, Any]) -> tuple[NodeLevel, ...]:
     node whose class cannot be settled that way gets ``level: null`` with a
     reason rather than being dropped. A dropped node and a node that does not
     exist look identical to a reader, and only one of them is true.
+
+    A ``python:`` node never reaches the table. Its class is the import
+    target's, which this walk does not import, so it gets ``level: null`` and
+    ``type: null`` whatever the table holds at that node id.
     """
     specs = model_nodes(document)
     if not specs:
@@ -110,6 +122,15 @@ def node_levels(document: Mapping[str, Any]) -> tuple[NodeLevel, ...]:
     for node_id, spec in specs.items():
         if not isinstance(spec, Mapping):
             rows.append(NodeLevel(node_id, None, None, "spec_not_a_mapping"))
+            continue
+        if "python" in spec:
+            # The build dispatches on `python:` before it consults the table
+            # (`sections/model.py::build_node_operator`), so a class registered
+            # at this node id is one the document did not choose. Falling
+            # through to the table published that class's level for a custom
+            # operator whenever the node id held exactly one class, and A53
+            # then named it. Settling the named class would mean importing it.
+            rows.append(NodeLevel(node_id, None, None, "unresolved_type"))
             continue
         classes = table.get(node_id)
         declared = spec.get("type")

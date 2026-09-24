@@ -107,6 +107,68 @@ class TestEveryReasonIsProducible:
         assert row.level_reason is None
 
 
+class TestAPythonNodeIsNotTheTablesClass:
+    """A ``python:`` node's class is the one its import target names.
+
+    The build dispatches on ``python:`` before it consults the operator table
+    (``sections/model.py::build_node_operator``), so a class registered at the same
+    node id is one the document did not choose. The walk imports nothing, so
+    it cannot read the named class's level either, and the row says so rather
+    than borrowing the table's.
+
+    Measured 2026-09-23: ``global_signal: {python:
+    "global21cm.signal21:CompressedSignal"}`` published ``type:
+    GlobalSignalOperator, level: placeholder``, and A53 called the node
+    placeholder physics, naming a class the document never used. Only a node
+    id holding exactly one class could do this, so those are the subjects.
+    """
+
+    TARGET = {"python": "some_package.module:CustomOperator"}
+
+    @staticmethod
+    def _single_class_nodes(*, maintained: bool = True) -> list[str]:
+        levels = capabilities()
+        nodes = [
+            node_id
+            for node_id, classes in operator_table().items()
+            if len(classes) == 1
+            and (maintained or levels[classes[0].__name__] is not Maturity.MAINTAINED)
+        ]
+        assert nodes, "no node id holds one such class; this guard has lost its subject"
+        return nodes
+
+    def test_no_row_borrows_the_class_registered_at_its_node(self):
+        nodes = self._single_class_nodes()
+        rows = node_levels(graph(**{node_id: dict(self.TARGET) for node_id in nodes}))
+        assert [(row.node_id, row.type, row.level, row.level_reason) for row in rows] == [
+            (node_id, None, None, "unresolved_type") for node_id in nodes
+        ]
+
+    def test_a53_names_none_of_them(self):
+        nodes = self._single_class_nodes(maintained=False)
+        # The control: placed through the table, these nodes ARE named, so the
+        # empty notice below cannot pass merely because A53 had nothing to say.
+        assert list(_capability_level(graph(**{node_id: {} for node_id in nodes})))
+        assert (
+            list(_capability_level(graph(**{node_id: dict(self.TARGET) for node_id in nodes})))
+            == []
+        )
+
+    def test_the_published_row_is_schema_valid(self):
+        payload = json.loads(
+            capabilities_manifest((layer(graph(global_signal=dict(self.TARGET))),))
+        )
+        jsonschema.validate(payload, SCHEMA)
+        assert payload["layers"][0]["nodes"] == [
+            {
+                "node_id": "global_signal",
+                "type": None,
+                "level": None,
+                "level_reason": "unresolved_type",
+            }
+        ]
+
+
 class TestTheNoticeAndTheRecordAreOneResolution:
     """A53's message and the published record cannot disagree about a node.
 

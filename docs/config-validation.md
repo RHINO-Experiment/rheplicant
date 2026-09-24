@@ -444,6 +444,12 @@ both, so C18 is last. Write the bullets in that order and keep them in it;
   number" does not mean parsing this sentence. The notice and the record are
   two views of one resolution, not two walks that could disagree.
 
+  A `python:` node is listed with `type: null`, `level: null` and
+  `level_reason: unresolved_type`. Its class is imported only when the run
+  builds it, so neither view can read its level, and A53 does not name it.
+  A filter for stand-in physics should treat a null level as unknown, not as
+  maintained.
+
 - **A30** — `model.noise` draws its own randomness and `inference.twin.without:`
   does not drop it. A `conjugate.wiener` run closes the twin over one template
   state, so that draw would be the same realisation added to every prediction
