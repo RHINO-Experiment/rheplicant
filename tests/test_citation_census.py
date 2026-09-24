@@ -10,7 +10,7 @@ anchor lowers a number here and nothing else has to be edited; a new
 ``file.py:<line>`` written into the tree raises one and turns this red, which
 is the moment to write the durable form instead.
 
-**What is counted, and what was measured wrong three times before it was
+**What is counted, and what was measured wrong four times before it was
 right.** A citation names a path SUFFIX, and it must be resolved as one.
 Matching on the basename alone says a citation of ``core/graph.py`` at line
 350 points at ``config/graph.py``, which has 224 lines, and reports a
@@ -19,8 +19,12 @@ of this scan.
 Indexing only ``src/`` and ``tests/`` says the seventeen citations of
 ``examples/`` name files that do not exist. And an index built from
 ``ROOT.rglob`` picks up the checked-out worktree under ``.claude/`` and makes
-every basename ambiguous. The numbers below are after all three were fixed;
-the measurement, not the code, was the thing that kept being broken.
+every basename ambiguous. And ``SKIP`` was matched against the ABSOLUTE
+path, while a worktree lives at ``.claude/worktrees/<name>/``: from one, all
+698 sources and every candidate were skipped, and each check here passed over
+an empty tree except the one with a floor. The numbers below are after all
+four were fixed; the measurement, not the code, was the thing that kept being
+broken.
 
 So the objective defects are:
 
@@ -56,7 +60,8 @@ CITING_FILES = ("README.md", "DESIGN.md", "CLAUDE.md", "AGENTS.md")
 
 #: Never scanned, and never used to resolve. ``.claude/`` holds a checked-out
 #: worktree: a full second copy of the package, which makes every basename
-#: ambiguous if it is indexed.
+#: ambiguous if it is indexed. Each entry is a run of directories below the
+#: checkout's root; see :func:`_skipped`.
 SKIP = (
     "docs/superpowers/",
     ".agents/",
@@ -69,6 +74,8 @@ SKIP = (
     ".git/",
     "tools/",
 )
+
+_SKIP_RUNS = tuple(tuple(entry.strip("/").split("/")) for entry in SKIP)
 
 #: Citations INTO a dependency. Their line numbers are that project's business
 #: and move with its releases, not with this tree; so are their names.
@@ -147,39 +154,50 @@ AMBIGUOUS_CEILING = 0
 NAME_CITATION = re.compile(r"\b([\w/]+\.py)::([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*)")
 
 
-def _skipped(path: pathlib.Path) -> bool:
-    text = str(path)
-    return any(part in text for part in SKIP)
+def _skipped(path: pathlib.Path, root: pathlib.Path = ROOT) -> bool:
+    """Whether ``path`` lies in a ``SKIP`` directory below ``root``.
+
+    Only the part of the path below the root is read. The whole absolute path
+    was read until 2026-09-24, so a checkout whose own location contained
+    ``.claude/``, ``runs/``, ``site/`` or ``tools/`` skipped every file it
+    had, and every worktree's location contains ``.claude/``. It is compared
+    by directory, not by substring, because ``site/`` is also the end of
+    ``composite/``.
+    """
+    folders = path.relative_to(root).parts[:-1]
+    return any(
+        folders[start : start + len(run)] == run
+        for run in _SKIP_RUNS
+        for start in range(len(folders) - len(run) + 1)
+    )
 
 
-def _candidates() -> list[pathlib.Path]:
+def _candidates(root: pathlib.Path = ROOT) -> list[pathlib.Path]:
     """Every file a citation could be naming."""
-    found = []
-    for root in ("src", "tests", "examples"):
-        for path in (ROOT / root).rglob("*.py"):
-            if not _skipped(path):
-                found.append(path)
-    return found
+    return [
+        path
+        for top in ("src", "tests", "examples")
+        for path in (root / top).rglob("*.py")
+        if not _skipped(path, root)
+    ]
 
 
-def _sources() -> list[pathlib.Path]:
+def _sources(root: pathlib.Path = ROOT) -> list[pathlib.Path]:
     """Every file whose text is live prose or code."""
-    sources: list[pathlib.Path] = []
-    for root in CITING_ROOTS:
-        sources += [
-            path
-            for path in (ROOT / root).rglob("*")
-            if path.is_file() and path.suffix in (".py", ".md")
-        ]
-    return sources + [ROOT / name for name in CITING_FILES]
+    found = [
+        path
+        for top in CITING_ROOTS
+        for path in (root / top).rglob("*")
+        if path.is_file() and path.suffix in (".py", ".md")
+    ]
+    found += [root / name for name in CITING_FILES if (root / name).exists()]
+    return [path for path in found if not _skipped(path, root)]
 
 
 def _citations() -> list[tuple[str, str, int, int]]:
     """``(citing file, cited path, first line, last line)`` over live text."""
     found = []
     for path in _sources():
-        if _skipped(path) or not path.exists():
-            continue
         text = _prose_only(path, path.read_text(encoding="utf-8", errors="replace"))
         for match in CITATION.finditer(text):
             target = match.group(1)
@@ -287,8 +305,6 @@ def _name_citations() -> list[tuple[str, str, str]]:
     """``(citing file, cited path, qualname)`` over live text."""
     found = []
     for path in _sources():
-        if _skipped(path) or not path.exists():
-            continue
         text = _prose_only(path, path.read_text(encoding="utf-8", errors="replace"))
         for match in NAME_CITATION.finditer(text):
             target = match.group(1)
@@ -342,6 +358,45 @@ def _defined_names(path: pathlib.Path) -> set[str]:
 def test_the_tree_still_cites_by_name():
     """Guard the guard: the checks below would pass over an empty corpus."""
     assert len(_name_citations()) > 600, len(_name_citations())
+
+
+def _elsewhere(tmp_path: pathlib.Path) -> pathlib.Path:
+    """A checkout location whose own path passes through every ``SKIP`` entry."""
+    return tmp_path.joinpath(*(part for run in _SKIP_RUNS for part in run), "checkout")
+
+
+def test_a_skip_directory_above_the_root_skips_nothing(tmp_path):
+    """Where the checkout sits is not part of the tree.
+
+    A worktree lives at ``.claude/worktrees/<name>/``, and a checkout may sit
+    under a ``runs/`` or ``tools/`` of its own. Below the root, an entry is
+    skipped wherever it appears, and a directory that merely ends with one is
+    not.
+    """
+    root = _elsewhere(tmp_path)
+    for kept in ("README.md", "src/rheplicant/core/graph.py", "src/rheplicant/composite/graph.py"):
+        assert not _skipped(root / kept, root), kept
+    for entry in SKIP:
+        assert _skipped(root / entry / "graph.py", root), entry
+        assert _skipped(root / "src" / entry / "graph.py", root), entry
+
+
+def test_the_census_reads_the_same_files_from_any_checkout(tmp_path):
+    """The file set belongs to the tree, not to where it is checked out.
+
+    The same checkout is reached a second time through a link whose own path
+    passes through every ``SKIP`` entry. Both routes must find the same files,
+    and some. From a worktree, the absolute-path rule found none, and every
+    check in this file but the floor above passed over an empty tree.
+    """
+    elsewhere = _elsewhere(tmp_path)
+    elsewhere.parent.mkdir(parents=True)
+    elsewhere.symlink_to(ROOT, target_is_directory=True)
+    for collect in (_sources, _candidates):
+        here = {path.relative_to(ROOT) for path in collect()}
+        there = {path.relative_to(elsewhere) for path in collect(elsewhere)}
+        assert here, f"{collect.__name__} found nothing under {ROOT}"
+        assert here == there, (collect.__name__, sorted(map(str, here ^ there))[:10])
 
 
 def test_every_named_citation_resolves_to_one_file():

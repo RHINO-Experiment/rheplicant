@@ -241,7 +241,9 @@ class TestTheLayerBoundaryIsMechanical:
         offenders = [
             str(path.relative_to(src))
             for path in src.rglob("*.py")
-            if "config" not in path.parts
+            # Below src only: an install under any directory named `config`
+            # would otherwise exempt every file and this could not fail.
+            if "config" not in path.relative_to(src).parts
             and path.relative_to(src) not in allowed_clients
             and (
                 "from rheplicant.config" in path.read_text()
