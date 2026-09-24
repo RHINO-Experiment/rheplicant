@@ -296,6 +296,18 @@ Any install that resolves this package's dependencies needs
 the build, so an install checked against them is reproducible even though the
 wheel is byte-stale against HEAD.
 
+**From a worktree, `../bayesmith` is not the sibling.** The relative paths
+above assume the main checkout; from `.claude/worktrees/<name>` they name
+`.claude/worktrees/bayesmith`, which does not exist. Run those commands from
+the main checkout or spell the path out. The tests do not use the relative
+path: `tests/config/wheel_support.py` looks beside the main checkout, which it
+finds with `git rev-parse --git-common-dir`, and `RHEPLICANT_BAYESMITH_CHECKOUT`
+names any other location. Until 2026-09-24 the lookup was
+`PROJECT_ROOT.parent`, and from a worktree the five fresh-venv tests in
+`tests/config/test_config_installed_wheel.py` and four in
+`tests/test_bayesmith_floor.py` skipped while the release was on disk, the
+first five saying this machine did not have it.
+
 **bayesmith has settled at 0.10 and is not moving to 0.11 during this work**
 (confirmed by that repository's own session, 2026-09-21). Two things follow
 and both were measured rather than assumed. The wheel on disk is still the one

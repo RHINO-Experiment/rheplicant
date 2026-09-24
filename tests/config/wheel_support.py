@@ -21,21 +21,103 @@ from _rheplicant_bootstrap import gui_child
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 UV = "uv"
 
-#: The sibling checkout whose local release the core dependency on bayesmith
-#: resolves from, because the range `pyproject.toml` declares is not on PyPI
-#: (0.10.0 is a local release; see CLAUDE.md's complete-environment section).
-#: The manifest sits one level above the artefacts, as it did for 0.9.0, so
-#: these two constants are deliberately not one path joined twice.
-#: The fresh-venv installs below hand the resolver a `--find-links` to the
-#: release directory after checking every artefact against the release
-#: manifest, so they install the same hash-checked wheel the checkout's own
-#: venv holds, not a build of whatever the sibling working tree contains. With
-#: the release absent they SKIP, loudly -- the same complete-environment
-#: contract CLAUDE.md states for the package itself, and a skip here is a
-#: thinner environment, never a pass.
-BAYESMITH_CHECKOUT = PROJECT_ROOT.parent / "bayesmith"
-BAYESMITH_RELEASE = BAYESMITH_CHECKOUT / "runs" / "t004" / "dist"
-BAYESMITH_MANIFEST = BAYESMITH_CHECKOUT / "runs" / "t004" / "release-manifest.json"
+#: Names the bayesmith checkout directly, for a machine where it is not a
+#: sibling of rheplicant's main checkout. Unset or empty, it is found from git.
+BAYESMITH_VARIABLE = "RHEPLICANT_BAYESMITH_CHECKOUT"
+
+#: Variables that point git at a repository other than the one its working
+#: directory is in. A hook or a mutation script can leave one set, and the
+#: lookup below has to answer for the project root it was given.
+_GIT_REDIRECTS = frozenset({"GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR"})
+
+
+@dataclass(frozen=True)
+class BayesmithCheckout:
+    """The sibling checkout whose local release bayesmith resolves from.
+
+    The range `pyproject.toml` declares is not on PyPI (0.10.0 is a local
+    release; see CLAUDE.md's complete-environment section). The fresh-venv
+    installs below hand the resolver a `--find-links` to the release directory
+    after checking every artefact against the release manifest, so they install
+    the same hash-checked wheel the checkout's own venv holds, not a build of
+    whatever the sibling working tree contains. With the manifest absent they
+    SKIP, loudly: a skip here is a thinner environment, never a pass.
+
+    `basis` says how `path` was chosen, so a skip can say where it looked.
+    """
+
+    path: Path
+    basis: str
+
+    @property
+    def release(self) -> Path:
+        return self.path / "runs" / "t004" / "dist"
+
+    @property
+    def manifest(self) -> Path:
+        # One level above the artefacts, as it was for 0.9.0, so not
+        # `release` joined twice.
+        return self.path / "runs" / "t004" / "release-manifest.json"
+
+
+def _main_checkout(project_root: Path, environ: Mapping[str, str]) -> Path:
+    """The root of the main working tree that `project_root` belongs to.
+
+    A linked worktree, which every `.claude/worktrees/<name>` is, has its own
+    root and shares the main checkout's `.git`; `--git-common-dir` names that
+    directory, and its parent is the main root. Measured 2026-09-23: taking
+    `project_root.parent` instead put bayesmith under `.claude/worktrees/`,
+    and every fresh-venv install skipped with a message saying this machine
+    had no release while the release was on disk.
+
+    Where there is no main working tree to find, `project_root` is the answer:
+    no git, a directory that is not the top of its repository (an unpacked
+    sdist inside some other checkout), a bare repository or a submodule. In
+    the last two the common directory is not named `.git`.
+    """
+    env = {key: value for key, value in environ.items() if key not in _GIT_REDIRECTS}
+    try:
+        completed = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel", "--git-common-dir"],
+            cwd=project_root,
+            env=env,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    except OSError:
+        return project_root
+    lines = completed.stdout.splitlines()
+    if completed.returncode != 0 or len(lines) != 2:
+        return project_root
+    # The common directory is relative from the main checkout and absolute
+    # from a worktree; joining onto the root reads both.
+    top, common = (Path(project_root, line).resolve() for line in lines)
+    if top != project_root.resolve() or common.name != ".git":
+        return project_root
+    return common.parent
+
+
+def locate_bayesmith(project_root: Path, environ: Mapping[str, str]) -> BayesmithCheckout:
+    """Where the bayesmith checkout is expected, and why there.
+
+    `RHEPLICANT_BAYESMITH_CHECKOUT` wins when set. Otherwise bayesmith is the
+    sibling of rheplicant's MAIN checkout, which is one directory whether the
+    suite runs from that checkout or from any worktree of it.
+    """
+    named = environ.get(BAYESMITH_VARIABLE, "")
+    if named:
+        return BayesmithCheckout(
+            Path(named).expanduser().resolve(), f"named by ${BAYESMITH_VARIABLE}"
+        )
+    main = _main_checkout(project_root, environ)
+    return BayesmithCheckout(
+        main.parent / "bayesmith", f"the sibling of rheplicant's main checkout, {main}"
+    )
+
+
+BAYESMITH = locate_bayesmith(PROJECT_ROOT, os.environ)
+BAYESMITH_CHECKOUT = BAYESMITH.path
 
 
 CommandArgument = str | os.PathLike[str]
@@ -132,36 +214,38 @@ class InstallFactory(Protocol):
     ) -> Install: ...
 
 
-def _sibling_wheels(tmp_path: Path) -> Path:
+def verified_release(checkout: BayesmithCheckout) -> Path:
     """The bayesmith release directory, after checking it against its manifest.
 
     Every artefact the manifest names must be present with its recorded
     sha256; a directory that disagrees fails rather than skips, because it
     would install a bayesmith other than the one this checkout is tested
-    against. `tmp_path` is unused and kept for the factory's signature.
+    against. The skip names the manifest, because that is the file whose
+    absence it reports.
     """
-    del tmp_path
-    if not BAYESMITH_MANIFEST.exists():
+    if not checkout.manifest.exists():
         pytest.skip(
             "the fresh-venv installs need a bayesmith wheel in rheplicant's "
-            "declared range, and PyPI does not carry one; they install the "
-            f"local release under {BAYESMITH_RELEASE}, which this machine does "
-            "not have. This is a thinner environment, not a pass -- see "
-            "CLAUDE.md's complete-environment section."
+            "declared range, and PyPI does not carry one. They install the "
+            f"local release whose manifest is {checkout.manifest}, and that "
+            f"file is absent. The checkout {checkout.path} is {checkout.basis}; "
+            f"set ${BAYESMITH_VARIABLE} to name another. This is a thinner "
+            "environment, not a pass -- see CLAUDE.md's complete-environment "
+            "section."
         )
-    manifest = json.loads(BAYESMITH_MANIFEST.read_text())
+    manifest = json.loads(checkout.manifest.read_text())
     for name, record in manifest["artifacts"].items():
-        digest = hashlib.sha256((BAYESMITH_RELEASE / name).read_bytes()).hexdigest()
+        digest = hashlib.sha256((checkout.release / name).read_bytes()).hexdigest()
         assert digest == record["sha256"], (
-            f"{name} in {BAYESMITH_RELEASE} does not match the release manifest "
+            f"{name} in {checkout.release} does not match the release manifest "
             f"({digest} != {record['sha256']})"
         )
-    return BAYESMITH_RELEASE
+    return checkout.release
 
 
 def fresh_install_factory(tmp_path: Path) -> InstallFactory:
     counter = 0
-    wheels = _sibling_wheels(tmp_path)
+    wheels = verified_release(BAYESMITH)
 
     def install(
         source: Path,

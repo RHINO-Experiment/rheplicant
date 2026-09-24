@@ -8,6 +8,8 @@ import re
 import subprocess
 import urllib.request
 import zipfile
+from collections.abc import Callable
+from pathlib import Path
 
 import pytest
 import yaml
@@ -16,11 +18,16 @@ from rheplicant.config.schemas import SCHEMA_NAMES
 from tests.config.test_config_cli import document
 from tests.config.test_config_document import synthetic_document
 from tests.config.wheel_support import (
+    BAYESMITH_VARIABLE,
     PROJECT_ROOT,
+    BayesmithCheckout,
     Install,
+    _run,
     build_distributions,
     fresh_install_factory,
+    locate_bayesmith,
     running_gui,
+    verified_release,
 )
 
 PRESET = PROJECT_ROOT / "src/rheplicant/config/presets/rhino_v1.yaml"
@@ -248,3 +255,189 @@ def test_wheel_and_editable_preset_discovery_are_byte_identical(fresh_install, b
         editable_row["preset"],
         editable_row["sha256"],
     )
+
+
+# --- where bayesmith is looked for -------------------------------------------
+#
+# The fresh-venv tests above skip when the release is absent, and a skip is a
+# thinner environment, never a pass. So the lookup that decides "absent" has to
+# be right from every place the suite runs, and a worktree is one of them:
+# until 2026-09-24 it looked beside the worktree, not beside the main checkout,
+# and all five skipped while the release was on disk.
+
+_USER = ("-c", "user.name=rheplicant", "-c", "user.email=tests@example.invalid")
+
+
+def _git_environment(root: Path) -> dict[str, str]:
+    """The inherited environment with no user, system or redirecting git state.
+
+    No global config (HOME is the temporary root), so signing or hooks the
+    developer has configured cannot fail a commit here; no GIT_* variables, so
+    nothing points git at the repository the suite itself runs in; no bayesmith
+    override, so the lookup takes the git path. The ceiling stops git at the
+    temporary root, so a layout meant to have no repository has none.
+    """
+    environ = {
+        key: value
+        for key, value in os.environ.items()
+        if key != BAYESMITH_VARIABLE and not key.startswith("GIT_")
+    }
+    return {
+        **environ,
+        "HOME": os.fspath(root),
+        "XDG_CONFIG_HOME": os.fspath(root / ".config"),
+        "GIT_CONFIG_NOSYSTEM": "1",
+        "GIT_CEILING_DIRECTORIES": os.fspath(root),
+    }
+
+
+def _repository(path: Path, env: dict[str, str]) -> Path:
+    path.mkdir(parents=True)
+    _run(["git", "init", "-q"], cwd=path, env=env)
+    _run(["git", *_USER, "commit", "-q", "--allow-empty", "-m", "root"], cwd=path, env=env)
+    return path
+
+
+def _main_with_worktree(root: Path, env: dict[str, str]) -> tuple[Path, Path]:
+    """`<root>/projects/rheplicant` and a worktree of it where the app makes them."""
+    main = _repository(root / "projects" / "rheplicant", env)
+    worktree = main / ".claude" / "worktrees" / "w"
+    _run(["git", "worktree", "add", "-q", "--detach", os.fspath(worktree)], cwd=main, env=env)
+    return main, worktree
+
+
+def test_bayesmith_is_one_directory_from_a_worktree_and_from_the_main_checkout(tmp_path):
+    root = tmp_path.resolve()
+    env = _git_environment(root)
+    main, worktree = _main_with_worktree(root, env)
+    # Pinned to the layout, not only to each other: two lookups that were
+    # wrong the same way would agree.
+    expected = root / "projects" / "bayesmith"
+    assert locate_bayesmith(main, env).path == expected
+    assert locate_bayesmith(worktree, env).path == expected
+
+
+def test_this_checkout_looks_where_its_main_checkout_would():
+    """The same property on the real layout, against an independent oracle.
+
+    `git worktree list` names the main working tree first; the lookup reaches
+    it through `--git-common-dir` instead. From the main checkout this is
+    trivially true, and from a worktree it is the case that used to skip.
+    """
+    listed = subprocess.run(
+        ["git", "worktree", "list", "--porcelain"],
+        cwd=PROJECT_ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    lines = listed.stdout.splitlines()
+    if listed.returncode != 0 or not lines or "bare" in lines[1:2]:
+        pytest.skip(
+            f"{PROJECT_ROOT} is not in a repository with a main working tree, "
+            "so there is no main checkout to compare this one with"
+        )
+    main = Path(lines[0].removeprefix("worktree ")).resolve()
+    environ = {key: value for key, value in os.environ.items() if key != BAYESMITH_VARIABLE}
+    expected = main.parent / "bayesmith"
+    assert locate_bayesmith(PROJECT_ROOT, environ).path == expected
+    assert locate_bayesmith(main, environ).path == expected
+
+
+def test_the_variable_names_the_checkout_over_git(tmp_path):
+    root = tmp_path.resolve()
+    env = _git_environment(root)
+    _, worktree = _main_with_worktree(root, env)
+    named = locate_bayesmith(worktree, {**env, BAYESMITH_VARIABLE: os.fspath(root / "elsewhere")})
+    assert named.path == root / "elsewhere"
+    assert BAYESMITH_VARIABLE in named.basis
+    # Empty is unset, so an exported but blank variable does not name the cwd.
+    blank = locate_bayesmith(worktree, {**env, BAYESMITH_VARIABLE: ""})
+    assert blank.path == root / "projects" / "bayesmith"
+
+
+def test_a_git_dir_left_in_the_environment_does_not_move_the_lookup(tmp_path):
+    # A hook or a mutation script can leave GIT_DIR set. Obeyed, it makes git
+    # answer for that repository with the project root as its work tree, and
+    # bayesmith would be looked for beside the other repository.
+    root = tmp_path.resolve()
+    env = _git_environment(root)
+    _, worktree = _main_with_worktree(root, env)
+    other = _repository(root / "elsewhere" / "other", env)
+    redirected = {**env, "GIT_DIR": os.fspath(other / ".git")}
+    assert locate_bayesmith(worktree, redirected).path == root / "projects" / "bayesmith"
+
+
+def _no_git_on_path(root: Path, env: dict[str, str]) -> tuple[Path, dict[str, str]]:
+    _, worktree = _main_with_worktree(root, env)
+    return worktree, {**env, "PATH": os.fspath(root / "no-bin")}
+
+
+def _not_a_repository(root: Path, env: dict[str, str]) -> tuple[Path, dict[str, str]]:
+    project = root / "projects" / "rheplicant"
+    project.mkdir(parents=True)
+    return project, env
+
+
+def _inside_another_repository(root: Path, env: dict[str, str]) -> tuple[Path, dict[str, str]]:
+    # An unpacked sdist somewhere under someone else's checkout: git answers
+    # for THAT repository, whose root is not this project's.
+    outer = _repository(root / "outer", env)
+    project = outer / "projects" / "rheplicant"
+    project.mkdir(parents=True)
+    return project, env
+
+
+def _worktree_of_a_bare_repository(root: Path, env: dict[str, str]) -> tuple[Path, dict[str, str]]:
+    seed = _repository(root / "seed", env)
+    bare = root / "projects" / "rheplicant.git"
+    _run(["git", "clone", "-q", "--bare", os.fspath(seed), os.fspath(bare)], cwd=root, env=env)
+    project = root / "projects" / "rheplicant"
+    _run(["git", "worktree", "add", "-q", "--detach", os.fspath(project)], cwd=bare, env=env)
+    return project, env
+
+
+_NO_MAIN_CHECKOUT: dict[str, Callable[[Path, dict[str, str]], tuple[Path, dict[str, str]]]] = {
+    "no-git-on-path": _no_git_on_path,
+    "not-a-repository": _not_a_repository,
+    "inside-another-repository": _inside_another_repository,
+    "worktree-of-a-bare-repository": _worktree_of_a_bare_repository,
+}
+
+
+@pytest.mark.parametrize("layout", sorted(_NO_MAIN_CHECKOUT))
+def test_without_a_main_checkout_bayesmith_is_the_project_roots_sibling(tmp_path, layout):
+    """Where git cannot name a main working tree, the old answer stands.
+
+    Each layout with git in it is built so that trusting git's output there
+    would land somewhere other than `project.parent`: the worktree's main
+    checkout, the outer repository's root, or the parent of `rheplicant.git`.
+    """
+    root = tmp_path.resolve()
+    project, env = _NO_MAIN_CHECKOUT[layout](root, _git_environment(root))
+    assert locate_bayesmith(project, env).path == project.parent / "bayesmith"
+
+
+def test_the_skip_names_the_manifest_it_looked_for(tmp_path):
+    checkout = BayesmithCheckout(tmp_path / "bayesmith", "named by this test")
+    with pytest.raises(pytest.skip.Exception) as skipped:
+        verified_release(checkout)
+    message = str(skipped.value)
+    assert os.fspath(checkout.manifest) in message
+    assert "named by this test" in message
+    assert BAYESMITH_VARIABLE in message
+    assert "this machine does not have" not in message
+
+
+def test_a_release_that_disagrees_with_its_manifest_fails_rather_than_skips(tmp_path):
+    checkout = BayesmithCheckout(tmp_path / "bayesmith", "named by this test")
+    checkout.release.mkdir(parents=True)
+    wheel = checkout.release / "bayesmith-0.10.0-py3-none-any.whl"
+    wheel.write_bytes(b"the recorded build")
+    record = {"sha256": hashlib.sha256(b"the recorded build").hexdigest()}
+    checkout.manifest.write_text(json.dumps({"artifacts": {wheel.name: record}}))
+    assert verified_release(checkout) == checkout.release
+
+    wheel.write_bytes(b"some other build")
+    with pytest.raises(AssertionError, match="does not match the release manifest"):
+        verified_release(checkout)
