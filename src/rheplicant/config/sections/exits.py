@@ -241,7 +241,16 @@ def _run_optimize(run: ParsedRun, built: Any, previous: Any = None) -> Any:
 
 _BLOCK_KEYS = frozenset({"names", "steps", "engine", "learning_rate"})
 _ESTIMATE_KEYS = frozenset(
-    {"blocks", "max_iter", "tol", "min_sweeps", "check_identifiability", "solve_tol", "solve_guard"}
+    {
+        "blocks",
+        "max_iter",
+        "tol",
+        "min_sweeps",
+        "check_identifiability",
+        "check_linearity",
+        "solve_tol",
+        "solve_guard",
+    }
 )
 _SAMPLE_KEYS = frozenset(
     {
@@ -252,6 +261,7 @@ _SAMPLE_KEYS = frozenset(
         "rhat_max",
         "warm_start",
         "check_identifiability",
+        "check_linearity",
         "solve_tol",
         "solve_guard",
     }
@@ -265,30 +275,46 @@ _WARM_KEYS = frozenset(
         "min_sweeps",
         "move",
         "check_identifiability",
+        "check_linearity",
         "solve_tol",
         "solve_guard",
     }
 )
+#: ``check_linearity`` is the plan's own check of each closed-form block's
+#: claim, run before the first sweep.  ``inference.checks.linearity`` gates
+#: the document's load and does not reach it, so a document that digitises
+#: declines both: the conjugate kinds' ``check: false`` is the same second
+#: knob one exit along.
 _ESTIMATE_PASSTHROUGH = (
     "max_iter",
     "tol",
     "min_sweeps",
     "check_identifiability",
+    "check_linearity",
     "solve_tol",
     "solve_guard",
 )
-_SAMPLE_PASSTHROUGH = ("warmup", "rhat_max", "check_identifiability", "solve_tol", "solve_guard")
+_SAMPLE_PASSTHROUGH = (
+    "warmup",
+    "rhat_max",
+    "check_identifiability",
+    "check_linearity",
+    "solve_tol",
+    "solve_guard",
+)
 #: The parser-injected defaults behind the passthrough tuples, measured
 #: against ``SamplingPlan``'s own signatures (``DEFAULT_MAX_ITER``,
-#: ``DEFAULT_CHI2_TOL``, ``MIN_SWEEPS``, ``CHECK_ONCE``, ``solve_tol=1e-6``,
-#: ``solve_guard=None``; ``warmup=None``, ``DEFAULT_RHAT_MAX``) -- an
-#: explicit keyword is byte-identical to today's omission.  A warm start
-#: gets none: its passthrough has always been declared-only.
+#: ``DEFAULT_CHI2_TOL``, ``MIN_SWEEPS``, ``CHECK_ONCE``,
+#: ``check_linearity=True``, ``solve_tol=1e-6``, ``solve_guard=None``;
+#: ``warmup=None``, ``DEFAULT_RHAT_MAX``) -- an explicit keyword is
+#: byte-identical to today's omission.  A warm start gets none: its
+#: passthrough has always been declared-only.
 _ESTIMATE_DEFAULTS = {
     "max_iter": 100,
     "tol": 1e-8,
     "min_sweeps": 3,
     "check_identifiability": "once",
+    "check_linearity": True,
     "solve_tol": 1e-6,
     "solve_guard": None,
 }
@@ -296,6 +322,7 @@ _SAMPLE_DEFAULTS = {
     "warmup": None,
     "rhat_max": 1.05,
     "check_identifiability": "once",
+    "check_linearity": True,
     "solve_tol": 1e-6,
     "solve_guard": None,
 }
@@ -310,6 +337,8 @@ def _plan_default(built, key, value):
         return built.context.use_default("runs[].options.min_sweeps", value)
     if key == "check_identifiability":
         return built.context.use_default("runs[].options.check_identifiability", value)
+    if key == "check_linearity":
+        return built.context.use_default("runs[].options.check_linearity", value)
     if key == "solve_tol":
         return built.context.use_default("runs[].options.solve_tol", value)
     if key == "solve_guard":

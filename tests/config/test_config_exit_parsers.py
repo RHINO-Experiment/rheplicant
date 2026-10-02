@@ -875,6 +875,7 @@ class TestBaseKindsNormalizeTheirDefaults:
         assert _plain(parsed.parsed.resolved) == {
             "blocks": [{"names": ["g"]}],
             "check_identifiability": False,
+            "check_linearity": True,
             "max_iter": 100,
             "tol": 1e-8,
             "min_sweeps": 3,
@@ -891,6 +892,7 @@ class TestBaseKindsNormalizeTheirDefaults:
             "seed": 11,
             "n_sweeps": 6,
             "check_identifiability": False,
+            "check_linearity": True,
             "warmup": None,
             "rhat_max": 1.05,
             "solve_tol": 1e-6,

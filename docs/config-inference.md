@@ -520,6 +520,15 @@ so a float32 run still gets a supported verdict;
 dtype to float32 (an `astype` inside an operator) is refused by that check
 with "even with x64 enabled"; the remedy is in the model, not the config.
 
+Both kinds also take `check_linearity:` (default `true`). It is the plan's
+check of each closed-form block's `linear: true` claim, run once before the
+first sweep. `inference.checks.linearity` gates the document's load and does
+not reach it, so a document that lights `model.adc` declines both: the gate
+with its `reason:`, and the run with `check_linearity: false`. `warm_start:`
+takes the key for its own estimate.
+[The plans page](inference-plans.md#the-linearity-check-and-a-stage-that-saturates)
+says what the check probes and what skipping it leaves to the document.
+
 ## A conjugate document
 
 The same model as above, asked three questions: whether this gain can be

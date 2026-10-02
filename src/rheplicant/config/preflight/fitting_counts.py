@@ -92,13 +92,15 @@ _A25_CHECK_MODES: tuple[Any, ...] = (False, _T9_CHECK_ONCE, _T9_CHECK_EACH_SWEEP
 
 #: ``(key, kind, minimum)`` per ``runs[].kind``, for every numeric knob that
 #: reaches the package.  ``sorted(set(_ESTIMATE_PASSTHROUGH) |
-#: set(_SAMPLE_PASSTHROUGH))`` (``exits.py::_parse_optimize``) is eight names --
-#: ``check_identifiability``, ``max_iter``, ``min_sweeps``, ``rhat_max``,
-#: ``solve_guard``, ``solve_tol``, ``tol``, ``warmup`` -- of which A25's
-#: schema row names two, and ``n_sweeps`` is the ninth: it reaches ``_number``
-#: at ``exits.py::_SAMPLE_DEFAULTS`` with NO ``minimum=``, so today ``n_sweeps: 0`` is the
-#: package's sentence at P3.  ``check_identifiability`` is the one of the
-#: eight that is not numeric, and :data:`_A25_CHECK_MODES` has it.
+#: set(_SAMPLE_PASSTHROUGH))`` (``exits.py::_parse_optimize``) is nine names --
+#: ``check_identifiability``, ``check_linearity``, ``max_iter``,
+#: ``min_sweeps``, ``rhat_max``, ``solve_guard``, ``solve_tol``, ``tol``,
+#: ``warmup`` -- of which A25's schema row names two, and ``n_sweeps`` is the
+#: tenth: it reaches ``_number`` at ``exits.py::_SAMPLE_DEFAULTS`` with NO
+#: ``minimum=``, so today ``n_sweeps: 0`` is the package's sentence at P3.
+#: Two of the nine are not numeric: :data:`_A25_CHECK_MODES` has
+#: ``check_identifiability``, and :func:`_counts` holds ``check_linearity``
+#: to a bool.
 #:
 #: The floors are the package's own: ``plan_results.py::Estimate`` (``max_iter >= 1``),
 # : ``plan_results.py::Estimate.names`` (``1 <= min_sweeps <= max_iter``),
@@ -369,8 +371,9 @@ def _a25_sites(run: Mapping[str, Any]) -> tuple[tuple[str, str, Mapping], ...]:
     **Two, not one.**  ``exits.py::_ESTIMATE_DEFAULTS`` calls ``SamplingPlan(space,
     *warm_blocks).estimate(..., **_passthrough(warm, _ESTIMATE_PASSTHROUGH))``
     -- so ``max_iter``, ``tol``, ``min_sweeps``, ``check_identifiability``,
-    ``solve_tol`` and ``solve_guard`` are read off the WARM mapping and meet
-    the same guards in the same method, at the same P3 behind the same beam.
+    ``check_linearity``, ``solve_tol`` and ``solve_guard`` are read off the
+    WARM mapping and meet the same guards in the same method, at the same P3
+    behind the same beam.
     A25 written on ``runs[]`` alone would guard one route and leave its
     identical sibling open, which is the shape Task 7 found on ``blocks:``.
 
@@ -452,11 +455,12 @@ def _counts(document: Mapping[str, Any]) -> Iterable[Finding]:
 
     A25's schema row names four clauses and this plan's §1 adds "the six
     passthrough keys A25 does not name".  Counted from ``exits.py::_parse_optimize``:
-    ``sorted(set(_ESTIMATE_PASSTHROUGH) | set(_SAMPLE_PASSTHROUGH))`` is
-    eight names, A25's row names ``max_iter`` and ``min_sweeps``, so the six
-    are ``check_identifiability``, ``rhat_max``, ``solve_guard``,
-    ``solve_tol``, ``tol`` and ``warmup``.  ``n_sweeps`` is the ninth and
+    ``sorted(set(_ESTIMATE_PASSTHROUGH) | set(_SAMPLE_PASSTHROUGH))`` was
+    eight names when that was written, A25's row names ``max_iter`` and
+    ``min_sweeps``, so the six are ``check_identifiability``, ``rhat_max``,
+    ``solve_guard``, ``solve_tol``, ``tol`` and ``warmup``.  ``n_sweeps``
     reaches ``_number`` at ``exits.py::_SAMPLE_DEFAULTS`` with no ``minimum=``.
+    ``check_linearity`` joined both tuples at 0.9.1 and is a seventh.
 
     **A run declaring ``expect: refuse`` is NOT left alone**, and that is the
     one place this check departs from :func:`_blocks` and
@@ -539,6 +543,23 @@ def _counts(document: Mapping[str, Any]) -> Iterable[Finding]:
                         "dense Jacobian and an SVD, so which of the three a "
                         "run wants is a decision the document makes "
                         "(check A25).",
+                    )
+
+            # The second non-numeric passthrough, at the same two sites.
+            # ``isinstance(..., bool)`` IS the package's two identities
+            # (``plan_blocks.py::prepare_conditioning``): ``bool`` cannot be
+            # subclassed, so ``0``, ``1`` and ``None`` fail both spellings.
+            if rows_kind.startswith("plan.") and "check_linearity" in spec:
+                claim = spec["check_linearity"]
+                if not isinstance(claim, bool):
+                    yield refuse(
+                        "A25",
+                        site,
+                        f"{named}: {prefix}check_linearity: is true or false; "
+                        f"got {claim!r}. false skips the plan's check of each "
+                        "closed-form block's linear claim before its first "
+                        "sweep; inference.checks.linearity gates the load and "
+                        "does not reach that check (check A25).",
                     )
 
             if rows_kind == "plan.estimate":

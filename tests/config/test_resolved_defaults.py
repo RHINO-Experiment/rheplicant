@@ -175,6 +175,7 @@ EXPECTED_DEFAULT_PATHS = {
         "'runs[].options.tol'",
         "'runs[].options.min_sweeps'",
         "'runs[].options.check_identifiability'",
+        "'runs[].options.check_linearity'",
         "'runs[].options.solve_tol'",
         "'runs[].options.solve_guard'",
         "'runs[].options.warmup'",

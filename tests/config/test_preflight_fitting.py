@@ -4222,6 +4222,49 @@ class TestCounts:
         assert "check_identifiability" not in _NUTS_KEYS
         assert _counted(_chain(check_identifiability="banana")) == []
 
+    def test_check_linearity_is_true_or_false_and_nothing_else(self):
+        # `plan_blocks.prepare_conditioning` reads `linearity is not True and
+        # linearity is not False`: an IDENTITY on both sides, so `0` and `1`
+        # are refused there exactly as "banana" is, and `null` with them.
+        # Kills `not in (True, False)`, which `0 == False` and `1 == True`
+        # walk through.  BOTH plan kinds: every other assertion on this key
+        # drives an estimate.
+        for good in (True, False):
+            assert _counted(_estimate(check_linearity=good)) == []
+            assert _counted(_sample(n_sweeps=12, check_linearity=good)) == []
+        for bad in ("banana", "false", 0, 1, 0.0, None, ["false"], {"mode": "skip"}):
+            found = _counted(_estimate(check_linearity=bad))
+            assert [f.check for f in found] == ["A25"], bad
+            assert f"got {bad!r}" in found[0].message
+        on_sample = _counted(_sample(n_sweeps=12, check_linearity="banana"))
+        assert [f.check for f in on_sample] == ["A25"]
+
+    def test_the_package_guard_the_bool_mirrors_is_still_that_guard(self):
+        # The same reading `test_the_package_guard_this_enum_mirrors_is_still
+        # _that_guard` takes of the identifiability mode: a third accepted
+        # value in the package turns this red instead of leaving this pass
+        # refusing a document the package runs.
+        import inspect
+
+        from rheplicant.inference.plan_blocks import prepare_conditioning
+
+        source = inspect.getsource(prepare_conditioning)
+        lines = [
+            line.strip()
+            for line in source.splitlines()
+            if "linearity is not" in line and not line.lstrip().startswith("#")
+        ]
+        assert lines == ["if linearity is not True and linearity is not False:"], lines
+
+    def test_nuts_is_not_asked_about_check_linearity(self):
+        # As for `check_identifiability`: `_NUTS_KEYS` does not carry the
+        # key, so `A1.runs` refuses it by name and a second answer here would
+        # be two refusals for one typo.
+        from rheplicant.config.sections.nuts import _NUTS_KEYS
+
+        assert "check_linearity" not in _NUTS_KEYS
+        assert _counted(_chain(check_linearity="banana")) == []
+
     def test_rhat_max_zero_is_LEGAL_and_that_is_recorded_not_forgotten(self):
         # The one residue this task names in its own docstring, as an
         # assertion so that closing it later is a deliberate change to a red
@@ -4377,17 +4420,18 @@ class TestTheWarmStartIsTheSameEstimateOneCallAlong:
 
     ``_passthrough(warm, _ESTIMATE_PASSTHROUGH)`` (``exit_support.py::_legacy_freeze_parse``)
     reads ``max_iter``, ``tol``, ``min_sweeps``, ``check_identifiability``,
-    ``solve_tol`` and ``solve_guard`` off the WARM mapping and hands them to
+    ``check_linearity``, ``solve_tol`` and ``solve_guard`` off the WARM
+    mapping and hands them to
     ``SamplingPlan.estimate`` -- the same method, the same guards, at the
     same P3 behind the same beam.  A25 written on ``runs[]`` alone guards one
     route and leaves its identical sibling open, which is the shape Task 7
     found on ``blocks:`` and the shape this class exists to close.
     """
 
-    def test_the_passthrough_really_is_the_same_six_keys(self):
+    def test_the_passthrough_really_is_the_same_seven_keys(self):
         # ANTI-VACUITY.  The class above rests on the warm mapping reaching
         # `estimate()` with the estimate keys; this reads the tuple rather
-        # than trusting the docstring, so a seventh key added there shows up
+        # than trusting the docstring, so an eighth key added there shows up
         # as a red test rather than as a knob nobody checks.
         from rheplicant.config.sections.exits import (
             _ESTIMATE_PASSTHROUGH,
@@ -4400,6 +4444,7 @@ class TestTheWarmStartIsTheSameEstimateOneCallAlong:
             "tol",
             "min_sweeps",
             "check_identifiability",
+            "check_linearity",
             "solve_tol",
             "solve_guard",
         }
@@ -4430,6 +4475,10 @@ class TestTheWarmStartIsTheSameEstimateOneCallAlong:
         mode = _counted(_warmed(check_identifiability="banana"))
         assert [f.check for f in mode] == ["A25"]
         assert "warm_start.check_identifiability:" in mode[0].message
+        claim = _counted(_warmed(check_linearity="banana"))
+        assert [f.check for f in claim] == ["A25"]
+        assert "warm_start.check_linearity:" in claim[0].message
+        assert claim[0].where == "runs[0].warm_start"
 
     def test_the_warm_start_gets_no_A24_of_its_own(self):
         # `warm_start` is `.estimate()`d (`exits.py::_ESTIMATE_DEFAULTS`), which keeps every
@@ -4601,6 +4650,26 @@ _COUNT_VERBATIM = [
         "the cost is a dense Jacobian and an SVD, so which of the three a run "
         "wants is a decision the document makes (check A25).",
     ),
+    (
+        "a25-check-linearity-is-a-bool",
+        _estimate(check_linearity="banana"),
+        "A25",
+        "runs[0]",
+        "runs['fit']: check_linearity: is true or false; got 'banana'. false "
+        "skips the plan's check of each closed-form block's linear claim "
+        "before its first sweep; inference.checks.linearity gates the load "
+        "and does not reach that check (check A25).",
+    ),
+    (
+        "a25-check-linearity-is-a-bool-on-the-warm-start",
+        _warmed(check_linearity=0),
+        "A25",
+        "runs[0].warm_start",
+        "runs['fit']: warm_start.check_linearity: is true or false; got 0. "
+        "false skips the plan's check of each closed-form block's linear "
+        "claim before its first sweep; inference.checks.linearity gates the "
+        "load and does not reach that check (check A25).",
+    ),
 ]
 
 
@@ -4623,11 +4692,12 @@ class TestTheCountRefusalsAreThePRODUCT:
 
         Both ids, both sites, and the default/explicit warmup pair -- which
         is the one clause of A24 that varies with the document. Ten rows
-        since T-002 added A25's cap-below-the-earliest-verdict clause alone.
+        since T-002 added A25's cap-below-the-earliest-verdict clause alone,
+        and twelve with ``check_linearity`` at its two sites.
         """
         assert {row[2] for row in _COUNT_VERBATIM} == {"A24", "A25"}
         assert {row[3] for row in _COUNT_VERBATIM} == {"runs[0]", "runs[0].warm_start"}
-        assert len(_COUNT_VERBATIM) == 10
+        assert len(_COUNT_VERBATIM) == 12
 
     def test_every_count_finding_carries_its_own_tag(self):
         # Task 3 shipped the equivalent over its five checks; this is Task
@@ -4642,6 +4712,7 @@ class TestTheCountRefusalsAreThePRODUCT:
             _estimate(max_iter=1),
             _sample(n_sweeps=float("inf")),
             _estimate(check_identifiability="banana"),
+            _estimate(check_linearity="banana"),
             _warmed(solve_tol=-1.0),
             _chain(num_samples=0),
             preflight_document(
@@ -4650,7 +4721,7 @@ class TestTheCountRefusalsAreThePRODUCT:
             ),
         ]
         found = [one for document in documents for one in _counted(document)]
-        assert len(found) == 9
+        assert len(found) == 10
         for one in found:
             assert one.message.endswith(f"(check {one.check})."), one.message
             assert one.severity == REFUSE

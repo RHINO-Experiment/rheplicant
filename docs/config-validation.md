@@ -175,6 +175,14 @@ The escape is `linearity`'s own `mode:`. Decline the claim in writing,
 `inference.checks.linearity: {mode: skip, reason: "..."}`, which is what the
 refusal's own message names.
 
+The gate decides whether the document loads. The six run kinds that build a
+closed-form block repeat the check when they start, and each takes a key of
+its own beside the gate: `conjugate.wiener`, `conjugate.gcr`,
+`conjugate.gls` and `condition` take `check: false`, and `plan.estimate` and
+`plan.sample` take `check_linearity: false`, which `warm_start:` also reads
+for its own estimate. With the gate declined and the run's key left at its
+default, the run is refused with `LinearityRefused` when it starts.
+
 **Why the defaults are what they are.** Measured on a two-latent document on
 a 16 × 8 grid with no beam: `load_document` cold is 0.715 s;
 `check_linearity` is 0.188 s cold and 0.007 s warm per linear latent;
