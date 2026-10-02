@@ -1,0 +1,13 @@
+# What this example needs beyond rheplicant installed with its `numpyro` extra.
+# From the repository root:
+#
+#   uv pip install --python .venv/bin/python -r examples/global21cm/requirements.txt
+#
+# global21cm-jax is the JAX port of the 21cmVAE emulator. It is not on PyPI, so
+# it installs from its repository. The commit is the one every kept product
+# under results/ was made at (README.md, "Running"); the emulator's weights
+# ship in the package and nothing downloads.
+global21cm-jax @ git+https://github.com/RHINO-Experiment/21cmVAE-jax@7a1b455d221fec7a54e8c9dc16175bed7292aeca
+# Demo B's GSM2008 template. The first use downloads gsm_components.h5, 82 MB,
+# into ~/.astropy/cache.
+pygdsm

@@ -485,19 +485,32 @@ example needs in addition:
 | dependency | used by | source |
 |---|---|---|
 | numpyro 0.21 | the documents' `kind: nuts` runs | the `dev` dependency group or the `numpyro` extra of `pyproject.toml` |
-| `global21cm_jax` (distribution `global21cm-jax` 0.1.0, from the 21cmVAE-jax repository) | the 21 cm curve, in every step | https://github.com/RHINO-Experiment/21cmVAE-jax, public (`main` at 7a1b455 on 2026-09-25, `git ls-remote`). The products were made at 7a1b455 in one run (2026-09-24); the package's source hash was the same at the start and the end of that run. 21cmVAE-jax's commit 5ceee47 regenerated the emulator's normalisation constants to match upstream 21cmVAE's constants bitwise, which moves the emulator output by at most 4.6e-5 mK (the commit message). The example's 259 tests pass against 7a1b455 (2026-09-24). Install editable from a clone: `uv pip install --python .venv/bin/python --no-deps -e <21cmVAE-jax checkout>`. The emulator weights ship in the package; nothing downloads |
-| `pygdsm` (1.7.1 here) | demo B's GSM2008 template: `prepare`, `ablation`, `sensitivity`, `rheplicant validate` and `rheplicant run` of `physical.yaml` and `physical_quick.yaml` (the hook `strategies.gaussian_sky`), `tests/test_document_likelihood.py` | `uv pip install --python .venv/bin/python pygdsm`. The first use downloads `gsm_components.h5` (81,777,450 bytes) from apps.datacentral.org.au into `~/.astropy/cache`, so the first `prepare main` needs network access |
+| `global21cm_jax` (distribution `global21cm-jax` 0.1.0, from the 21cmVAE-jax repository) | the 21 cm curve, in every step | https://github.com/RHINO-Experiment/21cmVAE-jax, public (`main` at 7a1b455 on 2026-09-25, `git ls-remote`). The products were made at 7a1b455 in one run (2026-09-24); the package's source hash was the same at the start and the end of that run. 21cmVAE-jax's commit 5ceee47 regenerated the emulator's normalisation constants to match upstream 21cmVAE's constants bitwise, which moves the emulator output by at most 4.6e-5 mK (the commit message). The example's 259 tests pass against 7a1b455 (2026-09-24). `requirements.txt` in this directory pins that commit: `uv pip install --python .venv/bin/python -r examples/global21cm/requirements.txt`. To work on the emulator, install a clone editable in its place: `uv pip install --python .venv/bin/python --no-deps -e <21cmVAE-jax checkout>`. The emulator weights ship in the package; nothing downloads |
+| `pygdsm` (1.7.1 here) | demo B's GSM2008 template: `prepare`, `ablation`, `sensitivity`, `rheplicant validate` and `rheplicant run` of `physical.yaml` and `physical_quick.yaml` (the hook `strategies.gaussian_sky`), `tests/test_document_likelihood.py` | the same `requirements.txt`, or `uv pip install --python .venv/bin/python pygdsm`. The first use downloads `gsm_components.h5` (81,777,450 bytes) from apps.datacentral.org.au into `~/.astropy/cache`, so the first `prepare main` needs network access |
 | matplotlib (3.11.2 here) | every figure: `analyse`, `plots`, `sensitivity`; `tests/test_analyse.py` and `tests/test_figures.py` import it | a requirement of `pygdsm` |
 | MERS | `simulate` (the truth's synchrotron maps); `tests/test_ports.py` | https://github.com/zzhang0123/MERS, public. Its `MERS/data/` must hold `haslam408_dsds_Remazeilles2014.fits` (public, from LAMBDA) and `cnn56arcmin_beta.npy` (not public) |
 | RHINO HornWet beams | `simulate stress` | RHINO horn simulations, not redistributable. One HEALPix file per 0.5 MHz, `HornWet55.0.fits` to `HornWet85.0.fits` (61 files); the stress band reads the 31 integer-MHz ones |
 
 Outside this machine, `simulate` cannot run: `cnn56arcmin_beta.npy` is not
-public and the HornWet files are not redistributable. `results/sim*/`, the
-run trees and `posteriors.npz` are not kept in git, so no later step of the
-pipeline can run either. A fresh checkout can read the kept
-`results/analysis*/` products and run the tests; the test table below gives
-the counts without `results/sim*/`, and `tests/test_ports.py` needs a MERS
+public and the HornWet files are not redistributable. The sixteen arrays the
+six documents read are kept in git (`.gitignore` names them, and `fom.json`
+records the sha256 of each), so a checkout can `rheplicant validate` and
+`rheplicant run` every document. Measured on 2026-10-02 in a fresh clone,
+with the emulator at the pinned commit: all six validate and run, and the
+draws of all twelve runs equal, bit for bit, those of the run trees made on
+2026-09-24, which the kept scores were computed from. The runs took 256, 83
+and 94 s for the quick documents and 877, 179 and 199 s for the full ones, in
+the order oracle, beamconv, physical. The other products of `simulate` and
+`prepare`, the run trees and `posteriors.npz` are not kept: `prepare`,
+`ablation`, `analyse`, `sensitivity` and `plots` each read one of them, so
+none of the five runs from a checkout. `tests/test_ports.py` needs a MERS
 checkout.
+
+Two of the kept arrays derive from the HornWet beams:
+`results/sim_stress/beam_alm_fit.npy` holds their spherical-harmonic
+coefficients to lmax 47 at the 31 stress channels, and
+`results/sim_stress/beam_svd_spectra.npy` eight frequency singular vectors.
+The HornWet files themselves are not in the repository.
 
 **Environment.**
 
@@ -555,8 +568,8 @@ a simulation file that `fom.json` hashed has changed, or when the saved
 particles do not reproduce `fom.json`'s trough-depth quantiles to 1e-12.
 
 `rheplicant validate examples/global21cm/<document>.yaml` resolves the
-documents' `file:` arguments, so it exits 2 until `simulate` and `prepare`
-have written `results/sim*/`.
+documents' `file:` arguments. The arrays they name are kept in git, so it
+exits 0 on a checkout; it exits 2 when one of them is missing.
 
 **Measured times.** One machine: 28 cores, 96 GB, macOS. Every step of
 both paths except the optional `plots` ran once, in one sequence on
@@ -614,7 +627,8 @@ times from pytest's summary line):
 |---|---|---|---|---|
 | `MERS_DIR` set, `results/sim*/` present | 259 | 259 | 0 | 161.4 s |
 | `MERS_DIR` unset | 241 | 240 | 1: `tests/test_ports.py`'s collection skip, standing for its 19 tests | 132.8 s |
-| `MERS_DIR` set, no `results/sim*/` (a fresh checkout) | 259 | 253 | 6: `tests/test_document_likelihood.py`, "run simulate.py and prepare.py first" | 16.0 s |
+| `MERS_DIR` set, a fresh clone (the sixteen kept arrays and nothing else under `results/sim*/`), 2026-10-02 | 259 | 253 | 6: `tests/test_document_likelihood.py`, "run simulate.py and prepare.py first": it needs `<model>_collapsed.npz`, which is not kept | 16.9 s |
+| `MERS_DIR` unset, the same fresh clone, 2026-10-02 | 241 | 234 | 7: those six and `tests/test_ports.py`'s collection skip | 18.2 s |
 
 The tests execute 79.62 % of the package's 2144 statements (pytest-cov over
 `examples/global21cm/tests` with `MERS_DIR` set, 2026-09-25; test files
@@ -641,7 +655,7 @@ The other modules execute 95 % of their statements or more.
 
 | path | written by | kept in git | holds |
 |---|---|---|---|
-| `results/sim/`, `results/sim_stress/` | `simulate`, `prepare` | no | the waterfall, noiseless waterfall, true foreground, true curve, channels, beam-SVD spectra, the fit's beam alms and the NSIDE 16 truth maps (`.npy`); `truth.json`; each document's `<model>_data.npy` and `<model>_collapsed.npz`; `prepare.json` |
+| `results/sim/`, `results/sim_stress/` | `simulate`, `prepare` | the eight arrays per scenario that the documents read: `waterfall`, `fg_truth`, `freqs_mhz`, `beam_alm_fit`, `beam_svd_spectra` and the three `<model>_data`; nothing else | the waterfall, noiseless waterfall, true foreground, true curve, channels, beam-SVD spectra, the fit's beam alms and the NSIDE 16 truth maps (`.npy`); `truth.json`; each document's `<model>_data.npy` and `<model>_collapsed.npz`; `prepare.json` |
 | `results/{oracle,beamconv,physical}{,_quick}/` | `rheplicant run` | no | the run trees: `config.input.yaml`, `config.resolved.yaml`, `provenance.json` (sha256 of every `file:` input), `diagnostics.json`, `capabilities.json`, `integrity.json`, `products.json`, `.rheplicant-results.json`, `variants/<encoded variant name>/config.resolved.yaml`, and `runs/<encoded run name>/` with `draws.npz`, `run_diagnostics.json`, `timings.json` |
 | `results/.rheplicant-lock-*.lock` | the `rheplicant` CLI | no | one empty lock file per output tree (six here) |
 | `results/analysis/` | `analyse`, `ablation`, `sensitivity`, `plots` | yes, except `posteriors.npz` | `fom.json`, `ablation.json`, `sensitivity.json`, nine PNGs, `posteriors.npz` (36 MB) |
@@ -1294,7 +1308,8 @@ the products regenerated at emulator 7a1b455 on 2026-09-24:
 | `sensitivity.py` | the noise-level sweep, radiometer equivalence and a-priori predictor (`sensitivity.json`, `sensitivity.png`) |
 | `oracle.yaml`, `beamconv.yaml`, `physical.yaml` | the three documents, each with a `stress` variant |
 | `oracle_quick.yaml`, `beamconv_quick.yaml`, `physical_quick.yaml` | the same with 300 + 300 NUTS steps per chain and their own `outputs.dir` |
-| `.gitignore` | keeps the regenerated `results/` parts and `posteriors.npz` out of git |
+| `requirements.txt` | the emulator, pinned to the commit the products were made at, and `pygdsm` |
+| `.gitignore` | keeps the regenerated `results/` parts and `posteriors.npz` out of git; names the sixteen simulation arrays that are kept |
 | `results/` | see "The `results/` layout" |
 
 Tests, with their junit counts:

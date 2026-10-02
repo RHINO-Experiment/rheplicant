@@ -166,12 +166,27 @@ executes; the Python beside them is the plugin and the hooks the documents
 load, and the analysis of the published run trees.
 
 Its [README](https://github.com/RHINO-Experiment/rheplicant/blob/main/examples/global21cm/README.md)
-gives the commands, the time each step takes, and the results. It needs
-`global21cm_jax`, from the 21cmVAE-jax repository, and `pygdsm`.
+gives the commands, the time each step takes, and the results. It needs the
+`numpyro` extra and two packages that its `requirements.txt` installs:
+`global21cm-jax`, the JAX port of the 21cmVAE emulator, pinned to the commit
+the results were made at, and `pygdsm`.
 
-A fresh checkout cannot run the pipeline. The simulation step reads one data
-file that is not public and RHINO beam files that are not redistributable, and
-the simulated arrays the six documents read are not kept in git. What a fresh
-checkout can do is read the kept analysis products under `results/analysis*/`
-and run the example's own tests, which the repository's suite does not
-collect.
+```bash
+uv pip install --python .venv/bin/python -r examples/global21cm/requirements.txt
+```
+
+A checkout can validate and run the six documents, because the sixteen
+simulated arrays they read are kept in git:
+
+```bash
+PYTHONPATH=examples .venv/bin/rheplicant validate examples/global21cm/oracle_quick.yaml
+```
+
+The repository's suite holds that much: `tests/test_global21cm_documents.py`
+asks git for every file the documents name and validates each document where
+the emulator is installed. A checkout cannot run the simulation, which reads
+one data file that is not public and RHINO beam files that are not
+redistributable, or the steps that prepare and score, which read simulation
+products that are not kept. The kept analysis products are under
+`results/analysis*/`. The example's own tests are run separately; the
+repository's suite does not collect them.

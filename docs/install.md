@@ -187,6 +187,15 @@ collects fewer tests and still passes. The reference install is the one in
 the Node toolchain (`npm ci` in `tools/gui/react`) for the GUI type checks and
 the Playwright suite.
 
+**The examples are part of the suite.** `tests/test_examples_run.py` runs
+each script under `examples/` in its own interpreter, with its needs and its
+time read from [the examples page](examples.md). The three scripts documented
+at 59 s or more run only with `RHEPLICANT_ALL_EXAMPLES=1`, and on a CI runner
+no script runs without it. `tests/test_global21cm_documents.py` validates the
+six documents of `examples/global21cm/` where the emulator they import is
+installed, which `examples/global21cm/requirements.txt` does; elsewhere those
+six cases skip.
+
 :::{admonition} Why the suite is three sessions
 :class: note
 Two parts of the suite need float64. `tests/evidence` does because a stored

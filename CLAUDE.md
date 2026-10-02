@@ -221,6 +221,30 @@ environment variable because their data is not redistributable:
 (`tests/radio/test_beams.py`), and `RHEPLICANT_RHINO_CAL` names a rhino-cal
 checkout (`tests/radio/test_ingestion_vs_reference.py`).
 
+**The example scripts are run by the suite, and three of them are opt-in for
+time.** `tests/test_examples_run.py` runs each `examples/*.py` in its own
+interpreter and reads the script's needs and documented time from the table
+in `docs/examples.md`, so a row there is the test's input. Twelve scripts run
+by default, about 95 s of CPU. The three documented at 59 s or more
+(`tutorial_nuts.py`, `driftscan_mmode.py`, `sky_to_noise_wave.py`, about five
+minutes between them) run only with `RHEPLICANT_ALL_EXAMPLES=1`. On a CI
+runner (`CI` set) no script runs without that variable, and the workflow does
+not set it, to keep Actions minutes down. Nothing ran the scripts before
+2026-10-02, and `examples/gibbs_plan.py` had stopped with `LinearityRefused`
+at the `v0.9.0` tag while three pages gave its running time.
+
+**`tests/test_global21cm_documents.py` validates the six
+`examples/global21cm` documents**, about 100 s of CPU, where `global21cm_jax`
+imports. It is not on PyPI:
+
+```bash
+uv pip install --python .venv/bin/python -r examples/global21cm/requirements.txt
+```
+
+CI does not install it, so those six cases skip there. The same module asks
+git, and not the disk, whether each array a document reads is tracked: on the
+machine that made the arrays the files exist either way.
+
 **MomentRFI and MomentEmu install from git, together.** Neither is on PyPI,
 and MomentRFI declares MomentEmu, so naming MomentRFI alone does not resolve;
 one command with both does:
