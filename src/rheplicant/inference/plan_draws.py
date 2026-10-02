@@ -51,6 +51,7 @@ def run_sample(
     n_sweeps: int,
     warmup: int | None = None,
     check_identifiability: Any = CHECK_ONCE,
+    check_linearity: bool = True,
     rhat_max: float = DEFAULT_RHAT_MAX,
     solve_tol: float = 1e-6,
     solve_guard: float | None = None,
@@ -74,7 +75,8 @@ def run_sample(
             tuning for gradient blocks adapts through warmup and is **frozen**
             afterwards, because a kernel that keeps adapting from the states
             it visits is no longer a valid transition.
-        check_identifiability: as for :meth:`~rheplicant.inference.plan.SamplingPlan.estimate`.
+        check_identifiability, check_linearity: as for
+            :meth:`~rheplicant.inference.plan.SamplingPlan.estimate`.
         rhat_max: split-``r_hat`` of the post-warmup joint chi-squared above
             which :attr:`~rheplicant.inference.plan_results.PlanDiagnostics.converged` is ``False``.
             Reported,
@@ -126,6 +128,7 @@ def run_sample(
         noise,
         check_identifiability,
         "SamplingPlan.sample",
+        check_linearity,
     )
     report = None
     residuals: dict[tuple[str, ...], float] = {}

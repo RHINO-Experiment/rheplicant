@@ -34,7 +34,7 @@ import numpyro.distributions as dist
 import pytest
 
 from rheplicant import Coordinates, State
-from rheplicant.core.errors import LinearityRefused, ParameterSpaceError
+from rheplicant.core.errors import LinearityRefused, LogSpaceUnavailable, ParameterSpaceError
 from rheplicant.core.operator import AbstractOperator
 from rheplicant.core.pipeline import Pipeline
 from rheplicant.inference import (
@@ -408,6 +408,91 @@ class TestThePlan:
             )
         assert len(programs) == 1, "a key that grows per sweep never hits"
         assert next(iter(programs))[-1] == "log_conjugate"
+
+    def test_check_linearity_false_declines_the_log_claim_check_too(self, state, observed, noise):
+        """One keyword covers both closed-form engines.
+
+        A known level added after the gain keeps the prediction positive and
+        makes ``log(prediction)`` non-affine in the gain, so the plan's check
+        before the first sweep refuses the block. Declined, the run proceeds.
+        The answer is then the caller's to stand behind, so this asserts that
+        the run happened and not what it returned.
+        """
+        offset_pipeline = Pipeline(
+            SummedSky(t_ant=T_ANT, t_nw=T_NW, tone=TONE),
+            GainOperator(gain=jnp.ones(N_TIME)),
+            AddConstant(level=500.0),
+            names=("sky", "gain", "receiver"),
+        )
+        plan = SamplingPlan(self._space_with_prior(), Block("log_gain", engine="log_conjugate"))
+        with pytest.raises(LinearityRefused):
+            plan.estimate(offset_pipeline, state, observed, noise=noise, max_iter=2, tol=None)
+        estimate = plan.estimate(
+            offset_pipeline,
+            state,
+            observed,
+            noise=noise,
+            max_iter=2,
+            tol=None,
+            check_linearity=False,
+        )
+        assert estimate.diagnostics.sweeps == 2
+        assert estimate.values["log_gain"].shape == (N_TIME,)
+
+    @pytest.mark.parametrize("exit_name", ["estimate", "sample"])
+    @pytest.mark.parametrize("model", ["negative everywhere", "zero at the block's zero"])
+    def test_declining_the_claim_keeps_the_positivity_refusal(
+        self, state, observed, noise, exit_name, model
+    ):
+        """``log`` of a non-positive prediction is nan, and a nan residual reads as converged.
+
+        That refusal lives in the same function as the affinity probes and is
+        not a claim about them, so declining the claim does not decline it.
+        Measured while it did, on the first model: the estimate returned its
+        starting values with ``converged=True`` at chi2 1.17e7, and forty
+        sweeps of the sampler returned one distinct draw at ``rhat = 1.0``.
+        """
+        if model == "negative everywhere":
+            space = self._space_with_prior()
+            name = "log_gain"
+            pipeline = Pipeline(
+                SummedSky(t_ant=T_ANT, t_nw=T_NW, tone=TONE),
+                GainOperator(gain=jnp.ones(N_TIME)),
+                AddConstant(level=-1e9),
+                names=("sky", "gain", "receiver"),
+            )
+        else:
+            # A gain bound directly: affine, so the prediction at the block's
+            # zero is zero. The case the refusal's own message names.
+            name = "gain"
+            space = ParameterSpace(
+                latents=[
+                    Latent(
+                        name,
+                        init=jnp.exp(LOG_G),
+                        prior=dist.Normal(jnp.ones(N_TIME), PRIOR_STD),
+                    )
+                ],
+                bindings=[Bind(name, into=lambda p: p["gain"].gain)],
+            )
+            pipeline = Pipeline(
+                SummedSky(t_ant=T_ANT, t_nw=T_NW, tone=TONE),
+                GainOperator(gain=jnp.ones(N_TIME)),
+                names=("sky", "gain"),
+            )
+        plan = SamplingPlan(space, Block(name, engine="log_conjugate"))
+        run = {
+            "estimate": lambda **kw: plan.estimate(
+                pipeline, state, observed, noise=noise, max_iter=4, **kw
+            ),
+            "sample": lambda **kw: plan.sample(
+                pipeline, state, observed, noise=noise, key=jax.random.key(9), n_sweeps=8, **kw
+            ),
+        }[exit_name]
+        with pytest.raises(LogSpaceUnavailable):
+            run()
+        with pytest.raises(LogSpaceUnavailable):
+            run(check_linearity=False)
 
 
 class TestRefusals:

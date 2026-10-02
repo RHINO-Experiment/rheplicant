@@ -401,9 +401,9 @@ class SamplingPlan:
           enough on its own, since :meth:`_prepare` has already verified that
           block's joint linearity. With more than one block, each was
           verified alone, and two conditionally affine blocks are not jointly
-          affine — the bilinear ``gain * sky`` is the standing example — so
-          the same check is asked of the union, and a refusal means no
-          floor.
+          affine (the bilinear ``gain * sky``), so the same check is asked of
+          the union, and a refusal means no floor. With
+          ``check_linearity=False`` nothing was verified and there is no floor.
         * **a sigma that does not depend on the prediction**, so the
           log-determinant is a constant and not curvature.
         * **a Normal prior on every latent**, since a prior that is not
@@ -444,6 +444,7 @@ class SamplingPlan:
         noise: Any,
         check: Any,
         exit_name: str,
+        linearity: Any = True,
     ) -> tuple[Conditioning, dict[str, jax.Array]]:
         """Everything both exits do before their first sweep.
 
@@ -451,9 +452,10 @@ class SamplingPlan:
         and checks each conjugate block's linearity claim once — the bargain
         :func:`~rheplicant.inference.linear_solve.gcr_sample` recommends for a sweep,
         which is what lets every rebuild inside the loop pass ``check=False``.
+        ``linearity`` is the exits' ``check_linearity=``.
         """
         return prepare_conditioning(
-            self, pipeline, state_template, observed, noise, check, exit_name
+            self, pipeline, state_template, observed, noise, check, exit_name, linearity
         )
 
     def _identifiable(
@@ -553,6 +555,7 @@ class SamplingPlan:
         tol: float | None = DEFAULT_CHI2_TOL,
         min_sweeps: int = MIN_SWEEPS,
         check_identifiability: Any = CHECK_ONCE,
+        check_linearity: bool = True,
         solve_tol: float = 1e-6,
         solve_guard: float | None = None,
         gap_tol: float = DEFAULT_GAP_TOL,
@@ -649,6 +652,13 @@ class SamplingPlan:
             check_identifiability: ``"once"``, ``"each_sweep"`` or ``False``. See
                 the module docstring; a point estimate is the exit that needs it
                 most, because it has no other diagnostic.
+            check_linearity: ``False`` skips the check of each closed-form
+                block's claim before the first sweep, linear and log-linear.
+                It is for a model that is affine where the fit goes and not a
+                thousand prior widths out, where the outermost probe is: a
+                converter that clips. A block is solved as the map tangent to
+                the model at the block's zero, so check the range the fit
+                visits first, with ``check_linearity(..., scales=...)``.
             solve_tol: CG tolerance for conjugate blocks, at the start: the run
                 tightens it when its solves are inexact (see above).
             solve_guard: bound on each conjugate solve's relative ERROR, as for
@@ -685,6 +695,7 @@ class SamplingPlan:
             tol=tol,
             min_sweeps=min_sweeps,
             check_identifiability=check_identifiability,
+            check_linearity=check_linearity,
             solve_tol=solve_tol,
             solve_guard=solve_guard,
             gap_tol=gap_tol,
@@ -703,6 +714,7 @@ class SamplingPlan:
         n_sweeps: int,
         warmup: int | None = None,
         check_identifiability: Any = CHECK_ONCE,
+        check_linearity: bool = True,
         rhat_max: float = DEFAULT_RHAT_MAX,
         solve_tol: float = 1e-6,
         solve_guard: float | None = None,
@@ -726,7 +738,7 @@ class SamplingPlan:
                 tuning for gradient blocks adapts through warmup and is **frozen**
                 afterwards, because a kernel that keeps adapting from the states
                 it visits is no longer a valid transition.
-            check_identifiability: as for :meth:`estimate`.
+            check_identifiability, check_linearity: as for :meth:`estimate`.
             rhat_max: split-``r_hat`` of the post-warmup joint chi-squared above
                 which :attr:`~rheplicant.inference.plan_results.PlanDiagnostics.converged` is
                 ``False``. Reported,
@@ -758,6 +770,7 @@ class SamplingPlan:
             n_sweeps=n_sweeps,
             warmup=warmup,
             check_identifiability=check_identifiability,
+            check_linearity=check_linearity,
             rhat_max=rhat_max,
             solve_tol=solve_tol,
             solve_guard=solve_guard,

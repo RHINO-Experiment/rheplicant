@@ -90,6 +90,12 @@ CENSUS: dict[str, int] = {
     "test_numpyro_bridge.py": 6,
     "test_parameters.py": 29,
     "test_plan.py": 32,
+    # Added 2026-10-02 with `check_linearity=` on the two plan exits. Three
+    # sites: the keyword's own refusal of a value that is not True or False,
+    # once per exit, and the identifiability refusal reached with the
+    # linearity check declined, which pins that one check is skipped and not
+    # both.
+    "test_plan_check_linearity.py": 3,
     "test_prior_sensitivity.py": 9,
     "test_stochastic_twin.py": 4,
     # 8 -> 14 on 2026-08-27: `uncertainty`'s second step. Five come with the
@@ -113,7 +119,10 @@ BY_CLASS: dict[str, int] = {
     # side; that is the whole content of D48.
     # 180 -> 182 on 2026-08-28: the two conditioning-exit refusals the
     # Wave B mutation set found unguarded. Same class, same seam rule.
-    "ParameterSpaceError": 182,
+    # 182 -> 185 on 2026-10-02: `test_plan_check_linearity.py`, see CENSUS.
+    # All three are raised on this side, in `plan_blocks.py` and
+    # `plan.py::_identifiable`.
+    "ParameterSpaceError": 185,
     "StateValidationError": 64,
     # 4 -> 3 on 2026-08-28: one `pytest.raises(RuntimeError)` site became a
     # twenty-key sweep, see CENSUS above. The class is NOT lost -- three
@@ -190,7 +199,7 @@ def test_every_file_pins_the_number_of_refusals_it_used_to():
 
 
 def test_the_total_is_the_number_the_plan_records():
-    assert sum(CENSUS.values()) == 254
+    assert sum(CENSUS.values()) == 257
 
 
 def test_the_exception_classes_are_the_ones_translate_was_written_against():

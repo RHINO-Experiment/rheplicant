@@ -233,7 +233,9 @@ def curvature_floor(plan, cond: Conditioning) -> float | None:
       verified alone, and two conditionally affine blocks are not jointly
       affine — the bilinear ``gain * sky`` is the standing example — so
       the same check is asked of the union, and a refusal means no
-      floor.
+      floor. A caller who passed ``check_linearity=False`` had nothing
+      verified, so there is no floor then, for one block or several, and
+      the union is not probed at the default scales the caller declined.
     * **a sigma that does not depend on the prediction**, so the
       log-determinant is a constant and not curvature.
     * **a Normal prior on every latent**, since a prior that is not
@@ -246,7 +248,7 @@ def curvature_floor(plan, cond: Conditioning) -> float | None:
     the decrement falls back to a probe, which never certifies, and the
     run says so (:func:`_at_this_size`).
     """
-    if bool(cond.noise.depends_on_prediction):
+    if not cond.claims_checked or bool(cond.noise.depends_on_prediction):
         return None
     floor = math.inf
     for name in plan.space.names:
@@ -276,6 +278,7 @@ def prepare_conditioning(
     noise: Any,
     check: Any,
     exit_name: str,
+    linearity: Any,
 ) -> tuple[Conditioning, dict[str, jax.Array]]:
     """Everything both exits do before their first sweep.
 
@@ -283,7 +286,24 @@ def prepare_conditioning(
     and checks each conjugate block's linearity claim once — the bargain
     :func:`~rheplicant.inference.linear_solve.gcr_sample` recommends for a sweep,
     which is what lets every rebuild inside the loop pass ``check=False``.
+
+    ``linearity`` is the exits' ``check_linearity=``, under another name
+    because this module imports the function of that one. ``False`` skips the
+    affinity probes of every closed-form block, conjugate and log-conjugate.
+    It does not skip the log route's refusal of a prediction that is not
+    positive at the block's zero: that is the precondition of taking a log,
+    not a claim about a probe, and without it ``log`` returns nan, the solve
+    returns its starting values and the run reports them as converged.
     """
+    if linearity is not True and linearity is not False:
+        raise ParameterSpaceError(
+            f"{exit_name} was given check_linearity={linearity!r}; it takes True (check "
+            "each closed-form block's claim once, before the first sweep) or False. "
+            "False is for a model that is affine where the fit goes and not at the "
+            "check's outermost probe, a thousand prior widths out: a converter that "
+            "clips is the usual case. check_linearity(space, pipeline, state, "
+            "names=..., scales=...) asks the same question over a range you choose."
+        )
     if check is not False and check not in (CHECK_ONCE, CHECK_EACH_SWEEP):
         raise ParameterSpaceError(
             f"{exit_name} was given check_identifiability={check!r}; it takes "
@@ -314,10 +334,16 @@ def prepare_conditioning(
         forward=forward,
         log_observed=log_observed,
         log_sigma=log_sigma,
+        claims_checked=linearity,
     )
+    # With no scales the log check has no probes left and keeps its refusal
+    # at the block's zero.
+    log_scales = {} if linearity else {"scales": ()}
     for block, engine in plan._assign:
-        if engine == CONJUGATE:
+        if engine == CONJUGATE and linearity:
             check_linearity(plan.space, pipeline, state_template, names=block.names, at=values0)
         elif engine == LOG_CONJUGATE:
-            check_log_linearity(plan.space, pipeline, state_template, names=block.names, at=values0)
+            check_log_linearity(
+                plan.space, pipeline, state_template, names=block.names, at=values0, **log_scales
+            )
     return cond, values0

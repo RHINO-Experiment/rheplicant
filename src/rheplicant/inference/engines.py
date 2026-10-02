@@ -143,6 +143,11 @@ class Conditioning:
             :meth:`sigma` there is nothing for a sweep to re-evaluate; and
             ``to_log_space`` refuses a non-positive sample eagerly, which a
             jitted transition could not do at all.
+        claims_checked: whether each closed-form block's affinity claim was
+            checked before the first sweep. ``False`` when the caller passed
+            ``check_linearity=False``. The curvature floor reads it: the prior
+            precision bounds the joint Hessian only where affinity was
+            verified, and a declined check verified nothing.
     """
 
     space: ParameterSpace
@@ -153,6 +158,7 @@ class Conditioning:
     forward: Callable[[dict[str, jax.Array]], jax.Array]
     log_observed: jax.Array | None = None
     log_sigma: jax.Array | None = None
+    claims_checked: bool = True
 
     def sigma(self, values: dict[str, jax.Array]) -> jax.Array:
         """Noise sigma at the current joint prediction, shaped like the data."""

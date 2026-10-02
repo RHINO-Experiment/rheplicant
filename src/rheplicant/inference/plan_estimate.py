@@ -160,6 +160,7 @@ def run_estimate(
     tol: float | None = DEFAULT_CHI2_TOL,
     min_sweeps: int = MIN_SWEEPS,
     check_identifiability: Any = CHECK_ONCE,
+    check_linearity: bool = True,
     solve_tol: float = 1e-6,
     solve_guard: float | None = None,
     gap_tol: float = DEFAULT_GAP_TOL,
@@ -256,6 +257,19 @@ def run_estimate(
         check_identifiability: ``"once"``, ``"each_sweep"`` or ``False``. See
             the module docstring; a point estimate is the exit that needs it
             most, because it has no other diagnostic.
+        check_linearity: ``True`` checks each closed-form block's claim
+            once, before the first sweep:
+            :func:`~rheplicant.inference.linear.check_linearity` for a
+            conjugate block and
+            :func:`~rheplicant.inference.loglinear.check_log_linearity` for a
+            log-conjugate one, at their default probe scales. ``False`` skips
+            both. The linear check's outermost probe is a thousand prior
+            widths out, so a model with a stage that saturates (a converter
+            that clips) is refused there even when the data and the posterior
+            are far below the limit. A block is solved as the affine map
+            tangent to the model at the block's zero, so with the check
+            skipped the answer is the model's own only where the model equals
+            that map.
         solve_tol: CG tolerance for conjugate blocks, at the start: the run
             tightens it when its solves are inexact (see above).
         solve_guard: bound on each conjugate solve's relative ERROR, as for
@@ -306,6 +320,7 @@ def run_estimate(
         noise,
         check_identifiability,
         "SamplingPlan.estimate",
+        check_linearity,
     )
     report = None
     residuals: dict[tuple[str, ...], float] = {}
