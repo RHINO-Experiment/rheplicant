@@ -323,12 +323,19 @@ def _path_sites():
     the check said the file was there while the reader's editor said it was
     not. Git decides which pages SHIP, below; the disk decides what is
     actually there.
+
+    A page cites from the repository root or from its own directory.
+    ``examples/global21cm/README.md`` names ``tests/test_ports.py`` and means
+    the example's own; resolved against the root alone, all 29 of its test
+    citations read as missing files in this repository's ``tests/``. A path
+    that resolves from neither place is still an offender.
     """
     for page, number, found in _sites(_REPO_PATH):
         candidate = found.group(1)
-        if not (ROOT / Path(candidate).parent).is_dir():
+        bases = (ROOT, ROOT / page.parent)
+        if not any((base / Path(candidate).parent).is_dir() for base in bases):
             continue
-        yield page, number, candidate, (ROOT / candidate).is_file()
+        yield page, number, candidate, any((base / candidate).is_file() for base in bases)
 
 
 def test_every_repository_file_the_docs_cite_is_in_the_repository() -> None:
