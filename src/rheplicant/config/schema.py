@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from _rheplicant_bootstrap.process import SCHEMA_VERSION
+from _rheplicant_bootstrap.process import SCHEMA_VERSION, schema_version_problem
 
 
 def _list(value: Any) -> list[str]:
@@ -48,7 +48,14 @@ def json_schema() -> dict[str, Any]:
     exits = list(_runs._KINDS)
     transforms = sorted(_dims._FORMULA_REGISTRY)
 
+    # `_REQUIRED` is the four sections `_structural` reports missing in one
+    # sentence. `schema_version` is refused a clause earlier, by the predicate
+    # the command line also reads, so it is asked of that predicate rather
+    # than added to the tuple: an absent key is what the predicate sees as
+    # `None`.
     required = set(_REQUIRED)
+    if schema_version_problem(None) is not None:
+        required.add("schema_version")
     # Derived, not re-spelled: `_NOT_YET` and `_RESERVED` are preflight's own
     # refusal tables (`_structural`, in this same package), so a section that
     # moves from deferred to accepted -- or grows a fifth refused name --

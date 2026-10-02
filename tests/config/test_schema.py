@@ -74,14 +74,19 @@ class TestSections:
             assert isinstance(entry["status"], str)
             assert entry["reason"] is None or isinstance(entry["reason"], str)
 
-    def test_the_required_section_names_are_exactly_four(self):
-        """Pinned as a set equality, not membership: a fifth section
-        wrongly marked required would pass a `"runtime" in required` style
-        check and still break every consumer that treats the required set
-        as exhaustive."""
+    def test_the_required_names_are_exactly_five(self):
+        """Pinned as a set equality, not membership: a sixth name wrongly
+        marked required would pass a `"runtime" in required` style check and
+        still break every consumer that treats the required set as
+        exhaustive.
+
+        Five since 0.9.1. `schema_version` was reported as not required until
+        then, while the loader refused every document without it: the name is
+        refused by a predicate of its own, one clause before the tuple the
+        other four are read from."""
         sections = json_schema()["sections"]
         required = {entry["name"] for entry in sections if entry["required"]}
-        assert required == {"runtime", "observation", "model", "runs"}
+        assert required == {"schema_version", "runtime", "observation", "model", "runs"}
 
     def test_campaign_is_present_and_not_required(self):
         sections = {entry["name"]: entry["required"] for entry in json_schema()["sections"]}
@@ -94,7 +99,12 @@ class TestSections:
         section list (this schema's) has not drifted from the first."""
         sections = json_schema()["sections"]
         assert [entry["name"] for entry in sections] == list(_SECTIONS)
-        assert {entry["name"] for entry in sections if entry["required"]} == (set(_REQUIRED))
+        # `_REQUIRED` is the four `_structural` reports missing in one
+        # sentence; `schema_version` is refused a clause earlier and is not
+        # in that tuple. `TestRequiredAgreesWithTheLoader` holds all five to
+        # what the loader does.
+        required = {entry["name"] for entry in sections if entry["required"]}
+        assert required - {"schema_version"} == set(_REQUIRED)
 
     def test_every_status_is_one_of_the_three_known_values(self):
         """`status` is a closed vocabulary -- "accepted", "deferred" or
@@ -134,6 +144,56 @@ class TestSections:
         assert deferred == set(_NOT_YET)
         reserved = {entry["name"] for entry in sections if entry["status"] == "reserved"}
         assert reserved == set(_RESERVED)
+
+
+class TestRequiredAgreesWithTheLoader:
+    """`required` is what `preflight()` does with a document that omits the name.
+
+    The flag was read off `_REQUIRED` alone, which made it a statement about a
+    tuple. `schema_version` is not in that tuple and the loader refuses a
+    document without it, so the schema said "not required" of a key no
+    document may leave out. Driving the real call for every accepted name is
+    what holds the flag to the behaviour, in both directions.
+    """
+
+    ACCEPTED = (
+        "schema_version",
+        "runtime",
+        "observation",
+        "resources",
+        "model",
+        "variants",
+        "inference",
+        "runs",
+    )
+
+    def test_these_are_the_names_the_schema_calls_accepted(self):
+        accepted = [
+            entry["name"] for entry in json_schema()["sections"] if entry["status"] == "accepted"
+        ]
+        assert sorted(accepted) == sorted(self.ACCEPTED)
+
+    @pytest.mark.parametrize("name", ACCEPTED)
+    def test_omitting_a_name_is_refused_exactly_when_it_is_required(self, name):
+        required = {entry["name"]: entry["required"] for entry in json_schema()["sections"]}
+        document = preflight_document(**{name: None})
+        assert name not in document
+        if not required[name]:
+            # Findings are collected; only a structural problem raises.
+            preflight(document)
+            return
+        with pytest.raises(ConfigError) as caught:
+            preflight(document)
+        message = str(caught.value)
+        if name == "schema_version":
+            assert message.startswith("schema_version: 1 is required (got None)")
+        else:
+            assert message.startswith(f"This document is missing ['{name}']")
+
+    def test_no_refused_section_is_required(self):
+        for entry in json_schema()["sections"]:
+            if entry["status"] != "accepted":
+                assert entry["required"] is False, entry["name"]
 
 
 class TestStatusAgreesWithTheLoader:

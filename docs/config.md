@@ -19,20 +19,20 @@ refusal messages are the only other place that says so.
 
 ## The document, section by section
 
-Twelve top-level names are recognised. Four sections are required, four names
-are accepted, and four are refused today. The loader's own refusal tables are
-what `rheplicant.config.schema.json_schema()` reports as each section's
-`status`.
+Twelve top-level names are recognised. Five are required, three more are
+accepted, and four are refused today. `rheplicant.config.schema.json_schema()`
+reports each name's `required` flag and `status` from what the loader does
+with a document.
 
 | Section | Status |
 |---|---|
-| `runtime`, `observation`, `model`, `runs` | required |
-| `schema_version`, `resources`, `variants`, `inference` | accepted |
+| `schema_version`, `runtime`, `observation`, `model`, `runs` | required |
+| `resources`, `variants`, `inference` | accepted |
 | `defaults`, `plugins`, `outputs` | refused by the mapping API; the command line handles them |
 | `campaign` | reserved, refused; see above |
 
-`schema_version: 1` is listed as accepted because it is a key and not a
-section, but a document without it is refused: write it in every document.
+`schema_version` is a key holding the integer `1`; the other eleven names are
+sections.
 
 The third row is the difference between `load_document` and the CLI: the CLI
 adds presets, plugins and the output tree on top of the same orchestration.

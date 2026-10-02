@@ -901,18 +901,24 @@ class TestThePagesSayWhatTheLayerDoes:
 
         The page states which of the twelve section names are required, which
         are accepted, which the mapping API refuses to the command line, and
-        which is reserved. Every one of those four sets already exists in
-        ``config/preflight``: ``_SECTIONS``, ``_REQUIRED``, ``_NOT_YET``, and
-        the campaign clause that ``json_schema()`` reports as
-        ``status: reserved``. Prose that restates them is the shape this
-        repository's own notes name as the origin of every drift it has had --
-        so it is asserted against them here rather than proofread.
+        which is reserved. Every one of those four sets already exists:
+        ``_SECTIONS`` and ``_NOT_YET`` in ``config/preflight``, the campaign
+        clause that ``json_schema()`` reports as ``status: reserved``, and the
+        required names as ``json_schema()`` reports them, which
+        ``test_schema.py::TestRequiredAgreesWithTheLoader`` holds to what the
+        loader does with a document omitting each. ``_REQUIRED`` alone is four
+        of the five: ``schema_version`` is refused a clause earlier. Prose
+        that restates them is the shape this repository's own notes name as
+        the origin of every drift it has had -- so it is asserted against
+        them here rather than proofread.
 
         Names are read out of the table's backticked cells, so re-wording the
         surrounding sentences is free and moving a name between rows is not.
         """
-        from rheplicant.config.preflight import _NOT_YET, _REQUIRED, _SECTIONS
+        from rheplicant.config.preflight import _NOT_YET, _SECTIONS
+        from rheplicant.config.schema import json_schema
 
+        required = {entry["name"] for entry in json_schema()["sections"] if entry["required"]}
         body = _block(_page("config.md"), "## The document, section by section")
         rows = _rows(body)
         assert rows, "the section table is gone from config.md"
@@ -933,10 +939,10 @@ class TestThePagesSayWhatTheLayerDoes:
                 key = "accepted"
             stated.setdefault(key, set()).update(names)
 
-        assert stated.get("required") == set(_REQUIRED), (
+        assert stated.get("required") == required, (
             f"config.md says these sections are required: "
             f"{sorted(stated.get('required', ()))}; the loader says "
-            f"{sorted(_REQUIRED)}."
+            f"{sorted(required)}."
         )
         assert stated.get("cli_only") == set(_NOT_YET), (
             f"config.md says the command line handles "

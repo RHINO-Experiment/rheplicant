@@ -102,7 +102,7 @@
     {
       "name": "schema_version",
       "reason": null,
-      "required": false,
+      "required": true,
       "status": "accepted"
     },
     {
