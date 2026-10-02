@@ -221,21 +221,24 @@ layout, where being wrong returns numbers rather than an error.
 Some arithmetic exists on both sides of the bayesmith seam. That is a
 decision, not a leftover, and the copies are kept rather than deleted for the
 stable baseline: an independent second implementation is the strongest oracle
-either package has, and bayesmith's `tests/crosscheck/` runs the same inputs
-through both and compares the outputs, so "they agree" is a measurement on
-every run rather than an intention.
+either package has, and `tests/crosscheck/` runs the same inputs through both
+and compares the outputs, so "they agree" is a measurement on every run
+rather than an intention.
 
 | Here | Held in agreement by |
 |---|---|
 | `rheplicant.inference.sqrtinfo` — `SqrtInfo`, `marginalise` | `tests/crosscheck/test_sqrtinfo_agrees.py` |
-| `rheplicant.inference.linear` — the affinity criterion and the linear solve | `tests/crosscheck/test_linear.py` |
-| `rheplicant.inference.chain_recursion._zeta_joint` — the joint covariance | `tests/evidence/test_chain_smoother.py`, against a dense oracle **here** |
+| `rheplicant.inference.linear` — the affinity criterion | `tests/crosscheck/test_linear.py` |
+| `rheplicant.inference.chain_recursion._zeta_joint` — the joint covariance | `tests/evidence/test_chain_smoother.py`, against a dense oracle |
 
-The first two paths are in **bayesmith's** repository, because that comparison
-belongs to whichever side is checking the other and running it here would be
-this package against itself.
+All three files are in this repository. The first two were in bayesmith's
+until its `61d4644` removed its `tests/crosscheck/`, so that its suite no
+longer imports its downstream; they moved here at 0.9.1. bayesmith is a
+dependency of this package, so both sides are always installed where this
+suite runs. The solve names in `rheplicant.inference.linear` delegate to
+bayesmith and are not compared: that would be bayesmith against itself.
 
-**The third is not, and the difference matters.** `_zeta_joint` exists on both
+**The third is not a comparison with bayesmith.** `_zeta_joint` exists on both
 sides, but the thing that uses it here — `_joint_covariance` — has no
 counterpart upstream (measured: `grep -rn joint_covariance src/bayesmith/`
 returns nothing). So there is no cross-check to hold the two in agreement, and
@@ -244,10 +247,10 @@ oracle, in this repository. `chain_recursion`'s own docstring has said so all
 along — "the far side has no counterpart to that … checked against the dense
 oracle rather than against each other".
 
-This row used to name `tests/crosscheck/test_provenance.py`, which holds
-nothing in agreement: it is a per-symbol provenance table, and `_zeta_joint`
-appears nowhere in it. The guard could not see that, because it asserted the
-FILE existed and never that the file checked the symbol.
+This row used to name bayesmith's `test_provenance.py`, which held nothing in
+agreement: it was a per-symbol provenance table, and `_zeta_joint` appeared
+nowhere in it. The guard could not see that, because it asserted the FILE
+existed and never that the file checked the symbol.
 
 The cost of the arrangement is real and worth stating: a copy can drift, and
 one had. `linear.py`'s `_worse` had lost a case its far side kept (A4-5). What

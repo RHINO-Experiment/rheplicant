@@ -11,8 +11,9 @@ diagnostics.
 2026-08-26 the two packages are no longer fully disjoint.**
 `rheplicant.inference` is the implementation of everything on these pages, it
 is fully supported, and the historically shared capabilities stay separate,
-held in agreement by a cross-check suite rather than by shared code — 123
-comparisons that run on every change to bayesmith. The NEW capabilities are
+held in agreement by a cross-check suite rather than by shared code — the
+comparisons in this repository's `tests/crosscheck/`, which run with this
+package's suite. The NEW capabilities are
 the exception, by the owner's decision: the auto-partition grouping rule and
 the log-space transform arithmetic were implemented in bayesmith
 (`dispatch.factor`, `exact.loglinear`) and `rheplicant.inference` imports

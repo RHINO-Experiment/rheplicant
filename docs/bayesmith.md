@@ -33,8 +33,8 @@ comes from bayesmith's dispatch, not from the sampler.
 
 Some arithmetic exists on both sides, and that is a decision rather than a
 leftover. [The stability page](stability.md) lists each copy and the
-cross-check in bayesmith's repository that holds it in agreement, and says the
-cost out loud: a copy can drift, and one had. What makes it defensible is that
+comparison in this repository's `tests/crosscheck/` that holds it in
+agreement, and says the cost out loud: a copy can drift, and one had. What makes it defensible is that
 a cross-check turns drift into a failing test rather than into two answers
 nobody compares.
 

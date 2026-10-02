@@ -380,17 +380,18 @@ def test_upstream_still_calls_its_descent_engine_experimental():
 
 
 #: What `docs/stability.md` calls a deliberate reference implementation, and
-#: the cross-check in BAYESMITH's repository that holds each one in agreement.
+#: the test file in this repository that holds each one in agreement.
 #:
 #: Written here rather than only on the page because a table of promises with
 #: nothing checking it is the shape this repository keeps paying for: the
-#: local symbol can be deleted or renamed, and the far-side file can be
-#: retired when its module switches, and the page would go on saying both are
-#: there.
-#: Each row is ``local symbol -> (where it is held, the file, the ENTRY POINT
-#: that comparison goes through)``. ``where`` is ``"bayesmith"`` for a file in
-#: the sibling repository's ``tests/crosscheck/`` and ``"here"`` for one of
-#: ours.
+#: local symbol can be deleted or renamed, and the file that compares it can
+#: be retired, and the page would go on saying both are there.
+#: Each row is ``local symbol -> (the file, the ENTRY POINT that comparison
+#: goes through)``.
+#:
+#: The first three rows named files in bayesmith's ``tests/crosscheck/`` until
+#: bayesmith's ``61d4644`` removed that directory, and this guard skipped for
+#: them from that commit on. The two files moved to ``tests/crosscheck/`` here.
 #:
 #: The entry point is the part that makes this checkable. A cross-check need
 #: not name the private symbol it exercises -- ``test_linear.py`` compares
@@ -399,29 +400,22 @@ def test_upstream_still_calls_its_descent_engine_experimental():
 #: entry point is true, and is the thing a reader would look for.
 REFERENCE_IMPLEMENTATIONS = {
     "rheplicant.inference.sqrtinfo:SqrtInfo": (
-        "bayesmith",
-        "test_sqrtinfo_agrees.py",
+        "tests/crosscheck/test_sqrtinfo_agrees.py",
         "SqrtInfo",
     ),
     "rheplicant.inference.sqrtinfo:marginalise": (
-        "bayesmith",
-        "test_sqrtinfo_agrees.py",
+        "tests/crosscheck/test_sqrtinfo_agrees.py",
         "marginalise",
     ),
     "rheplicant.inference.linear:_worse": (
-        "bayesmith",
-        "test_linear.py",
+        "tests/crosscheck/test_linear.py",
         "check_linearity",
     ),
-    # NOT a bayesmith cross-check, and the row said it was until 2026-09-21.
-    # `_zeta_joint` exists on both sides, but `_joint_covariance` -- the only
-    # thing that uses it here -- has no counterpart upstream, so there is
-    # nothing to compare against. It is held by a dense oracle in THIS
-    # repository. The old row named `test_provenance.py`, which holds nothing
-    # in agreement: it is a per-symbol provenance table and never mentions
-    # `_zeta_joint`.
+    # NOT a comparison with bayesmith, and the row said it was until
+    # 2026-09-21. `_zeta_joint` exists on both sides, but `_joint_covariance`
+    # -- the only thing that uses it here -- has no counterpart upstream, so
+    # there is nothing to compare against. It is held by a dense oracle.
     "rheplicant.inference.chain_recursion:_zeta_joint": (
-        "here",
         "tests/evidence/test_chain_smoother.py",
         "_joint_covariance",
     ),
@@ -454,26 +448,11 @@ def test_every_labelled_reference_implementation_is_still_held(target):
     no arithmetic at all. Existence is the cheapest possible proxy for the
     claim and it was wrong about a quarter of the table.
 
-    So the entry point is read out of the file too. A bayesmith cross-check
-    needs the sibling checkout and skips loudly without it, because a thinner
-    environment is not a passing one; a local one is always readable.
+    So the entry point is read out of the file too. Every file is in this
+    repository, so nothing here can skip.
     """
-    where, filename, entry = REFERENCE_IMPLEMENTATIONS[target]
-    root = pathlib.Path(__file__).resolve().parents[1]
-
-    if where == "bayesmith":
-        from tests.config.wheel_support import BAYESMITH_CHECKOUT
-
-        directory = BAYESMITH_CHECKOUT / "tests" / "crosscheck"
-        if not directory.is_dir():
-            pytest.skip(
-                f"{directory} is absent, so the cross-checks that hold this "
-                "package's deliberate reference implementations in agreement "
-                "cannot be seen from here"
-            )
-        path = directory / filename
-    else:
-        path = root / filename
+    filename, entry = REFERENCE_IMPLEMENTATIONS[target]
+    path = pathlib.Path(__file__).resolve().parents[1] / filename
 
     assert path.is_file(), (
         f"docs/stability.md names {filename} as what holds {target} in "
@@ -493,7 +472,7 @@ def test_the_page_lists_exactly_the_labelled_reference_implementations():
     section = page.split("## Deliberate reference implementations", 1)
     assert len(section) == 2, "docs/stability.md no longer has that section"
     body = section[1].split("## ", 1)[0]
-    for _, filename, _ in REFERENCE_IMPLEMENTATIONS.values():
+    for filename, _ in REFERENCE_IMPLEMENTATIONS.values():
         assert filename in body, f"the page does not name {filename}"
     for target in REFERENCE_IMPLEMENTATIONS:
         module_name, _, attribute = target.partition(":")
