@@ -29,6 +29,19 @@ class AssemblyError(DirtError, ValueError):
 REFUSALS: tuple[type[DirtError], ...] = (ConfigError, AssemblyError)
 
 
+def exception_fields(error: BaseException) -> tuple[str, str]:
+    """``(exception_type, message)`` as an audit record carries them.
+
+    An exception raised with no message renders as ``""`` -- numpyro's bare
+    ``assert x.shape[1] >= 4`` is one.  Its message is recorded as its type
+    name, so a record of a failure never has an empty one: the run-outcome
+    row's sink refuses an empty string, and that refusal used to replace the
+    run's own exception with a ``ConfigError`` about the row.
+    """
+    type_name = f"{type(error).__module__}.{type(error).__qualname__}"
+    return type_name, str(error) or type_name
+
+
 DirtError.__module__ = "rheplicant.core.errors"
 ConfigError.__module__ = "rheplicant.config.errors"
 AssemblyError.__module__ = "rheplicant.core.errors"

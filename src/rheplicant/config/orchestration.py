@@ -52,7 +52,7 @@ from _rheplicant_bootstrap.capture import (
     CaptureService,
     captured_input_json,
 )
-from _rheplicant_bootstrap.errors import REFUSALS, DirtError
+from _rheplicant_bootstrap.errors import REFUSALS, DirtError, exception_fields
 from _rheplicant_bootstrap.layering import (
     DeletionRecord,
     OriginNode,
@@ -1112,18 +1112,16 @@ def execute_one_parsed(
         thrown = error
         if captured_expected:
             thrown = result.error
+        # The sink takes null or a non-empty string in each slot.
+        thrown_type, thrown_message = (None, None) if thrown is None else exception_fields(thrown)
         trace.record_run_outcome(
             parsed.layer.identity,
             {
                 "descriptor": _descriptor(parsed),
                 "status": "expected_refusal" if captured_expected else status,
                 "wall_time_ns": wall,
-                "exception_type": (
-                    None
-                    if thrown is None
-                    else f"{type(thrown).__module__}.{type(thrown).__qualname__}"
-                ),
-                "exception_message": None if thrown is None else str(thrown),
+                "exception_type": thrown_type,
+                "exception_message": thrown_message,
                 "capture_scope": ("arbitrary_exception" if captured_expected else None),
                 "is_dirt_error": (None if thrown is None else isinstance(thrown, DirtError)),
             },

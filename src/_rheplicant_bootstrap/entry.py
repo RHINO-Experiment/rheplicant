@@ -35,7 +35,7 @@ from _rheplicant_bootstrap.audit.types import (
     AuditSnapshot,
 )
 from _rheplicant_bootstrap.capture import CaptureService
-from _rheplicant_bootstrap.errors import REFUSALS, ConfigError
+from _rheplicant_bootstrap.errors import REFUSALS, ConfigError, exception_fields
 from _rheplicant_bootstrap.execution_environment import (
     TRUSTED_CODE_WARNING,
     prepare_execution_environment,
@@ -80,10 +80,8 @@ _TRUSTED_CODE_WARNING = TRUSTED_CODE_WARNING
 
 
 def _exception_row(error: BaseException) -> dict[str, str]:
-    return {
-        "exception_type": f"{type(error).__module__}.{type(error).__qualname__}",
-        "message": str(error),
-    }
+    exception_type, message = exception_fields(error)
+    return {"exception_type": exception_type, "message": message}
 
 
 def _record_error_once(trace: AuditTrace, error: BaseException) -> None:

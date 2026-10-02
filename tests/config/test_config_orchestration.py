@@ -891,6 +891,39 @@ class TestTheExecutionRecord:
         with pytest.raises(RuntimeError, match="kaboom"):
             run_document(_document())
 
+    @pytest.mark.parametrize(
+        ("expect", "row_status", "outcome_status"),
+        [(None, "error", "error"), ("refuse", "ok", "expected_refusal")],
+    )
+    def test_an_exception_with_no_message_is_recorded_under_its_type(
+        self, handler_tables, expect, row_status, outcome_status
+    ):
+        """A bare ``assert`` in a dependency raises ``AssertionError()``, whose
+        ``str`` is empty.  The audit sink takes ``null`` or a non-empty string
+        for ``exception_message``, so the row carries the type name there: an
+        empty string was refused by the sink, and that refusal replaced the
+        run's own exception on both the uncaptured and the captured route.
+        """
+        error = AssertionError()
+
+        def fail(parsed, configured, previous):
+            raise error
+
+        EXECUTORS["forward"] = fail
+        run = {"name": "a", "kind": "forward"}
+        if expect is not None:
+            run["expect"] = expect
+        trace = _Trace()
+        prepared = prepare_document(_document(runs=[run]), scope="all_layers")
+        record = execute_prepared(prepared, trace=trace)
+        (row,) = record.runs
+        assert row.status == row_status
+        assert (row.error if expect is None else row.result.error) is error
+        ((_, outcome),) = trace.outcomes
+        assert outcome["status"] == outcome_status
+        assert outcome["exception_type"] == "builtins.AssertionError"
+        assert outcome["exception_message"] == "builtins.AssertionError"
+
     def test_the_succeeded_refusal_message_is_the_legacy_one(self):
         document = _document(runs=[{"name": "a", "kind": "forward", "expect": "refuse"}])
         record = execute_prepared(prepare_document(document, scope="all_layers"))

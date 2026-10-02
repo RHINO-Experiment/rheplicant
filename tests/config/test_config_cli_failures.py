@@ -279,6 +279,47 @@ def test_an_assembly_refused_while_running_is_a_refusal(tmp_path, capsys):
     assert diagnostics["status"] == "refused"
 
 
+def test_a_run_raising_with_no_message_publishes_an_error_naming_its_type(
+    tmp_path, capsys, monkeypatch
+):
+    """A bare ``assert`` in a dependency raises ``AssertionError()``, whose
+    ``str`` is empty.  The audit sink refuses an empty
+    ``exception_message``, and that refusal used to replace the run's own
+    exception: the tree was published as ``refused`` with a ``ConfigError``
+    about the outcome row, and the exception and its type were gone.  The
+    row now carries the type name as its message, so the tree is an
+    ``error`` and names the exception that ended the run."""
+    import json
+
+    from _rheplicant_bootstrap.cli import main
+    from rheplicant.config.sections import exits  # noqa: F401  -- fills EXECUTORS
+    from rheplicant.config.sections.exit_support import EXECUTORS
+
+    def fail(parsed, configured, previous):
+        raise AssertionError()
+
+    monkeypatch.setitem(EXECUTORS, "forward", fail)
+    target = tmp_path / "result"
+    config = tmp_path / "config.yaml"
+    value = document(output=target)
+    value["runs"] = [{"name": "a", "kind": "forward"}]
+    write_document(config, value)
+    assert main(["run", str(config)]) == 1
+    assert not tuple(tmp_path.glob("result.refused-*"))
+    (sibling,) = tuple(tmp_path.glob("result.error-*"))
+    assert f"error audit: {sibling}\n" in capsys.readouterr().err
+    diagnostics = json.loads((sibling / "diagnostics.json").read_bytes())
+    assert diagnostics["status"] == "error"
+    assert diagnostics["error"] == {
+        "exception_type": "builtins.AssertionError",
+        "message": "builtins.AssertionError",
+    }
+    (run,) = diagnostics["runs"]
+    assert run["status"] == "error"
+    assert run["exception_type"] == "builtins.AssertionError"
+    assert run["exception_message"] == "builtins.AssertionError"
+
+
 def _plan_blocks(blocks):
     """The fitting tests' own ``plan.estimate`` document with ``blocks``."""
     from tests.config.test_preflight_fitting import _doc
