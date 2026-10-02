@@ -1,10 +1,235 @@
 # Changelog
 
+## 0.9.1 — 2026-10-02
+
+Fixes since 0.9.0, one new refusal and one new keyword. The `v0.9.0` tag
+fails on a vector latent under `kind: nuts`. The fixes landed on main while
+main still declared version 0.9.0, so no version number separated the two.
+0.9.1 is the first version with the fixes: require `rheplicant>=0.9.1`.
+
+### Fixed
+
+- `kind: nuts` on a non-scalar latent raised `TypeError: only length-1 arrays
+  can be converted to Python scalars` after the chain had run. numpyro's
+  `summary` reports `r_hat` and `n_eff` per element and the product called
+  `float()` on each. `NutsProduct.diagnostics` is now shaped like its latent:
+  a `float` for a scalar latent, a read-only float64 array otherwise.
+- The command line refused every document whose `foregrounds`, `t_sys_extra`,
+  `filters`, `cal_loads` or `compose` stages were written as a list, with
+  `audit: no origin`. The builder named each entry by the bare node id while
+  the origins tree records it by index.
+- `capabilities.json` and check A53 named a built-in operator class for a node
+  declared with `python:`, wherever the node id held exactly one built-in
+  class. Such a node now has type `null`, level `null` and `level_reason`
+  `unresolved_type`.
+- A run that raised an exception with an empty message was published as a
+  `refused` tree with the error `run outcome.exception_message must be a
+  non-empty string.`, and the exception and its type were lost. The audit
+  sink refused the empty string and that refusal replaced the run's own
+  error; `expect: refuse` runs failed the same way. The tree is now an
+  `error`, exit 1, and names the exception.
+- `ruff check src tests` failed at the 0.9.0 head on one 123-character
+  comment line in `config/sections/nuts.py`.
+- `examples/gibbs_plan.py` stopped at its estimate over the seven-position
+  twin with `LinearityRefused`, at the `v0.9.0` tag as well. The refusal the
+  script is about, the identifiability one over the four-position twin, had
+  become that same linearity refusal; the script catches and prints it, so
+  only the printed text showed the change. A plan checks each
+  `linear=True` claim with probes spread to a thousand prior widths, and the
+  example's 12-bit ADC clips at ten. `SamplingPlan` had no way to decline
+  that check. It has one now (under Added). The script checks the claim out
+  to three prior widths, passes `check_linearity=False`, and runs to its end
+  in about 20 s. Its chain is 120 sweeps where it was 26: a sweep is compiled
+  once, and the two lengths take the same time.
+- `json_schema()` reported `schema_version` as `required: false`. The loader
+  refuses every document without the key. The flag is now read from the
+  predicate that refuses it, and a test drives the loader with each accepted
+  name omitted.
+
+### Added
+
+- `SamplingPlan.estimate` and `SamplingPlan.sample` take `check_linearity=`,
+  default `True`. `False` skips the check of each closed-form block's claim
+  before the first sweep, the linear one and the log-linear one. It is for a
+  model that is affine over the values the fit visits and not at the check's
+  outermost probe; a converter that clips is the usual case.
+  `check_identifiability` is a separate keyword and is not affected. A value
+  other than `True` or `False` is refused by name. Two things stay on or go
+  with it. The log route still refuses a prediction that is not positive at
+  the block's zero, which is the precondition of taking a log. And the
+  certificate has no curvature floor without a verified claim, so above 1024
+  real latents a declined estimate refuses to certify; `tol=None` runs it
+  without a claim.
+- `plan.estimate` and `plan.sample` runs take `check_linearity:`, and
+  `warm_start:` takes it for its own estimate. A document that lights
+  `model.adc` and declares `inference.checks.linearity` skipped could load
+  and then not run a plan: the plan repeats the check, and the gate does not
+  reach it. The conjugate kinds and `condition` have `check: false` for the
+  same purpose.
+  Pre-flight check A25 refuses a value that is not `true` or `false`.
+
+### What a consumer has to change
+
+- `kind: nuts` refuses a chain that keeps fewer than four draws,
+  `num_samples // thinning < 4`, when the document is parsed. Those documents
+  did not run before either: numpyro's split `r_hat` asserts four draws per
+  chain and raised `AssertionError()` with no message after the chain had
+  been drawn. The refusal names the run and the smallest `num_samples` that
+  works at the declared thinning. `rheplicant validate` reports it.
+- In `diagnostics.json`, `runs[].exception_message` and `error.message` are
+  never empty for a raised exception. An exception with no message is
+  recorded under its qualified type name in both, the same string as
+  `exception_type`. The format version is unchanged.
+- `NutsProduct.diagnostics[name]["r_hat"]` and `["n_eff"]` are arrays for a
+  non-scalar latent. Code that called `float()` on them needs an index.
+- `json_schema()["sections"]` gives `schema_version` as `required: true`. No
+  document changes. A consumer that stores the projection regenerates it;
+  rheplicant-agent's generated `schema.ts` differs in that one flag.
+- The run grammar and the form catalogue each have one more optional key,
+  `check_linearity`, on `plan.estimate`, `plan.sample` and `warm_start`. A
+  consumer that pins those kinds' key lists adds it.
+
+### bayesmith
+
+- bayesmith 0.10.0 is on PyPI as of 2026-10-02, so the declared range
+  `bayesmith>=0.10,<0.11` resolves from the index. The install instructions
+  no longer name a local wheel or a `--find-links` directory, and CI's suite
+  jobs can install.
+- The README, the inference pages and `docs/bayesmith.md` state the
+  relationship as it is: bayesmith is a required dependency and
+  `rheplicant.inference` is built on it. They used to call the two packages
+  siblings held in agreement by a cross-check suite. The delegation table on
+  the bayesmith page lists every bayesmith module this package imports, and a
+  test compares it with `src/` in both directions.
+- The fresh-environment tests install bayesmith from the index. They used to
+  install a wheel from a sibling checkout after checking its sha256 against a
+  release manifest, and failed on that comparison when the wheel was rebuilt
+  at the release tag.
+- bayesmith's `61d4644` removed its `tests/crosscheck/`, which
+  `docs/stability.md` named as what holds this package's deliberate reference
+  implementations in agreement. The two files that do that,
+  `test_sqrtinfo_agrees.py` and `test_linear.py`, are now in this
+  repository's `tests/crosscheck/`, 11 tests. Two tests that asserted only
+  bayesmith's behaviour were not brought over.
+
+### Documentation
+
+A pass over every page against the code. What it corrected:
+
+- `require_convergence=` on `wiener_solve`, `gcr_sample` and `iterative_gls`
+  is off by default. The conditioning section of the linear-inference page,
+  the solver's own docstring and one example said it defaulted to `1e-3`. The
+  same section now says the guard reads `condition_bound`, an upper bound, and
+  that `condition_estimate` is a diagnostic that is biased low.
+- The guided tour's printed output for the linearity check, the 500 exact
+  draws and the refused spectral index were from before the solves moved to
+  bayesmith. They are replaced with what the tour prints today.
+- The command-line page ties the exit status, the published tree and the
+  `status` in `diagnostics.json` together in one table, names the failure
+  sibling as it is written (`NAME.results.refused-<32 hex digits>/`), and
+  says a file `NAME.yaml` publishes to `NAME.results/`.
+- A refused `load_document` carries its findings: the `ConfigError` has the
+  cumulative `Report` as `.report`. The validation page said it produced no
+  record.
+- The capability table's definition of Maintained is the module's own,
+  "documented contract, regression-tested within its declared domain". The
+  generated page had a stronger one.
+- The install page's test section gave commands, timings and a suite size
+  from August. It now gives the two-phase run and says what a complete test
+  environment holds.
+- The signal-path page described two figures as five and nine operators with
+  a `beam`; the code that draws them places four and eight, and `beam` is a
+  reserved node.
+- The examples page lists `gls_gcr.py` as needing `cal`, counts five scripts
+  at 20 s or more, and describes `examples/global21cm/`.
+- Smaller corrections on the stability, contracts, operators, evidence,
+  inference-plan and configuration pages, and in `DESIGN.md` and
+  `RELEASING.md`.
+- `docs/config-anatomy.md` has reference sections for `runtime:` and
+  `variants:`, which no page had.
+- The guided tour's figures are regenerated, and the statistics quoted beside
+  them are re-measured: χ²/dof of the pulls is 1.02 where the caption said
+  0.98, and the 20 000-draw comparison with the dense posterior gives a worst
+  off-diagonal correlation of 0.020 and a KS p-value of 0.92.
+- The two tutorial pages print what their scripts print today. The NUTS
+  tutorial's failing run reads `r_hat` 846 and the repaired one 1.003 with
+  1259 effective draws; the GCR tutorial's coverage is 70 %, where the page
+  said "exactly 68 %". The tutorial's advice to pass
+  `extra_fields=("diverging",)` now says that NUTS records divergences by
+  default and that the count has to be read.
+
+The prose of every page was then revised to state facts plainly: asides in
+dashes, sentences that evaluate themselves, announcements, and labels a
+reader cannot resolve ("Plan 2B", "T-002", "D-C8") are gone, and 57 headings
+that were claims are topics. No fenced block, number or link target changed
+in that pass, and links to the renamed headings were updated with them.
+Anchors to those headings from outside this documentation will need updating.
+
+Three changes to the pages came with the fixes listed at the top:
+
+- The plans page has a section on the linearity check and a stage that
+  saturates, with the departure at each probe scale measured on the example's
+  twin: zero out to seven prior widths, 0.29 at ten.
+- The configuration overview lists `schema_version` as required.
+- `docs/agentic-ui-design.md`, a design draft for another repository, is
+  removed. It was an orphan page and nothing linked to it.
+
+`publish.yml`'s wheel check imported a helper from a test module that imports
+pytest, which the wheel does not depend on, so the build job would have failed
+before any upload. It installs pytest into the check's environment now.
+
+### Examples
+
+- `examples/global21cm/` is in the repository: two configured foreground
+  strategies and an oracle fitted to one simulated drift scan, six documents
+  (`oracle`, `beamconv`, `physical` and their `_quick` forms), the plugin and
+  hooks they load, and the example's own tests. Its README states what it
+  needs beyond this package and how long each step takes. The repository's
+  suite does not collect its tests.
+- The sixteen simulated arrays the six documents read are kept in git,
+  1.6 MB, so a checkout can `rheplicant validate` and `rheplicant run` each
+  document. Measured in a fresh clone: all six validate and run, and the
+  draws of all twelve runs equal, bit for bit, those of the run trees the
+  kept scores were computed from. The step that writes the arrays needs
+  inputs that are not public, and the steps that prepare and score read
+  products that are not kept, so those do not run from a checkout.
+  `results/analysis/fom.json` records the sha256 of all sixteen. Two of them
+  derive from RHINO's HornWet beam simulations:
+  `results/sim_stress/beam_alm_fit.npy` holds the beams' harmonic
+  coefficients to lmax 47 at 31 channels, and
+  `results/sim_stress/beam_svd_spectra.npy` eight frequency singular vectors.
+- `examples/global21cm/requirements.txt` installs what the example needs
+  beyond the `numpyro` extra: `global21cm-jax` from the 21cmVAE-jax
+  repository, pinned to the commit the kept results were made at, and
+  `pygdsm`.
+
+### Tests and tooling
+
+- `tests/test_examples_run.py` runs the example scripts, reading each
+  script's needs and time from the table on the examples page. Twelve run by
+  default. The three documented at 59 s or more run only with
+  `RHEPLICANT_ALL_EXAMPLES=1`, and on a CI runner no script runs without it.
+  Nothing ran the scripts before, which is how `gibbs_plan.py` stayed broken.
+- `tests/test_global21cm_documents.py` asks git for every file the six
+  documents name, compares the tracked arrays with the hashes in `fom.json`,
+  and validates each document where the emulator is installed. The CI runner
+  does not install it, so those six cases skip there.
+- The citation census and the config-surface boundary scan compared their
+  skip lists against absolute paths, so from a worktree under
+  `.claude/worktrees/` every file was skipped and each check passed over an
+  empty tree. Both now compare paths below the checkout's root.
+- The fresh-venv tests looked for the bayesmith release beside
+  `PROJECT_ROOT`, which from a worktree is not the sibling checkout, and
+  skipped while the release was on disk. The main checkout is found with
+  `git rev-parse --git-common-dir`, and `RHEPLICANT_BAYESMITH_CHECKOUT` names
+  any other location.
+
 ## 0.9.0 — 2026-09-20
 
 ### What changed, in one page
 
-The detail below runs to a hundred sections in the order things happened.
+The detail below runs to about thirty sections and a thousand lines, in the
+order things happened.
 This is the same release grouped by what it affects, for a reader deciding
 whether it concerns them.
 
@@ -18,8 +243,9 @@ than guessing, and every refusal names the key to edit.
 software, the runtime, the inputs and the artefacts; `diagnostics.json`
 records the findings, the gates and the runs; `integrity.json` anchors the
 whole tree on one digest; `capabilities.json` says which of the physics that
-run used was a stand-in. All four are closed, versioned formats with schemas
-that ship in the wheel.
+run used was a stand-in. `provenance.json`, `diagnostics.json` and
+`capabilities.json` are closed, versioned formats whose schemas ship in the
+wheel, as is `products.json`; `integrity.json` carries a format version.
 
 **There is a browser editor.** It keeps exact YAML as the only scientific
 state, organises the work into Model, Config, Execute and Results, and runs
@@ -30,8 +256,8 @@ its HTTP API is internal and versioned with the client bundled beside it.
 **The inference layer answers to bayesmith.** The block partition, the
 per-block engine, the exact solves, the chain marginal and the convergence
 certificate are upstream's; NumPyro supplies the chain. What remains here as
-a second implementation is labelled as one and held in agreement by a
-cross-check suite. See [the bayesmith page](https://rheplicant.readthedocs.io/en/latest/bayesmith.html) for the
+a second implementation is labelled as one and tested against bayesmith or
+against a dense oracle (`docs/stability.md` lists each). See [the bayesmith page](https://rheplicant.readthedocs.io/en/latest/bayesmith.html) for the
 version range and why it is closed.
 
 **The instrument model gained real physics in places and declares where it
