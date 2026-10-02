@@ -12,11 +12,11 @@ are in the repository and not in the wheel, so run them from a clone.
 ```
 
 :::{warning}
-Four scripts take 20 s or more. `tutorial_nuts.py` runs NUTS twice and takes
+Five scripts take 20 s or more. `tutorial_nuts.py` runs NUTS twice and takes
 **185 s**. `driftscan_mmode.py` (**61 s**) and `sky_to_noise_wave.py`
 (**59 s**) are dominated by JIT compilation. `three_ways_to_a_posterior.py`
-takes 26 s. Ten finish in under ten seconds. `gibbs_plan.py` does not run to
-its end at 0.9.1; its row says where it stops.
+takes 26 s and `gibbs_plan.py` 20 s. The other ten finish in under ten
+seconds.
 :::
 
 ## Forward modelling
@@ -110,11 +110,12 @@ its end at 0.9.1; its row says where it stops.
   - numpyro
 * - `gibbs_plan.py`
   - One `SamplingPlan` over six latents, conjugate blocks and a gradient
-    block, over the guided tour's twin and then over a seven-position repair
-    of it. At 0.9.1 the script stops at its estimate over the repaired twin
-    with `LinearityRefused`: the linearity check probes each latent at 1000
-    times its prior width, and the twin's 12-bit ADC clips there
-  - 9 s, to the refusal
+    block. Over the guided tour's twin the plan is refused, because the six
+    latents are degenerate there; three more calibration loads repair it and
+    the script takes both exits. The twin's 12-bit ADC clips at the
+    linearity check's outermost probe, so the script checks the claim over
+    the range the fit visits and passes `check_linearity=False`
+  - 20 s
   - `cal`, numpyro
 :::
 

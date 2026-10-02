@@ -1037,8 +1037,11 @@ of it.
 :::
 
 [`examples/gibbs_plan.py`](https://github.com/RHINO-Experiment/rheplicant/blob/main/examples/gibbs_plan.py) is this section as a script,
-with the seven-position repair and both exits. At 0.9.1 it stops at its
-estimate over the repaired twin; [the examples page](examples.md) says why.
+with the refusal, the seven-position repair and both exits, in about 20 s.
+Its plan calls pass `check_linearity=False`: a plan checks each `linear=True`
+claim out to a thousand prior widths, where this twin's 12-bit ADC clips.
+[The plans page](inference-plans.md#the-linearity-check-and-a-stage-that-saturates)
+has the measurement.
 
 ## Where to go next
 

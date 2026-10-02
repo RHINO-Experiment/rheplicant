@@ -627,6 +627,69 @@ reaches. Both exits check by default. Skipping the check is more dangerous on
 the point estimate: a chain still has `r_hat`, while a point estimate has no
 diagnostic and CG converges quietly onto an arbitrary point of the null space.
 
+### The linearity check, and a stage that saturates
+
+Before its first sweep a plan checks each closed-form block's claim once:
+`check_linearity` for a conjugate block and `check_log_linearity` for a
+log-conjugate one, at their default probe scales. A block whose claim fails is
+refused before any solve, and the rebuilds inside the sweep do not repeat the
+check.
+
+`check_linearity=False` on either exit skips that check. It is for a model
+whose claim holds over the values the fit visits and fails at the check's
+outermost probe, a thousand prior widths out. A converter that clips is the
+usual case. Measured on the twin of
+[`examples/gibbs_plan.py`](https://github.com/RHINO-Experiment/rheplicant/blob/main/examples/gibbs_plan.py),
+whose four temperature families carry a `Normal(0, 400)` prior in kelvin and
+sit ahead of a 12-bit ADC at 0.25 counts per kelvin; the largest sample is 385
+of 2048 counts:
+
+| probe scale, in prior widths | worst departure from affine | verdict |
+|---|---|---|
+| 0.001 | 4.9e-12, below the roundoff floor | pass |
+| 1, 3, 5, 7 | 0 | pass |
+| 10 | 0.29 | refused |
+| 30 | 2.9 | refused |
+| 1000, the default's outermost | 128 | refused |
+
+The model is affine out to seven prior widths and clipped at ten, and the fit
+stays within one. The script checks the range it uses and then declines the
+plan's check:
+
+```python
+check_linearity(joint, fit7, state7, names=NAMES, scales=(1e-3, 1.0, 3.0))
+est = plan.estimate(fit7, state7, observed7, noise=NOISE_STD,
+                    max_iter=45, tol=1e-3, check_linearity=False)
+```
+
+A conjugate block is solved as the affine map tangent to the model at the
+block's zero. With the check skipped, the answer is the model's own only where
+the model equals that map. The explicit call establishes that over the range
+it probes.
+
+Two things follow from declining the check.
+
+- **The log route keeps one refusal.** `check_log_linearity` probes out to one
+  prior width, and `check_linearity=False` skips those probes as it skips the
+  linear ones. It does not skip the refusal of a prediction that is not
+  positive at the block's zero. That is the precondition of taking a log, and
+  without it the solve returns its starting values and reports them as
+  converged.
+- **The certificate has no curvature floor.** Above 1024 real latents an
+  estimate bounds its distance to the MAP with the prior precision as a floor
+  on the joint Hessian, and that floor is a proof only where the prediction
+  was verified affine. With the check declined there is no floor, so an
+  estimate of that size refuses to certify at `max_iter`. `tol=None` runs the
+  sweeps and makes no claim.
+`check_identifiability` is a separate keyword and is not affected: on the
+four-position twin the same script passes `check_linearity=False` and is
+refused by the rank test, which is the refusal it is there to show.
+
+In a configuration document the keyword is `check_linearity: false` on a
+`plan.estimate` or `plan.sample` run, and inside `warm_start:`. See
+[the post-flight pass](config-validation.md#the-post-flight-pass-and-what-it-costs)
+for the document-level gate that goes with it.
+
 ### Two limitations
 
 :::{warning}
@@ -857,6 +920,10 @@ on one twin, from truth to recovery.
 ```
 
 [`examples/gibbs_plan.py`](https://github.com/RHINO-Experiment/rheplicant/blob/main/examples/gibbs_plan.py)
-builds one `SamplingPlan` over six latents, with conjugate blocks and a
-gradient block. At 0.9.1 it does not run to its end;
-[the examples page](examples.md) says where it stops.
+runs one `SamplingPlan` over six latents, with conjugate blocks and a gradient
+block: the refusal over the guided tour's twin, the seven-position repair and
+both exits. It needs `rhino-cal-jax` and numpyro and takes about 20 s.
+
+```bash
+.venv/bin/python examples/gibbs_plan.py
+```

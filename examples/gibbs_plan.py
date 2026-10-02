@@ -18,7 +18,7 @@ The repair is design, not tolerance: three more calibration loads, seven switch
 positions, nullity 0. The tour's own tip -- the switching cycle IS the
 calibration design -- one step further. Two more unknowns need more design.
 
-Run:  .venv/bin/python examples/gibbs_plan.py    (~45 s)
+Run:  .venv/bin/python examples/gibbs_plan.py    (~20 s)
 Needs: rhino-cal-jax (the `cal` extra) and numpyro.
 """
 
@@ -237,9 +237,29 @@ FG = ("fg_log_amp", "fg_beta")
 plan = SamplingPlan(joint, Block(*NAMES), Block(*FG, steps=200))
 print(plan)
 
+
+def affine_where_the_fit_goes(fit, at_state, data):
+    """Check the temperatures' linear=True claim out to three prior widths.
+
+    The claim holds below the converter's clip and not above it. A plan checks
+    it with random probes whose spread reaches a thousand prior widths,
+    400 000 K here, where twelve bits do clip, so the plan's own check refuses
+    this twin whatever the data are. The probes below spread every temperature
+    by up to three prior widths, 1200 K; the estimate and the draws stay
+    within one. Having checked that range, the plan calls below pass
+    check_linearity=False.
+    """
+    errors = check_linearity(joint, fit, at_state, names=NAMES, scales=(1e-3, 1.0, 3.0))
+    print(f"affine to 3 prior widths: worst departure {max(errors.values()):.1e}"
+          f" | peak sample {float(jnp.max(jnp.abs(data))):.0f}"
+          f" of {2 ** (N_BITS - 1)} counts")
+
+
 # The tour's own four switch positions cannot carry six latents.
+affine_where_the_fit_goes(fit_twin, state, observed)
 try:
-    plan.estimate(fit_twin, state, observed, noise=NOISE_STD, max_iter=3)
+    plan.estimate(fit_twin, state, observed, noise=NOISE_STD, max_iter=3,
+                  check_linearity=False)
 except Exception as exc:
     lines = str(exc).splitlines()
     print(lines[0][:104] + " ...")
@@ -277,7 +297,9 @@ TRUTH6 = {**TRUE, "fg_log_amp": jnp.log(jnp.array(2500.0)),
           "fg_beta": jnp.array(2.55)}
 
 # Exit 1 -- the best fit.
-est = plan.estimate(fit7, state7, observed7, noise=NOISE_STD, max_iter=45, tol=1e-3)
+affine_where_the_fit_goes(fit7, state7, observed7)
+est = plan.estimate(fit7, state7, observed7, noise=NOISE_STD, max_iter=45, tol=1e-3,
+                    check_linearity=False)
 d = est.diagnostics
 print(f"\nestimate  sweeps {d.sweeps}  converged {d.converged}  "
       f"chi2 {d.chi2[0]:.3g} -> {d.chi2[-1]:.4f}   (512 data, 34 parameters)")
@@ -287,14 +309,13 @@ print(f"  per-block last number "
 print(f"  rank {d.identifiability.rank} of {d.identifiability.n_par}, "
       f"nullity {d.identifiability.nullity}")
 
-# Exit 2 -- draws, started from that best fit. 26 sweeps is what fits in a
-# tour; n_sweeps=120, warmup=20 gives r_hat 0.990 and sigma(fg_beta) 0.0069,
-# in 81 s.
+# Exit 2 -- draws, started from that best fit. A sweep is compiled once, so
+# the script takes about 20 s whether it runs 26 sweeps or these 120.
 warm = eqx.tree_at(lambda s: [s.latent(n).init for n in FG], joint,
                    [est.values[n] for n in FG])
 draws = SamplingPlan(warm, Block(*NAMES), Block(*FG, steps=25)).sample(
     fit7, state7, observed7, noise=NOISE_STD, key=jax.random.key(11),
-    n_sweeps=26, warmup=8)
+    n_sweeps=120, warmup=20, check_linearity=False)
 dd = draws.diagnostics
 print(f"\nsample    sweeps {dd.sweeps}  warmup {dd.warmup}  kept {draws.n_draw}  "
       f"r_hat(joint chi2) {dd.rhat:.3f}  converged {dd.converged}")

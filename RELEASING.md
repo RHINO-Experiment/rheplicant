@@ -35,7 +35,9 @@ protection rules under **Settings → Environments** for a manual approval gate.
    package's `__version__` is read back from the installed distribution
    metadata (`importlib.metadata.version`), so never hardcode a version string
    anywhere else in the source. Update `CHANGELOG.md` and the README test
-   count, then commit.
+   count, then commit. Run `tests/test_examples_run.py` once with
+   `RHEPLICANT_ALL_EXAMPLES=1` on that commit: CI runs none of the example
+   scripts, and three of them are skipped by default.
 2. Read `README.md` as the page PyPI will show for this version: it is the
    long description (`readme = "README.md"`), and it cannot be edited after
    the upload. The install section says which version PyPI serves; update
