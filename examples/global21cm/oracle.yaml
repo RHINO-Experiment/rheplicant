@@ -1,0 +1,148 @@
+# The oracle: the true foreground is subtracted exactly, so only the 21 cm
+# parameters and the noise are left. It is the reference for eta (fom.py).
+#
+# The foreground is integrated out of the likelihood exactly (collapse.py),
+# leaving one Gaussian statistic y ~ Normal(D T21(theta), (10 mK)^2 I) of at
+# most n_freq numbers, which is what is fitted: the seven 21cmVAE parameters
+# are the only latents, and the observation grid is one time sample by the
+# channel grid. resources.arrays.foreground is the strategy; `design` refuses
+# unless inference.observed is this strategy's statistic of this waterfall
+# (prepare.py writes it by calling the same function with the same arguments).
+#
+# Two scenarios: the base is the main one (45-135 MHz, analytic chromatic
+# Gaussian beam); variant `stress` is RHINO's 55-85 MHz band with the HornWet
+# horn beam. Both runs execute.
+#
+# Run from the repository root (README.md, "Running"):
+#   PYTHONPATH=examples .venv/bin/rheplicant run examples/global21cm/oracle.yaml
+schema_version: 1
+
+runtime:
+  seed: 20260923
+  jax_enable_x64: true
+  seeds: {main: 31, stress: 32}
+
+plugins: [global21cm.plugin]
+
+observation:
+  meta: {telescope: RHINO}
+  freq:
+    grid:
+      linspace: {start: 45.0, stop: 135.0, num: 46, endpoint: true}
+      unit: MHz
+  time:
+    grid:
+      arange: {start: 0.0, step: 1.0, num: 1}
+      unit: s
+
+resources:
+  arrays:
+    foreground:
+      python: "global21cm.strategies:known_foreground"
+      args:
+        waterfall: {file: {path: results/sim/waterfall.npy, format: npy}}
+        fg_truth: {file: {path: results/sim/fg_truth.npy, format: npy}}
+    design:
+      python: "global21cm.strategies:design_checked"
+      args:
+        collapsed: {ref: resources.arrays.foreground}
+        observed: {file: {path: results/sim/oracle_data.npy, format: npy}}
+    # The chains' start: the prior-bank draw of highest posterior, this
+    # strategy's likelihood times the unit-normal prior (strategies.start_point);
+    # the posterior can be multimodal.
+    start:
+      python: "global21cm.strategies:start_point"
+      args:
+        collapsed: {ref: resources.arrays.foreground}
+        freqs_mhz: {file: {path: results/sim/freqs_mhz.npy, format: npy}}
+
+variants:
+  stress:
+    observation:
+      freq:
+        grid:
+          linspace: {start: 55.0, stop: 85.0, num: 31, endpoint: true}
+    resources:
+      arrays:
+        foreground:
+          args:
+            waterfall: {file: {path: results/sim_stress/waterfall.npy, format: npy}}
+            fg_truth: {file: {path: results/sim_stress/fg_truth.npy, format: npy}}
+        design:
+          args:
+            observed: {file: {path: results/sim_stress/oracle_data.npy, format: npy}}
+        start:
+          args:
+            freqs_mhz: {file: {path: results/sim_stress/freqs_mhz.npy, format: npy}}
+    inference:
+      observed:
+        file: {path: results/sim_stress/oracle_data.npy}
+
+model:
+  global_signal:
+    python: "global21cm.signal21:CompressedSignal"
+    # The centre of the emulator's box; the latents below replace it.
+    theta: {list: [-2.15035, 1.311547, -1.5, 0.106898, 1.25, 1.55, 30.0]}
+    design: {ref: resources.arrays.design}
+
+inference:
+  parameters:
+    # theta = box_low + (box_high - box_low) Phi(u): a uniform prior on the
+    # emulator's training box (signal21.box_from_unit_normal).
+    u_fstar:
+      init: {python: "global21cm.strategies:component", args: {start: {ref: resources.arrays.start}}, literal: {index: 0}}
+      prior: {normal: {loc: 0.0, scale: 1.0}}
+    u_vc:
+      init: {python: "global21cm.strategies:component", args: {start: {ref: resources.arrays.start}}, literal: {index: 1}}
+      prior: {normal: {loc: 0.0, scale: 1.0}}
+    u_fx:
+      init: {python: "global21cm.strategies:component", args: {start: {ref: resources.arrays.start}}, literal: {index: 2}}
+      prior: {normal: {loc: 0.0, scale: 1.0}}
+    u_tau:
+      init: {python: "global21cm.strategies:component", args: {start: {ref: resources.arrays.start}}, literal: {index: 3}}
+      prior: {normal: {loc: 0.0, scale: 1.0}}
+    u_alpha:
+      init: {python: "global21cm.strategies:component", args: {start: {ref: resources.arrays.start}}, literal: {index: 4}}
+      prior: {normal: {loc: 0.0, scale: 1.0}}
+    u_nu_min:
+      init: {python: "global21cm.strategies:component", args: {start: {ref: resources.arrays.start}}, literal: {index: 5}}
+      prior: {normal: {loc: 0.0, scale: 1.0}}
+    u_rmfp:
+      init: {python: "global21cm.strategies:component", args: {start: {ref: resources.arrays.start}}, literal: {index: 6}}
+      prior: {normal: {loc: 0.0, scale: 1.0}}
+  bindings:
+    - latents: [u_fstar, u_vc, u_fx, u_tau, u_alpha, u_nu_min, u_rmfp]
+      into: global_signal.theta
+      transform: {python: "global21cm.signal21:stack_theta", fan: broadcast}
+  noise:
+    kind: homoscedastic
+    sigma: {value: 0.01, unit: K}
+  observed:
+    file: {path: results/sim/oracle_data.npy, format: npy}
+
+runs:
+  - name: posterior
+    kind: nuts
+    num_warmup: 1000
+    num_samples: 1000
+    num_chains: 4
+    chain_method: sequential
+    seed: {from: runtime.seeds.main}
+    progress_bar: false
+  - name: stress
+    variant: stress
+    kind: nuts
+    num_warmup: 1000
+    num_samples: 1000
+    num_chains: 4
+    chain_method: sequential
+    seed: {from: runtime.seeds.stress}
+    progress_bar: false
+
+outputs:
+  dir: results/oracle
+  clobber: true
+  write:
+    draws: true
+    run_diagnostics: true
+    timings: true
