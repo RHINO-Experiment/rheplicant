@@ -39,21 +39,25 @@ def _drive(spec, built):
     Plan 4A Task 9 moved the grammar into the parser, so a SUCCESS path must
     come through the parse seam (the seed travels as its resolved integer).
     """
-    from _rheplicant_bootstrap.variants import LayerRef
-    from rheplicant.config.sections.exit_support import (
-        handler_for,
-        parse_run,
-    )
+    from rheplicant.config.sections.exit_support import handler_for
 
-    parsed = parse_run(
+    parsed = _parse(spec, built)
+    handler = handler_for(spec.kind)
+    handler.pre_execute(parsed, built, {})
+    return handler.execute(parsed, built, {})
+
+
+def _parse(spec, built):
+    """The parse seam alone: what ``rheplicant validate`` reaches."""
+    from _rheplicant_bootstrap.variants import LayerRef
+    from rheplicant.config.sections.exit_support import parse_run
+
+    return parse_run(
         spec,
         built,
         index=0,
         layer=LayerRef(kind="base", name=None, prefix="", document={}, declared_runs=None),
     )
-    handler = handler_for(spec.kind)
-    handler.pre_execute(parsed, built, {})
-    return handler.execute(parsed, built, {})
 
 
 def product(run=None, **document):
@@ -218,6 +222,76 @@ class TestTheRequiredKeys:
         """
         with pytest.raises(ConfigError, match="must be >= 1"):
             _run_nuts(nuts_spec(num_samples=count), nuts_built())
+
+    #: ``(num_samples, thinning)`` either side of the floor at three thinnings
+    #: and at a thinning in the thousands.  The pairs at ``thinning > 1`` are
+    #: the ones a rule on ``num_samples`` alone lets through.
+    _KEPT_CELLS = [
+        (1, 1),
+        (3, 1),
+        (4, 1),
+        (7, 2),
+        (8, 2),
+        (11, 3),
+        (12, 3),
+        (5000, 1251),
+        (5000, 1250),
+    ]
+
+    @pytest.mark.parametrize(("num_samples", "thinning"), _KEPT_CELLS)
+    def test_the_draw_floor_is_numpyros_own_at_every_thinning(self, num_samples, thinning):
+        """The parser refuses the cells numpyro's ``summary`` refuses.
+
+        ``NutsProduct.diagnostics`` is ``summary``'s, whose split r_hat is a
+        bare ``assert x.shape[1] >= 4`` on the draws each chain KEEPS,
+        ``num_samples // thinning``.  Measured through the executor over 66
+        cells of num_samples x thinning x num_chains: every cell below four
+        kept draws raised ``AssertionError()`` with an empty message after
+        the chain had run, and ``num_chains`` did not enter.
+
+        Both sides are evaluated here: ``summary`` on an array of the kept
+        shape, and the parser on the document that would produce it.  A
+        floor that drifts from the package's turns this red at the cell where
+        they part.
+        """
+        from numpyro.diagnostics import summary
+
+        kept = num_samples // thinning
+        draws = np.random.default_rng(0).normal(size=(1, kept))
+        try:
+            summary({"g": draws})
+        except AssertionError as bare:
+            assert str(bare) == ""
+            package_refuses = True
+        else:
+            package_refuses = False
+        assert package_refuses == (kept < 4)
+        spec = nuts_spec(num_samples=num_samples, thinning=thinning)
+        if not package_refuses:
+            assert _parse(spec, nuts_built()).options["num_samples"] == num_samples
+            return
+        for route in (_parse, _run_nuts):
+            with pytest.raises(ConfigError) as caught:
+                route(spec, nuts_built())
+            message = str(caught.value)
+            assert message.startswith("runs['chain']: num_samples:")
+            assert f"keeps {kept} draw(s) per chain" in message
+            assert f"num_samples: {4 * thinning} or more" in message
+
+    def test_a_thinning_that_keeps_no_draw_is_refused(self):
+        """``num_samples: 2, thinning: 3`` keeps none.  Measured: numpyro
+        raises ``IndexError: index is out of bounds for axis 0 with size 0``
+        there, naming no run and no key."""
+        with pytest.raises(ConfigError, match=r"keeps 0 draw\(s\) per chain"):
+            _parse(nuts_spec(num_samples=2, thinning=3), nuts_built())
+
+    @pytest.mark.parametrize(("num_samples", "thinning"), [(4, 1), (8, 2)])
+    def test_a_chain_at_the_floor_runs(self, num_samples, thinning):
+        """Four kept draws is accepted by the parser AND runs: the floor is
+        not one draw higher than the package's."""
+        drawn = product({"num_samples": num_samples, "thinning": thinning, "num_warmup": 5})
+        assert drawn.n_draw == 4
+        assert set(drawn.diagnostics["g"]) == {"r_hat", "n_eff"}
 
     def test_an_unknown_key_is_swept(self):
         """`step_size` is a real NUTS parameter this layer does not offer.

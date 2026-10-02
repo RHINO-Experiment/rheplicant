@@ -84,6 +84,9 @@ parser raises it without building the strategy) and :func:`_parse_nuts`
 The three ``chain_method`` words numpyro takes stay a LOCAL, now inside
 :func:`_parse_nuts`, so this inventory stays exhaustive.
 
+*Two more for the draw floor*: :data:`_MIN_KEPT` and :func:`_kept_floor`,
+which the parser and the executor both call.
+
 Tasks 5 and 6 GROW :data:`_NUTS_KEYS` and ``NutsProduct`` rather than
 rebinding them, and Task 5 added the ``@register("nuts")`` decorator to
 :func:`_run_nuts`.
@@ -140,6 +143,10 @@ _MCMC_KEYS = ("num_chains", "chain_method", "thinning", "progress_bar")
 _NUTS_KERNEL_KEYS = ("target_accept_prob",)
 
 _COUNTS = ("num_warmup", "num_samples")
+#: The fewest draws a chain may KEEP.  ``NutsProduct.diagnostics`` is
+#: ``numpyro.diagnostics.summary``'s, whose split r_hat halves each chain and
+#: is ``assert x.shape[1] >= 4`` on what it is handed.
+_MIN_KEPT = 4
 #: What ``init:`` may say.  ``declared`` is the DEFAULT, and it is this
 #: layer's own choice rather than a restatement of numpyro's -- see
 #: :func:`_init_strategy`.
@@ -210,6 +217,28 @@ def _per_element(value: Any) -> float | np.ndarray:
         return float(array)
     array.flags.writeable = False
     return array
+
+
+def _kept_floor(run: Any, num_samples: int, thinning: int) -> None:
+    """Refuse a chain that keeps fewer draws than its diagnostics take.
+
+    numpyro keeps ``num_samples // thinning`` draws per chain, and below
+    :data:`_MIN_KEPT` its ``summary`` raises ``AssertionError()`` with no
+    message, after the whole chain has run.  Measured through the executor
+    over 66 cells of num_samples x thinning x num_chains: the kept count
+    decides every one and ``num_chains`` does not enter.  A thinning that
+    keeps no draw at all is an ``IndexError`` instead, and is refused here on
+    the same line.
+    """
+    kept = num_samples // thinning
+    if kept < _MIN_KEPT:
+        raise ConfigError(
+            f"runs[{run.name!r}]: num_samples: {num_samples} with thinning: "
+            f"{thinning} keeps {kept} draw(s) per chain, and this exit "
+            "reports a split r_hat per latent, which numpyro computes from "
+            "two halves of at least two draws each. Declare num_samples: "
+            f"{_MIN_KEPT * thinning} or more."
+        )
 
 
 def _init_choice(run: Any, built: Any, space: Any) -> str:
@@ -326,6 +355,7 @@ def _parse_nuts(options, context):
                 "nobody wrote down."
             )
     normalized = {key: _number(spec, key, options[key], kind=int, minimum=1) for key in _COUNTS}
+    _kept_floor(spec, normalized["num_samples"], options.get("thinning", 1))
     # Presence and form, then the resolved integer in BOTH views -- the
     # freeze turns a declaration mapping into a proxy ``_seed_name`` would
     # refuse, so the executor reads the int and builds the key itself.
@@ -424,6 +454,7 @@ def _run_nuts(run: ParsedRun, built: Any, previous: Any = None) -> Any:
                 "nobody wrote down."
             )
     counts = {key: _number(run, key, run.options[key], kind=int, minimum=1) for key in _COUNTS}
+    _kept_floor(run, counts["num_samples"], run.options.get("thinning", 1))
     space = _sampled_space(run, built, route="nuts")
     observed = _observed(run, built)
     # _noise, never _decided_sigma: see the module docstring.
@@ -452,10 +483,11 @@ def _run_nuts(run: ParsedRun, built: Any, previous: Any = None) -> Any:
     # row under a key no latent owns.  `r_hat` and `n_eff` are two of the
     # seven keys it returns, one entry per element of the latent: a numpy
     # scalar for a scalar latent, an array of its shape otherwise.
-    # `_per_element` turns the first into a `float` and freezes the second.  No `prob=` argument: the plan's snippet passed
-    # `prob=0.9`, which IS the package default and controls only the
-    # '5.0%'/'95.0%' rows the comprehension below discards -- restating a
-    # default two lines above the comment refusing to restate one.
+    # `_per_element` turns the first into a `float` and freezes the second.
+    # No `prob=` argument: the plan's snippet passed `prob=0.9`, which IS the
+    # package default and controls only the '5.0%'/'95.0%' rows the
+    # comprehension below discards -- restating a default two lines above the
+    # comment refusing to restate one.
     grouped = mcmc.get_samples(group_by_chain=True)
     table = summary({name: grouped[name] for name in space.names})
     # `diverging` is in get_extra_fields() with NO extra_fields= argument

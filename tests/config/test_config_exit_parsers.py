@@ -1515,7 +1515,7 @@ class TestRemainingParsersDoNotExecuteScience:
             (
                 "nuts",
                 "nuts_configured",
-                {"num_warmup": 2, "num_samples": 2, "seed": {"from": "runtime.seeds.chain"}},
+                {"num_warmup": 2, "num_samples": 4, "seed": {"from": "runtime.seeds.chain"}},
             ),
             ("npe", "npe_configured", {}),
         ],
@@ -1563,12 +1563,12 @@ class TestRemainingKindsNormalizeTheirDefaults:
             "nuts",
             nuts_configured,
             num_warmup=2,
-            num_samples=2,
+            num_samples=4,
             seed={"from": "runtime.seeds.chain"},
         )
         assert _plain(parsed.parsed.resolved) == {
             "num_warmup": 2,
-            "num_samples": 2,
+            "num_samples": 4,
             "seed": 3,
             "init": "declared",
             "num_chains": 1,
@@ -1696,7 +1696,7 @@ class TestRemainingOptionRefusalsHappenAtParse:
                 "nuts",
                 nuts_configured,
                 num_warmup=2,
-                num_samples=2,
+                num_samples=4,
                 seed={"from": "runtime.seeds.chain"},
                 chain_method="sidecar",
             )
@@ -1709,7 +1709,7 @@ class TestRemainingOptionRefusalsHappenAtParse:
 
     def test_nuts_seed_must_name_an_entry(self, nuts_configured):
         with pytest.raises(ConfigError, match="seed must NAME an entry"):
-            _parse_conjugate("nuts", nuts_configured, num_warmup=2, num_samples=2, seed=3)
+            _parse_conjugate("nuts", nuts_configured, num_warmup=2, num_samples=4, seed=3)
 
     def test_nuts_init_vocabulary_and_ref_availability(self, nuts_configured):
         with pytest.raises(ConfigError, match="init: is one of"):
@@ -1717,7 +1717,7 @@ class TestRemainingOptionRefusalsHappenAtParse:
                 "nuts",
                 nuts_configured,
                 num_warmup=2,
-                num_samples=2,
+                num_samples=4,
                 seed={"from": "runtime.seeds.chain"},
                 init="random",
             )
@@ -1726,7 +1726,7 @@ class TestRemainingOptionRefusalsHappenAtParse:
                 "nuts",
                 nuts_configured,
                 num_warmup=2,
-                num_samples=2,
+                num_samples=4,
                 seed={"from": "runtime.seeds.chain"},
                 init="ref",
             )
@@ -1870,7 +1870,7 @@ class TestNoKindDelegatesToTheLegacyParser:
             ),
             "predict": ({}, conjugate_configured),
             "nuts": (
-                {"num_warmup": 2, "num_samples": 2, "seed": {"from": "runtime.seeds.chain"}},
+                {"num_warmup": 2, "num_samples": 4, "seed": {"from": "runtime.seeds.chain"}},
                 nuts_configured,
             ),
             "npe": ({}, npe_configured),

@@ -689,10 +689,11 @@ class TestThePagesSayWhatTheLayerDoes:
         "condition": ({"names": ["g"], "prior_std": {"g": 10.0}}, False),
         # num_warmup/num_samples/seed are required and the sweep refuses a run
         # without them, so they are written here to get PAST the grammar and
-        # as far as the noise check -- 2 and 2 because this row is about which
-        # refusal fires, not about a posterior.
+        # as far as the noise check -- 2 and 4 because this row is about which
+        # refusal fires, not about a posterior, and four is the fewest draws a
+        # chain may keep.
         "nuts": (
-            {"num_warmup": 2, "num_samples": 2, "seed": {"from": "runtime.seeds.probe"}},
+            {"num_warmup": 2, "num_samples": 4, "seed": {"from": "runtime.seeds.probe"}},
             False,
         ),
         "npe": ({}, False),

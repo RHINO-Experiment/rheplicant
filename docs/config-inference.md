@@ -366,7 +366,10 @@ rather than failing.
 - `nuts` — numpyro's No-U-Turn sampler over the whole parameter space, through
   `to_numpyro_model`. `num_warmup:`, `num_samples:` and a named `seed:` are all
   required — the first two because numpyro's own `MCMC` gives them no defaults,
-  the seed because a draw needs one (check A29). `init:` says where the chain
+  the seed because a draw needs one (check A29). A chain must keep at least
+  four draws, `num_samples // thinning >= 4`, because the split `r_hat` the
+  product reports needs two draws in each half of a chain; fewer is refused
+  when the document is parsed. `init:` says where the chain
   starts: it defaults to `declared`, each latent's own `init:`, rather than to
   numpyro's uniform default — which is not a tuning knob, because on the
   package's own ring toy that difference is `r_hat = 1.002` against
