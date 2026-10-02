@@ -2,8 +2,8 @@ name: Publish to PyPI
 
 # Tokenless publishing via PyPI Trusted Publishing (OIDC). No secrets stored:
 # GitHub mints a short-lived OIDC identity that PyPI verifies against the
-# trusted-publisher config (owner/repo/workflow/environment). See the repo's
-# README/CHANGELOG for the one-time PyPI setup.
+# trusted-publisher config (owner/repo/workflow/environment). See RELEASING.md
+# for the one-time PyPI setup.
 #
 # Publish a release by either:
 #   - creating a GitHub Release (recommended: tag the commit, publish the release), or
@@ -32,7 +32,11 @@ jobs:
           test -n "$wheel"
           python -m zipfile -l "$wheel"
           uv venv --clear dist/verify
-          uv pip install --python dist/verify/bin/python "$wheel"
+          # pytest is not a dependency of the wheel. The proof below borrows
+          # its document from tests/config/test_config_cli.py, which imports
+          # pytest at module scope, so without this line the step fails on
+          # that import and nothing is published.
+          uv pip install --python dist/verify/bin/python "$wheel" pytest
           dist/verify/bin/python -c "import sys, _rheplicant_bootstrap; assert 'jax' not in sys.modules; assert 'rheplicant' not in sys.modules"
           dist/verify/bin/python - <<'PY'
           import hashlib
