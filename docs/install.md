@@ -88,16 +88,12 @@ access or running a document from another person.
 git clone https://github.com/RHINO-Experiment/rheplicant
 cd rheplicant
 uv venv
-uv pip install -e . --group dev --find-links ../bayesmith/runs/t004/dist
+uv pip install -e . --group dev
 ```
 
-The `--find-links` is there because rheplicant declares `bayesmith>=0.10,<0.11`
-and bayesmith 0.10.0 is, for now, a local release rather than a PyPI one. It
-expects a bayesmith checkout beside this one holding that release, and a
-`release-manifest.json` one directory above `dist/` giving each artefact's
-sha256. Check the wheel against that manifest before installing it; the
-fresh-environment tests in `tests/config/` do the same check and fail rather
-than skip when the directory disagrees with the manifest.
+rheplicant declares `bayesmith>=0.10,<0.11`, and bayesmith 0.10.0 is on PyPI
+(2026-10-02), so the resolver takes it from the index. The fresh-environment
+tests in `tests/config/` install the same way.
 
 :::{warning}
 **Neither `uv sync` nor `uv run` works in this project — with `--frozen` or

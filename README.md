@@ -150,18 +150,12 @@ uv venv                          # NOT `uv sync`, which cannot work here
 uv pip install -e . --group dev
 ```
 
-**Neither install line resolves today.** `rheplicant` requires
-`bayesmith>=0.10,<0.11`, and bayesmith's highest release on PyPI is 0.8.0;
-0.10.0 exists only as a local wheel. Until it is published, an install needs
-that wheel on the search path:
-
-```bash
-uv pip install --find-links ../bayesmith/runs/t004/dist -e . --group dev
-```
-
-This is why nothing here is pushed or uploaded, and it is the same reason the
-online documentation build and remote CI cannot run. It ends when bayesmith
-0.10.0 is on PyPI; [the bayesmith page](https://rheplicant.readthedocs.io/en/latest/bayesmith.html)
+**The development install resolves from PyPI; `pip install rheplicant` gives
+an older release.** `rheplicant` requires `bayesmith>=0.10,<0.11`, and
+bayesmith 0.10.0 is on PyPI as of 2026-10-02, so the clone-and-install lines
+need nothing beside the index. This package's own latest upload is 0.2.0:
+0.9.x is tagged in the repository and not uploaded, so the first line installs
+0.2.0 until it is. [The bayesmith page](https://rheplicant.readthedocs.io/en/latest/bayesmith.html)
 says what the range is for.
 
 Requires Python ≥ 3.11, `jax ≥ 0.5`, `equinox ≥ 0.13`. Distribution and import

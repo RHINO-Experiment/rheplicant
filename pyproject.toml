@@ -73,13 +73,8 @@ dependencies = [
     # this package imports -- 0.10 did exactly that, turning `optimize` from a
     # module into a package, which is why the bound is not decoration.
     #
-    # 0.10.0 is a local release and not on PyPI (2026-09-20), so an install
-    # resolves it with
-    #
-    #     --find-links ../bayesmith/runs/t004/dist
-    #
-    # CLAUDE.md gives the hash check and the no-deps install this checkout
-    # uses. The same bet the limTOD floor above records: declare the true
+    # 0.10.0 is on PyPI (2026-10-02), so an install resolves the range from
+    # the index. The same bet the limTOD floor above records: declare the true
     # requirement rather than pretend the seam is optional.
     "bayesmith>=0.10,<0.11",
 ]

@@ -20,14 +20,12 @@ from tests.config.test_config_document import synthetic_document
 from tests.config.wheel_support import (
     BAYESMITH_VARIABLE,
     PROJECT_ROOT,
-    BayesmithCheckout,
     Install,
     _run,
     build_distributions,
     fresh_install_factory,
     locate_bayesmith,
     running_gui,
-    verified_release,
 )
 
 PRESET = PROJECT_ROOT / "src/rheplicant/config/presets/rhino_v1.yaml"
@@ -416,28 +414,3 @@ def test_without_a_main_checkout_bayesmith_is_the_project_roots_sibling(tmp_path
     root = tmp_path.resolve()
     project, env = _NO_MAIN_CHECKOUT[layout](root, _git_environment(root))
     assert locate_bayesmith(project, env).path == project.parent / "bayesmith"
-
-
-def test_the_skip_names_the_manifest_it_looked_for(tmp_path):
-    checkout = BayesmithCheckout(tmp_path / "bayesmith", "named by this test")
-    with pytest.raises(pytest.skip.Exception) as skipped:
-        verified_release(checkout)
-    message = str(skipped.value)
-    assert os.fspath(checkout.manifest) in message
-    assert "named by this test" in message
-    assert BAYESMITH_VARIABLE in message
-    assert "this machine does not have" not in message
-
-
-def test_a_release_that_disagrees_with_its_manifest_fails_rather_than_skips(tmp_path):
-    checkout = BayesmithCheckout(tmp_path / "bayesmith", "named by this test")
-    checkout.release.mkdir(parents=True)
-    wheel = checkout.release / "bayesmith-0.10.0-py3-none-any.whl"
-    wheel.write_bytes(b"the recorded build")
-    record = {"sha256": hashlib.sha256(b"the recorded build").hexdigest()}
-    checkout.manifest.write_text(json.dumps({"artifacts": {wheel.name: record}}))
-    assert verified_release(checkout) == checkout.release
-
-    wheel.write_bytes(b"some other build")
-    with pytest.raises(AssertionError, match="does not match the release manifest"):
-        verified_release(checkout)

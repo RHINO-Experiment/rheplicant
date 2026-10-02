@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import hashlib
-import json
 import os
 import socket
 import subprocess
@@ -33,31 +31,20 @@ _GIT_REDIRECTS = frozenset({"GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR"})
 
 @dataclass(frozen=True)
 class BayesmithCheckout:
-    """The sibling checkout whose local release bayesmith resolves from.
+    """The sibling bayesmith checkout, for the guards that read its pages.
 
-    The range `pyproject.toml` declares is not on PyPI (0.10.0 is a local
-    release; see CLAUDE.md's complete-environment section). The fresh-venv
-    installs below hand the resolver a `--find-links` to the release directory
-    after checking every artefact against the release manifest, so they install
-    the same hash-checked wheel the checkout's own venv holds, not a build of
-    whatever the sibling working tree contains. With the manifest absent they
-    SKIP, loudly: a skip here is a thinner environment, never a pass.
+    Nothing installs from it. bayesmith 0.10.0 is on PyPI (2026-10-02), so
+    the fresh-venv installs below take the range `pyproject.toml` declares
+    from the index. Until then they installed a wheel from this checkout's
+    `runs/t004/dist` after checking it against a release manifest, and the
+    day that wheel was rebuilt at the release tag without the manifest, six
+    installs failed on a hash while the package was unchanged.
 
     `basis` says how `path` was chosen, so a skip can say where it looked.
     """
 
     path: Path
     basis: str
-
-    @property
-    def release(self) -> Path:
-        return self.path / "runs" / "t004" / "dist"
-
-    @property
-    def manifest(self) -> Path:
-        # One level above the artefacts, as it was for 0.9.0, so not
-        # `release` joined twice.
-        return self.path / "runs" / "t004" / "release-manifest.json"
 
 
 def _main_checkout(project_root: Path, environ: Mapping[str, str]) -> Path:
@@ -214,38 +201,13 @@ class InstallFactory(Protocol):
     ) -> Install: ...
 
 
-def verified_release(checkout: BayesmithCheckout) -> Path:
-    """The bayesmith release directory, after checking it against its manifest.
-
-    Every artefact the manifest names must be present with its recorded
-    sha256; a directory that disagrees fails rather than skips, because it
-    would install a bayesmith other than the one this checkout is tested
-    against. The skip names the manifest, because that is the file whose
-    absence it reports.
-    """
-    if not checkout.manifest.exists():
-        pytest.skip(
-            "the fresh-venv installs need a bayesmith wheel in rheplicant's "
-            "declared range, and PyPI does not carry one. They install the "
-            f"local release whose manifest is {checkout.manifest}, and that "
-            f"file is absent. The checkout {checkout.path} is {checkout.basis}; "
-            f"set ${BAYESMITH_VARIABLE} to name another. This is a thinner "
-            "environment, not a pass -- see CLAUDE.md's complete-environment "
-            "section."
-        )
-    manifest = json.loads(checkout.manifest.read_text())
-    for name, record in manifest["artifacts"].items():
-        digest = hashlib.sha256((checkout.release / name).read_bytes()).hexdigest()
-        assert digest == record["sha256"], (
-            f"{name} in {checkout.release} does not match the release manifest "
-            f"({digest} != {record['sha256']})"
-        )
-    return checkout.release
-
-
 def fresh_install_factory(tmp_path: Path) -> InstallFactory:
+    """Installs into fresh venvs, every dependency resolved from the index.
+
+    bayesmith included: the wheel under test declares its range and the
+    resolver finds it, which is what a user's `pip install` does.
+    """
     counter = 0
-    wheels = verified_release(BAYESMITH)
 
     def install(
         source: Path,
@@ -266,8 +228,6 @@ def fresh_install_factory(tmp_path: Path) -> InstallFactory:
             "install",
             "--python",
             os.fspath(venv / "bin/python"),
-            "--find-links",
-            os.fspath(wheels),
         ]
         if editable:
             arguments.append("--editable")

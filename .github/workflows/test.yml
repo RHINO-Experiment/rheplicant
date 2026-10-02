@@ -26,10 +26,8 @@ concurrency:
   group: tests-${{ github.ref }}
   cancel-in-progress: true
 
-# bayesmith 0.10.0 is a local release and not on PyPI (see CLAUDE.md's
-# complete-environment section), so until it is published the environment
-# steps below cannot resolve `bayesmith>=0.10,<0.11` and the suite jobs fail at
-# install. The lint job does not depend on it.
+# bayesmith 0.10.0 is on PyPI (2026-10-02), so the environment steps below
+# resolve `bayesmith>=0.10,<0.11` from the index.
 
 env:
   # The import names whose absence fails the Suite job's completeness report

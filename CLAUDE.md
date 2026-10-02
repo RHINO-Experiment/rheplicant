@@ -280,51 +280,39 @@ whole estimate to its MAP and does need this package's models. Do not
 reintroduce a local copy: two spellings of one bound is the shape this repo
 keeps paying for.
 
-**0.10.0 is a local release and not on PyPI** (built 2026-09-20; 0.9.0 was not
-published either, and the index stopped at 0.8.0 when it was checked on
-2026-09-19). Check both artefacts' sha256 against
-`../bayesmith/runs/t004/release-manifest.json`, which sits one level above the
-artefacts rather than beside them, then
+**0.10.0 is on PyPI, and this checkout installs it by version** (uploaded
+2026-10-02; the tag `v0.10.0` is bayesmith's `61d4644`). Nothing here names a
+local wheel or checks a hash any more:
 
 ```bash
-uv pip install --python .venv/bin/python --no-deps ../bayesmith/runs/t004/dist/bayesmith-0.10.0-py3-none-any.whl
+uv pip install --python .venv/bin/python --no-deps "bayesmith==0.10.0"
 ```
 
-Any install that resolves this package's dependencies needs
-`--find-links ../bayesmith/runs/t004/dist`. The wheel was built at bayesmith's
-`8aefb3e` and that repository's HEAD has moved on; the manifest's shas describe
-the build, so an install checked against them is reproducible even though the
-wheel is byte-stale against HEAD.
+Until that day 0.10.0 existed only as a wheel under `../bayesmith/runs/t004/dist`,
+installed with `--find-links` after a sha256 check against a release manifest.
+The arrangement failed on the day of the release: bayesmith rebuilt the wheel
+at its tag and left the manifest at the old hash, and six fresh-venv tests
+here failed on the comparison while neither package had a defect. A published
+version cannot be rebuilt under its number, which is the guarantee the manifest
+was standing in for.
 
-**From a worktree, `../bayesmith` is not the sibling.** The relative paths
-above assume the main checkout; from `.claude/worktrees/<name>` they name
-`.claude/worktrees/bayesmith`, which does not exist. Run those commands from
-the main checkout or spell the path out. The tests do not use the relative
-path: `tests/config/wheel_support.py` looks beside the main checkout, which it
-finds with `git rev-parse --git-common-dir`, and `RHEPLICANT_BAYESMITH_CHECKOUT`
-names any other location. Until 2026-09-24 the lookup was
-`PROJECT_ROOT.parent`, and from a worktree the five fresh-venv tests in
-`tests/config/test_config_installed_wheel.py` and four in
-`tests/test_bayesmith_floor.py` skipped while the release was on disk, the
-first five saying this machine did not have it.
+**Install the wheel, not the sibling checkout.** An editable install from
+`../bayesmith` runs whatever that working tree holds and reports the version
+its metadata was written with (0.2.0 against 0.9.0 source, measured
+2026-09-19), so a seam result could not say which bayesmith it tested.
+bayesmith's runtime dependencies, including its `numpyro>=0.15,<0.22`, are
+already here. Without bayesmith `rheplicant.inference` does not import at all,
+so this one fails loudly rather than as silent skips.
 
-**bayesmith has settled at 0.10 and is not moving to 0.11 during this work**
-(confirmed by that repository's own session, 2026-09-21). Two things follow
-and both were measured rather than assumed. The wheel on disk is still the one
-every seam result here was obtained against -- sha256 `129f3db13fd0c56d…`,
-identical in bayesmith's `release-manifest.json`, in this repository's, and on
-disk -- so their later commits did not rebuild it. And 0.10.0 is still **not
-on PyPI**: the index stopped at 0.8.0 when checked on 2026-09-21, so
-`pip install rheplicant` still cannot resolve and the README still says so.
-"Settled" means the version stopped moving, not that it was published. The wheel replaces
-the editable install from `../bayesmith` this checkout used while the two
-repositories were developed against each other: an editable install runs
-whatever the sibling working tree holds and reports the version its metadata
-was written with (0.2.0 against 0.9.0 source, measured 2026-09-19), so a
-seam result could not say which bayesmith it tested. Record the wheel's
-sha256 beside seam results. bayesmith's runtime dependencies, including its
-`numpyro>=0.15,<0.22`, are already here. Without it `rheplicant.inference`
-does not import at all, so this one fails loudly rather than as silent skips.
+**The sibling checkout is still read, for one page.**
+`tests/test_bayesmith_floor.py` reads `../bayesmith/docs/stability.md` to watch
+the level upstream gives its descent engine. `tests/config/wheel_support.py`
+finds that checkout beside the MAIN checkout, with
+`git rev-parse --git-common-dir`, and `RHEPLICANT_BAYESMITH_CHECKOUT` names any
+other location. From `.claude/worktrees/<name>` a literal `../bayesmith` names
+`.claude/worktrees/bayesmith`, which does not exist; until 2026-09-24 the
+lookup was `PROJECT_ROOT.parent` and the tests that needed the checkout
+skipped from a worktree while it was on disk.
 
 **There are two pytest sessions that need `JAX_ENABLE_X64=1`, not one.**
 `tests/evidence/` is the older; `tests/seam/` is the adapter's acceptance
