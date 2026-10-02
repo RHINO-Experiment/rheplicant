@@ -6,13 +6,13 @@
 :width: 560px
 ```
 
-A **REPLIC**a of an **ANT**enna — a **JAX model of a radio telescope, run as a
+A **REPLIC**a of an **ANT**enna: a **JAX model of a radio telescope, run as a
 digital twin**. Built for **RHINO**, a horn antenna measuring the 21 cm global
 signal, and domain-agnostic underneath: horns, dipoles and dishes alike.
 
 A RHEPLICANT twin is one pure function from sky and instrument parameters to raw
-data. Because every stage is differentiable, the same twin that *simulates*
-an observation also *calibrates* it: gradients, Bayesian posteriors, Fisher
+data. Every stage is differentiable, so the twin that simulates an
+observation also calibrates it: gradients, Bayesian posteriors, Fisher
 forecasts, and neural surrogates all run through the instrument model
 itself.
 
@@ -22,18 +22,18 @@ itself.
 :gutter: 2
 
 :::{grid-item-card} 1 · Forward modelling
-Simulate what any stage of the experiment would produce — a sky, a receiver
+Simulate what any stage of the experiment would produce: a sky, a receiver
 output, a processed product. Where you stop is a property of the graph.
 :::
 
 :::{grid-item-card} 2 · Bayesian inference
 Read the same twin backwards. Free any subset of what it contains; the noise
-model *is* the likelihood; the engine follows from the model's structure.
+model is the likelihood; the engine follows from the model's structure.
 :::
 
 :::{grid-item-card} 3 · Neural surrogates
 Replace an expensive stage with a trained network and leave the graph's shape
-untouched — or amortize the posterior itself.
+untouched, or amortize the posterior itself.
 :::
 
 :::{grid-item-card} 4 · Streaming evidence
@@ -42,8 +42,8 @@ fixed-size likelihood factor, then discard the data.
 :::
 ::::
 
-None of the four is a separate mode. They all read the **same twin object**,
-which is what makes the calibration you fit the simulator you trust.
+None of the four is a separate mode. All four read the same twin object, so
+the twin you calibrate is the twin you simulate with.
 
 ## Two nouns
 
@@ -64,29 +64,29 @@ An operator takes the whole scientific context and returns it one step later.
 :::
 
 `State`
-: **The complete scientific context** — data, coordinates, environment,
-  randomness, metadata. It is an organisation of *references* to buffers, not
-  the buffers themselves, so a derived state allocates the shell and nothing
-  else: 48 bytes, with a 16 MB array shared rather than copied. JAX arrays are
-  immutable, which is what makes sharing safe.
+: **The complete scientific context**: data, coordinates, environment,
+  randomness, metadata. It organises references to buffers, not the buffers
+  themselves, so a derived state allocates only the shell: 48 bytes, with a
+  16 MB array shared rather than copied. JAX arrays are immutable, so sharing
+  is safe.
 
 `Operator`
 : **One step**, `State` in and `State` out. Sky models, instrument effects,
   calibration, filtering and neural networks are all the same kind of thing,
   and each carries its own physical parameters as differentiable leaves.
 
-**`state.data` always references what the instrument has produced so far.**
+`state.data` always references what the instrument has produced so far.
 For example: the sky engine produces the `(n_time, n_freq)` antenna
 temperature, the antenna's ohmic loss produces that array after loss, the
-receiver produces a system temperature. Nothing is written in place — each
-stage hands back a *new* `State` whose `data` points at its own result, while
-the fields it did not touch go on pointing where they already did.
+receiver produces a system temperature. Nothing is written in place: each
+stage returns a new `State` whose `data` points at its own result, and the
+fields it did not touch point where they already did.
 
-The sky map itself is not in `state.data` — it is a **parameter of the sky
-model**, differentiable like every other, which is why a map can be inferred
-rather than merely assumed.
+The sky map is not in `state.data`. It is a parameter of the sky model,
+differentiable like every other, so a map can be inferred rather than
+assumed.
 
-## Three ways to join them — and you rarely write any
+## Three ways to join them
 
 
 :::{list-table}
@@ -107,47 +107,47 @@ rather than merely assumed.
   - alternative paths, one selected per time sample
 :::
 
-**You normally write none of them.** Declare the operators you want and
+You normally write none of them. Declare the operators you want and
 [`assemble`](tour.md#graph-assembly) reads the canonical signal path to decide
-what joins to what — so the composition is a consequence of the physics you
-declared, not something you wrote out. Reach for the three combinators directly
-only when you are building a structure the template does not describe.
+what joins to what, so the composition follows from the physics you declared.
+Use the three combinators directly only when you are building a structure the
+template does not describe.
 
 A *canonical signal path* is a template saying which operators exist and which
 structure joins them: node kinds `source`, `transform`, `junction`
 and `selector` map one-to-one onto "creates data", cascade, sum and switch. You
 provide a set of operators, and [`assemble`](tour.md#graph-assembly) folds
-them into exactly those three combinators.
+them into those three combinators.
 
 The template shipped as the default,
-[`RADIO_GRAPH`](signal-path.md), is **RHINO's** structure: a single-antenna,
-switched-load, drift-scanning horn. It is a default, not the framework — the
-machinery underneath knows nothing about radio astronomy, and another
-instrument is another template registered the same way.
+[`RADIO_GRAPH`](signal-path.md), is RHINO's structure: a single-antenna,
+switched-load, drift-scanning horn. The machinery underneath knows nothing
+about radio astronomy, and another instrument is another template registered
+the same way.
 
 :::{dropdown} The eight principles the design follows
 :color: secondary
 :icon: law
 
-1. **Everything is an operator acting on a state** — one contract covers
+1. **Everything is an operator acting on a state.** One contract covers
    sky models, instrument effects, processing, filters, neural networks; and
    exactly three structures compose them.
-2. **The twin is a differentiable function** — `jit`/`grad`/`vmap` apply to
+2. **The twin is a differentiable function.** `jit`/`grad`/`vmap` apply to
    the entire instrument; systematics become inferable parameters.
-3. **Composition is physics, implicit in the signal path** — cascades,
-   sums and switches assemble themselves from the canonical graph, which is
-   a template you can replace rather than a fixed instrument.
-4. **Purity everywhere** — immutable states, randomness as data, one seed
+3. **Composition is physics, implicit in the signal path.** Cascades,
+   sums and switches are assembled from the canonical graph, which is
+   a template you can replace.
+4. **Purity everywhere.** Immutable states, randomness as data, one seed
    reproduces a run.
-5. **Forward models never contain inference** — one seam serves every
-   inference engine, and a `ParameterSpace` re-parameterizes freely without
-   ever editing the instrument description.
-6. **Interfaces first, physics second** — placeholder bodies, real tested
+5. **Forward models never contain inference.** One seam serves every
+   inference engine, and a `ParameterSpace` re-parameterizes without
+   editing the instrument description.
+6. **Interfaces first, physics second.** Placeholder bodies, real tested
    contracts; ports replace functions, never structure.
-7. **Loud failure over silent wrongness** — trace-time validation,
+7. **Loud failure over silent wrongness.** Trace-time validation,
    provenance-tagged matrices, assembly-time graph errors.
-8. **The core is domain-agnostic** — radio astronomy is the first
-   application, not the design center (a test enforces the layering).
+8. **The core is domain-agnostic.** Radio astronomy is the first
+   application, and a test enforces the layering.
 
 :::
 
@@ -160,24 +160,24 @@ instrument is another template registered the same way.
 * - You want to…
   - Start here
 * - install it
-  - [Install](install.md) — limTOD resolves from PyPI; `uv sync` and `uv run`
+  - [Install](install.md): limTOD resolves from PyPI; `uv sync` and `uv run`
     do not work here, so use `uv venv` + `uv pip install`
 * - understand the whole thing in one sitting
-  - [The guided tour](tour.md) — one worked example, simulated then inferred
+  - [The guided tour](tour.md): one worked example, simulated then inferred
 * - simulate an instrument
   - [The canonical signal path](signal-path.md), then
     [the operator catalog](operators.md)
 * - write or run a YAML configuration
-  - [Configuration](config.md) — what a document contains and what v1 covers.
+  - [Configuration](config.md): what a document contains and what v1 covers.
     A first document, start to finish, is [the
-    tutorial](config-tutorial.md); the [command line](config-cli.md) is what
-    validates and runs it
+    tutorial](config-tutorial.md); the [command line](config-cli.md) validates
+    and runs it
 * - edit a YAML configuration in a browser
-  - [Configuration workbench](config-gui.md) — Model, Config, Execute and
+  - [Configuration workbench](config-gui.md): Model, Config, Execute and
     Results over exact YAML, plus install and trusted-server boundaries
-* - **turn a RHINO recording into a `State`**
-  - [Ingestion](ingestion.md) — every other page starts from a `State` that
-    already exists; this is where one comes from
+* - turn a RHINO recording into a `State`
+  - [Ingestion](ingestion.md): every other page starts from a `State` that
+    already exists, and this page is where one comes from
 * - see one instrument end to end
   - [From the sky to the receiver](sky-to-receiver.md)
 * - fit or sample parameters
@@ -185,9 +185,9 @@ instrument is another template registered the same way.
     [Tutorial: a gradient posterior](tutorial-nuts.md) first, then
     [Inference](inference.md) for the rules they cite
 * - keep a campaign after the recordings are archived
-  - [Evidence](evidence.md) — accumulate likelihood factors, discard the data
+  - [Evidence](evidence.md): accumulate likelihood factors, discard the data
 * - run something and read its output
-  - [Examples](examples.md) — fifteen scripts with measured wall clocks, and
+  - [Examples](examples.md): fifteen scripts with measured wall clocks, and
     one configured example
 * - look something up
   - [The API reference](api.md), [contracts between stages](contracts.md),

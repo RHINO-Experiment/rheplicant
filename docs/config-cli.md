@@ -33,7 +33,7 @@ file `NAME.yaml` publishes to `NAME.results/` beside it (`config.yaml` to
 `config.results/`); an explicit relative `outputs.dir` is resolved against the
 config file's directory. `run -` needs an explicit `outputs.dir`.
 A program embedding a document can override the directory per invocation
-instead — see [Placing one run's tree without editing the document](#placing-one-runs-tree-without-editing-the-document).
+instead; see [Placing one run's tree without editing the document](#placing-one-runs-tree-without-editing-the-document).
 
 | Status | Meaning |
 |---|---|
@@ -69,13 +69,10 @@ is the installed distribution's, read from the same place the `software` row
 of every `provenance.json` reads it.
 
 `rheplicant-gui` uses the same table: a rejected `--host`, `--port` or
-`--allow-remote` combination exits **2** with the message on standard error.
+`--allow-remote` combination exits 2 with the message on standard error.
 It exits 1 only for a missing `rheplicant[gui]` install, which is an
 environment fault and not a refused invocation. Until 2026-09-20 a refused
-invocation exited 1 here, because `SystemExit("message")` carries the text as
-its exit *code* and Python then exits 1 — so the two commands disagreed about
-this table, and the disagreement was invisible from this page because the
-page documented only `rheplicant`.
+invocation exited 1 here.
 
 ### Lines a caller may parse
 
@@ -92,10 +89,10 @@ page is stable, and they are spelled once in the code
 
 `outputs.stdout: none` suppresses the two stdout lines.
 
-The two `audit:` lines are written **before** the failure unwinds and prints
+The two `audit:` lines are written before the failure unwinds and prints
 itself, so a long traceback pushes them out of any bounded excerpt of the
 stream: read them from the whole stream, and take the last match. The GUI's
-worker prefers its own framed `failure_audit` field over parsing them at all,
+worker prefers its own framed `failure_audit` field over parsing them,
 because a plugin that prints `error audit: /somewhere/else` would otherwise
 choose the directory a long-lived parent serves artefacts from.
 
@@ -120,16 +117,10 @@ config.results/
 └── diagnostics.json
 ```
 
-`integrity.json` and `capabilities.json` were both absent from this listing
-until 2026-09-20, and had been published for some time. A tree that omits a
-file teaches a reader to treat it as an addition, so the listing is now
-checked against a real run by
-`tests/config/test_config_cli.py::test_the_documented_output_tree_lists_what_a_run_publishes`.
-
 A refusal or internal error after publication trust is established uses a
 non-clobbering sibling such as `config.results.refused-<32 hex digits>/` or
 `config.results.error-<32 hex digits>/`, with the same mandatory metadata and
-every resolved layer that actually completed. No later boundary or file is
+every resolved layer that completed. No later boundary or file is
 claimed. An ambiguity during recovery preserves every named path and starts no
 second transaction.
 
@@ -185,7 +176,7 @@ times, `refusals` reads captured `expect: refuse` outcomes, and neither reruns a
 run. Likewise, a report reads only prior results and timings.
 
 `products.json` is canonical JSON validated against the packaged strict
-`products-v1.schema.json`. It records each request, every truthful omission,
+`products-v1.schema.json`. It records each request, every omission,
 and every file's relative path, selector, run kind, format, byte count, SHA-256
 digest, and metadata. Numeric archives are deterministic NPZ without object
 dtype or pickle; JSON records reject non-finite numbers.
@@ -211,13 +202,13 @@ process was side-effect-free.
 mode-0700 directory owned by the effective user whose canonical mode-0600
 ownership marker proves it was created by RHEPLICANT.
 
-Before A34 clobber authorization, `run` acquires the persistent per-target
-lock and recovers any proved prior transaction. The same platform adapter then
-proves access/default ACLs and atomic no-replace support without a write,
-revalidates root-to-parent ancestor identity and rename protection, and budgets
-every target, failure, journal, staging, backup, run, and variant component
-against the leased filesystem `NAME_MAX` before the first directory or lock
-write. No replacing-rename fallback exists.
+Before clobber authorization (check A34), `run` acquires the persistent
+per-target lock and recovers any proved prior transaction. The same platform
+adapter then proves access/default ACLs and atomic no-replace support without
+a write, revalidates root-to-parent ancestor identity and rename protection,
+and budgets every target, failure, journal, staging, backup, run, and variant
+component against the leased filesystem `NAME_MAX` before the first directory
+or lock write. No replacing-rename fallback exists.
 
 An ordinary terminal metadata or publication failure is recovered under that
 same lease before an error sibling is attempted. The retry needs a fresh
@@ -247,56 +238,54 @@ no-replace link; an existing destination is always refused, independently of
 
 `run_embedded_config` and `dispatch_request` accept `outputs_dir=`, an
 invocation-level override of where that one invocation publishes. It exists for
-programs that run a document many times and need each tree kept apart — the
+programs that run a document many times and need each tree kept apart. The
 document, and therefore `config.input.yaml` and its digest, stay exactly what
 the author wrote, because nothing is injected into it.
 
 There is no command-line flag for it: the command line runs a document as
 written, and a person who wants a different directory can write one.
 
-Three rules keep the override honest.
+Three rules apply to the override.
 
-- **It must be absolute.** `outputs.dir` resolves against the *document's*
+- It must be absolute. `outputs.dir` resolves against the document's
   directory; an invocation parameter arrives from a caller whose directory this
-  layer does not know, so there is no defensible base to join it to. A relative
-  path, a `~`, or a `$VAR` is refused rather than expanded.
-- **It refuses an authored `outputs.dir` rather than replacing it.** A document
-  that chose a directory and a caller that chose another is a disagreement, and
-  silently resolving it in the caller's favour would discard a decision someone
+  layer does not know, so there is no base to join it to. A relative path, a
+  `~`, or a `$VAR` is refused rather than expanded.
+- It refuses an authored `outputs.dir` rather than replacing it. A document
+  that chose a directory and a caller that chose another disagree, and
+  resolving that in the caller's favour would discard a decision someone
   wrote down.
-- **It is recorded.** `provenance.json` carries
+- It is recorded. `provenance.json` carries
   `bootstrap.invocation_outputs_dir`, so a published tree says whether it landed
   where the document asked or where an invocation put it. It is `null` when the
   document decided.
 
-`outputs_write=` is its companion, and answers the other half of the question: a
-sequence of Plan 4B selector names, taken at their default formats, that this
-invocation wants kept. Same three rules, with one deliberate difference.
+`outputs_write=` is its companion: a sequence of scientific-product selector
+names, taken at their default formats, that this invocation wants kept. Same
+three rules, with one difference.
 
 - It refuses a document that already requests products under `outputs.write`
   rather than merging, because a merge would produce a tree matching neither
   what the author asked for nor what the caller did.
 - It is recorded as `bootstrap.invocation_outputs_write`, `null` when the
   document decided.
-- **Unlike the document form, a selector nothing produced is an omission, not a
-  refusal.** A document naming `draws` when no run samples has made a mistake
+- Unlike the document form, a selector nothing produced is an omission, not a
+  refusal. A document naming `draws` when no run samples has made a mistake
   worth reporting. A caller saying "keep whatever these runs can produce" has
   not: whether a given forward run yields `aux` or `taps` is a fact about that
   document, not about its run kinds, so no caller can know it in advance. Every
-  skipped run is recorded in `products.json`'s `omissions`, so nothing is
-  silently dropped either way.
+  skipped run is recorded in `products.json`'s `omissions`.
 
-Together the two mean a task document can be about the science and nothing else,
-while the program running it decides where the tree goes and what is kept in it.
+With both, a task document describes the science, and the program running it
+decides where the tree goes and what is kept in it.
 
 ## Quality signals: `outputs.write.run_diagnostics`
 
-`diagnostics.json` records whether a run *happened* correctly -- its status,
+`diagnostics.json` records whether a run happened correctly: its status,
 kind, wall time, the gates it tripped. It does not record whether to believe the
-answer. Those numbers -- `r_hat`, `n_eff`, `divergences`, the joint chi-squared,
-a conditioning number, whether a solver converged -- live on the product, and
-before this selector existed they were reachable only in-process, so a published
-tree could not say whether its own contents were trustworthy.
+answer. Those numbers (`r_hat`, `n_eff`, `divergences`, the joint chi-squared,
+a conditioning number, whether a solver converged) live on the product, and
+without this selector they are reachable only in-process.
 
 `outputs.write.run_diagnostics` writes them per run as
 `runs/<run>/run_diagnostics.json`. One generic extractor serves every kind: it
@@ -305,7 +294,7 @@ that gains a diagnostic field needs no new code. A run whose product carries
 none is recorded as an omission, because a forward simulation having no
 convergence diagnostics is not an error.
 
-**A non-finite value is written as `null`, not refused.** numpyro reports
+A non-finite value is written as `null`, not refused. numpyro reports
 `r_hat` and `n_eff` as NaN for a chain that degenerated, and a run diverging on
-every transition is exactly the run whose diagnostics someone needs to read;
-refusing would publish nothing for the worst runs.
+every transition is a run whose diagnostics someone needs to read; refusing
+would publish nothing for the worst runs.

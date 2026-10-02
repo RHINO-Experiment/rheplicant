@@ -19,7 +19,7 @@ these pages describe. To install 0.9.1, name its tag:
 pip install "rheplicant @ git+https://github.com/RHINO-Experiment/rheplicant@v0.9.1"
 ```
 
-Two packages come with it as **dependencies**, not extras, and both resolve
+Two packages come with it as dependencies, not extras, and both resolve
 from PyPI. `limTOD` carries the sky engines, which are the forward model.
 `bayesmith` carries the inference arithmetic, and brings numpyro with it.
 `import rheplicant` imports neither bayesmith nor numpyro;
@@ -27,10 +27,9 @@ from PyPI. `limTOD` carries the sky engines, which are the forward model.
 
 ## Extras
 
-Two of the integration extras name a requirement that is not on PyPI,
-deliberately: the
-package is developed alongside them and pinning a git URL in `pyproject.toml`
-would make this project unpublishable. So the extra records *what is needed*,
+Two of the integration extras name a requirement that is not on PyPI. The
+package is developed alongside them, and pinning a git URL in `pyproject.toml`
+would make this project unpublishable, so the extra records what is needed
 and you install it yourself.
 
 :::{list-table}
@@ -45,19 +44,19 @@ and you install it yourself.
     installed, through bayesmith
   - `pip install "rheplicant[numpyro]"`
 * - `cal`
-  - `NoiseWaveOperator` — the noise-wave receiver model, reflection couplings
-    and all
-  - `pip install "rhino-cal-jax @ git+https://github.com/RHINO-Experiment/rhino-cal@feat/rhino-cal-jax"`
-    — the `@feat/rhino-cal-jax` is load-bearing: `rhino_cal_jax/` exists only on
+  - `NoiseWaveOperator`, the noise-wave receiver model, including the
+    reflection couplings
+  - `pip install "rhino-cal-jax @ git+https://github.com/RHINO-Experiment/rhino-cal@feat/rhino-cal-jax"`.
+    The `@feat/rhino-cal-jax` is required: `rhino_cal_jax/` exists only on
     that branch, and the default branch has no `pyproject.toml` to build
 * - `rfi`
   - `MomentRFIFlaggingOperator`, the real flagger. The threshold-based
     `FlaggingOperator` needs none of it
-  - `pip install "MomentEmu @ git+https://github.com/zzhang0123/MomentEmu" "MomentRFI @ git+https://github.com/zzhang0123/MomentRFI"`
-    — both in one command: MomentRFI declares MomentEmu, neither is on PyPI,
+  - `pip install "MomentEmu @ git+https://github.com/zzhang0123/MomentEmu" "MomentRFI @ git+https://github.com/zzhang0123/MomentRFI"`.
+    Both go in one command: MomentRFI declares MomentEmu, neither is on PyPI,
     and MomentRFI named alone does not resolve
 * - `rhino`
-  - `read_rhino_observation()` — the RHINO HDF5 reader (h5py). The Touchstone
+  - `read_rhino_observation()`, the RHINO HDF5 reader (h5py). The Touchstone
     reader needs none of it, being numpy only
   - `pip install "rheplicant[rhino]"`
 * - `uvbeam`
@@ -107,34 +106,34 @@ rheplicant declares `bayesmith>=0.10,<0.11`, and bayesmith 0.10.0 is on PyPI
 tests in `tests/config/` install the same way.
 
 :::{warning}
-**Neither `uv sync` nor `uv run` works in this project — with `--frozen` or
-without it.** Measured on a fresh clone, not assumed.
+**Neither `uv sync` nor `uv run` works in this project, with `--frozen` or
+without it.** Measured on a fresh clone.
 
 *Without* `--frozen`, each refuses with *"your project's requirements are
-unsatisfiable"*. `uv` resolves **every declared extra** when it locks, and
+unsatisfiable"*. `uv` resolves every declared extra when it locks, and
 `rheplicant[cal]` → `rhino-cal-jax` is not on PyPI by design; `rheplicant[rfi]`
 → `MomentRFI` is the same shape. The `pyproject.toml` comment beside each says
 why they name a requirement instead of resolving it.
 
 *With* `--frozen`, each refuses with *"Unable to find lockfile at `uv.lock`"*.
-This repository ships no lockfile and **cannot**: `uv lock` fails on the very
-same unsatisfiable extra, so there is nothing to commit. `--frozen` applies only
-where a `uv.lock` already exists in your working copy — which a fresh clone does
+This repository ships no lockfile and cannot: `uv lock` fails on the same
+unsatisfiable extra, so there is nothing to commit. `--frozen` applies only
+where a `uv.lock` already exists in your working copy, which a fresh clone does
 not have and cannot generate. Treat any `uv.lock` you find in an older checkout
-as stale rather than as the missing piece.
+as stale.
 
-`uv pip install` resolves only what you ask it for, never the whole declared
-universe, which is why the two commands above work where the project-level ones
-cannot. Nothing is removed either, so editable local checkouts of limTOD or
-rhino-cal survive it — install those the usual way afterwards, in any order.
+`uv pip install` resolves only what you ask it for, so the two commands above
+work where the project-level ones cannot. It removes nothing either, so
+editable local checkouts of limTOD or rhino-cal survive it; install those the
+usual way afterwards, in any order.
 :::
 
 ## Optional local data
 
 Two things this project compares itself against cannot be published: the RHINO
 CST far-field exports, and the `rhino-cal` checkout whose numpy readers are the
-reference implementation. Neither has a path that can be guessed, so neither is
-guessed — you name yours, or the work that needs it stands down and says so.
+reference implementation. Neither has a default path: you name yours, or the
+work that needs it stands down and says so.
 
 :::{list-table}
 :header-rows: 1
@@ -154,10 +153,8 @@ guessed — you name yours, or the work that needs it stands down and says so.
     package's Touchstone and HDF5 readers against rhino-cal's.
 :::
 
-Neither is required, and nothing fails without them — the tests that need them
-skip with the variable named in the reason. Both used to be hard-coded paths
-under one person's home directory, which meant those tests never ran anywhere
-else and said nothing about it.
+Neither is required, and nothing fails without them: the tests that need them
+skip with the variable named in the reason.
 
 ## Running the tests
 
@@ -222,14 +219,14 @@ show as uncovered in the default coverage report.
 ```
 
 The interpreter is named explicitly because nothing above activates the
-environment — a bare `python` here reaches whichever one is on your `PATH` and
-reports `ModuleNotFoundError` for an install that is in fact fine. Drop the
+environment: a bare `python` here reaches whichever one is on your `PATH` and
+reports `ModuleNotFoundError` for an install that is fine. Drop the
 prefix if you have run `source .venv/bin/activate`.
 
-The second line is the more useful one: it proves the radio layer imported and
-the default signal-path template registered. If the extras are in place, these
-import too — each is the module an operator reaches for, and an absent one
-raises an `ImportError` naming what to install rather than failing later:
+The second line checks more: that the radio layer imported and the default
+signal-path template registered. If the extras are in place, these import
+too. Each is the module an operator imports, and an absent one raises an
+`ImportError` naming what to install rather than failing later:
 
 ```bash
 .venv/bin/python -c "import limtod_jax, rhino_cal_jax; print('sky engines and noise waves ready')"

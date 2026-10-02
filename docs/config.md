@@ -1,22 +1,21 @@
 # Configuration documents
 
 A configuration document is a declarative route from exact YAML bytes to a
-validated, audited run. One document is the truth: the Python API, the command
-line and the browser workbench are three surfaces over the same accepted bytes,
-and none of them is a second configuration language.
+validated, audited run. The Python API, the command line and the browser
+workbench are three surfaces over the same accepted bytes; none of them is a
+second configuration language.
 
 ## What v1 covers, and what it does not
 
-Worth knowing before you write anything, because two of the package's headline
-capabilities are **deliberately** out of reach from YAML today and the refusal
-messages are the only other place that says so.
+Two of the package's capabilities are out of reach from YAML today. The
+refusal messages are the only other place that says so.
 
 | | |
 |---|---|
-| **Covered** | One observation, end to end: the instrument model, the resources it reads, the likelihood and noise, and every fitting exit — forward, Fisher, optimize, the conjugate solvers, sampling plans, NUTS, NPE and the diagnostics. |
-| **Deferred: `campaign:`** | Streaming evidence — compressing each night to a fixed-size likelihood factor and discarding the data — has no YAML surface. The section name is reserved and refused, so a document that reaches for it is told, not ignored. |
+| **Covered** | One observation, end to end: the instrument model, the resources it reads, the likelihood and noise, and every fitting exit: forward, Fisher, optimize, the conjugate solvers, sampling plans, NUTS, NPE and the diagnostics. |
+| **Deferred: `campaign:`** | Streaming evidence (compressing each night to a fixed-size likelihood factor and discarding the data) has no YAML surface. The section name is reserved, and a document that uses it is refused. |
 | **Deferred: `type: NeuralOperator`** | The neural surrogate is refused with its capability named. Its `mlp:` field is an object no value node can express. |
-| **Python only** | A custom graph *topology*. Configuration targets the canonical radio graph; `compose:` with `cascade`/`sum`/`many` gives bounded composition freedom inside it, but new nodes, junctions and selectors are written in Python. |
+| **Python only** | A custom graph topology. Configuration targets the canonical radio graph; `compose:` with `cascade`/`sum`/`many` gives bounded composition freedom inside it, but new nodes, junctions and selectors are written in Python. |
 
 ## The document, section by section
 
@@ -27,17 +26,16 @@ what `rheplicant.config.schema.json_schema()` reports as each section's
 
 | Section | Status |
 |---|---|
-| `runtime`, `observation`, `model`, `runs` | **required** |
+| `runtime`, `observation`, `model`, `runs` | required |
 | `schema_version`, `resources`, `variants`, `inference` | accepted |
-| `defaults`, `plugins`, `outputs` | refused by the mapping API; the **command line** handles them |
-| `campaign` | reserved, refused — see above |
+| `defaults`, `plugins`, `outputs` | refused by the mapping API; the command line handles them |
+| `campaign` | reserved, refused; see above |
 
 `schema_version: 1` is listed as accepted because it is a key and not a
 section, but a document without it is refused: write it in every document.
 
-`load_document` and the CLI are not the same surface, which is what the third
-row says. The CLI adds presets, plugins and the output tree on top
-of the same orchestration.
+The third row is the difference between `load_document` and the CLI: the CLI
+adds presets, plugins and the output tree on top of the same orchestration.
 
 ## Reading order
 
@@ -60,7 +58,7 @@ are in the next section.
     the two that describe the instrument in full.
 * - [Values and units](config-values.md)
   - How any single number, array or reference is written, and how a unit is
-    checked rather than assumed. Eighteen form keys in eight families.
+    checked. Eighteen form keys in eight families.
 * - [Resources and captured inputs](config-resources.md)
   - Where data comes from: files, beams, S-parameters, sky models, and how a
     path becomes a byte-exact recorded input.
@@ -74,13 +72,13 @@ are in the next section.
 
 ## The three surfaces
 
-- **Python** — `load_document` on a mapping. The smallest surface, and the one
+- **Python**: `load_document` on a mapping. The smallest surface, and the one
   the other two are built on.
-- **[Command line](config-cli.md)** — adds exact-byte source identity, runtime
+- **[Command line](config-cli.md)**: adds exact-byte source identity, runtime
   ordering, output security, resolved YAML and provenance. It parses the base
-  and every declared variant, and every run kind's options, **before** the first
+  and every declared variant, and every run kind's options, before the first
   executor is called.
-- **[Workbench](config-gui.md)** — four browser views over the accepted bytes.
+- **[Workbench](config-gui.md)**: four browser views over the accepted bytes.
   Raw YAML and safe field drafts are submitted with an expected revision, and
   every accepted edit returns complete YAML. Quick checks are immediate
   projections; full validation, previews and declared actions are explicit jobs

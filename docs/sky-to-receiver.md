@@ -2,14 +2,12 @@
 
 The [sky engines](sky-engines.md) produce an antenna temperature. The
 [noise-wave model](operators.md#the-noise-wave-model-and-what-it-needs-from-the-graph) consumes
-one. This page joins them end to end on RHINO's actual horn, and is a
-walkthrough of
+one. This page joins them end to end on RHINO's horn. It is a walkthrough of
 [`examples/sky_to_noise_wave.py`](https://github.com/RHINO-Experiment/rheplicant/blob/main/examples/sky_to_noise_wave.py),
-which runs everything shown below. Steps 1-6 are that script's own six blocks,
-in its order; their numbers and figures come from that path being executed, not
-from illustrating it. The two sections after Step 6 are the measured evidence
-behind Step 1's $f_\mathrm{sky}$, and their numbers come from the test suites
-named there rather than from the script.
+which runs everything shown below. Steps 1-6 are that script's six blocks, in
+its order, and their numbers and figures are its output. The two sections after
+Step 6 give the measurements behind Step 1's $f_\mathrm{sky}$. Their numbers
+come from the test suites named there, not from the script.
 
 ```bash
 .venv/bin/python examples/sky_to_noise_wave.py
@@ -20,15 +18,15 @@ numbers below use RHINO's CST horn exports, which are not redistributable:
 pass `--beam-dir` or set `RHEPLICANT_RHINO_BEAMS`. Without them the script
 uses a Gaussian beam and prints different numbers.
 
-- [The one identification](#the-one-identification) — what makes the two halves one model
+- [The one identification](#the-one-identification): what makes the two halves one model
 - [The path, as the graph builds it](#the-path-as-the-graph-builds-it)
-- [Step 1 — the horn](#step-1--the-horn)
-- [Step 2 — the antenna chain, assembled from the graph](#step-2--the-antenna-chain-assembled-from-the-graph)
-- [Step 3 — three effects, none standing in for another](#step-3--three-effects-none-standing-in-for-another)
-- [Step 4 — a real switching cycle](#step-4--a-real-switching-cycle)
-- [Step 5 — closing the loop](#step-5--closing-the-loop)
-- [Step 6 — one differentiable object](#step-6--one-differentiable-object)
-- [The horizon split, measured](#the-horizon-split-measured) — where f_sky comes from, and the two wrong answers before it
+- [Step 1: the horn](#step-1-the-horn)
+- [Step 2: the antenna chain, assembled from the graph](#step-2-the-antenna-chain-assembled-from-the-graph)
+- [Step 3: horizon split, ohmic loss and mismatch loss](#step-3-horizon-split-ohmic-loss-and-mismatch-loss)
+- [Step 4: the switching cycle](#step-4-the-switching-cycle)
+- [Step 5: closing the loop](#step-5-closing-the-loop)
+- [Step 6: gradients through the whole path](#step-6-gradients-through-the-whole-path)
+- [The horizon split, measured](#the-horizon-split-measured): where f_sky comes from, and what the alternatives cost
 - [What is tested](#what-is-tested)
 
 ## The one identification
@@ -60,18 +58,17 @@ $$
 
 $T_\mathrm{src}$ is whatever the receiver input is connected to. On antenna
 samples that is the beam-convolved sky; on load samples the switch replaces it
-and takes the load's $\Gamma$ with it. **That is the entire interface**, and the
-graph already encodes the ordering, so there is no glue code — but three joins
-carry no structural guard, and each returns a finite, correctly-shaped, wrong
-answer when you get it wrong. They are called out as you reach them.
+and takes the load's $\Gamma$ with it. That is the entire interface. The graph
+encodes the ordering, so there is no glue code. Three joins carry no structural
+guard, and a mistake at any of them returns a finite, correctly-shaped, wrong
+answer. Each is marked where the walkthrough reaches it.
 
 ## The path, as the graph builds it
 
-Six operators, and one call. All three composition structures appear here at
-once, and the picture shows each of them differently because they *are*
-different kinds of thing — a **cascade** is a run of arrows; a **sum** and a
-**switch** are not operators but operations *on* them, so the wire runs through
-a symbol of its own for each, ⊕ and ◇. Boxes are the operators:
+Six operators and one call. All three composition structures appear here, and
+the picture draws each differently. A **cascade** is a run of arrows. A **sum**
+and a **switch** are operations on operators, so the wire runs through a symbol
+of its own for each, ⊕ and ◇. Boxes are the operators:
 
 ```{mermaid}
 flowchart LR
@@ -100,39 +97,38 @@ flowchart LR
   class tsum,sw,out wire;
 ```
 
-Read it structure by structure:
+By structure:
 
-- **cascade** — `sky → beam_spill`, and again `t_ant_sum → antenna_loss →
+- **cascade**: `sky → beam_spill`, and again `t_ant_sum → antenna_loss →
   receiver_input`. Each stage transforms what the last produced.
-- **sum** at the ⊕: the sky branch and the atmosphere are *independent
-  contributions*, and they add.
-- **switch** at the ◇: the antenna and the two loads are *alternatives*.
-  One is connected per sample; the loads **replace** the antenna rather than
-  adding to it.
+- **sum** at the ⊕: the sky branch and the atmosphere are independent
+  contributions, and they add.
+- **switch** at the ◇: the antenna and the two loads are alternatives.
+  One is connected per sample. A load replaces the antenna and is not added to
+  it.
 
 :::{admonition} Why the spill cascades and the atmosphere sums
 :class: tip
-`BeamSpillOperator` looks like it should be a sum — sky *plus* ground — and it
-is not. It computes a **mixture**,
+`BeamSpillOperator` is not a sum of sky and ground. It computes a **mixture**,
 $f_\mathrm{sky} T_\mathrm{sky} + (1 - f_\mathrm{sky}) T_\mathrm{ground}$,
-whose two weights add to one by construction. The test is the isothermal one: a
-sky and a ground at the same $T$ must give $T$, and addition cannot do that
-($T + T = 2T$). So the spill *transforms* the sky — one input, one output, a
-`transform` node — while `AtmosphericEmissionOperator` contributes something
+whose two weights add to one by construction. The isothermal test separates the
+two: a sky and a ground at the same $T$ must give $T$, and addition cannot do
+that ($T + T = 2T$). So the spill transforms the sky, as a `transform` node with
+one input and one output. `AtmosphericEmissionOperator` contributes something
 independent that nothing constrains against the sky, and is a `source` leaf into
 the junction.
 
-The mixture could have been split into a scaling and a separate ground leaf.
-That is exactly what it must not be: two objects holding two numbers that have
-to satisfy $f + (1-f) = 1$, with nothing enforcing it. See [D17](design.md).
+Splitting the mixture into a scaling and a separate ground leaf would leave two
+objects holding two numbers that have to satisfy $f + (1-f) = 1$, with nothing
+enforcing it. See [D17](design.md).
 :::
 
-Not one line of the `assemble()` call says any of this — the
+The `assemble()` call states none of this. The
 [canonical path](signal-path.md#rhinos-template) does.
 
 ---
 
-## Step 1 — the horn
+## Step 1: the horn
 
 RHINO ships its horn as CST Studio far-field ASCII exports, one file per
 frequency, holding total directivity in dBi on a regular $(\theta, \phi)$ grid.
@@ -148,9 +144,9 @@ A real beam does not stop at the horizon, and what is below it sees ground:
 :width: 100%
 
 Left: the horn's directivity against zenith angle at the two ends of the band.
-The line is the azimuthal mean per ring, the band its 10–90 % spread — this horn
-varies by tens of percent around a ring, which is why the azimuth convention is
-not a detail. Right: the share of solid angle below the horizon, peaking near
+The line is the azimuthal mean per ring, the band its 10–90 % spread. This horn
+varies by tens of percent around a ring, so the result depends on the azimuth
+convention. Right: the share of solid angle below the horizon, peaking near
 3.4 % at 70 MHz.
 ```
 
@@ -160,15 +156,15 @@ not a detail. Right: the share of solid angle below the horizon, peaking near
 :width: 100%
 
 Left: the horn's directivity against zenith angle at the two ends of the band.
-The line is the azimuthal mean per ring, the band its 10–90 % spread — this horn
-varies by tens of percent around a ring, which is why the azimuth convention is
-not a detail. Right: the share of solid angle below the horizon, peaking near
+The line is the azimuthal mean per ring, the band its 10–90 % spread. This horn
+varies by tens of percent around a ring, so the result depends on the azimuth
+convention. Right: the share of solid angle below the horizon, peaking near
 3.4 % at 70 MHz.
 ```
 
 For a drift scan the pointing is fixed, so the horizon is fixed and the
-truncated beam is a **constant** — one multiply, done once, which also yields
-the surviving fraction $f_\mathrm{sky}$:
+truncated beam is a constant. Truncation is one multiply, done once, which also
+yields the surviving fraction $f_\mathrm{sky}$:
 
 ```python
 from rheplicant.radio import cst_beam_maps, horizon_truncated_beam
@@ -185,19 +181,19 @@ projector = DriftScanProjector.from_beam_maps(
 ).to_reference_frame(lst_ref_deg=0.0)          # pay the Wigner rotation once
 ```
 
-:::{admonition} Join 1 — `normalize_beam` decides whether `T_src` is a temperature
+:::{admonition} Join 1: `normalize_beam` decides whether `T_src` is a temperature
 :class: warning
 Both sky engines default to `normalize_beam=False`, matching numpy limTOD: the
 forward model then returns $\int B\,T \,d\Omega$, not
 $\int B\,T \,d\Omega \big/ \int B \,d\Omega$. The first is not a temperature.
-Use limTOD's own switch rather than normalizing the beam map by hand — a
-hand-normalized beam is *still* biased at the percent level, because the
-band-limit truncates the denominator too. The numbers are in
+Use limTOD's own switch, not a beam map normalized by hand: a hand-normalized
+beam is still biased at the percent level, because the band-limit truncates the
+denominator too. The numbers are in
 [sky engines](sky-engines.md#is-the-output-a-temperature).
 :::
 
-The example checks this rather than asserting it, against the one sky whose beam
-average is known by definition — a uniform one:
+The example checks this against a uniform sky, whose beam average is known by
+definition:
 
 ```text
 beam: RHINO horn, HornDryGround
@@ -207,12 +203,12 @@ beam: RHINO horn, HornDryGround
 drift-scan sky: (96, 8)  1869 .. 4682 K
 ```
 
-Four thousand kelvin is not a typo: at 60–85 MHz the Galactic synchrotron sky
-really is that bright, which is why the calibration problem is hard.
+The drift-scan sky reaches four thousand kelvin because the Galactic synchrotron
+sky is that bright at 60–85 MHz, which makes the calibration problem hard.
 
 ---
 
-## Step 2 — the antenna chain, assembled from the graph
+## Step 2: the antenna chain, assembled from the graph
 
 ```python
 twin = assemble(
@@ -237,14 +233,14 @@ Assembly(graph='single-antenna', lit=['observed_astro_sky', 'atmosphere',
 switch order: ('t_ant_sum', 'cal_loads') <- gamma_src rows stack in THIS order
 ```
 
-:::{admonition} Join 2 — `gamma_src`'s row order is the selector's branch order
+:::{admonition} Join 2: `gamma_src`'s row order is the selector's branch order
 :class: warning
 `NoiseWaveOperator` carries $\Gamma$ per source; the selector orders its
 branches by the graph's in-edge declaration, then by the order the loads were
 provided. The two orderings are independent and both objects are
 `(n_source, n_freq)`, so transposing them is shape-legal. Measured cost of
-getting it backwards: **46 K peak, 28 K mean** on a 545 K signal. Read the order
-off the assembly — `twin["receiver_input"].names` — rather than assuming it.
+getting it backwards: 46 K peak, 28 K mean on a 545 K signal. Read the order
+off the assembly, `twin["receiver_input"].names`.
 :::
 
 The example then checks the assembled twin against that sum written out by hand,
@@ -262,19 +258,20 @@ assembled twin vs the same sum by hand: 2.7e-16 relative — roundoff
 
 ---
 
-## Step 3 — three effects, none standing in for another
+## Step 3: horizon split, ohmic loss and mismatch loss
 
-The sky is modified three times on its way to the receiver. They are easy to
-confuse, they compose, and each has a distinct signature:
+The sky is modified three times on its way to the receiver. The three effects
+are easy to confuse. They compose, and each has a distinct signature:
 
 ```{figure} _static/receiver-cascade-light.svg
 :figclass: only-light
 :alt: Sky temperature through the horizon split, ohmic loss and mismatch loss
 :width: 100%
 
-Band-averaged, in order. The horizon split is a *mixture*; the ohmic loss both
-attenuates and emits; the mismatch loss only attenuates. None of it is a detail
-— the first two are ~4 % between them, the third a factor of four.
+The band-averaged sky temperature through the three stages, in order. The
+horizon split is a mixture; the ohmic loss both attenuates and emits; the
+mismatch loss only attenuates. The first two are ~4 % between them, the third a
+factor of four.
 ```
 
 ```{figure} _static/receiver-cascade-dark.svg
@@ -282,9 +279,10 @@ attenuates and emits; the mismatch loss only attenuates. None of it is a detail
 :alt: Sky temperature through the horizon split, ohmic loss and mismatch loss
 :width: 100%
 
-Band-averaged, in order. The horizon split is a *mixture*; the ohmic loss both
-attenuates and emits; the mismatch loss only attenuates. None of it is a detail
-— the first two are ~4 % between them, the third a factor of four.
+The band-averaged sky temperature through the three stages, in order. The
+horizon split is a mixture; the ohmic loss both attenuates and emits; the
+mismatch loss only attenuates. The first two are ~4 % between them, the third a
+factor of four.
 ```
 
 :::{list-table}
@@ -294,33 +292,32 @@ attenuates and emits; the mismatch loss only attenuates. None of it is a detail
 * - Stage
   - What it is
   - Signature
-* - $f_\mathrm{sky}$ — `BeamSpillOperator`
-  - part of the beam is looking at **ground**, not sky
-  - **mixing, no loss** — sky and ground at the same $T$ give $T$
-* - $\eta$ — `AntennaLossOperator`
-  - ohmic dissipation **inside** the horn
-  - loss **and** its own emission, $(1-\eta)\,T_\mathrm{phys}$
-* - $c_s$ — inside `NoiseWaveOperator`
-  - impedance **mismatch** at the receiver input
+* - $f_\mathrm{sky}$ (`BeamSpillOperator`)
+  - part of the beam is looking at ground, not sky
+  - mixing, no loss: sky and ground at the same $T$ give $T$
+* - $\eta$ (`AntennaLossOperator`)
+  - ohmic dissipation inside the horn
+  - loss and its own emission, $(1-\eta)\,T_\mathrm{phys}$
+* - $c_s$ (inside `NoiseWaveOperator`)
+  - impedance mismatch at the receiver input
   - loss, nothing added
 :::
 
-The first two share the arithmetic $a\,x + (1-a)\,b$ and are deliberately not
-one operator: merging them would make an efficiency and a spill fraction
+The first two share the arithmetic $a\,x + (1-a)\,b$ and are kept as separate
+operators: merging them would make an efficiency and a spill fraction
 indistinguishable in a fit, and would silently drop whichever additive term the
-survivor does not carry. Each pairing is pinned by an invariant rather than by
-inspection — for the ohmic loss, an antenna at $T$ looking at a sky at $T$
-delivers $T$ for any efficiency; for the spill, the same statement with ground
-in place of the antenna.
+survivor does not carry. Each is pinned by an invariant. For the ohmic loss, an
+antenna at $T$ looking at a sky at $T$ delivers $T$ for any efficiency. For the
+spill, the same holds with ground in place of the antenna.
 
 ---
 
-## Step 4 — a real switching cycle
+## Step 4: the switching cycle
 
-An identifiable per-channel noise-wave fit needs several sources with genuinely
-different $\Gamma$. Each switch position contributes exactly **one equation per
-frequency channel**, so *while every temperature is free per channel* the design
-matrix has rank
+An identifiable per-channel noise-wave fit needs several sources with distinct
+$\Gamma$. Each switch position contributes exactly one equation per frequency
+channel, so while every temperature is free per channel the design matrix has
+rank
 
 $$
 \mathrm{rank} = \min\!\left(n_\mathrm{src},\, k\right) \times n_\mathrm{freq}
@@ -328,37 +325,35 @@ $$
 
 where $k$ is the number of **free temperature families**: four when $T_{rx}$ is
 fitted alongside $T_{unc}, T_{cos}, T_{sin}$, three only when it is held known.
-So the three sources assembled in Step 2 — the antenna and two loads — make a
+So the three sources assembled in Step 2 (the antenna and two loads) make a
 three-family fit square and leave a four-family one deficient by exactly
 $n_\mathrm{freq}$.
 
 :::{warning}
-That count is per-channel and nothing more. The moment the temperatures become
-coefficients of a frequency basis, the basis ties channels together and the
-counting stops applying — in **both** directions, with no counting rule to
-replace it. Measure that case with
-{func}`~rheplicant.inference.identifiability.identifiability` instead of
-counting loads. See [D15](design.md) and `NoiseWaveOperator`'s module docstring
-for the measured numbers.
+That count holds per channel only. When the temperatures become coefficients of
+a frequency basis, the basis ties channels together and the count stops
+applying, in both directions, with no counting rule to replace it. Measure that
+case with {func}`~rheplicant.inference.identifiability.identifiability` instead
+of counting loads. See [D15](design.md) and `NoiseWaveOperator`'s module
+docstring for the measured numbers.
 :::
 
 `cal_loads` is `many=True` and feeds only the selector, so each
-`CalLoadOperator` becomes its own switch position rather than being summed with
-its sibling. The `assemble()` call in Step 2 *is* the whole switching cycle.
+`CalLoadOperator` becomes its own switch position and is not summed with its
+sibling. The `assemble()` call in Step 2 is the whole switching cycle.
 
 :::{admonition} If you hand-wire a branch anyway
 :class: warning
-A `Pipeline` of *source-type* operators **replaces** the data at each stage; only
+A `Pipeline` of source-type operators replaces the data at each stage, and only
 the last one survives. `Pipeline(sky, ground, atmosphere)` therefore returns the
-atmosphere alone — the sky silently gone, the result finite and correctly shaped.
-Summing is what the `t_ant_sum` junction does, and `SumOperator` is how you say
-it by hand. This bug was in an earlier draft of this example, back when
-multi-load switching still required hand-wiring, and it was caught only because
-the gradient with respect to the sky map came back exactly zero. The graph
-knowing the composition rules is what removed the opportunity.
+atmosphere alone: the sky is silently gone, and the result is finite and
+correctly shaped. One symptom is a gradient with respect to the sky map that is
+exactly zero. The `t_ant_sum` junction sums, and `SumOperator` does the same by
+hand. With `assemble()` the graph supplies the composition rules and this
+mistake does not arise.
 :::
 
-Noise is the radiometer equation — fractional, $d \to d\,(1 + w)$ with
+Noise follows the radiometer equation. It is fractional, $d \to d\,(1 + w)$ with
 $w \sim \mathcal{N}(0, \sigma_w)$ and $\sigma_w = 1/\sqrt{\Delta\nu\,\tau}$:
 
 ```python
@@ -367,7 +362,7 @@ noise_std = observed / (DELTA_NU * T_INT) ** 0.5   # per sample, not a scalar
 ```
 
 Because the noise is multiplicative it is ~2× larger on antenna samples than on
-the loads. A scalar $\sigma$ would weight them equally and throw that away.
+the loads. A scalar $\sigma$ would weight them equally and lose that difference.
 
 ```text
 simulated waterfall: (96, 8), 776.4 K mean, sigma 0.201..0.668 K (radiometer, fractional)
@@ -378,13 +373,12 @@ simulated waterfall: (96, 8), 776.4 K mean, sigma 0.201..0.668 K (radiometer, fr
 
 ---
 
-## Step 5 — closing the loop
+## Step 5: closing the loop
 
-The sky is **data** here, not a parameter: limTOD supplies it and its only job
-is to be right. That is exactly why the block stays linear in the noise-wave
-temperatures and needs no gradient sampler — the same
-[linear-block machinery](inference-linear.md#linear-blocks) as
-`examples/noise_wave_gcr.py`, now with a real sky in the $T_\mathrm{src}$ column.
+The sky is data here, not a parameter: limTOD supplies it. The block therefore
+stays linear in the noise-wave temperatures and needs no gradient sampler. It is
+the same [linear-block machinery](inference-linear.md#linear-blocks) as
+`examples/noise_wave_gcr.py`, with a real sky in the $T_\mathrm{src}$ column.
 
 ```python
 space = ParameterSpace(
@@ -407,8 +401,8 @@ solved, residual = wiener_solve(block, observed, noise_std=noise_std,
 :width: 100%
 
 Truth against the Wiener mean, per frequency channel, with the residual
-underneath on a ±0.45 K scale. The spectra come back to ~0.1 K out of spreads of
-8–60 K, from a waterfall whose own scatter is 0.2–0.7 K.
+underneath on a ±0.45 K scale. The spectra are recovered to ~0.1 K out of
+spreads of 8–60 K, from a waterfall whose scatter is 0.2–0.7 K.
 ```
 
 ```{figure} _static/receiver-recovery-dark.svg
@@ -417,8 +411,8 @@ underneath on a ±0.45 K scale. The spectra come back to ~0.1 K out of spreads o
 :width: 100%
 
 Truth against the Wiener mean, per frequency channel, with the residual
-underneath on a ±0.45 K scale. The spectra come back to ~0.1 K out of spreads of
-8–60 K, from a waterfall whose own scatter is 0.2–0.7 K.
+underneath on a ±0.45 K scale. The spectra are recovered to ~0.1 K out of
+spreads of 8–60 K, from a waterfall whose scatter is 0.2–0.7 K.
 ```
 
 ```text
@@ -434,22 +428,20 @@ Wiener mean, CG residual 2.9e-11:
 $\kappa \approx 40$ is a well-conditioned system: with $T_{rx}$ held known,
 three distinct $\Gamma$ make the per-channel $3\times 3$ square, and the antenna
 counts as a source like any other because its $T_\mathrm{src}$ is known. Fit
-$T_{rx}$ as well and the per-channel system is $4\times 4$ and wants a fourth
-load. Drop to one source and $\kappa$
-rises to $\sim 4\times 10^{6}$. The solve then returns a prior-driven answer
-whose residual looks converged, unless `require_convergence=` is passed, in
-which case it
-[refuses](inference-linear.md#conditioning-why-a-residual-is-not-an-accuracy).
+$T_{rx}$ as well and the per-channel system is $4\times 4$ and needs a fourth
+load. Drop to one source and $\kappa$ rises to $\sim 4\times 10^{6}$. The solve
+then returns a prior-driven answer whose residual looks converged, unless
+`require_convergence=` is passed, in which case it
+[refuses](inference-linear.md#conditioning).
 
 ---
 
-## Step 6 — one differentiable object
+## Step 6: gradients through the whole path
 
-From the HEALPix sky map, through the beam convolution, the horizon split, the
-ohmic loss, the switch and the noise-wave couplings — one gradient, no finite
-differences anywhere.
-Parameters are reached by their **graph node**, wherever `assemble()` folded
-them:
+One gradient runs from the HEALPix sky map through the beam convolution, the
+horizon split, the ohmic loss, the switch and the noise-wave couplings, with no
+finite differences. Parameters are reached by their graph node, wherever
+`assemble()` folded them:
 
 ```python
 pipeline = eqx.tree_at(lambda t: t["observed_astro_sky"].sky_model.maps,
@@ -466,11 +458,10 @@ d(sum P^2)/d(eta):        4.752e+08
 
 ## The horizon split, measured
 
-The walkthrough ends at Step 6. $f_\mathrm{sky}$ gets its own section after it
-because it was got wrong twice before it was got right, and only measurement
-settled it. With a truncated beam (or
-`horizon_mask=True`) the projector gives the beam average over the *visible*
-sky, and the rest of the antenna temperature is ground:
+The walkthrough ends at Step 6. This section gives the measurement that fixes
+$f_\mathrm{sky}$. With a truncated beam (or `horizon_mask=True`) the projector
+gives the beam average over the visible sky, and the rest of the antenna
+temperature is ground:
 
 $$
 T_\mathrm{collected} \;=\; f_\mathrm{sky}\,
@@ -481,14 +472,14 @@ f_\mathrm{sky} = \frac{\int_\mathrm{above} B \,d\Omega}
                       {\int_{4\pi} B \,d\Omega}.
 $$
 
-`BeamSpillOperator` applies **both** halves, so the weights sum to one by
-construction — split across a weight here and a `GroundPickupOperator` there,
-the two numbers can drift apart and nothing structural would notice.
+`BeamSpillOperator` applies both halves, so the weights sum to one by
+construction. Split across a weight here and a `GroundPickupOperator` there,
+the two numbers can drift apart with no structural check to catch it.
 
-The reference that settled it: a projector run on a sky map with the ground
-painted in, at latitude 90° where the local horizon coincides with the celestial
-equator and stops moving with LST — so the right answer is *computed*, not
-argued. Residual on a ~200 K effect at nside 16:
+The reference is a projector run on a sky map with the ground painted in, at
+latitude 90°, where the local horizon coincides with the celestial equator and
+stops moving with LST, so the right answer can be computed directly. Residual on
+a ~200 K effect at nside 16:
 
 :::{list-table}
 :header-rows: 1
@@ -506,25 +497,22 @@ argued. Residual on a ~200 K effect at nside 16:
   - **+0.005 K**
 :::
 
-Two findings in that table. The band-limited masked beam's solid-angle integral
-is *not* $f_\mathrm{sky}$: `map2alm` of a sharply cut map does not preserve the
-mean, so it is off by ~0.7 %. And `horizon_weights` uses a strict `el > 0`,
-which drops the whole ring of pixels centred exactly on the horizon — 64 of 3072
-at nside 16, at *exactly* zero elevation, not nearly. A pixel centred on the
-horizon is half sky and half ground; the two one-sided alternatives are
-symmetric and halve with nside, which is the signature of a miscounted ring
-rather than of anything harmonic.
-
-The first implementation used the strict cut, and looked entirely reasonable.
+The band-limited masked beam's solid-angle integral is not $f_\mathrm{sky}$:
+`map2alm` of a sharply cut map does not preserve the mean, so it is off by
+~0.7 %. `horizon_weights` uses a strict `el > 0`, which drops the whole ring of
+pixels centred on the horizon: 64 of 3072 at nside 16, at exactly zero
+elevation. A pixel centred on the horizon is half sky and half ground. The two
+one-sided alternatives are symmetric and halve with nside, which is the
+signature of a miscounted ring, not of a harmonic effect.
 
 :::{admonition} Where this lives
 :class: note
-All of it is **limTOD's** — `horizon_partition_weights`,
-`horizon_truncated_beam` and `horizon_beam_fraction`, from 1.9 — and the locks
-are in its `tests/limtod_jax/test_horizon_partition.py`. How a beam weights the
-sky is limTOD's subject, the same way the noise-wave data model is
-`rhino_cal_jax`'s; this package supplies the *placement*, and
-`BeamSpillOperator` consumes $f_\mathrm{sky}$ without computing it. See [D20](design.md).
+All of it is limTOD's: `horizon_partition_weights`, `horizon_truncated_beam`
+and `horizon_beam_fraction`, from 1.9. The locks are in its
+`tests/limtod_jax/test_horizon_partition.py`. How a beam weights the sky is
+limTOD's subject, as the noise-wave data model is `rhino_cal_jax`'s. This
+package supplies the placement, and `BeamSpillOperator` consumes
+$f_\mathrm{sky}$ without computing it. See [D20](design.md).
 :::
 
 ---
@@ -538,7 +526,7 @@ sky is limTOD's subject, the same way the noise-wave data model is
 * - File
   - Covers
 * - `tests/radio/test_sky_noise_wave_integration.py`
-  - the sky really is `T_src`: a matched antenna passes it through untouched, a mismatched one attenuates it by exactly $c_s$, the receiver terms do not scale with it, load samples never see it, each extra load is its own switch position, and a hand-wired branch reproduces `assemble()`
+  - the sky is `T_src`: a matched antenna passes it through untouched, a mismatched one attenuates it by exactly $c_s$, the receiver terms do not scale with it, load samples never see it, each extra load is its own switch position, and a hand-wired branch reproduces `assemble()`
 * - `tests/radio/test_antenna_loss.py`
   - the isothermal fixed point, the $\eta = 0$ and $\eta = 1$ limits, that the loss reaches the receiver as a changed `T_src`, and that the calibration loads are downstream of it
 * - `tests/radio/test_beam_spill.py`

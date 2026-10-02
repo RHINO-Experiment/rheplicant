@@ -94,8 +94,8 @@ capability, so the floor can be re-measured:
 
 Below 0.5, `rheplicant.inference` does not import at all, because
 `bayesmith.marginal` first ships there. Below 0.10 it fails the same way on
-`optimize.certify`. A 0.5 install imports and fails only in behaviour, which
-is the case the capability tests exist for.
+`optimize.certify`. A 0.5 install imports and fails only in behaviour; the
+capability tests cover that case.
 
 ## What the documentation cannot link to
 

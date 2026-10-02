@@ -28,9 +28,9 @@ still compiling:
 * ``init_strategy`` is **``NUTS``'s**, not ``MCMC``'s.  ``MCMC`` has no such
   parameter (measured: ``TypeError: MCMC.__init__() got an unexpected keyword
   argument 'init_strategy'``), and passing it to neither object is the silent
-  failure: ``init_to_declared``'s own docstring measures ``r_hat = 840`` and
-  ``n_eff = 2`` from numpyro's default against ``r_hat = 1.002`` and
-  ``n_eff = 1327`` from the identical model started at the declaration.
+  failure: ``init_to_declared``'s own docstring measures ``r_hat = 846`` and
+  ``n_eff = 2`` from numpyro's default against ``r_hat = 1.003`` and
+  ``n_eff = 1259`` from the identical model started at the declaration.
 * ``noise_std`` takes the NoiseModel **whole**.  Unlike the conjugate
   family, which needs a DECIDED array, this route wants the rule: a
   prediction-dependent sigma brings its log-determinant with it, because
@@ -277,8 +277,8 @@ def _init_strategy(run: Any, built: Any, space: Any) -> Any:
     numpyro's, not a restatement of it: numpyro's default is
     ``init_to_uniform``, which draws in the unconstrained space with no
     knowledge of the declaration, and on ``examples/tutorial_nuts.py``'s ring
-    toy that is ``r_hat = 840`` and ``n_eff = 2`` against ``r_hat = 1.002``
-    and ``n_eff = 1327`` from the identical model started at the declaration
+    toy that is ``r_hat = 846`` and ``n_eff = 2`` against ``r_hat = 1.003``
+    and ``n_eff = 1259`` from the identical model started at the declaration
     (``numpyro_bridge.py::to_numpyro_model``).  The schema says ``init=declared`` for
     the same reason.
 

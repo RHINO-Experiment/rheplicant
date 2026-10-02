@@ -4,8 +4,8 @@
 ```
 
 One space can be stepped by several engines at once. A `SamplingPlan` declares
-the partition and *derives* each block's engine from what the latents already
-say about themselves, rather than restating it.
+the partition and derives each block's engine from the latents' own
+declarations.
 
 - [A plan: one partition, two exits](#a-plan-one-partition-two-exits)
 - [One space, every engine](#one-space-every-engine)
@@ -17,10 +17,10 @@ say about themselves, rather than restating it.
 
 ## A plan: one partition, two exits
 
-The [linear machinery](inference-linear.md) answers for **one** block.
+The [linear machinery](inference-linear.md) answers for one block.
 `wiener_solve` is a linear-Gaussian block's posterior mean, `gcr_sample` an
 exact draw from that same conditional, and its
-[Gibbs tip](inference-linear.md#sampling-it-exactly) sketches the loop you would
+[Gibbs tip](inference-linear.md#sampling-a-linear-block) sketches the loop you would
 write by hand to put several blocks together. `SamplingPlan` is that loop,
 declared rather than written:
 
@@ -36,12 +36,12 @@ est   = plan.estimate(twin, state, observed, noise=noise)
 draws = plan.sample(twin, state, observed, noise=noise, key=k, n_sweeps=200)
 ```
 
-Every number quoted below is measured on the package's own fixture in
-`tests/inference/test_plan.py`: a bilinear `gain × T_ant` model, a 6-element
+Unless another test file is named, the numbers below are measured on the
+fixture in `tests/inference/test_plan.py`: a bilinear `gain × T_ant` model, a 6-element
 gain against a `(3, 4)` time × frequency coefficient basis, 54 data points and
 18 parameters. It is asymmetric in every dimension on purpose.
 
-### The engine is derived, never restated
+### How a block's engine is derived
 
 `Latent(..., linear=True)` already says which machinery a latent can take, so
 `Block` does not ask again. A block whose members are all declared linear is
@@ -51,12 +51,12 @@ steps (this package's own descent, with a per-latent step of
 `learning_rate × max|init|`) and then a Newton polish from
 `bayesmith.optimize.certify`. In `sample` it takes `steps` NUTS steps.
 
-There is a third engine, `log_conjugate`, and it is *not* derived — because
-there is no declaration to derive it from. A block is
-[conjugate in log space](inference-linear.md#the-same-model-in-log-space-where-sigma-is-constant)
+A third engine, `log_conjugate`, is not derived, because there is no declaration
+to derive it from. A block is [conjugate in log
+space](inference-linear.md#log-space)
 when the prediction is `exp` of an affine map, which no `Latent` field states;
 it is either asked for with `engine="log_conjugate"` or found by
-[`auto_blocks`](#the-partition-can-be-derived-too) probing for it. Asking for it
+[`auto_blocks`](#deriving-the-partition) probing for it. Asking for it
 on a latent declared `linear=True` is refused, because the two claims exclude
 each other: `exp` of an affine function is affine only where it is constant.
 
@@ -67,8 +67,8 @@ SamplingPlan(('gain'):conjugate, ('t_coeff'):conjugate)
 SamplingPlan(('amp'):conjugate, ('centre'):gradient)
 ```
 
-Exactly one case is genuinely ambiguous — a block mixing declared-linear and
-non-linear members — and it is refused rather than guessed:
+One case is ambiguous, a block mixing declared-linear and non-linear members,
+and it is refused:
 
 ```text
 Block('amp', 'centre') mixes declared-linear latents ['amp'] with non-linear
@@ -79,14 +79,14 @@ difference between tractable and hopeless. Split them into separate blocks, or
 say engine='gradient' to step the whole block by gradient deliberately.
 ```
 
-`engine=` exists for that override and for nothing else. `steps=` on a
+`engine=` exists for that override and for asking for `log_conjugate`. `steps=` on a
 conjugate block raises for the same reason: a Wiener solve has no inner steps,
 so accepting the argument would silently ignore it.
 
-### The partition is checked, and the check is the point
+### The partition check
 
-Every latent of the space in exactly one block. Both ways of getting that wrong
-are refused by name, and the dangerous one is the omission:
+Every latent of the space must be in exactly one block. A latent in no block
+and a latent in two are both refused by name. The omission is refused with:
 
 ```text
 This plan does not cover latent(s) ['t_coeff']: every latent of the space must
@@ -96,13 +96,13 @@ nothing anywhere reports that a parameter you declared was never inferred. Add
 it to a block, or drop it from the space.
 ```
 
-A latent in *two* blocks is refused too: the second update each sweep would be
+A latent in two blocks is refused too: the second update each sweep would be
 solving a conditional the first had just invalidated, and every diagnostic would
 report the second's answer as if the first had never run.
 
-### The partition can be derived, too
+### Deriving the partition
 
-Declaring the blocks stays available and stays the honest default for a model
+Declaring the blocks stays available and stays the default for a model
 you know. When you would rather not, `auto_blocks` reads the partition off the
 model, and `SamplingPlan.automatic` is the one-liner over it. The grouping
 loop is `bayesmith.dispatch.factor.first_fit`; this package supplies the
@@ -115,63 +115,61 @@ plan = SamplingPlan.automatic(space, twin, state, noise=noise)
 plan = SamplingPlan(space, *auto_blocks(space, twin, state, noise=noise, steps=20))
 ```
 
-`noise=` is optional and only the log-space half needs it — see below.
+`noise=` is optional and only the log-space half needs it (see below).
 
 The rule is conjugate blocks for the latents declared `linear=True` and one
-gradient block for everything else — with two refinements, both of which the
-probe supplies and neither of which you declare.
+gradient block for everything else, with two refinements that the probe
+supplies and you do not declare.
 
-**One block per factor, not one per latent and not one for all.**
-`Latent(..., linear=True)` is a claim about **one** latent: the prediction is
-affine in it *with the others held fixed*. A conjugate block over several of
-them claims something strictly stronger, that the prediction is affine in them
-**jointly**, and on a multilinear model that is false while every member's own
-declaration is true. So sweeping every linear latent into one block is wrong,
-and one block per latent is needlessly worse — the correct partition is one
-block per *factor*, holding all of that factor's latents. On
-`gain × (B_ant @ t_ant + B_nw @ t_nw + tone)`:
+**Grouping by factor.** `Latent(..., linear=True)` is a claim about one latent:
+the prediction is affine in it with the others held fixed. A conjugate block
+over several of them claims something strictly stronger, that the prediction is
+affine in them jointly, and on a multilinear model that is false while every
+member's own declaration is true. Sweeping every linear latent into one block is
+therefore wrong, and one block per latent is worse than it needs to be. The
+correct partition is one block per factor, holding all of that factor's latents.
+On `gain × (B_ant @ t_ant + B_nw @ t_nw + tone)`:
 
 ```text
 SamplingPlan(('t_ant', 't_nw'):conjugate, ('gain'):conjugate)
 ```
 
-**And log-linearity is discovered, not declared.** A latent the prediction is
-`exp`-affine in — a gain bound as `Bind(..., fn=jnp.exp)` — has no `linear=True`
-to read, and there is deliberately no `log_linear=True` either: the same probe
-that finds the grouping asks
-[`check_log_linearity`](inference-linear.md#the-same-model-in-log-space-where-sigma-is-constant)
+**Log-linearity.** A latent the prediction is `exp`-affine in (a gain bound as
+`Bind(..., fn=jnp.exp)`) has no `linear=True` to read, and by design there is no
+`log_linear=True` either. The same probe that finds the grouping asks
+[`check_log_linearity`](inference-linear.md#log-space)
 and routes it to a `log_conjugate` block.
 
-**Discovery needs the noise, and this is half the question rather than a
-detail.** A log-conjugate block is a claim about the *likelihood*: taking logs
-simplifies a multiplicative noise and merely restates an additive one as a
+**The noise in discovery.** Discovering a log-conjugate block needs the noise.
+A log-conjugate block is a claim about the likelihood: taking logs
+simplifies a multiplicative noise and restates an additive one as a
 different likelihood from the one declared, the first-order equivalence
 holds only up to `FIRST_ORDER_MAX_FRACTIONAL`, and a declared
 `RadiometerNoise.floor` makes sigma constant wherever it binds, so any floor
-above zero has no log route. So `auto_blocks` takes `noise=` and applies all
-three refusals (`log_route_refusal`) when it partitions. Without it, no
-`log_conjugate` block is claimed at all and an `UncheckedLogRouteWarning`
-names the latents that qualified on their prediction alone — conservative, because a gradient
-block is always a sound verdict, and loud, because the alternative is a
-partition promising a route `to_log_space` will refuse.
+above zero has no log route. `auto_blocks` therefore takes `noise=` and applies
+all three refusals (`log_route_refusal`) when it partitions. Without it, no
+`log_conjugate` block is claimed and an `UncheckedLogRouteWarning`
+names the latents that qualified on their prediction alone. A gradient
+block is always a sound verdict, and the warning is issued because the
+alternative is a partition promising a route `to_log_space` will refuse.
 
 On the same model with the gain in log space, nothing is declared about the
-gain at all and the partition comes back closed-form throughout:
+gain and every block of the partition is closed-form:
 
 ```text
 SamplingPlan(('t_ant', 't_nw'):conjugate, ('log_gain'):log_conjugate)
 ```
 
-The two probes take separate `scales`, and that is not tidiness: feeding the
-linear default's `1e3` entry to a log probe sends it through an exponential
-that overflows, the check refuses, and a genuinely log-linear latent is filed as
-gradient — a misclassification that costs a conjugate block and reports nothing.
-`log_scales=` is the argument, `LOG_DEFAULT_SCALES` the default.
+The two probes take separate `scales`. Feeding the linear default's `1e3` entry
+to a log probe sends it through an exponential that overflows, the check
+refuses, and a log-linear latent is filed as gradient: a misclassification that
+costs a conjugate block and reports nothing. `log_scales=` is the argument,
+`LOG_DEFAULT_SCALES` the default.
 
 #### A worked example: all three engines from one model
 
-For `d = exp(Ax) · (By + exp(Cz)) · (1 + f w)` — a matrix-exponential gain over
-a summed sky under radiometer noise — declare `linear=True` on `y` alone (the
+For `d = exp(Ax) · (By + exp(Cz)) · (1 + f w)`, a matrix-exponential gain over
+a summed sky under radiometer noise, declare `linear=True` on `y` alone (the
 one latent the prediction is affine in) and let the probes decide the rest:
 
 ```text
@@ -179,76 +177,73 @@ SamplingPlan(('y'):conjugate, ('x'):log_conjugate, ('z'):gradient)
 ```
 
 `y` is conjugate in the original space, solved each sweep with sigma frozen at
-the current prediction — the GLS-flavoured choice this page documents above.
+the current prediction, the GLS-flavoured choice described under
+[When the covariance is not given](inference-linear.md#when-the-covariance-is-not-given).
 `x` is discovered: nothing was declared for it, but `log(prediction) = Ax +
 log(By + exp(Cz))` is affine in it given the others, so the probe routes it to
-the log-space engine. `z` fails both probes and takes NUTS. Three engines, one
-sweep.
+the log-space engine. `z` fails both probes and takes NUTS. One sweep runs all
+three engines.
 
-Two things this example teaches beyond the partition:
+The example also shows two limits:
 
 * **A correct partition is not a convergence proof.** This model is fully
   identified (`identifiability` reports nullity 0) with
-  `weakest_identified = 5.4e-4` — one direction constrained thousands of times
-  more weakly than the rest, because `exp(Ax)`'s shape partly trades against
-  the sky's. Single-latent Gibbs alternation random-walks along that valley:
-  measured, two 400-sweep chains from different starts each reported tight
-  widths while sitting sixteen of those widths apart, and the joint
-  chi-squared `rhat` flagged nothing — chi-squared is FLAT along a valley by
-  construction, which is a blindness this page's own monitoring section
-  warns about in its other form. On such a model, put the strongly coupled
-  latents in ONE block by hand (`Block("y", "z", steps=...)`), and run a
+  `weakest_identified = 5.4e-4`: one direction is constrained thousands of
+  times more weakly than the rest, because `exp(Ax)`'s shape partly trades
+  against the sky's. Single-latent Gibbs alternation random-walks along that
+  valley: measured, two 400-sweep chains from different starts each reported
+  tight widths while sitting sixteen of those widths apart, and the joint
+  chi-squared `rhat` flagged nothing, because chi-squared is flat along a
+  valley by construction. This page's monitoring section warns about the same
+  blindness in its other form. On such a model, put the strongly coupled
+  latents in one block by hand (`Block("y", "z", steps=...)`), and run a
   second chain from a different start before believing any of them.
 * **Where this package's plans stop.** A `Latent`'s prior is a fixed
-  distribution; a prior *parameterised by another latent* — a field `w1`
-  whose statistics a hyperparameter sets — has no spelling in a
-  `ParameterSpace`, and a plan cannot sweep what it cannot declare. Build
-  that model as a bayesmith graph directly. Its documentation works the
-  hierarchical variant of this same model (`docs/factor-partition-examples.md`
-  in that repository): a hyperparameter is ejected from every exact block,
-  because an exact block solving only against data would drop the
-  `p(w1 | y)` factor.
+  distribution; a prior parameterised by another latent (a field `w1` whose
+  statistics a hyperparameter sets) has no spelling in a `ParameterSpace`, and a
+  plan cannot sweep what it cannot declare. Build that model as a bayesmith
+  graph directly. Its documentation works the hierarchical variant of this same
+  model (`docs/factor-partition-examples.md` in that repository): a
+  hyperparameter is ejected from every exact block, because an exact block
+  solving only against data would drop the `p(w1 | y)` factor.
 
-**Pairs settle it.** For latents already known to be affine on their own, every
+**Why pairs suffice.** For latents already known to be affine on their own, every
 diagonal block of the group's Hessian vanishes, so joint affinity is exactly the
-claim that the off-diagonal ones do too — a question about pairs. Probing the
+claim that the off-diagonal ones do too, a question about pairs. Probing the
 `C(n, 2)` pairs with `check_linearity` therefore decides a property of all
 `2ⁿ − n − 1` subsets, and the verdicts colour a graph whose groups are the
 blocks. The cost is that quadratic count of probes, each a linearization plus
 one forward per entry in `scales`; nothing here switches on a size, for the same
 reason `check_identifiability` does not.
 
-Deriving the partition changes nothing downstream. The blocks are checked
-exactly as declared ones are, each conjugate block's joint linearity re-verified
-at the first sweep, and — the part worth saying plainly — **a derived partition
-is not a reason to believe a model**. Two coupled conjugate blocks are precisely
-the configuration whose degenerate case converges quietly onto an arbitrary
-point with every per-block guard green; `identifiability` is what sees that, and
-both exits still run it by default.
+Deriving the partition changes nothing downstream. The blocks are checked as
+declared ones are, and each conjugate block's joint linearity is re-verified at
+the first sweep. A derived partition is not a reason to believe a model. Two
+coupled conjugate blocks are the configuration whose degenerate case converges
+quietly onto an arbitrary point with every per-block guard green;
+`identifiability` detects that, and both exits still run it by default.
 
-### Two methods, not a mode flag
+### Two exits: estimate and sample
 
-`key=None | key` is the right *implementation* and the wrong *interface*. A
-caller's intent is "give me the best fit" or "give me draws", not "here is a
-PRNG key" — and two methods make the invalid combinations unrepresentable
-rather than merely validated: `key` is required on `sample` and absent from
-`estimate`, so "asked for draws and forgot the key" cannot be written down.
-`n_sweeps` and `warmup` belong to one, `max_iter` and `tol` to the other,
-because they mean nothing to the other. Both return the same currency —
-`result.diagnostics` and `result.names` — so a caller can log or assert on a run
-without knowing which exit produced it.
+Internally one sweep takes `key=None | key`. The interface is two methods and no
+mode flag: `key` is required on `sample` and absent from `estimate`, so a
+request for draws without a key cannot be written. `n_sweeps` and `warmup`
+belong to `sample`, `max_iter` and `tol` to `estimate`, because each pair means
+nothing to the other method. Both return `result.diagnostics` and
+`result.names`, so a caller can log or assert on a run without knowing which
+exit produced it.
 
-That shared currency has a name. `PlanResult` is the protocol both exits
-satisfy: `.diagnostics` is a `PlanDiagnostics`, `.names` are the latents. What
-differs is what the answer *is*, which is the honest difference between the two:
+`PlanResult` is the protocol both exits satisfy: `.diagnostics` is a
+`PlanDiagnostics`, `.names` are the latents. The exits differ in the answer they
+return:
 
 | exit | returns | the answer |
 |---|---|---|
-| `plan.estimate` | `Estimate` | `.values` — one array per latent |
-| `plan.sample` | `Draws` | `.samples` — a chain per latent, plus `.n_draw`, `.mean`, `.std` (properties, not calls) |
+| `plan.estimate` | `Estimate` | `.values`: one array per latent |
+| `plan.sample` | `Draws` | `.samples`: a chain per latent, plus `.n_draw`, `.mean`, `.std` (properties, not calls) |
 
 Annotate against `PlanResult` when a function of yours should take either, and
-against `Estimate` or `Draws` when it genuinely needs the values or the chain.
+against `Estimate` or `Draws` when it needs the values or the chain.
 
 Both exits on the fixture above, at `HomoscedasticNoise(1.0)`:
 
@@ -266,15 +261,15 @@ plan.sample     n_sweeps  60   kept  30   rhat 1.434   converged False
 
 The estimate runs in float32, so its change tolerance is the float32 floor
 rather than the default `tol = 1e-8`, and it converges at sweep 94 of its 100
-(see the monitoring section below). Those 94 sweeps and
-the `rhat = 1.434` are the same fact seen twice: these two
-blocks are strongly correlated, so the alternation moves slowly, and 30 kept
-draws are nowhere near stationarity. Neither exit hides it — `converged` is
-`False` on the short run and `PlanDiagnostics.rhat` says by how much.
+(see the monitoring section below). Those 94 sweeps and the `rhat = 1.434` have
+one cause: these two blocks are strongly correlated, so the alternation moves
+slowly, and 30 kept draws are far from stationarity. Neither exit hides it:
+`converged` is `False` on the short run and `PlanDiagnostics.rhat` says by how
+much.
 
-That diagnostic is computed by `split_rhat`, which is exported and worth
-reaching for on any chain you hold — cut the trace in half, treat the halves as
-two chains, compare the variance between them against the variance within:
+That diagnostic is computed by `split_rhat`, which is exported and applies to
+any chain you hold. It cuts the trace in half, treats the halves as
+two chains, and compares the variance between them against the variance within:
 
 ```python
 import jax, jax.numpy as jnp
@@ -284,14 +279,13 @@ split_rhat(jax.random.normal(jax.random.key(0), (200,)))   # 1.0043  — iid
 split_rhat(jnp.arange(200.0))                              # 2.6326  — pure drift
 ```
 
-Two degenerate readings are deliberate rather than defensive: halves that are
-each constant at the *same* value give `1.0` (nothing to mix), and halves each
-constant at *different* values give `inf` (a chain that moved once and stopped).
+Two degenerate inputs have defined results: halves that are each constant at the
+same value give `1.0` (nothing to mix), and halves each constant at different
+values give `inf` (a chain that moved once and stopped).
 
-**A trace too short to halve is refused, not answered**, and that is the part
-worth knowing before you call it. The minimum is `MIN_DRAWS = 4`, two halves of
-two, exported from `rheplicant.inference`.
-Below it the diagnostic is not weak but undefined:
+A trace too short to halve is refused. The minimum is `MIN_DRAWS = 4`, two
+halves of two, exported from `rheplicant.inference`. Below it the diagnostic is
+undefined:
 
 ```text
 split_rhat was given 3 value(s) and a split-r_hat needs at least 4 — two halves
@@ -303,27 +297,26 @@ caller tested for. SamplingPlan.sample refuses the same count on
 (n_sweeps - warmup); this is that refusal, for the trace you brought yourself.
 ```
 
-The middle clause is the reason this is an exception and not a `nan`: `rhat <=
-rhat_max` is `False` for a nan and so is `rhat > rhat_max`, so a threshold guard
-reads an undefined diagnostic as whichever answer it happened to test for.
-`SamplingPlan.sample` enforces the same minimum on `n_sweeps - warmup`, so
-reaching this by that route is not possible; `split_rhat` enforces it anyway,
-because it is public and does not trust its one in-package caller.
+This is an exception and not a `nan` because `rhat <= rhat_max` is `False` for a
+nan and so is `rhat > rhat_max`, so a threshold guard reads an undefined
+diagnostic as whichever answer it tested for. `SamplingPlan.sample` enforces the
+same minimum on `n_sweeps - warmup`, so a plan cannot reach this refusal.
+`split_rhat` enforces it as well because it is public; the plan is its one
+in-package caller.
 
-### Convergence is judged on a joint quantity, never a per-block residual
+### Convergence monitoring
 
-A hand-rolled alternating solve over
-this same bilinear model, with a free antenna temperature per `(time, frequency)`
-cell, lands hundreds to thousands of kelvin from the truth while **every
-per-block guard this package ships reports green**: `check_linearity` passes at
-every sweep, because each conditional genuinely *is* affine; the per-block
-condition number is ≈1.47; and the CG residual reads ~`1e-7`. Nothing in the
-sweep is wrong. The *partition* is, and no per-block number is entitled to
-notice — a residual and a condition number are both computed from the block
-being solved.
+A hand-rolled alternating solve over this same bilinear model, with a free
+antenna temperature per `(time, frequency)` cell, lands hundreds to thousands of
+kelvin from the truth while every per-block guard this package ships reports
+green: `check_linearity` passes at every sweep, because each conditional is
+affine; the per-block condition number is ≈1.47; and the CG residual reads
+~`1e-7`. The fault is in the partition and not in any sweep, and no per-block
+number can show it, because a residual and a condition number are both computed
+from the block being solved.
 
-How far from the truth is not a property of the degeneracy but of where the
-solve started, because the answer is the initial offset carried along the null
+The distance from the truth is set by where the solve started and not by the
+degeneracy, because the answer is the initial offset carried along the null
 direction and left there. Measured in
 `tests/inference/test_degenerate_partition.py`:
 
@@ -334,17 +327,17 @@ direction and left there. Measured in
 | 25 % off | 704 K | 1.0e-07 | 1.452 |
 | 100 % off | 2962 K | 9.6e-07 | 1.432 |
 
-Four decades of error, and the guards read alike down the column — including
-across the gap between the row that is right and the row that is
-catastrophically wrong. There is no threshold to place between them, which is
-why the remedy is a different measurement rather than a tighter tolerance.
-Iterating is not one either: five sweeps and two hundred agree to four figures,
-because the solve reaches the solution manifold at once and then has nowhere
-left to move.
+The error spans five orders of magnitude and the guards read alike down the
+column,
+including between the row that is right and the rows that are wrong. There is no
+threshold to place between them, so the remedy is a different measurement and
+not a tighter tolerance. More sweeps are not a remedy either: five sweeps and
+two hundred agree to four figures, because the solve reaches the solution
+manifold at once and then does not move.
 
-So the monitored quantity is a **joint** one at the current parameter tuple,
+The monitored quantity is therefore a joint one at the current parameter tuple,
 across sweeps. For `plan.estimate` it is the joint negative log posterior `f`,
-`Conditioning.neg_log_posterior` — the objective every block update descends —
+`Conditioning.neg_log_posterior` (the objective every block update descends),
 and what certifies a run is the **Newton decrement** of `f` at the point it
 would return. The stop rule is `bayesmith.optimize.certify`'s: the schedule,
 the decrement and the tightening of `solve_tol`. The plan supplies the joint
@@ -353,14 +346,14 @@ objective and the sweep, and the constants named below are re-exports.
 * **the certificate**: `λ² = gᵀH⁻¹g` over every latent, for `g` and `H` the
   gradient and Hessian of `f`. Near its minimum `f` is quadratic,
   `f − f* = d² / 2` for `d` the Mahalanobis distance under the posterior
-  precision, and `λ` *is* that distance. A run converges when `λ` is at most
-  `sqrt(2 gap_tol)` — 0.1 posterior σ by default — which does not grow with
-  `N` and does not care which block is slow. Recorded as
-  `PlanDiagnostics.distance_bound`, with the Hessian-vector products it cost
-  in `.certificate_iterations` and the number of times it ran in
+  precision, and `λ` is that distance. A run converges when `λ` is at most
+  `sqrt(2 gap_tol)` (0.1 posterior σ by default), which does not grow with `N`
+  and does not depend on which block is slow. Recorded as
+  `PlanDiagnostics.distance_bound`, with the Hessian-vector products it cost in
+  `.certificate_iterations` and the number of times it ran in
   `.certificate_attempts`.
 * **the schedule**: the decrement costs a gradient and a solve, so it is asked
-  only where a stop is plausible — the last two changes of `f` within
+  only where a stop is plausible: the last two changes of `f` within
   `t × max(|f|, 1)`, `t = max(tol, 64 ε)` for `ε` the machine epsilon of the
   objective's dtype (`OBJECTIVE_FLOOR_EPS = 64`, recorded as
   `.effective_tol`), and this sweep's decrease either below what the
@@ -371,20 +364,19 @@ objective and the sweep, and the constants named below are re-exports.
   `O(log max_iter)` decrements.
 
 **How the decrement is computed, and why an inexact solve is safe.** The
-numerics are in `bayesmith.optimize.certify`, upstream rather than here. They
-know nothing about models: the module takes a callable and a pytree, and the
-plan supplies the joint objective. Knowing nothing about models is also why it
-moved. It was written in this package and lifted into bayesmith byte for byte
-in bayesmith 0.10.0, with its 50 unit tests; the acceptance test that drives a
-whole estimate to its MAP stayed here, because that one does need this
-package's models. `H` is never formed from the model: every product is `jax.jvp` of
-`jax.grad` of `f`. Up to 1024 latents the decrement takes `n` such products,
-assembles the Hessian, scales it by its diagonal and solves by
-eigendecomposition; above that it runs conjugate gradients on the products
-alone. Either way the solve is inexact, and the verdict is never `gᵀx` as it
-stands. With `r = g − Hx` the true residual — recomputed with one more
-product, because a recursive one drifts — and `μ` a **lower bound on the
-smallest eigenvalue** of `H`,
+numerics are in `bayesmith.optimize.certify`. They know nothing about models:
+the module takes a callable and a pytree, and the plan supplies the joint
+objective. That is why the module moved: it was written in this package and
+lifted into bayesmith byte for byte in bayesmith 0.10.0, with its 50 unit tests;
+the acceptance test that drives a whole estimate to its MAP stayed here, because
+it needs this package's models. `H` is never formed from the model: every
+product is `jax.jvp` of `jax.grad` of `f`. Up to 1024 latents the decrement
+takes `n` such products, assembles the Hessian, scales it by its diagonal and
+solves by eigendecomposition; above that it runs conjugate gradients on the
+products alone. Either way the solve is inexact, and the verdict is never `gᵀx`
+as it stands. With `r = g − Hx` the true residual (recomputed with one more
+product, because a recursive one drifts) and `μ` a lower bound on the smallest
+eigenvalue of `H`,
 
 ```text
 λ  ≤  (R + sqrt(R² + 4 gᵀx)) / 2,      R = |r| / sqrt(μ)
@@ -394,11 +386,11 @@ by Cauchy–Schwarz in the `H⁻¹` inner product, inflated by `1/sqrt(1 − ε 
 for the rounding of `g` and `H` themselves. The run certifies on that upper
 bound and records it, so stopping the solve early can only make it refuse.
 
-**Where the lower bound comes from, and why only a proof certifies.** Below
-1024 latents it is measured: the scaled Hessian's own smallest eigenvalue,
-which also decides positive definiteness, so an indefinite or numerically
-singular Hessian is refused rather than certified. Above it the Hessian is
-not formed, and there are two ways for a run to have a floor at all:
+**Where the lower bound comes from, and why only a proof certifies.** Below 1024
+latents it is measured: the scaled Hessian's own smallest eigenvalue, which also
+decides positive definiteness, so an indefinite or numerically singular Hessian
+is refused. Above it the Hessian is not formed, and there are two ways for a run
+to have a floor:
 
 | floor | where it comes from | certifies |
 |---|---|---|
@@ -407,27 +399,26 @@ not formed, and there are two ways for a run to have a floor at all:
 | `probe` | a 32-step Lanczos probe's Ritz interval | **no** |
 | `none` | no usable floor at all | no |
 
-which one a run used is recorded as `PlanDiagnostics.floor_source`. The
+Which one a run used is recorded as `PlanDiagnostics.floor_source`. The
 proof for the second is the model's: with the prediction affine in every
-latent **jointly**, a sigma that does not depend on it, and a Normal prior on
+latent jointly, a sigma that does not depend on it, and a Normal prior on
 every latent, `H = JᵀN⁻¹J + P ⪰ P ⪰ min(1/σ_prior²)` whatever the data. Each
-condition is checked — joint affinity by the same `check_linearity` a
+condition is checked. Joint affinity is checked by the same `check_linearity` a
 conjugate block passes, asked of all the latents at once, because two blocks
 that are each affine are not jointly affine (`gain × sky` is the standing
-case) — and the floor is the **widest** prior scale, the smallest precision.
+case). The floor is the widest prior scale, the smallest precision.
 
-The third class is a heuristic and is treated as one. `θ₀ − β|s₀|` bounds the
-distance from `θ₀` to *some* eigenvalue of `H`, not to the smallest, so where
-the Krylov space never reaches the bottom of the spectrum the probe's floor
-can sit above it: measured over 480 random spectra, 5 in 240 did so in
-float32, the worst by a factor 7.4. A probed floor therefore never certifies
-here. It is kept for what it can do soundly — refuse: non-positive curvature,
-or a bound already outside the threshold. A run left with only a probe keeps
-sweeping and refuses at `max_iter` with **"cannot certify this estimate at
-this size and precision"**, naming the three things that would make a proof:
-a single conjugate block with Normal priors (or any partition of a jointly
-affine model), fewer latents than the dense limit, or float64 where the
-precision is what blocks the dense path.
+The third class is a heuristic. `θ₀ − β|s₀|` bounds the distance from `θ₀` to
+some eigenvalue of `H`, not to the smallest, so where the Krylov space never
+reaches the bottom of the spectrum the probe's floor can sit above it: measured
+over 480 random spectra, 5 in 240 did so in float32, the worst by a factor 7.4.
+A probed floor therefore never certifies here. It is kept because it can soundly
+refuse: non-positive curvature, or a bound already outside the threshold. A run
+left with only a probe keeps sweeping and refuses at `max_iter` with "cannot
+certify this estimate at this size and precision", naming the three things that
+would make a proof: a single conjugate block with Normal priors (or any
+partition of a jointly affine model), fewer latents than the dense limit, or
+float64 where the precision is what blocks the dense path.
 
 Both halves of that were found by construction: a spectrum
 clustered at 1 with one eigenvalue at 1e-8 and a gradient whose component
@@ -448,7 +439,7 @@ same plan:
 | one conjugate block of 1024 coefficients | 1024 | 1025 | 322 ms | 16 |
 | one conjugate block of 2000 coefficients | 2000 | 2 | 7.5 ms | 0.17 |
 
-The last row is the prior floor paying for itself: above 1024 latents the
+The last row shows the prior floor's effect: above 1024 latents the
 Hessian is not formed, and a floor the model proves lets the iteration stop
 at the second product instead of probing the spectrum.
 
@@ -471,7 +462,7 @@ below that rounding cannot be descended at all: run in float64
 ```
 
 A run that did reach a candidate is refused in the decrement's own terms
-instead — the distance it measured, what the solve did, and the `solve_tol` the
+instead: the distance it measured, what the solve did, and the `solve_tol` the
 closed-form blocks ended at.
 
 The changes counted are between sweep outputs, never from the starting values
@@ -481,25 +472,24 @@ sweep 3 (`EARLIEST_CONVERGED_SWEEP`) whatever `min_sweeps` says below that, and
 for that is refused before it runs, by pre-flight check A25.
 
 The joint χ² is still recorded (`PlanDiagnostics.chi2`) and is no longer the
-test. It was until 0.9.0, as a *decrease*: any sweep that did not lower χ² counted
+test. It was until 0.9.0, as a decrease: any sweep that did not lower χ² counted
 as converged. With a prior the MAP is not the χ² minimum, so a sweep moving
-towards the MAP raises χ², and the rule read that rise as convergence — measured
+towards the MAP raises χ², and the rule read that rise as convergence: measured
 1 to 15 posterior σ from the exact MAP, including a plan of two conjugate blocks
 and no gradient block. An exact conditional update cannot raise `f` beyond the
 arithmetic's noise, so a rise beyond its resolution is never convergence.
 
 **Why a curvature check, and not the changes alone.** A tolerance relative to
 `|f|` certifies a distance of about `sqrt(2 t |f| / (1 − ρ))`, and `|f|` is
-about `N / 2` for `N` data. Measured: the change test
-alone passing two collinear conjugate blocks 0.6 posterior σ from the MAP at
-`N = 1e6` in float64 and 16.5 σ in float32. Extrapolating the decreases at
-their contraction removes the `|f|` but not the second failure: `ρ` read from
-the decreases is the *fastest* mode still moving, so a slow mode hidden under a
-fast one passes. That was measured too — two correlated pairs,
-one started 30 σ off and one 1 σ off, certified 0.5 to 1.0 σ away, and 4618
-random dense precisions giving false certificates up to 1.33 σ. The decrement
-is a distance and has neither failure. Two collinear templates started 20 σ
-off, re-measured with it
+about `N / 2` for `N` data. Measured: the change test alone passing two
+collinear conjugate blocks 0.6 posterior σ from the MAP at `N = 1e6` in float64
+and 16.5 σ in float32. Extrapolating the decreases at their contraction removes
+the `|f|` but not the second failure: `ρ` read from the decreases is the fastest
+mode still moving, so a slow mode hidden under a fast one passes. Measured: two
+correlated pairs, one started 30 σ off and one 1 σ off, certified 0.5 to 1.0 σ
+away, and 4618 random dense precisions giving false certificates up to 1.33 σ.
+The decrement is a distance and has neither failure. Two collinear templates
+started 20 σ off, re-measured with it
 (`tests/inference/test_estimate_reaches_map.py`,
 `test_estimate_large_n_float32.py`):
 
@@ -515,22 +505,22 @@ off, re-measured with it
 what it asked for; what changed is that the change test no longer suffices, and a
 run that used to report converged may now take more sweeps or refuse.
 
-**The resolution, and what it is now for.** The change is summed term by term,
-so the constant parts of `f` (every prior's normalizer) and the bulk of the χ²
-sum cancel exactly instead of costing `ε |f|`; what remains is resolved to about
-`4 ε sqrt(Σ term²)` (`RESOLUTION_EPS`). A decrease below that is treated as no
-decrease — the sweep becomes a candidate and the decrement decides. Until the
-decrement, the resolution was the certificate's own floor, and a float32 run
-whose decreases fell below it was refused however good its answer: the second
-review measured that floor 50 to 1500 times coarser than the distance it stood
-for, and the float32 column above is the same grid that used to refuse on it.
+**The resolution.** The change is summed term by term, so the constant parts of
+`f` (every prior's normalizer) and the bulk of the χ² sum cancel exactly instead
+of costing `ε |f|`; what remains is resolved to about `4 ε sqrt(Σ term²)`
+(`RESOLUTION_EPS`). A decrease below that is treated as no decrease: the sweep
+becomes a candidate and the decrement decides. Before the decrement, the
+resolution was the certificate's own floor, and a float32 run whose decreases
+fell below it was refused however good its answer: that floor was measured 50 to
+1500 times coarser than the distance it stood for, and the float32 column above
+is the same grid that used to refuse on it.
 
 **When the inner solves are the obstacle.** A conjugate block solved to
 `solve_tol` has a fixed point that is not the MAP, and on correlated blocks the
 offset is not small: 0.11 posterior σ at the default `1e-6` on the bilinear
-fixture at noise 0.30. The decrement sees it as the distance it
-is and refuses, so when a sweep shows inexactness — the objective rising beyond
-its resolution, or a candidate refused — the closed-form blocks' tolerance is
+fixture at noise 0.30. The decrement measures that offset as a distance
+and refuses, so when a sweep shows inexactness (the objective rising beyond
+its resolution, or a candidate refused) the closed-form blocks' tolerance is
 divided by 100, down to a floor of `1e-12` in float64 and two machine epsilons
 in float32, and the value the run ended at is recorded as
 `PlanDiagnostics.solve_tol`. On that fixture the run converges at `1e-8`,
@@ -540,19 +530,19 @@ both exhaust 3000 sweeps and refuse. A model that certifies at the caller's
 
 **What is left.** The decrement is a statement about the quadratic model of `f`
 at the returned point: where the curvature changes over a posterior σ it is
-local. Above 1024 latents a model that is not jointly affine — a bilinear
-gain, a log-space block, anything a gradient block is there for — has no floor
-to prove and so no certificate at all; it refuses, and `tol=None` is the way
+local. Above 1024 latents a model that is not jointly affine (a bilinear
+gain, a log-space block, anything a gradient block is there for) has no floor
+to prove and so no certificate; it refuses, and `tol=None` is the way
 to get the answer without a claim. A direction of negative curvature that
 neither the probe nor the Krylov space meets is not seen. In float32 a
 model whose posterior σ is small against its latents' magnitudes has a gradient
-that is mostly rounding, and no solve recovers it — those runs refuse, naming
+that is mostly rounding, and no solve recovers it; those runs refuse, naming
 float64. Grouping the correlated latents into one `Block` removes the slowness
-rather than the symptom.
+itself.
 
 The change test's float32 floor exists because float32 cannot resolve
 `tol = 1e-8`: its epsilon is 1.19e-7, and conjugate solves at `solve_tol = 1e-6`
-move the objective at its plateau by tens of ulps a sweep — the inner-solver
+move the objective at its plateau by tens of ulps a sweep, the inner-solver
 floor [`iterative_gls`](inference-linear.md#when-the-covariance-is-not-given)
 documents for its own `reweight_tol`. On the fixture above, with the trace
 replayed against the float64 MAP, a floor of 4 ε never stops, 64 ε stops at
@@ -572,18 +562,18 @@ max |T_ant - truth|        1044.69 K
 max |gain  - truth|            0.308
 ```
 
-The joint χ² is *also* tiny, because a degenerate model fits the data exactly —
-it just does so at an arbitrary point of the null space. The joint objective
-and its certificate catch blocks that are identified but correlated; the rank
-test below is the only thing that sees the other failure.
+The joint χ² is also tiny, because a degenerate model fits the data exactly, at
+an arbitrary point of the null space. The joint objective and its certificate
+catch blocks that are identified but correlated; only the rank test below sees
+the other failure.
 :::
 
 ### The identifiability check, and its cadence
 
 `identifiability()` looks across blocks at the joint Jacobian and refuses a
 model with a null space before a sweep runs, naming the degenerate directions as
-combinations of **latents** — "you have 6 blind directions" tells a user they
-have a problem and nothing about which:
+combinations of latents. A count alone ("you have 6 blind directions") says
+that there is a problem and not where:
 
 ```text
 SamplingPlan.estimate refuses this model: its joint Jacobian has nullity 6 of 60
@@ -599,12 +589,12 @@ space. The degenerate directions, as shares of each latent:
   ... and 2 more
 ```
 
-Read the shares: each blind direction is half gain and half `t_ant`, which is
-the bilinear degeneracy `gain × T_ant = (c·gain) × (T_ant/c)` written down. The
-repair is a re-parameterization — the `(3, 4)` basis — not a tighter tolerance.
+Each blind direction is half gain and half `t_ant`, which is the bilinear
+degeneracy `gain × T_ant = (c·gain) × (T_ant/c)`. The repair is a
+re-parameterization (the `(3, 4)` basis), not a tighter tolerance.
 
-Called directly, `identifiability()` hands back an `IdentifiabilityReport`
-rather than raising, which is how you ask the question before committing to a
+Called directly, `identifiability()` returns an `IdentifiabilityReport`
+and does not raise, so the question can be asked before committing to a
 partition. On a healthy 64×4 design:
 
 ```text
@@ -615,9 +605,9 @@ singular_values [1.22098371 1.01958727 0.90795122 0.80328398]
 ```
 
 `rank` and `nullity` are the verdict; `singular_values`, `null_space` and
-`column_norms` are what it was read off, so a borderline case can be inspected
-instead of argued about. `threshold` is `rtol × σ_max`, and `rtol` defaults to
-`DEFAULT_RANK_RTOL` (`1e-8`) — a *relative* cut, which is why it does not need
+`column_norms` are what it was read off, so a borderline case can be
+inspected. `threshold` is `rtol × σ_max`, and `rtol` defaults to
+`DEFAULT_RANK_RTOL` (`1e-8`). The cut is relative, so it does not need
 retuning when the design's overall scale changes.
 
 `check_identifiability=` takes three values, and there is no size heuristic on
@@ -631,14 +621,13 @@ float64 words:
 | `False` | never |
 
 `"each_sweep"` is cheap for a small model and strictly more informative: a
-nonlinear model's identifiability is a property of *where you are*, so a check
-only at the start misses a degeneracy that opens up near the parameters you
-actually reach. Both exits check by default, and the point estimate is the
-**more** dangerous one to skip — a chain at least has `r_hat` to scream with,
-while a point estimate has no diagnostic at all and CG converges quietly onto an
-arbitrary point of the null space.
+nonlinear model's identifiability depends on the parameter values, so a check
+only at the start misses a degeneracy that opens up near the parameters the run
+reaches. Both exits check by default. Skipping the check is more dangerous on
+the point estimate: a chain still has `r_hat`, while a point estimate has no
+diagnostic and CG converges quietly onto an arbitrary point of the null space.
 
-### Two limitations that are real
+### Two limitations
 
 :::{warning}
 **`identifiability()` refuses a complex latent, so a complex sky-`alm` block must
@@ -652,28 +641,28 @@ freedom, and they can be identified separately. Declare the real and imaginary
 parts as separate latents, or ask about a different block with names=.
 ```
 
-Two independent reasons point the same way for the 10⁶-coefficient sky block
-that `linear.py` exists for: the rank test cannot *analyse* it, and it could not
-*afford* to — a dense `n_data × n_par` SVD is exactly what a matrix-free solver
-was built to avoid. So that plan runs with the guard off, and the run has no
-cross-block check at all. Declaring the real and imaginary parts as separate
-real latents buys the check back on a small block; on a big one, nothing does.
+Two independent reasons apply to the 10⁶-coefficient sky block that `linear.py`
+exists for: the rank test cannot analyse it, and it could not afford to, because
+a dense `n_data × n_par` SVD is what a matrix-free solver was built to avoid.
+That plan therefore runs with the guard off, and the run has no cross-block
+check. Declaring the real and imaginary parts as separate real latents restores
+the check on a small block; on a big one, nothing does.
 :::
 
 :::{danger}
 **A block taking a finite number of NUTS steps is Metropolis-within-Gibbs, not
-an exact conditional draw.** A conjugate block's GCR draw *is* exact, so a plan
-of conjugate blocks is an exact Gibbs sampler with nothing to tune. The moment
+an exact conditional draw.** A conjugate block's GCR draw is exact, so a plan
+of conjugate blocks is an exact Gibbs sampler with nothing to tune. Once
 one block takes `steps` gradient steps, the scheme is still valid and still
-targets the right stationary distribution — and is no longer exact, because the
-inner step count now sets the mixing. `steps=` reads as a performance knob and
-is a statistical assumption.
+targets the right stationary distribution, but it is no longer exact, because
+the inner step count now sets the mixing. `steps=` reads as a performance knob
+and is a statistical assumption.
 
 Measured on the plan's other fixture (`amp` conjugate, `centre` gradient, 120
-sweeps, truth `centre = 0.350`, `init = 0.100`, `key=jax.random.key(1)` — the
-one table on this page that does not use `key(0)`, because a stuck chain is a
-sampling accident and `key(0)` happens to escape at `steps=2`; that it depends
-on the seed is the point, not a caveat):
+sweeps, truth `centre = 0.350`, `init = 0.100`, `key=jax.random.key(1)`; this
+is the one table on this page that does not use `key(0)`, because a stuck chain
+is a sampling accident that depends on the seed, and `key(0)` happens to escape
+at `steps=2`):
 
 | `steps` | `rhat` | `converged` | posterior `centre` |
 |---|---|---|---|
@@ -681,17 +670,17 @@ on the seed is the point, not a caveat):
 | 10 | 0.983 | True | 0.3500 ± 0.0026 |
 | 50 | 0.991 | True | 0.3502 ± 0.0026 |
 
-At `steps=2` the chain **never left its initial value** — a posterior reported as
-a point mass 0.25 away from the truth, at zero width. Note how nearly it passed:
+At `steps=2` the chain never left its initial value: a posterior reported as
+a point mass 0.25 away from the truth, at zero width. It nearly passed:
 `r_hat` came in at 1.070 against a 1.05 threshold, and it is `r_hat` of the joint
-χ², which still moves because the *other* block is moving. Read
+χ², which still moves because the other block is moving. Read
 `diagnostics.rhat`, and look at the draws of the latent you care about.
 :::
 
 :::{note}
 **"Group the correlated latents into ONE Block" is not always available.** The
-non-convergence message above names that remedy, and for the bilinear model it
-is measured on, `check_linearity` refuses it — correctly:
+non-convergence message names that remedy, and for the bilinear model it
+is measured on, `check_linearity` refuses it, correctly:
 
 ```text
 Latents ['gain', 't_coeff'] are each declared linear=True, but the prediction is
@@ -702,11 +691,11 @@ or re-parameterize so the joint map really is affine. identifiability(space,
 pipeline, state) will tell you what the split costs before you choose it.
 ```
 
-Grouping works when the joint map really is affine — several noise-wave
-amplitudes, a sky block and an offset. When the coupling between the blocks is
-what makes them correlated, the remedy is the other one the message names: more
-sweeps, and `identifiability(space, pipeline, state, names=...)` to see what the
-split is costing before you choose it.
+Grouping works when the joint map is affine: several noise-wave amplitudes, a
+sky block and an offset. When the coupling between the blocks is what makes them
+correlated, the remedy is the other one the message names: more sweeps, and
+`identifiability(space, pipeline, state, names=...)` to see what the split is
+costing before you choose it.
 :::
 
 ---
@@ -777,7 +766,7 @@ is what physical fitting wants.
 Every engine so far evaluates a likelihood. Simulation-based inference does not:
 it draws pairs $(\theta, x)$ from the prior and the simulator, fits a
 conditional density $q(\theta \mid x)$ to them, and reads the posterior off $q$
-at the data actually observed.
+at the observed data.
 
 ```python
 thetas, bank = simulate_pairs(twin, state, space, noise=noise,
@@ -789,9 +778,9 @@ draws = q.sample(observed, key=jax.random.key(3), n_samples=4000)
 ```
 
 Nothing there needs the noise to be Gaussian, the model to be differentiable,
-or a normalization to be tractable — only a simulator, which the twin already
-is. And the cost is **amortized**: a second observation is a forward pass, not
-another chain.
+or a normalization to be tractable. It needs only a simulator, which the twin
+already is. The cost is **amortized**: a second observation is a forward pass,
+not another chain.
 
 The density is a conditional Gaussian mixture (an MLP → weights, means,
 scales). A normalizing flow is more expressive; a mixture is exact for a
@@ -801,11 +790,11 @@ density and its training are `bayesmith.amortize`, and `history` is its
 is the twin.
 
 :::{danger}
-**An approximate posterior has no internal notion of being wrong.** A
-badly-fitted $q$ returns a smooth, confident, correctly-centred, incorrect
-distribution and reports nothing amiss. Both failure modes are real, and they
-push in opposite directions — measured on the package's own linear-Gaussian
-test problem, where the exact answer is available from `gcr_sample`:
+**An approximate posterior does not report its own error.** A badly-fitted $q$
+returns a smooth, confident, correctly-centred, incorrect distribution and no
+warning. There are two failure modes, and they push in opposite directions.
+Measured on the package's own linear-Gaussian test problem, where the exact
+answer is available from `gcr_sample`:
 
 | simulations | steps | components | width / exact |
 |---|---|---|---|
@@ -818,24 +807,23 @@ test problem, where the exact answer is available from `gcr_sample`:
 *Too few simulations*: draws come from the prior, so only a fraction
 $\sigma_\text{post}/\sigma_\text{prior}$ of them land near any given
 observation, and the width comes out wrong. *Too many steps on a small bank*:
-over-fitting, which makes $q$ too **narrow** — the failure that looks like a
+over-fitting, which makes $q$ too narrow, the failure that looks like a
 better answer.
 
-`train_posterior` holds out a validation split by default and **returns the
-best validation step, not the last**, because the training loss falls
-monotonically straight through the point where the fit stops being a
-posterior. Prefer few components. And validate on a problem you can solve
-exactly before trusting one you cannot — which is what
-`tests/inference/test_npe.py` does, and why NUTS was wired to the noise model
-first.
+`train_posterior` holds out a validation split by default and returns the best
+validation step, not the last, because the training loss falls monotonically
+through the point where the fit stops being a posterior. Prefer few components.
+Validate on a problem you can solve exactly before trusting one you cannot.
+`tests/inference/test_npe.py` does that, and it is why NUTS was wired to the
+noise model first.
 :::
 
 ---
 
 ## Tutorials
 
-These pages say what each piece is. The tutorials walk one problem through end
-to end, in the order you would actually do it, with the scripts' real output:
+These pages say what each piece is. Each tutorial walks one problem through end
+to end, in the order you would do it, with its script's output:
 
 :::{list-table}
 :header-rows: 1
@@ -846,11 +834,11 @@ to end, in the order you would actually do it, with the scripts' real output:
 * - [An exact posterior for a big linear block](tutorial-gcr.md)
   - 256 sky pixels, no chain. Checking the linearity claim, reading κ before
     choosing `tol`, `iterative_gls` for the covariance, `gcr_sample` for the
-    draws — then widening the beam until the prior takes over, and watching
-    every diagnostic say so.
+    draws, then widening the beam until the prior takes over and reading that
+    off the diagnostics.
 * - [A gradient posterior, and how to tell it is wrong](tutorial-nuts.md)
-  - Three nonlinear beam parameters. **It fails first**: `r_hat = 840`,
-    `n_eff = 2`, nothing raised. Diagnosing that — two hypotheses, one right —
+  - Three nonlinear beam parameters. The first run fails: `r_hat = 846`,
+    `n_eff = 2`, nothing raised. Diagnosing that (two hypotheses, one right)
     is most of the page, and the fix is one line.
 :::
 
@@ -858,9 +846,6 @@ to end, in the order you would actually do it, with the scripts' real output:
 
 ## Run it
 
-[`examples/gibbs_plan.py`](https://github.com/RHINO-Experiment/rheplicant/blob/main/examples/gibbs_plan.py)
-runs one `SamplingPlan` over six latents, with conjugate blocks and a gradient
-block. It needs `rhino-cal-jax` and numpyro.
 [`examples/three_ways_to_a_posterior.py`](https://github.com/RHINO-Experiment/rheplicant/blob/main/examples/three_ways_to_a_posterior.py)
 compares the routes on one model, and
 [`examples/inferring_anything.py`](https://github.com/RHINO-Experiment/rheplicant/blob/main/examples/inferring_anything.py)
@@ -868,5 +853,10 @@ exercises the three binding shapes of [parameter spaces](inference-spaces.md)
 on one twin, from truth to recovery.
 
 ```bash
-.venv/bin/python examples/gibbs_plan.py
+.venv/bin/python examples/three_ways_to_a_posterior.py
 ```
+
+[`examples/gibbs_plan.py`](https://github.com/RHINO-Experiment/rheplicant/blob/main/examples/gibbs_plan.py)
+builds one `SamplingPlan` over six latents, with conjugate blocks and a
+gradient block. At 0.9.1 it does not run to its end;
+[the examples page](examples.md) says where it stops.

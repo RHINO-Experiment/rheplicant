@@ -2,7 +2,7 @@
 
 ## Operators, and three ways to compose them
 
-A signal path is not a special kind of object. It is **operators** — each one `State in, State out` — plus exactly **three structures** for putting them together. There is nothing else in the graph:
+A signal path is not a special kind of object. It is **operators**, each one `State in, State out`, plus **three structures** for putting them together. There is nothing else in the graph:
 
 :::{list-table}
 :header-rows: 1
@@ -30,21 +30,21 @@ A signal path is not a special kind of object. It is **operators** — each one 
 :class: tip
 A cascade is an **arrow**. A sum and a switch are combinators, operators that
 hold other operators, and the drawing gives them no box: the wire runs
-*through* a symbol of its own, ⊕ for the sum and a lever in a ◇ for the
+through a symbol of its own, ⊕ for the sum and a lever in a ◇ for the
 switch. Every **box** is a slot, and a box is the only place you can put an
 operator.
 :::
 
-Nodes come in the matching four kinds: a **source** creates data (in-degree 0), a **transform** changes it (in-degree 1), a **junction** sums its inputs and a **selector** switches between them (both in-degree ≥ 2). That is the entire vocabulary. `assemble(*operators)` lights the sub-path your operators induce and folds it into exactly those three combinators, so the composition is a consequence of the physics you declared rather than something you wrote out.
+Nodes come in the matching four kinds: a **source** creates data (in-degree 0), a **transform** changes it (in-degree 1), a **junction** sums its inputs and a **selector** switches between them (both in-degree ≥ 2). `assemble(*operators)` lights the sub-path your operators induce and folds it into those three combinators, so the composition follows from the physics you declared.
 
-Two rules follow from the table rather than being extra:
+Two rules follow from the table:
 
 - **A junction or selector with one live input is traversed as identity.** No `SumOperator` around a single branch, no switch array for a twin with no calibration load. Partial models come free because a structure with nothing to combine is not a structure.
-- **Several instances at one `many` node compose the way their consumer composes** — summed into a junction, switched at a selector. Two `CalLoadOperator`s are two switch positions, not one load worth their sum.
+- **Several instances at one `many` node compose the way their consumer composes**: summed into a junction, switched at a selector. Two `CalLoadOperator`s are two switch positions, not one load worth their sum.
 
-:::{admonition} The graph is a template, not the framework
+:::{admonition} The graph as a template
 :class: note
-`rheplicant.radio.RADIO_GRAPH` is **RHINO's** structure: a single-antenna, switched-load, drift-scanning horn. It is the *default*, not the definition. The machinery underneath — `SignalGraph`, the four node kinds, the three combinators, `assemble` — knows nothing about radio astronomy, and a different instrument is a different template registered the same way:
+`rheplicant.radio.RADIO_GRAPH` is RHINO's structure: a single-antenna, switched-load, drift-scanning horn. It is the default template. The machinery underneath (`SignalGraph`, the four node kinds, the three combinators, `assemble`) knows nothing about radio astronomy, and a different instrument is a different template registered the same way:
 
 ```python
 from rheplicant.core.graph import NodeSpec, SignalGraph, register_graph
@@ -57,23 +57,23 @@ MY_GRAPH = register_graph(SignalGraph(
 ))
 ```
 
-*Planned:* a documented path for supplying a custom graph end to end — operators declaring `graph_node` against it, rendering, and the assembly rules — so that *which instrument* becomes a configuration choice rather than a fork. The pieces are already public and are what `RADIO_GRAPH` itself is built from; what is missing is the guide.
+*Planned:* a documented path for supplying a custom graph end to end (operators declaring `graph_node` against it, rendering, and the assembly rules), so that the instrument becomes a configuration choice rather than a fork. The pieces are already public and are what `RADIO_GRAPH` itself is built from; the guide is what is missing.
 :::
 
 ---
 
 ## RHINO's template
 
-The single-antenna path every assembly lights up. The diagram itself is generated from the live `rheplicant.radio.RADIO_GRAPH` at documentation build time, so it cannot drift from the code; the prose around it is written by hand. Circles are sum junctions and the rhombus is the antenna/cal-load switch; see the [tour](tour.md#graph-assembly) for the assembly rules and [the operator catalog](operators.md) for what lives at each node.
+The single-antenna path every assembly lights up. The diagram is generated from the live `rheplicant.radio.RADIO_GRAPH` at documentation build time, so it cannot drift from the code; the prose around it is written by hand. Circles are sum junctions and the rhombus is the antenna/cal-load switch; see the [tour](tour.md#graph-assembly) for the assembly rules and [the operator catalog](operators.md) for what lives at each node.
 
 ```{mermaid} _generated/radio-graph.mmd
 ```
 
 ## Lit and dim: what an assembly simulates
 
-`assemble(*operators)` never shows you only the piece you built — rendering always draws the *full* template, with the provided operators lit (colored, amber signal path), traversed-as-identity nodes half-lit, and everything else dimmed. Reserved placeholder leaves are dashed. Both examples below are real renders, generated at build time with `assembly.to_svg()` (`to_html()` produces the same figure as a standalone page).
+Rendering the result of `assemble(*operators)` always draws the full template, not only the piece you built, with the provided operators lit (colored, amber signal path), traversed-as-identity nodes half-lit, and everything else dimmed. Reserved placeholder leaves are dashed. Both examples below are generated at build time with `assembly.to_svg()` (`to_html()` produces the same figure as a standalone page).
 
-A partial twin — four operators, `assemble(global_signal, foregrounds, ionosphere, gain)`; every junction on the way passes through and the rest of the receiver chain is identity:
+A partial twin of four operators, `assemble(global_signal, foregrounds, ionosphere, gain)`; every junction on the way passes through and the rest of the receiver chain is identity:
 
 :::{figure} signal-path-partial-light.svg
 :figclass: only-light
@@ -89,7 +89,7 @@ Partial twin: the sky through the ionosphere and the gain.
 Partial twin: the sky through the ionosphere and the gain.
 :::
 
-A fuller twin — eight operators including RFI, ground pickup, atmospheric emission, and one switched calibration load (the ◇ selector node); note the three dashed nodes (`atmosphere_field`, `ground_field` and `beam`) staying dim. Dashed means *reserved* — the node is part of the physics and no shipped operator declares it yet — which is a stronger claim than merely unlit, and one that goes stale the moment an operator lands. `t_sys_extra` was dashed until `BasisTemperatureOperator` arrived on it; the flag is now derived against the operator registry by a test, so the drawing cannot claim absent physics that is in fact present.
+A fuller twin of eight operators, including RFI, ground pickup, atmospheric emission, and one switched calibration load (the ◇ selector node). The three dashed nodes (`atmosphere_field`, `ground_field` and `beam`) stay dim. Dashed means *reserved*: the node is part of the physics and no shipped operator declares it yet. The flag is derived against the operator registry by a test, so the drawing cannot claim absent physics that is present.
 
 :::{figure} signal-path-fuller-light.svg
 :figclass: only-light

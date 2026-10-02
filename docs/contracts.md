@@ -4,13 +4,12 @@ Three things in this package are agreements between stages that never import
 each other: the shape every refusal takes, an `aux` key a calibrator writes and
 a flagger reads, and the way a composite reads its own children's declarations.
 None of the three is an operator, so none of them appears in
-[the operator catalog](operators.md) — but all three are public, and one of them
-decides whether your calibrator survives its first observation.
+[the operator catalog](operators.md), but all three are public.
 
 ## One base class for every refusal
 
 Every error this package raises derives from `DirtError`, so one `except`
-clause catches the whole family. Each subclass *additionally* derives from the
+clause catches the whole family. Each subclass also derives from the
 closest builtin, so a generic handler written before rheplicant existed keeps
 working.
 
@@ -26,9 +25,9 @@ working.
   - base of everything below; never raised on its own
 * - `StateValidationError`
   - `ValueError`
-  - a *structural* problem: wrong ndim or dtype, an `aux` mask that cannot
+  - a structural problem: wrong ndim or dtype, an `aux` mask that cannot
     compose, a `coords.time` that cannot resolve its own sampling. Never for
-    traced array *values*, so validation stays jit-safe
+    traced array values, so validation stays jit-safe
 * - `PipelineError`
   - `ValueError`
   - a `Pipeline` was misconfigured: empty, a bad stage type, a name collision,
@@ -48,8 +47,8 @@ working.
     declared about them
 * - `ParameterSpaceError`
   - `ValueError`
-  - a parameter space was declared inconsistently — the one member of the
-    family that is **not** on `rheplicant.core`'s surface (see below)
+  - a parameter space was declared inconsistently. It and its two
+    subclasses are not on `rheplicant.core`'s surface (see below)
 * - `LinearityRefused`
   - `ParameterSpaceError`
   - `check_linearity` measured a departure from linearity. Catch it as a
@@ -91,44 +90,42 @@ state        StateValidationError   also ValueError: True
 randomness   MissingKeyError        also ValueError: False
 ```
 
-**Read the last column.** `MissingKeyError` is the one refusal that is not a
-`ValueError`, and the difference is not cosmetic: it reports a state that was
-never given a key at all, which is a missing precondition rather than a bad
-value, so it derives from `RuntimeError`. A handler spelled `except ValueError`
-therefore catches every other refusal in the package and walks past exactly
-that one — into a traceback from wherever the state came from, which is not
-where the fix is. `except DirtError` catches all of them.
+In the last column, `MissingKeyError` is the one refusal that is not a
+`ValueError`. It reports a state that was never given a key, which is a
+missing precondition rather than a bad value, so it derives from
+`RuntimeError`. A handler spelled `except ValueError` therefore catches every
+other refusal in the package and misses that one, leaving a traceback from
+wherever the state came from, which is not where the fix is.
+`except DirtError` catches all of them.
 
 **Where the names live.** All of them are defined in `rheplicant.core.errors`.
 Every one except `ParameterSpaceError` and its subclasses `LinearityRefused`
 and `LogSpaceUnavailable` is re-exported from `rheplicant` and
 `rheplicant.core`; those three are exported from `rheplicant.inference`.
 `ConfigError`, the configuration layer's refusal, is a `DirtError` and a
-`ValueError` defined in `rheplicant.config.errors`; `AssemblyError` and `AmbiguousNodeError` are *additionally*
-re-exported from `rheplicant.core.graph`, which is where they used to be
-defined, so `from rheplicant.core.graph import AssemblyError` still resolves.
-`ParameterSpaceError` is deliberately absent from `core`'s surface — a
-parameter space is not a concept `core` has — and reaches you through
-`rheplicant.inference`. That is worth knowing before you write
-`except ParameterSpaceError` around a `core` call: you would catch nothing, and
-could not import the name from there to try.
+`ValueError` defined in `rheplicant.config.errors`; `AssemblyError` and
+`AmbiguousNodeError` are also re-exported from `rheplicant.core.graph`, where
+they used to be defined, so `from rheplicant.core.graph import AssemblyError`
+still resolves. `ParameterSpaceError` is absent from `core`'s surface, because
+a parameter space is not a concept `core` has, and reaches you through
+`rheplicant.inference`. An `except ParameterSpaceError` around a `core` call
+catches nothing, and the name cannot be imported from `core`.
 
 ## Protected channels: keeping a known calibrator out of the flags
 
-A continuous-wave calibration tone is a narrow, bright, persistent line —
-which is, from a flagger's point of view, the definition of RFI. Both shipped
-flaggers duly flag it, and `flagging` sits **downstream** of `cw_tone` on the
-same trunk. Without a contract between them, the pipeline that is supposed to
-*use* the calibrator destroys it on the first observation, and the symptom is a
-slightly worse calibration rather than an error.
+A continuous-wave calibration tone is a narrow, bright, persistent line,
+which to a flagger is RFI. Both shipped flaggers flag it, and `flagging` sits
+downstream of `cw_tone` on the same trunk. Without a contract between them,
+the pipeline that is supposed to use the calibrator flags it out on the first
+observation, and the symptom is a slightly worse calibration rather than an
+error.
 
-The mechanism is an `aux` channel rather than a flagger setting, and that is
-the whole design decision: the operator that **injects** the tone knows which
-channels it went into and writes the protection itself; the flaggers **read**
-it if it is there. A flagger has no way to tell a calibration tone from RFI,
-and the injecting operator has no way *not* to know. Put the switch on the
-flagger instead and it becomes a setting the user must remember to turn on for
-every run — the kind that gets forgotten exactly once and then never noticed.
+The mechanism is an `aux` channel rather than a flagger setting. The operator
+that injects the tone knows which channels it went into and writes the
+protection itself; the flaggers read it if it is there. A flagger cannot tell
+a calibration tone from RFI, and the injecting operator always knows where
+the tone is. A switch on the flagger would be a setting the user must remember
+to turn on for every run.
 
 :::{list-table}
 :header-rows: 1
@@ -149,9 +146,9 @@ every run — the kind that gets forgotten exactly once and then never noticed.
 :::
 
 All four are exported from `rheplicant.radio`. Nothing in a normal pipeline
-calls them by hand — `CWCalibrationOperator` calls `protect`, both flaggers
-call `unflag_protected`, and `BackendOperator` calls `reduce_protection` — so
-the first thing to see is the contract working with no code of yours in it:
+calls them by hand: `CWCalibrationOperator` calls `protect`, both flaggers
+call `unflag_protected`, and `BackendOperator` calls `reduce_protection`. The
+first example shows the contract working with no code of yours in it:
 
 ```python
 import jax, jax.numpy as jnp
@@ -184,18 +181,18 @@ mask (64,) protected: 5 flagged: 0
 same flagger, no mask -> flagged: 12 in channels [25, 26]
 ```
 
-Twelve flagged samples — every sample of the two channels the 5000 K line
-actually peaks in. That is the calibrator, gone.
+The twelve flagged samples are every sample of the two channels the 5000 K
+line peaks in. Without the mask, the flagger removes the calibrator.
 
-**"Narrow" is not "one channel", and it is not always the same channels.** The
+"Narrow" is not "one channel", and it is not always the same channels. The
 tone is observed through the spectrometer's channel response, so it wets a set
 of channels (five, above, at the default `protect_floor` of 1e-2 of the peak);
-if it drifts, that set moves during the run. Both mask shapes therefore matter:
-`(n_freq,)` for a line that stays put, `(n_time, n_freq)` for one that does not.
-Which channels a given tone wets is `CWCalibrationOperator`'s to decide — it is
-the only thing on the path that knows the lineshape.
+if it drifts, that set moves during the run. Both mask shapes are therefore
+needed: `(n_freq,)` for a line that stays put, `(n_time, n_freq)` for one that
+does not. `CWCalibrationOperator` decides which channels a given tone wets,
+because it is the only stage on the path that knows the lineshape.
 
-A waterfall mask is **bound to the time axis it was written on**: row `i` names
+A waterfall mask is bound to the time axis it was written on: row `i` names
 the channels the calibrator wet at sample `i` of the axis that existed when the
 mask was built. Any stage that changes the number of samples leaves it stale,
 and `unflag_protected` refuses a stale one rather than broadcasting it:
@@ -233,20 +230,19 @@ REFUSED: aux['protected'] is a waterfall mask over 6 time samples but the flags 
 re-derived: (3, 64) flagged: 0
 ```
 
-The full message names both ways out — *drop the mask or re-derive it* — and
-only one of them keeps the calibrator protected. `reduce_protection` is that
-re-derivation, which is why it lives next to the convention it depends on
-rather than being re-invented by every stage that reshapes a run. The two mask
-shapes go different ways, and that asymmetry is the whole content of the
-function: a `(n_freq,)` channel mask comes back unchanged, because it names
+The full message names both ways out, *drop the mask or re-derive it*, and
+only re-deriving keeps the calibrator protected. `reduce_protection` is that
+re-derivation, provided next to the convention it depends on so that a stage
+that reshapes a run does not re-implement it. The two mask shapes are treated
+differently: a `(n_freq,)` channel mask comes back unchanged, because it names
 channels and no change to the time axis can stale it; a waterfall mask is
-reduced with **`any`** over each chunk, because the chunk's average carries a
+reduced with `any` over each chunk, because the chunk's average carries a
 contaminated sample's power whether or not the tone was on for the rest of the
 chunk. `all` would unprotect a chunk the tone contaminated in two rows of
-three, which is the failure protection exists to prevent.
+three.
 
-On the shipped trunk you never write that line: `BackendOperator` reduces a 2-D
-`aux["protected"]` itself, with the same `any`, alongside `aux["flags"]` —
+On the shipped trunk you never write that line. `BackendOperator` reduces a 2-D
+`aux["protected"]` itself, with the same `any`, alongside `aux["flags"]`:
 
 ```python
 with_flags = drifting.replace(aux={**drifting.aux,
@@ -260,7 +256,7 @@ print("BackendOperator(n_chunk=2):", averaged.data.shape,
 BackendOperator(n_chunk=2): (3, 64) (3, 64)
 ```
 
-— so `reduce_protection` is for the stages `BackendOperator` is not: your own
+So `reduce_protection` is for the stages `BackendOperator` is not: your own
 decimation, a subset selection, anything that reshapes time on its way past.
 
 :::{admonition} Two things protection is not
@@ -271,21 +267,19 @@ biases that fit near the tone whether or not the spike is flagged afterwards.
 Protecting a channel is not the same as excluding it from the estimator, and
 only the first is claimed here.
 
-**It is not free.** A channel that is protected is a channel where genuine RFI
-now survives into the data. That is the deliberate trade — the tone channel is
-known-bright by construction, so a flagger's verdict there carries no
-information anyway — but it is a trade, and the raw data still shows what
-happened.
+**It is not free.** A protected channel is one where real RFI survives into
+the data. The trade is accepted because the tone channel is known-bright by
+construction, so a flagger's verdict there carries no information. The raw
+data still shows what happened.
 :::
 
 ## Reading a tree's own declarations
 
 Every operator carries two ClassVars, `requires` and `provides`, naming the
-`State` paths it reads and writes. `rheplicant.core.contract` is where they
-stop being prose: it walks a *built* operator tree and answers **which stages
-declare a given path**, so a caller can refuse a composition on the strength of
-what its stages say about themselves rather than on a hard-coded list of
-classes.
+`State` paths it reads and writes. `rheplicant.core.contract` reads them: it
+walks a built operator tree and answers which stages declare a given path, so
+a caller can refuse a composition on what its stages declare rather than on a
+hard-coded list of classes.
 
 ```python
 import jax.numpy as jnp
@@ -321,26 +315,27 @@ stochastic: [('noise', 'NoiseOperator')]
 
 `walk_operators` yields `(label, operator)` for the root and everything nested
 in it; `stages_requiring(op, path)` is the filter over that walk. Labels are
-`/`-joined stage names, which is what lets a refusal quote a graph node id
-instead of a class name — `'astro_sum/foregrounds'` above. The `Assembly`
+`/`-joined stage names, so a refusal can quote a graph node id
+instead of a class name (`'astro_sum/foregrounds'` above). The `Assembly`
 wrapper and the trunk `Pipeline` both come back as `''` because they are
 structural spine with no name of their own; only named composites (`Pipeline`,
 `SumOperator`, `SelectOperator`) contribute a segment.
 
-The walk is by **pytree position**, not by the composite spine `assemble` folds
-along. That is deliberate: this is a safety check, so it must not miss a stage
-held by a composite type nobody taught it about.
+The walk is by pytree position, not by the composite spine `assemble` folds
+along. This is a safety check, so it must not miss a stage held by a composite
+type it was not written for.
 
-**One path is enforced, and it is `"key"`** — spelled `RANDOMNESS`. An operator
+One path is enforced: `"key"`, spelled `RANDOMNESS`. An operator
 that names it in `requires` draws randomness through `State.next_key()`, and
 that is a property no shape check, no linearity check and no rank test can see.
 It is the reason every inference exit refuses a twin containing one: inference
-closes the model over *one* template state, so the draw happens once and the
-same frozen realisation rides into every prediction compared against the data.
+closes the model over one template state, so the draw happens once and the
+same frozen realisation enters every prediction compared against the data.
 Adding a constant field is exactly affine, so `check_linearity` reports residual
-0.0 and `identifiability` reports full rank — both exits wrong by the same
-amount with no diagnostic moving. `stages_requiring(model, RANDOMNESS)` is how
-that refusal finds the drawing stage, and it is how you would write your own:
+0.0 and `identifiability` reports full rank, and both exits are wrong by the
+same amount with no diagnostic moving. `stages_requiring(model, RANDOMNESS)` is
+how that refusal finds the drawing stage, and it is how you would write your
+own:
 
 ```python
 stochastic = stages_requiring(twin, RANDOMNESS)
@@ -353,21 +348,20 @@ ValueError: not a deterministic model: 'noise' draws
 ```
 
 Because the detector is the operators' own declaration, a new stochastic
-operator is covered the day it declares what it reads, with nothing to update.
-What it therefore cannot catch, stated rather than implied: an operator that
-draws randomness *without* declaring `"key"`, and one hiding a draw inside a
-static field. Nothing static can see either — there is no numerical symptom,
-which is the premise of the whole guard. `tests/test_operator_declarations.py`
-checks mechanically that the shipped operators declare honestly; a user-written
-operator is the user's declaration to make.
+operator is covered as soon as it declares what it reads, with nothing to
+update. It cannot catch an operator that draws randomness without declaring
+`"key"`, or one hiding a draw inside a static field. Nothing static can see
+either, and there is no numerical symptom.
+`tests/test_operator_declarations.py` checks that the shipped operators'
+declarations are true; a user-written operator is the user's declaration to
+make.
 
-**The rest of `requires`/`provides` stays descriptive, deliberately.** The
-obvious next step — refusing an operator whose `requires` names a path the
-template state does not supply — is not implementable against the shipped set,
-and the counter-example is in the package: `GroundPickupOperator` declares
+The rest of `requires`/`provides` stays descriptive. Refusing an operator
+whose `requires` names a path the template state does not supply is not
+implementable against the shipped set: `GroundPickupOperator` declares
 `"env.temperature"` and then documents a `t_ground` fallback for when it is
 missing, so the declaration means "reads if present", not "needs". A blanket
 availability rule would refuse a model the package itself describes as
-legitimate. `provides` is weaker still — 25 of the 31 classes that declare it
+legitimate. `provides` is weaker still: 25 of the 31 classes that declare it
 declare exactly `("data",)`, which distinguishes almost nothing the graph's own
 source/transform kinds do not already say.

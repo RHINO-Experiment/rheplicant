@@ -12,11 +12,11 @@ are in the repository and not in the wheel, so run them from a clone.
 ```
 
 :::{warning}
-Five scripts take 20 s or more. `tutorial_nuts.py` runs NUTS twice and takes
+Four scripts take 20 s or more. `tutorial_nuts.py` runs NUTS twice and takes
 **185 s**. `driftscan_mmode.py` (**61 s**) and `sky_to_noise_wave.py`
 (**59 s**) are dominated by JIT compilation. `three_ways_to_a_posterior.py`
-takes 26 s and `gibbs_plan.py` 20 s. The other ten finish in under ten
-seconds.
+takes 26 s. Ten finish in under ten seconds. `gibbs_plan.py` does not run to
+its end at 0.9.1; its row says where it stops.
 :::
 
 ## Forward modelling
@@ -44,9 +44,8 @@ seconds.
   - **59 s**
   - `cal`
 * - `driftscan_mmode.py`
-  - Shows the m-mode engine reproduces the general one to 5e-15 — an
-    optimisation, not an approximation — then times it at ~230× and
-    differentiates through the beam
+  - Shows the m-mode engine reproduces the general one to 5e-15, then times
+    it at ~230× and differentiates through the beam
   - **61 s**
   - —
 * - `diy_global_signal.py`
@@ -80,8 +79,8 @@ seconds.
   - 26 s
   - numpyro
 * - `bayesian_and_uncertainty.py`
-  - A NUTS posterior checked against a Fisher forecast on the same model —
-    the cross-check that says whether the forecast was honest
+  - A NUTS posterior compared with a Fisher forecast on the same model, as a
+    check on the forecast
   - 2.7 s
   - numpyro
 * - `neural_surrogate.py`
@@ -105,14 +104,17 @@ seconds.
   - —
 * - `tutorial_nuts.py`
   - The failing-then-fixed NUTS run of
-    [the gradient-posterior tutorial](tutorial-nuts.md) — `r_hat = 840` first
+    [the gradient-posterior tutorial](tutorial-nuts.md), with `r_hat = 846`
+    first
   - **185 s**
   - numpyro
 * - `gibbs_plan.py`
-  - One `SamplingPlan` over six latents, conjugate blocks and a gradient block.
-    Opens by being **refused**: over the guided tour's own twin the six are
-    exactly degenerate, and the repair is three more calibration loads
-  - **20 s**
+  - One `SamplingPlan` over six latents, conjugate blocks and a gradient
+    block, over the guided tour's twin and then over a seven-position repair
+    of it. At 0.9.1 the script stops at its estimate over the repaired twin
+    with `LinearityRefused`: the linearity check probes each latent at 1000
+    times its prior width, and the twin's 12-bit ADC clips there
+  - 9 s, to the refusal
   - `cal`, numpyro
 :::
 
@@ -128,7 +130,7 @@ seconds.
   - Needs
 * - `sky_projection_and_filters.py`
   - A sidereal filter in both `extract` and `remove` modes, then a
-    `SkySpaceFilter` map-making through the *same* projector's adjoint —
+    `SkySpaceFilter` map-making through the same projector's adjoint,
     recovering the sky component to ~0.06 %
   - 1.4 s
   - —
@@ -148,9 +150,9 @@ dependencies rather than extras, and both are on PyPI. **`cal`** is
 `pip install "rheplicant[numpyro]"`. See [Install](install.md) for the
 commands.
 
-Note that limTOD and `rhino_cal_jax` are imported **lazily** — importing
+limTOD and `rhino_cal_jax` are imported lazily: importing
 `rheplicant.radio` does not pull either. A script needs them only when it
-actually calls a sky engine or constructs a `NoiseWaveOperator`.
+calls a sky engine or constructs a `NoiseWaveOperator`.
 
 ## A configured example: global 21 cm separation
 

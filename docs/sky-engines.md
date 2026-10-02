@@ -1,27 +1,26 @@
 # Sky engines: the general path and the drift-scan fast path
 
-Every twin has to answer one question over and over: *given this sky and this
-beam, what does the antenna read at this moment?* The answer is a
-beam-weighted sum over the sky — and how expensive it is depends entirely on
-what the engine is allowed to assume about the observation.
+Every twin repeatedly computes what the antenna reads at a given moment, given
+a sky and a beam. The answer is a beam-weighted sum over the sky. Its cost
+depends on what the engine may assume about the observation.
 
-RHEPLICANT ships two engines that compute exactly the same thing.
+RHEPLICANT ships two engines that compute the same thing.
 [`GeneralPointingProjector`](api.md) assumes nothing: the beam can point anywhere
 at any time, so it rotates the beam onto the sky once per sample.
-[`DriftScanProjector`](api.md) assumes the one thing a drift scan guarantees —
-that the telescope never moves and the Earth does the scanning — and rotates
-the beam **once for the entire observation**.
+[`DriftScanProjector`](api.md) assumes what a drift scan guarantees, that the
+telescope never moves and the Earth does the scanning, and rotates the beam
+once for the entire observation.
 
-The result is not a cheaper approximation. It is the same number, to float64
+The drift-scan result is the same number as the general one, to float64
 roundoff, for a small fraction of the work.
 
-- [The product](#the-product) — one sidereal day, as the engines render it
-- [What a drift scan actually measures](#what-a-drift-scan-actually-measures) — m-modes
+- [The product](#the-product): one sidereal day, as the engines render it
+- [What a drift scan measures](#what-a-drift-scan-measures): m-modes
 - [Two engines, one contract](#two-engines-one-contract)
-- [Not an approximation](#not-an-approximation) — the two agree to float64 roundoff
-- [What it costs](#what-it-costs) — measured scaling against band-limit
+- [Agreement between the two engines](#agreement-between-the-two-engines): the two agree to float64 roundoff
+- [What it costs](#what-it-costs): measured scaling against band-limit
 - [Choosing an engine](#choosing-an-engine)
-- [Is the output a temperature?](#is-the-output-a-temperature) — the `normalize_beam` trap
+- [Is the output a temperature?](#is-the-output-a-temperature): the `normalize_beam` default
 - [Where does the beam stop?](#where-does-the-beam-stop)
 - [Run it](#run-it)
 
@@ -40,9 +39,9 @@ from live code.
 :alt: Drift-scan waterfall — GSM sky through a chromatic beam, one sidereal day
 :width: 100%
 
-The sky drifts through a fixed beam. Bright at the bottom because the Galactic
-synchrotron spectrum is steep; the structure along the time axis is the sky
-itself passing overhead.
+The drift-scan waterfall: the sky drifts through a fixed beam. It is bright at
+the bottom because the Galactic synchrotron spectrum is steep. The structure
+along the time axis is the sky passing overhead.
 :::
 
 :::{figure} _static/engine-waterfall-dark.png
@@ -50,29 +49,29 @@ itself passing overhead.
 :alt: Drift-scan waterfall — GSM sky through a chromatic beam, one sidereal day
 :width: 100%
 
-The sky drifts through a fixed beam. Bright at the bottom because the Galactic
-synchrotron spectrum is steep; the structure along the time axis is the sky
-itself passing overhead.
+The drift-scan waterfall: the sky drifts through a fixed beam. It is bright at
+the bottom because the Galactic synchrotron spectrum is steep. The structure
+along the time axis is the sky passing overhead.
 :::
 
 ---
 
-## What a drift scan actually measures
+## What a drift scan measures
 
-That waterfall repeats every sidereal day, so along the time axis it *is* a
+That waterfall repeats every sidereal day, so along the time axis it is a
 Fourier series. The coefficients are the m-modes: the same observation, in the
-coordinates the instrument naturally works in. The beam band-limits them, so
-past `m ≈ lmax` there is nothing left to measure — a handful of numbers per
+coordinates natural to the instrument. The beam band-limits them, so past
+`m ≈ lmax` there is nothing left to measure, and a handful of numbers per
 channel stands in for the whole day.
 
 :::{seealso}
 m-mode analysis is the standard harmonic treatment of drift-scan (transit)
 observations. This engine follows the conventions of
-[***M-mode RIME explicit in beam, fringe and sky modes***](https://zh-zhang.com/myNotes/MmodeNote.pdf),
-whose Eq. (13) — its last line — is the identity the fast path rests on:
-rotate the beam into the celestial frame **once**, at a reference LST, and the
-rest of the sidereal day is a per-`m` phase `e^{-i m Δφ}` — no further
-rotations, which is exactly why the cost stops scaling with the number of
+[*M-mode RIME explicit in beam, fringe and sky modes*](https://zh-zhang.com/myNotes/MmodeNote.pdf),
+whose Eq. (13), in its last line, is the identity the fast path rests on:
+rotate the beam into the celestial frame once, at a reference LST, and the
+rest of the sidereal day is a per-`m` phase `e^{-i m Δφ}`. No further rotations
+are needed, which is why the rotation cost does not scale with the number of
 samples.
 :::
 
@@ -81,8 +80,8 @@ samples.
 :alt: m-mode amplitude spectrum of a drift scan
 :width: 100%
 
-The harmonic view of the waterfall above. `mmodes()` returns these directly —
-a far smaller object than the TOD it summarizes.
+The m-mode amplitude spectrum of the waterfall above. `mmodes()` returns these
+directly, a far smaller object than the TOD it summarizes.
 :::
 
 :::{figure} _static/engine-mmodes-dark.svg
@@ -90,11 +89,11 @@ a far smaller object than the TOD it summarizes.
 :alt: m-mode amplitude spectrum of a drift scan
 :width: 100%
 
-The harmonic view of the waterfall above. `mmodes()` returns these directly —
-a far smaller object than the TOD it summarizes.
+The m-mode amplitude spectrum of the waterfall above. `mmodes()` returns these
+directly, a far smaller object than the TOD it summarizes.
 :::
 
-Once you have built a drift-scan projector — the next section — reading them
+Once you have built a drift-scan projector (the next section), reading them
 off is one call:
 
 ```python
@@ -111,7 +110,7 @@ exact `adjoint` for map-making. They differ in where the pointing lives.
 ::::{grid} 1 1 2 2
 :gutter: 3
 
-:::{grid-item-card} General — `GeneralPointingProjector`
+:::{grid-item-card} General: `GeneralPointingProjector`
 :class-header: sd-font-weight-bold
 
 Pointing is **data**: one az/el per sample.
@@ -134,10 +133,10 @@ Tracking, raster scans, anything that moves.
 `O(n_time · lmax³)`
 :::
 
-:::{grid-item-card} Drift scan — `DriftScanProjector`
+:::{grid-item-card} Drift scan: `DriftScanProjector`
 :class-header: sd-font-weight-bold
 
-Pointing is **configuration**: one az/el, full stop.
+Pointing is **configuration**: one az/el for the whole observation.
 ^^^
 ```python
 from rheplicant.radio.sky import DriftScanProjector
@@ -153,13 +152,13 @@ coords = Coordinates(
 )
 ```
 +++
-Fixed pointing — RHINO's actual geometry.
+Fixed pointing, RHINO's geometry.
 `O(lmax³ + n_time · lmax)`
 :::
 ::::
 
-Either one drops into the same graph slot, so the rest of the twin never
-learns which engine it got:
+Either one goes in the same graph slot, and the rest of the twin does not
+depend on which:
 
 ```python
 twin = assemble(SkySourceOperator(sky_model=MapSky(maps=sky, freq=nu), projector=projector))
@@ -167,26 +166,26 @@ waterfall = eqx.filter_jit(twin)(state).data
 ```
 
 :::{tip}
-`from_beam_maps` takes the beam as **maps**, the form a beam model actually
-has, and runs the analysis transform in JAX. That keeps gradients flowing to
-the beam map — and removes a real footgun: the quadrature transform the *sky*
-uses would silently rescale a beam by `npix/4π`.
+`from_beam_maps` takes the beam as maps, the form a beam model has, and runs
+the analysis transform in JAX. That keeps gradients flowing to the beam map. It
+also avoids a scaling error: the quadrature transform the sky uses would
+silently rescale a beam by `npix/4π`.
 :::
 
 ---
 
-## Not an approximation
+## Agreement between the two engines
 
 The m-mode engine is a different factorization of the same integral, so the
-only difference left is the order floating-point operations happen in.
+only difference is the order floating-point operations happen in.
 
 :::{figure} _static/engine-agreement-light.svg
 :figclass: only-light
 :alt: Generic and m-mode engines agree to float64 roundoff
 :width: 100%
 
-Same numbers, engine to engine. The residual sits at the float64 epsilon —
-this is roundoff, not physics.
+The general and m-mode engines on the same observation, and their residual.
+The residual sits at the float64 epsilon, which is roundoff.
 :::
 
 :::{figure} _static/engine-agreement-dark.svg
@@ -194,11 +193,11 @@ this is roundoff, not physics.
 :alt: Generic and m-mode engines agree to float64 roundoff
 :width: 100%
 
-Same numbers, engine to engine. The residual sits at the float64 epsilon —
-this is roundoff, not physics.
+The general and m-mode engines on the same observation, and their residual.
+The residual sits at the float64 epsilon, which is roundoff.
 :::
 
-Because it *is* the same physics, the general engine works as a test oracle:
+Because it is the same physics, the general engine works as a test oracle:
 `tests/radio/test_driftscan_projector.py` compares the two on irregular LST
 grids, with and without beam normalization, in forward and adjoint form.
 
@@ -208,16 +207,16 @@ grids, with and without beam normalization, in forward and adjoint form.
 
 The general engine pays one `O(lmax³)` Wigner rotation per sample. The
 drift-scan engine pays one for the whole scan, then `O(lmax)` phases per
-sample. The gap therefore grows with **both** the band-limit and the length
-of the observation.
+sample. The gap therefore grows with both the band-limit and the length of
+the observation.
 
 :::{figure} _static/engine-scaling-light.svg
 :figclass: only-light
 :alt: Wall-clock scaling of the two engines against band-limit
 :width: 100%
 
-One forward evaluation of a full sidereal day. Left: absolute cost. Right:
-speed-up over the general engine.
+Wall-clock time of one forward evaluation of a full sidereal day, against
+band-limit. Left: absolute cost. Right: speed-up over the general engine.
 :::
 
 :::{figure} _static/engine-scaling-dark.svg
@@ -225,13 +224,12 @@ speed-up over the general engine.
 :alt: Wall-clock scaling of the two engines against band-limit
 :width: 100%
 
-One forward evaluation of a full sidereal day. Left: absolute cost. Right:
-speed-up over the general engine.
+Wall-clock time of one forward evaluation of a full sidereal day, against
+band-limit. Left: absolute cost. Right: speed-up over the general engine.
 :::
 
-At the band-limit a real RHINO run uses — `nside` 64, `lmax` 191, a full
-sidereal day of 512 samples across 32 channels — that gap is the difference
-between waiting and not:
+At the band-limit a RHINO run uses (`nside` 64, `lmax` 191, a full sidereal
+day of 512 samples across 32 channels) the measured figures are:
 
 ::::{grid} 1 3 3 3
 :gutter: 2
@@ -252,43 +250,42 @@ relative disagreement
 :::
 ::::
 
-Both timings are one `forward()` on sky **maps**, so they include analysing
-the sky into harmonic space — see `forward_alms()` below, which removes that
-from a fitting loop and takes the 60 ms to about 1 ms. The general engine's
-number carries a few per cent of run-to-run scatter; treat the ratio as
-"about a thousandfold", not as four significant figures.
+Both timings are one `forward()` on sky maps, so they include analysing the
+sky into harmonic space. `forward_alms()`, below, removes that from a fitting
+loop and takes the 60 ms to about 1 ms. The general engine's number carries a
+few per cent of run-to-run scatter, so treat the ratio as "about a
+thousandfold".
 
-Three opt-ins sharpen it further, all preserving `jit`/`vmap`/`grad`:
+Three opt-ins reduce the cost further, all preserving `jit`/`vmap`/`grad`:
 
 `forward_alms()` / `sky_to_alms()`
-: Analyse a **fixed sky** into harmonic space once, outside the loop, instead
-  of on every call. Once the beam rotation is cached this is the whole
-  remaining cost — 91 % of the runtime and 99.5 % of the peak memory. Measured
-  when it was introduced, hoisting it took one forward from
-  **163 ms / 122 MB to 1.1 ms / 11 MB** (agreeing to 5e-16). `forward()` is now a thin wrapper that calls
-  `sky_to_alms()` for you; reach past it whenever the sky is not the thing
-  you are fitting. `mmodes_alms()` is the same idea for the m-mode path.
+: Analyse a fixed sky into harmonic space once, outside the loop, instead of
+  on every call. Once the beam rotation is cached this is the remaining cost:
+  91 % of the runtime and 99.5 % of the peak memory. Measured when it was
+  introduced, hoisting it took one forward from 163 ms / 122 MB to
+  1.1 ms / 11 MB (agreeing to 5e-16). `forward()` is a thin wrapper that
+  calls `sky_to_alms()` for you; call `forward_alms()` whenever the sky is
+  not what you are fitting. `mmodes_alms()` is the same idea for the m-mode
+  path.
 
 `to_reference_frame()`
-: Pays the `O(lmax³)` rotation **once** and returns an equivalent projector
-  that skips it forever after. Its margin used to be large; it is now small,
-  because the per-call rotation reuses a Wigner plane built at trace time. At
-  `lmax` 191 the un-cached path runs within 4 % of the cached one (62.6 ms
-  against 60.4 ms), where it used to be 81 % slower. Still free to use, and
-  still the right default
-  outside a fit. Gradients through the result are with respect to the
-  reference-frame alms, so keep the original when the **beam** is what you
-  are fitting; that case is why the rotation was made cheap rather than
-  merely skippable.
+: Pays the `O(lmax³)` rotation once and returns an equivalent projector that
+  skips it afterwards. Its margin is small, because the per-call rotation
+  reuses a Wigner plane built at trace time. At `lmax` 191 the un-cached path
+  runs within 4 % of the cached one (62.6 ms against 60.4 ms), where it used
+  to be 81 % slower. It is free to use, and the right default outside a fit.
+  Gradients through the result are with respect to the reference-frame alms,
+  so keep the original when the beam is what you are fitting. The per-call
+  rotation was made cheap for that case.
 
 `uniform_sampling=True`
 : Routes the time synthesis and its adjoint through real FFTs,
   `O(n_time log n_time)` independent of the band-limit. It needs the LST grid
-  to be a uniform **full** sidereal turn with `2·lmax < n_time` — the sampling
+  to be a uniform full sidereal turn with `2·lmax < n_time`: the sampling
   theorem, since `m = lmax` must stay off the Nyquist bin. Build the grid with
-  `DriftScanProjector.uniform_lst_grid(n_time)`; the natural
-  `jnp.linspace(0, 360, n_time)` includes the endpoint and is a turn *plus one
-  step*, which the projector rejects rather than silently mis-synthesizing.
+  `DriftScanProjector.uniform_lst_grid(n_time)`.
+  `jnp.linspace(0, 360, n_time)` includes the endpoint and is a turn plus one
+  step, which the projector rejects.
 
 ---
 
@@ -297,33 +294,31 @@ Three opt-ins sharpen it further, all preserving `jit`/`vmap`/`grad`:
 | Your observation | Engine | Why |
 |---|---|---|
 | Fixed pointing, Earth scans | `DriftScanProjector` | Same answer, orders of magnitude cheaper |
-| Tracking or scanning | `GeneralPointingProjector` | Pointing genuinely varies per sample |
-| Fixed pointing *and* fixed beam, matrix already built | `MatrixProjector` | Pure einsum; no engine dependency |
+| Tracking or scanning | `GeneralPointingProjector` | Pointing varies per sample |
+| Fixed pointing and fixed beam, matrix already built | `MatrixProjector` | Pure einsum; no engine dependency |
 
 :::{warning}
-The drift-scan engine does not consume `coords.pointing` — the pointing is
-projector configuration. It is not silently discarded either: coords whose
-pointing *disagrees* would otherwise simulate a different observation and
-return a perfectly finite, perfectly wrong answer, so they raise. Constant
-pointing that agrees passes, because reusing a general projector's coords is
-the expected way to switch engines.
+The drift-scan engine does not consume `coords.pointing`: the pointing is
+projector configuration. Coords whose pointing disagrees with it raise,
+because they would otherwise simulate a different observation and return a
+finite, wrong answer. Constant pointing that agrees passes, because reusing a
+general projector's coords is the expected way to switch engines.
 :::
 
 Both engines are backed by the `limtod_jax` package that ships with
-[limTOD](https://github.com/zzhang0123/limTOD). It is a **dependency**, not an
-extra — the engines are the forward model rather than an accessory — and it is
-on PyPI, so `pip install rheplicant` brings it.
+[limTOD](https://github.com/zzhang0123/limTOD). It is a dependency, not an
+extra, because the engines are the forward model. It is on PyPI, so
+`pip install rheplicant` brings it.
 
-The floor is **limTOD ≥ 1.10**, so a fresh install gets every fast path. The
+The floor is limTOD ≥ 1.10, so a fresh install gets every fast path. The
 individual floors, if you are pinning by hand: `GeneralPointingProjector`
-needs any version providing `limtod_jax`; `DriftScanProjector` needs **1.6**;
-`uniform_sampling=True` the FFT synthesis from **1.7**; and the hoisted Wigner
-plane comes from **1.8**. The first two are checked at the boundary, so an
-outdated install says so instead of failing inside a traced call; the last is
-detected at runtime and skipped when absent, because it is an optimization,
-not a contract.
+needs any version providing `limtod_jax`; `DriftScanProjector` needs 1.6;
+`uniform_sampling=True` the FFT synthesis from 1.7; and the hoisted Wigner
+plane comes from 1.8. The first two are checked at the boundary, so an
+outdated install says so instead of failing inside a traced call. The last is
+detected at runtime and skipped when absent, because it is an optimization.
 
-Enable `jax_enable_x64` for quantitative work — the map↔alm transforms inherit
+Enable `jax_enable_x64` for quantitative work: the map↔alm transforms inherit
 s2fft's float32 limitation.
 
 ---
@@ -331,56 +326,56 @@ s2fft's float32 limitation.
 ## Is the output a temperature?
 
 Not by default. Both engines take `normalize_beam` from numpy limTOD, where it
-defaults to **`False`** — the forward model then returns `∫B(n,t) T(n) dΩ`, the
-beam-weighted *integral*. An antenna temperature is the beam-weighted *average*,
-`∫BT dΩ / ∫B dΩ`. The two differ by the beam's solid angle, which is a per-
-frequency constant: invisible in a shape check, invisible in a plot of the
-waterfall's structure, and fatal the moment the number is used as a temperature
-— fed to `NoiseWaveOperator` as `T_src`, compared against a load, or fitted for
-a global signal.
+defaults to `False`. The forward model then returns `∫B(n,t) T(n) dΩ`, the
+beam-weighted integral. An antenna temperature is the beam-weighted average,
+`∫BT dΩ / ∫B dΩ`. The two differ by the beam's solid angle, which is a
+per-frequency constant. The difference is invisible in a shape check and in a
+plot of the waterfall's structure, and it makes the number wrong wherever it is
+used as a temperature: fed to `NoiseWaveOperator` as `T_src`, compared against
+a load, or fitted for a global signal.
 
-Checked against the one sky whose beam average is known by definition, a
-uniform 200 K one:
+Checked against a uniform 200 K sky, whose beam average is known by
+definition:
 
 | beam map | `normalize_beam` | result | error |
 |---|---|---|---|
 | any | `True` | 200.0000 K | exact |
 | raw Gaussian | `False` | 32838 K | ×164 |
-| normalized to unit pixel sum | `False` | 200.4113 K | **+0.21 %** |
+| normalized to unit pixel sum | `False` | 200.4113 K | +0.21 % |
 
-The third row is the dangerous one. Normalizing the beam map by hand looks like
-it fixes the problem and does not: the band-limit truncates `∫B` away from 1 as
-well, so a residual percent-level bias survives — 0.21 % at nside 16 / lmax 47
-with a wide beam, ~4 % at nside 8 with a 20° beam, growing as the beam narrows
-towards the pixel scale. `normalize_beam=True` divides by the *same* truncated
-integral, so the error cancels exactly at any band-limit.
+The third row shows that normalizing the beam map by hand does not fix the
+problem: the band-limit truncates `∫B` away from 1 as well, so a residual
+percent-level bias survives. It is 0.21 % at nside 16 / lmax 47 with a wide
+beam and ~4 % at nside 8 with a 20° beam, growing as the beam narrows towards
+the pixel scale. `normalize_beam=True` divides by the same truncated integral,
+so the error cancels exactly at any band-limit.
 
 Use `normalize_beam=True` whenever the output is a temperature. Leave it
-`False` when you want the unnormalized TOD — `mmodes()` is defined on it and
-refuses the normalized projector for exactly that reason.
+`False` when you want the unnormalized TOD: `mmodes()` is defined on it and
+refuses the normalized projector.
 
 ---
 
 ## Where does the beam stop?
 
-Not at the horizon. A real beam has response below it — 1–3 % of RHINO's horn,
-depending on frequency — and that part is looking at ground, not sky. Two
+Not at the horizon. A real beam has response below it (1–3 % of RHINO's horn,
+depending on frequency), and that part is looking at ground, not sky. Two
 switches deal with it, and they answer different questions.
 
 `horizon_mask=True` cuts the beam at the local horizon before projecting, so
-`forward` returns the beam average over the **visible** sky. A sharp cut is not
-band-limited, so the masked beam rings; `apod_deg` (2–5° of elevation) tames it,
-and `mask_iterations` sets the healpy-equivalent re-analysis depth.
+`forward` returns the beam average over the visible sky. A sharp cut is not
+band-limited, so the masked beam rings; `apod_deg` (2–5° of elevation) reduces
+the ringing, and `mask_iterations` sets the healpy-equivalent re-analysis depth.
 
-It is also the most expensive thing this projector can do — **14.6 ms against
-1.79 ms unmasked at nside 16 / lmax 47, 8.2×** — because it masks the *alms* on
+It is also the most expensive thing this projector can do, 14.6 ms against
+1.79 ms unmasked at nside 16 / lmax 47 (8.2×), because it masks the alms on
 every call: rotate into the horizontal frame, synthesize, multiply, re-analyze
 three times, rotate back.
 
-None of that is inherent, and for a drift scan none of it is necessary. The
-horizon is fixed in the horizontal frame and a drift scan's pointing is fixed by
-definition, so the masked beam is a **constant**: truncate the beam map once,
-before analysis, and the whole thing is one elementwise multiply.
+For a drift scan none of that is necessary. The horizon is fixed in the
+horizontal frame and a drift scan's pointing is fixed by definition, so the
+masked beam is a constant: truncate the beam map once, before analysis, and the
+masking is one elementwise multiply.
 
 ```python
 from rheplicant.radio import horizon_truncated_beam
@@ -388,27 +383,26 @@ beam_maps, f_sky = horizon_truncated_beam(beam_maps, el_deg=90.0, apod_deg=3.0)
 ```
 
 That is a thin pass-through to `limtod_jax.horizon_truncated_beam` (limTOD ≥
-1.9), and deliberately so: how a beam weights the sky, where the horizon falls
-in it and what share survives are limTOD's subject, the same way the noise-wave
-data model is `rhino_cal_jax`'s ([D15](design.md)). This package's job is to place the
-result on a signal path. The conventions and their numerical locks — including
-the painted-ground closure that decides them — live upstream.
+1.9). How a beam weights the sky, where the horizon falls in it and what share
+survives are limTOD's subject, as the noise-wave data model is
+`rhino_cal_jax`'s ([D15](design.md)). This package places the result on a
+signal path. The conventions and their numerical locks, including the
+painted-ground closure that decides them, live upstream.
 
-**1.04×** — free — and the same instrument, to 2.8e-5 (the residual is the
-alm→map→alm round trip the masking path takes *before* it masks, which this one
-does not). At a zenith pointing this needs no rotation at all: limTOD's
+This route costs 1.04× and gives the same instrument to 2.8e-5 (the residual is
+the alm→map→alm round trip the masking path takes before it masks, which this
+one does not). At a zenith pointing this needs no rotation: limTOD's
 horizontal chart puts the zenith at the pole and the beam-local chart puts the
 boresight there, so the two coincide, and a pure-elevation mask is invariant
 under the rotation about that shared pole that still separates them.
-`horizon_truncated_beam` refuses a tilted pointing rather than guess the
-rotation; that is where `horizon_mask=True` earns its keep. Either way, follow
-it with `to_reference_frame()`.
+`horizon_truncated_beam` refuses a tilted pointing; use `horizon_mask=True`
+there. Either way, follow it with `to_reference_frame()`.
 
 `horizon_truncated_beam` returns `f_sky` alongside the maps because they are the
-same sum. `DriftScanProjector.horizon_fraction()` — also a pass-through, to
-`limtod_jax.horizon_beam_fraction` — computes it for the `horizon_mask=True`
-path instead, and works at any fixed pointing. Either way it answers the other question the
-horizon raises: **how much** of the beam is above it. It is
+same sum. `DriftScanProjector.horizon_fraction()`, also a pass-through (to
+`limtod_jax.horizon_beam_fraction`), computes it for the `horizon_mask=True`
+path instead, and works at any fixed pointing. Either way it answers the other
+question the horizon raises, how much of the beam is above it. It is
 
 $$f_\mathrm{sky} = \frac{\int_\mathrm{above} B\,d\Omega}{\int_{4\pi} B\,d\Omega}$$
 
@@ -417,10 +411,10 @@ per frequency, so that the antenna temperature is
 $$T_\mathrm{collected} = f_\mathrm{sky}\,\langle T_\mathrm{sky}\rangle_\mathrm{masked}
   + (1 - f_\mathrm{sky})\,T_\mathrm{ground}.$$
 
-Masking without that weight is no better than not masking at all: at a 3000 K
-sky both are a ~200 K bias. `BeamSpillOperator` applies both halves, and the
-two routes to it each hand over the fraction and the beam together, which is
-what stops them describing different beams:
+Masking without that weight is no better than not masking: at a 3000 K sky
+both are a ~200 K bias. `BeamSpillOperator` applies both halves. Each of the
+two routes to it hands over the fraction and the beam together, so that the
+two describe the same beam:
 
 ```python
 # truncate the map (preferred for a drift scan)
@@ -437,18 +431,17 @@ On the second route, read the fraction **before** `to_reference_frame()`: that
 call leaves no unmasked denominator to divide by, and `horizon_fraction()`
 raises if asked afterwards.
 
-$f_\mathrm{sky}$ is an equal-area **pixel** partition of the beam, with the ring
-of pixels centred exactly on the horizon counted as half — `limtod_jax`'s
-`horizon_partition_weights`, which is a different object from the
-`horizon_weights` mask and says so. Neither choice is cosmetic: the
-alternatives cost 17 K and 8.6 K of a 200 K effect, measured against a directly
-computable reference. The table is in
+$f_\mathrm{sky}$ is an equal-area pixel partition of the beam, with the ring of
+pixels centred exactly on the horizon counted as half. That is `limtod_jax`'s
+`horizon_partition_weights`, a different object from the `horizon_weights`
+mask. The alternatives to those two choices cost 17 K and 8.6 K of a 200 K
+effect, measured against a directly computable reference. The table is in
 [From the sky to the receiver](sky-to-receiver.md#the-horizon-split-measured);
 the locks are in limTOD's `tests/limtod_jax/test_horizon_partition.py`.
 
-Note that `mmodes()` refuses a `normalize_beam=True` projector, and
-`horizon_mask` composes with everything else here — but a masked beam is a
-different beam, so a cached masked projector cannot be un-masked afterwards.
+`mmodes()` refuses a `normalize_beam=True` projector. `horizon_mask` composes
+with everything else here, but a masked beam is a different beam, so a cached
+masked projector cannot be un-masked afterwards.
 
 ---
 

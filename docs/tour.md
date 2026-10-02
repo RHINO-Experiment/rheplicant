@@ -10,16 +10,16 @@ The tour is in two parts:
 ::::{grid} 1 1 2 2
 :gutter: 2
 
-:::{grid-item-card} Part 1 — Forward modelling
+:::{grid-item-card} Part 1: Forward modelling
 :class-header: sd-font-weight-bold
 
-Simulate what any stage of an experiment would produce — a sky, a receiver
+Simulate what any stage of an experiment would produce: a sky, a receiver
 output, a processed product. `State` · `Operator` · the graph.
 +++
 The twin as a simulator.
 :::
 
-:::{grid-item-card} Part 2 — Bayesian inference
+:::{grid-item-card} Part 2: Bayesian inference
 :class-header: sd-font-weight-bold
 
 Infer any subset of what the twin contains, with the noise model standing as
@@ -29,35 +29,34 @@ The same twin as a model.
 :::
 ::::
 
-**▸ The example running through both** — RHINO's signal path down to the
+**▸ The example running through both:** RHINO's signal path down to the
 receiver output, then the four noise-wave temperatures recovered from it.
 
 Snippets build on each other; pasted top to bottom they form a working script,
-and `tests/test_tour_runs.py` runs it. This is an orientation, not a census —
-[the operator catalog](operators.md), [inferring anything](inference.md) and
+and `tests/test_tour_runs.py` runs it. The tour is an orientation.
+[The operator catalog](operators.md), [inferring anything](inference.md) and
 [the API reference](api.md) are the complete surfaces.
 
-**Part 1 — Forward modelling** · [The state](#the-state) · [Operators](#operators) · [Graph assembly](#graph-assembly)
+**Part 1: Forward modelling** · [The state](#the-state) · [Operators](#operators) · [Graph assembly](#graph-assembly)
 
-**Part 2 — Bayesian inference** · [The model](#the-model-what-is-free-and-how-it-enters) · [The likelihood](#the-likelihood-a-noise-model-is-a-likelihood) · [The engine](#the-engine-exact-where-the-model-is-linear) · [Reading the answer](#reading-the-answer)
+**Part 2: Bayesian inference** · [The model](#the-model-what-is-free-and-how-it-enters) · [The likelihood](#the-likelihood) · [The engine](#the-engine) · [Reading the answer](#reading-the-answer)
 
 ---
 
-# Part 1 — Forward modelling
+# Part 1: Forward modelling
 
 A twin is a **graph of operators**. Each node is one step of signal transmission
-*or of signal processing*; each operator is a pure `State -> State` function; and
-the graph says how they connect. The default graph is RHINO's, but it is a
-*default*, not the framework — supplying your own is supported.
+or of signal processing; each operator is a pure `State -> State` function; and
+the graph says how they connect. The default graph is RHINO's, and supplying
+your own is supported.
 
 :::{figure} _static/tour-operator-light.svg
 :figclass: only-light
 :align: center
 :width: 460px
 
-Every operator has the same shape. A new `State` comes back — usually with
-`data` replaced; whatever it did not touch is the same buffer, shared, not
-copied.
+Every operator has the same shape. A new `State` comes back, usually with
+`data` replaced. Whatever it did not touch is the same buffer, not a copy.
 :::
 
 :::{figure} _static/tour-operator-dark.svg
@@ -65,28 +64,27 @@ copied.
 :align: center
 :width: 460px
 
-Every operator has the same shape. A new `State` comes back — usually with
-`data` replaced; whatever it did not touch is the same buffer, shared, not
-copied.
+Every operator has the same shape. A new `State` comes back, usually with
+`data` replaced. Whatever it did not touch is the same buffer, not a copy.
 :::
 
-Two nouns carry everything:
+The two central types:
 
 `State`
-: **The complete scientific context** of an experiment — data, coordinates,
+: The complete scientific context of an experiment: data, coordinates,
   environment, metadata, randomness. Immutable, and a JAX pytree.
 
 `Operator`
-: **One step**, `State` in and `State` out. Sky models, instrument effects,
+: One step, `State` in and `State` out. Sky models, instrument effects,
   calibration, filtering and neural networks are all the same kind of thing.
 
-**Where you stop is a choice.** The graph decides what the twin produces: cut it
+**Where the graph ends.** The graph decides what the twin produces: cut it
 at the antenna for a sky temperature, at the receiver for a raw waterfall, later
 still for a calibrated, flagged, averaged product. Analysis steps are operators
 too, so end-to-end and any sub-path are the same kind of object.
 
-**▸ In this tour** — the path down to the receiver output and stopping there:
-no post-analysis operators on the graph.
+**▸ In this tour:** the path down to the receiver output, with no
+post-analysis operators on the graph.
 
 ## The state
 
@@ -115,7 +113,7 @@ state = State(
 )
 ```
 
-Every field is optional, and there are exactly two channels:
+Every field is optional, and there are two channels:
 
 :::{list-table}
 :header-rows: 1
@@ -126,7 +124,7 @@ Every field is optional, and there are exactly two channels:
   - What goes in it
 * - `data`
   - traced
-  - the payload — `(n_time, n_freq)` by radio convention, any pytree in general
+  - the payload: `(n_time, n_freq)` by radio convention, any pytree in general
 * - `coords`
   - traced
   - `time`, `freq`, `pointing`, plus an `extra` dict (the switch cycle above)
@@ -142,7 +140,7 @@ Every field is optional, and there are exactly two channels:
   - a typed PRNG key, `jax.random.key(seed)`
 * - `meta`
   - **static**
-  - strings and labels only — it is part of the jit cache key, so changing it
+  - strings and labels only. It is part of the jit cache key, so changing it
     recompiles
 :::
 
@@ -155,32 +153,33 @@ subkey, s4 = state.next_key()                     # the PRNG protocol: split, ad
 raw_kept = s3.checkpoint("raw")                   # zero-copy snapshot into aux
 ```
 
-:::{dropdown} A new State on every update — doesn't that cost memory?
+:::{dropdown} A new State on every update: doesn't that cost memory?
 :color: secondary
 :icon: question
 
-**No, because a `State` does not hold your data — it holds *references* to it.**
-`replace` builds a new collection of pointers; the buffers are the same ones. The
-only allocation is the outer shell, 48 bytes, so `s2.coords is state.coords`. A
-16 MB array is never duplicated by an update that did not name it, and sharing is
-safe because JAX arrays are immutable. That is also why `checkpoint("raw")` is
-free: the snapshot *is* the same buffer under a second name.
+No. A `State` holds references to your data, not the data. `replace` builds a
+new collection of pointers; the buffers are the same ones. The only allocation
+is the outer shell, 48 bytes, so `s2.coords is state.coords`. A 16 MB array is
+never duplicated by an update that did not name it, and sharing is safe because
+JAX arrays are immutable. For the same reason `checkpoint("raw")` is free: the
+snapshot is the same buffer under a second name.
 
-**Freeing** happens when no collection lists a buffer any more — not when a
+**Freeing** happens when no collection lists a buffer any more, not when a
 variable is reassigned. `checkpoint` keeps one on purpose; `history.append(state)`
 keeps one by accident. If memory grows through a long run, look for the list,
-dict or closure collecting states, never at `replace`.
+dict or closure collecting states, not at `replace`.
 
-**The one real cost is not memory.** `meta` is static, so it is part of the jit
-cache key: a different `meta` is a different compiled program, kept for the life
-of the process. Right for a label that changes what the program *is*
-(`telescope`, `band`), wrong for one that merely names a run. The test is not
-"string or number?" but **would the compiled program differ?**
+**Recompilation** is the one real cost. `meta` is static, so it is part of the
+jit cache key: a different `meta` is a different compiled program, kept for the
+life of the process. That is right for a label that changes what the program is
+(`telescope`, `band`) and wrong for one that only names a run. The test is
+whether the compiled program would differ, not whether the value is a string or
+a number.
 :::
 
 ## Operators
 
-One contract — a pure `State -> State` callable implemented as an
+One contract: a pure `State -> State` callable implemented as an
 `equinox.Module`. Array-valued fields are automatically differentiable
 parameters; there is no registration machinery.
 
@@ -195,13 +194,13 @@ out = gain(state.with_data(jnp.ones((N_TIME, N_FREQ))))
 assert jnp.allclose(out.data, 1.1)
 ```
 
-**Processing is not a different formalism.** `SnapshotOperator` preserves raw
-data, `SiderealFilter` and `FourierBandFilter` are linear projections,
-`MomentRFIFlaggingOperator` writes flags into `aux` — all of them are operators,
-and a pipeline of them composes with the forward chain in the same way. A twin
-can therefore be end-to-end (sky through to a calibrated spectrum) or any
-sub-path you like: the tour's example stops at the ADC, because a raw waterfall
-is what the instrument actually records.
+**Processing steps.** `SnapshotOperator` preserves raw data, `SiderealFilter`
+and `FourierBandFilter` are linear projections, and `MomentRFIFlaggingOperator`
+writes flags into `aux`. All of them are operators, and a pipeline of them
+composes with the forward chain in the same way. A twin can therefore be
+end-to-end (sky through to a calibrated spectrum) or any sub-path: the tour's
+example stops at the ADC, because a raw waterfall is what the instrument
+records.
 
 **Writing your own** is one small class:
 
@@ -226,11 +225,11 @@ class CableReflectionOperator(AbstractOperator):
 
 That is the whole integration: `graph_node` makes it assemblable, its array
 fields are trainable, and every inference exit sees them automatically. Three
-rules for implementors — never mutate the input state; draw randomness only via
+rules for implementors: never mutate the input state; draw randomness only via
 `state.next_key()`, returning the advanced state; validate structure only
-(shapes and dtypes — value checks break under jit).
+(shapes and dtypes, because value checks break under jit).
 
-### Three ways to compose, and only three
+### Three ways to compose
 
 ::::{grid} 1 1 3 3
 :gutter: 2
@@ -238,7 +237,7 @@ rules for implementors — never mutate the input state; draw randomness only vi
 :::{grid-item-card} Cascade
 :class-header: sd-font-weight-bold
 
-One after another — each stage transforms what the last produced.
+One after another: each stage transforms what the last produced.
 ```python
 # sketch
 Pipeline(sky, beam, gain)
@@ -291,18 +290,18 @@ sky = SumOperator(
 observed_sky = Pipeline(sky, gain, names=("sky", "gain"))(state).data
 ```
 
-:::{dropdown} My gain isn't a constant — do I need a different operator?
+:::{dropdown} My gain isn't a constant. Do I need a different operator?
 :color: secondary
 :icon: question
 
-**Almost never.** `GainOperator.gain` is an array field, so it already takes
+Almost never. `GainOperator.gain` is an array field, so it already takes
 whatever shape the operator accepts: a scalar for a constant, `(n_time,)` for a
-per-sample drift. Frequency structure lives at the `bandpass` node instead;
-inferred jointly and freely those two share one *exactly* null direction, which
-is why the bandpass is declared through `unit_mean_bandpass`.
+per-sample drift. Frequency structure lives at the `bandpass` node instead.
+Inferred jointly and freely, those two share one exactly null direction, so the
+bandpass is declared through `unit_mean_bandpass`.
 
-**An arbitrary parameterisation** — a polynomial, `exp` of one — is still the
-same operator. *What* is inferred and *how it enters* are separate declarations
+**An arbitrary parameterisation** (a polynomial, `exp` of one) is still the
+same operator. What is inferred and how it enters are separate declarations
 (Part 2): the operator keeps multiplying by an array, and the parameterisation is
 a `Bind`.
 
@@ -314,13 +313,13 @@ Bind("g_coeff", into=lambda p: p["gain"].gain,           # the leaf it drives
 ```
 
 A `PolynomialGainOperator` would make every choice of family, order and link
-function its own class — and its own graph slot and jit cache entry — for a
+function its own class, with its own graph slot and jit cache entry, for a
 forward model whose structure never changed. It also costs you the payoff:
-`g = B @ c` is *linear* in the coefficients, so `Latent(..., linear=True)` sends
+`g = B @ c` is linear in the coefficients, so `Latent(..., linear=True)` sends
 that block to the exact conjugate draw rather than to a gradient sampler.
 
-**A new operator is right when the *algebra* changes**, not the parameterisation
-— a complex gain, or a 2×2 Jones matrix over two polarisations. "It varies with
+A new operator is right when the algebra changes, not the parameterisation:
+a complex gain, or a 2×2 Jones matrix over two polarisations. "It varies with
 something" is a shape; "it multiplies differently" is an operator.
 :::
 
@@ -330,28 +329,27 @@ something" is a shape; "it multiplies differently" is an operator.
 
 Operators declare `requires` / `provides` (State paths read and written),
 `graph_node` (home on a template) and `must_precede` (what the contribution must
-flow through). **Two are enforced.**
+flow through). Two are enforced.
 
-`"key"` in `requires` is a **contract**: it says this operator draws randomness,
-and every inference exit refuses a model containing one — a frozen draw from the
+`"key"` in `requires` is a contract: it says this operator draws randomness,
+and every inference exit refuses a model containing one. A frozen draw from the
 template key would be added to every prediction alike, a bias that is exactly
 affine and full rank, so no shape check, no linearity check and no rank test can
 see it.
 
-`must_precede` is enforced by `assemble` — see the warning in the next section.
+`must_precede` is enforced by `assemble`; see the warning in the next section.
 
-The rest is descriptive **by decision, not omission**: `provides` is `("data",)`
-on 25 of 31 declaring classes, so enforcing it would distinguish nothing, and an
-operator that reads a field *if present* would be wrongly refused.
+The rest is descriptive by decision: `provides` is `("data",)` on 25 of 31
+declaring classes, so enforcing it would distinguish nothing, and an operator
+that reads a field if present would be wrongly refused.
 :::
 
 ## Graph assembly
 
-The canonical path does the composing. Composition is **implicit in the
-signal path**: a graph is a template of operator
-slots plus the structure joining them; you provide a *set* of operators and
-`assemble` compiles the sub-path they induce, folding it into exactly the three
-structures above.
+The canonical path does the composing. Composition is implicit in the signal
+path: a graph is a template of operator slots plus the structure joining them.
+You provide a set of operators and `assemble` compiles the sub-path they
+induce, folding it into the three structures above.
 
 :::{list-table} What `assemble` does with each node kind
 :header-rows: 1
@@ -374,15 +372,15 @@ structures above.
   - a `SelectOperator`, branch order fixed by the graph
 :::
 
-Branch order comes from the graph, never from your argument order — so the same
+Branch order comes from the graph, never from your argument order, so the same
 set of operators always folds to the same tree, with the same names, the same
 PRNG stream and the same jit cache entry.
 
 :::{important}
-**⬇ The worked example starts here.** Everything above was one operator at a
-time; this is the whole RHINO forward segment, ending at the ADC — a raw
-waterfall, as the instrument records it. Part 2 takes this same twin and infers
-the four noise-wave temperatures back out of it.
+**⬇ The worked example.** Everything above was one operator at a time. This is
+the whole RHINO forward segment, ending at the ADC: a raw waterfall, as the
+instrument records it. Part 2 takes this same twin and infers the four
+noise-wave temperatures back out of it.
 :::
 
 ```python
@@ -445,12 +443,12 @@ observed = twin(state).data                          # the raw waterfall
 :alt: The raw waterfall, the switch cycle aligned under it, and one mean spectrum per source
 :width: 100%
 
-**This is what the twin produces.** The stripes are the switch cycle — the
-coloured strip beneath the image is the same 64 samples, and every fourth one is
-the antenna. On the right, the four sources separated: the antenna's steep
-foreground spectrum, and three loads at levels the noise-wave couplings put them
-at, not at their physical temperatures. The 1200 K source reads lower than you
-would guess and the 400 K load lower than the 300 K one, because `c_s =
+**The twin's output.** The stripes are the switch cycle: the coloured strip
+beneath the image is the same 64 samples, and every fourth one is the antenna.
+Right: the four sources separated, the antenna's steep foreground spectrum and
+three loads at the levels the noise-wave couplings put them at, not at their
+physical temperatures. The 1200 K source reads lower than you would guess
+and the 400 K load lower than the 300 K one, because `c_s =
 (1−|Γ|²)|F|²` weights each source by its own match.
 :::
 
@@ -459,12 +457,12 @@ would guess and the 400 K load lower than the 300 K one, because `c_s =
 :alt: The raw waterfall, the switch cycle aligned under it, and one mean spectrum per source
 :width: 100%
 
-**This is what the twin produces.** The stripes are the switch cycle — the
-coloured strip beneath the image is the same 64 samples, and every fourth one is
-the antenna. On the right, the four sources separated: the antenna's steep
-foreground spectrum, and three loads at levels the noise-wave couplings put them
-at, not at their physical temperatures. The 1200 K source reads lower than you
-would guess and the 400 K load lower than the 300 K one, because `c_s =
+**The twin's output.** The stripes are the switch cycle: the coloured strip
+beneath the image is the same 64 samples, and every fourth one is the antenna.
+Right: the four sources separated, the antenna's steep foreground spectrum and
+three loads at the levels the noise-wave couplings put them at, not at their
+physical temperatures. The 1200 K source reads lower than you would guess
+and the 400 K load lower than the 300 K one, because `c_s =
 (1−|Γ|²)|F|²` weights each source by its own match.
 :::
 
@@ -475,31 +473,31 @@ would guess and the 400 K load lower than the 300 K one, because `c_s =
 | Setting | Value | Where it enters |
 |---|---|---|
 | grid | 64 samples × 8 channels, 60–85 MHz | `Coordinates` |
-| switch cycle | antenna, 300 K, 400 K, 1200 K — 16 visits each | `coords.extra["receiver_input"]` |
+| switch cycle | antenna, 300 K, 400 K, 1200 K; 16 visits each | `coords.extra["receiver_input"]` |
 | foreground | 2500 K at 70 MHz, spectral index 2.55 | `ForegroundOperator` |
 | global signal | 0.5 K absorption at 75 MHz, 5 MHz wide | `GlobalSignalOperator` |
 | horizon split | `f_sky` 0.97, ground 290 K | `BeamSpillOperator` |
 | horn loss | η 0.97 at 293 K | `AntennaLossOperator` |
-| noise waves | `T_unc` 230–270 K, `T_cos` ±30 K, `T_sin` −40…−32 K, `T_rx` 285–295 K — **per channel** | `NoiseWaveOperator` |
+| noise waves | `T_unc` 230–270 K, `T_cos` ±30 K, `T_sin` −40…−32 K, `T_rx` 285–295 K; per channel | `NoiseWaveOperator` |
 | reflections | receiver 45 Ω; sources open/10 Ω/short/150 Ω through cables | `gamma_rec`, `gamma_src` |
 | bandpass | 10 % cosine ripple, mean 1 | `ReceiverOperator` |
 | gain | 1.0 ± 2 %, 60 s period | `GainOperator` |
 | noise | σ = 2 counts, post-gain | `NoiseOperator` |
-| ADC | 0.25 counts/K, 12-bit clip (**no quantisation** — it is a placeholder) | `ADCOperator` |
+| ADC | 0.25 counts/K, 12-bit clip (no quantisation: it is a placeholder) | `ADCOperator` |
 
-The bandpass carries *shape* at mean 1 and the gain carries the *level*: free
+The bandpass carries shape at mean 1 and the gain carries the level: free
 jointly, those two share one exactly null direction.
 :::
 
 Nothing in that call says what connects to what. The graph does: the two sky
 terms **sum**, the antenna stages **chain**, and `receiver_input` is a
-**selector**, so each `CalLoadOperator` *replaces* the antenna on its own switch
+**selector**, so each `CalLoadOperator` replaces the antenna on its own switch
 position instead of adding to it.
 
-**One convention, three structures.** A **cascade** is an arrow. A **sum** and a
+**Reading the drawing.** A **cascade** is an arrow. A **sum** and a
 **switch** are combinators, operators that hold other operators, and the
-drawing gives them no box: the wire runs *through* a symbol of its own — ⊕
-adds the branches that reach it, the lever in the ◇ connects one of them per
+drawing gives them no box: the wire runs through a symbol of its own. ⊕ adds
+the branches that reach it, and the lever in the ◇ connects one of them per
 sample. Only a box is a slot you can place an operator in.
 
 ```{mermaid}
@@ -518,7 +516,7 @@ flowchart LR
     class AS,SW sym;
 ```
 
-The result is an `Assembly` — an ordinary operator, with node-id ergonomics:
+The result is an `Assembly`, an ordinary operator with node-id ergonomics:
 
 ```python
 print(twin)                                   # lit nodes + nodes traversed as identity
@@ -536,12 +534,12 @@ skipped-as-identity=['ionosphere', 'atmosphere_field', 'field_sum', 'beam',
 switch order: ('astro_sum', 'cal_loads_1', 'cal_loads_2', 'cal_loads_3')
 ```
 
-:::{dropdown} What `to_svg()` actually draws — the whole template, unedited
+:::{dropdown} What `to_svg()` draws: the whole template, unedited
 :color: secondary
 :icon: image
 
 The figure above is the assembled path alone. `to_svg()` keeps every node of the
-template, so the skipped ones are visible *as* skipped: half-lit where the
+template, so the skipped ones are visible as skipped: half-lit where the
 traversal went through them as identity, dimmed where nothing reached them.
 
 :::{figure} _static/tour-graph-light.svg
@@ -558,25 +556,25 @@ traversal went through them as identity, dimmed where nothing reached them.
 :::
 
 
-Two things to read off that output. The **skipped** nodes are the template
-traversed as identity — nothing was provided for them, and no `SumOperator`
-wrapping a single branch was materialised. And the **switch order** is a fact you
-must read, never assume: it is the order `gamma_src`'s rows have to be stacked
-in, and its labels depend on which sibling leaves you supplied.
+In that output, the **skipped** nodes are the template traversed as identity:
+nothing was provided for them, and no `SumOperator` wrapping a single branch
+was materialised. The **switch order** has to be read from the output, not
+assumed: it is the order `gamma_src`'s rows have to be stacked in, and its
+labels depend on which sibling leaves you supplied.
 
 :::{warning}
-**Placement can be silently wrong, so state the constraint.** `At(node, op)`
-puts any operator anywhere, so an ordering rule written only in prose is one
-nothing checks: a CW calibration tone assembled *after* the gain builds cleanly,
-every shape correct, and its gain response is exactly 1.0 — it monitors nothing.
+**Placement constraints.** `At(node, op)` puts any operator anywhere, so an
+ordering rule written only in prose is one nothing checks. A CW calibration
+tone assembled after the gain builds cleanly, every shape correct, and its gain
+response is exactly 1.0: it monitors nothing.
 
 Declaring `must_precede = ("bandpass", "gain")` makes `assemble` refuse that
-placement instead. The test is **reachability** — does my contribution flow
-*through* that node — not sort order, which is why it needs the graph's node ids
-rather than `State` paths.
+placement. The test is **reachability** (does my contribution flow through
+that node), not sort order, so it needs the graph's node ids rather than
+`State` paths.
 :::
 
-Two more things `assemble` refuses, and three escape hatches:
+Three more things `assemble` refuses, and three escape hatches:
 
 - **Refuses:** caller data handed to a sourced assembly (it would be silently
   discarded); a transform feeding a sum with no live source upstream; an operator
@@ -586,30 +584,30 @@ Two more things `assemble` refuses, and three escape hatches:
   let the same physics enter in different forms (ground spill as a pre-beam
   field, or as a post-beam effective temperature).
 
-The default template `RADIO_GRAPH` has 33 nodes and is **RHINO's** structure, not
-the framework's — `SignalGraph`, `register_graph` and `get_graph` are public and
+The default template `RADIO_GRAPH` has 33 nodes and is RHINO's structure, not
+the framework's: `SignalGraph`, `register_graph` and `get_graph` are public and
 domain-agnostic. See [the canonical signal path](signal-path.md) for the rendered
 graph, and [the operator catalog](operators.md) for what lives
 at each node.
 
 ---
 
-# Part 2 — Bayesian inference
+# Part 2: Bayesian inference
 
 :::{important}
-**⬆ Same twin, read backwards.** Part 1 built it and ran it forward. Nothing is
-rebuilt here: the twin becomes a *model*, `forward(params) -> prediction`, with
+**⬆ The same twin.** Part 1 built it and ran it forward. Nothing is rebuilt
+here: the twin becomes a *model*, `forward(params) -> prediction`, with
 everything you do not free closed over.
 :::
 
-Any leaf of the graph can be made free — a sky amplitude, a beam coefficient, a
-gain, a receiver temperature — and whatever you leave alone is closed over.
+Any leaf of the graph can be made free (a sky amplitude, a beam coefficient, a
+gain, a receiver temperature), and whatever you leave alone is closed over.
 Declaring the noise declares the likelihood. The engine then follows from the
-model's *structure* rather than from taste: exact and sampler-free where the free
-parameters enter linearly, gradient-based where they do not, and one plan
-splitting a model that is both.
+model's structure: exact and sampler-free where the free parameters enter
+linearly, gradient-based where they do not, and one plan splitting a model that
+is both.
 
-Inference is declared in three layers, and it is worth keeping them apart:
+Inference is declared in three layers:
 
 :::{list-table}
 :header-rows: 1
@@ -620,21 +618,21 @@ Inference is declared in three layers, and it is worth keeping them apart:
 * - **The model**
   - which quantities are free, and how they enter the twin
 * - **The likelihood**
-  - what the noise is — a noise model *is* a likelihood
+  - what the noise is; a noise model is a likelihood
 * - **The engine**
   - how to get the posterior, given the shape the first two produced
 :::
 
-**▸ In this tour** — the sky and the beam are given; what were the receiver's
+**▸ In this tour:** the sky and the beam are given; what were the receiver's
 four noise-wave temperatures? The answer arrives as
 [a figure with error bars](#reading-the-answer) a few sections from here.
 
 ## The model: what is free, and how it enters
 
-Two words carry it. A `Latent` is **a named quantity you infer**; a `Bind` is
-**a rule turning latent values into pipeline leaf values**. Keeping them separate
-is what lets one latent drive several stages, or a leaf be a transform of several
-latents, without a new operator for each combination.
+A `Latent` is a named quantity you infer; a `Bind` is a rule turning latent
+values into pipeline leaf values. Keeping them separate lets one latent drive
+several stages, or a leaf be a transform of several latents, without a new
+operator for each combination.
 
 ```python
 from rheplicant.inference import Bind, Latent, ParameterSpace
@@ -652,18 +650,18 @@ space = ParameterSpace(
 )
 ```
 
-Four latents, one per temperature family, each free **per channel** — 32 numbers.
+Four latents, one per temperature family, each free per channel: 32 numbers.
 `linear=True` is a claim about how they enter, and it is checked before it is
 used.
 
-## The likelihood: a noise model is a likelihood
+## The likelihood
 
-Giving the noise is giving the likelihood — `RadiometerNoise(...)` for the
+Giving the noise is giving the likelihood: `RadiometerNoise(...)` for the
 radiometer equation, `HomoscedasticNoise(...)` for a single σ,
 `FlaggedNoise(inner, flags)` to down-weight flagged samples. Nothing else about
 the twin changes.
 
-Which is why a twin that draws its *own* randomness is not a model, and every
+A twin that draws its own randomness is therefore not a model, and every
 inference exit refuses one:
 
 ```python
@@ -678,23 +676,22 @@ fit_twin = twin.without("noise")          # the supported repair, one line
 ```
 
 :::{danger}
-A frozen draw from the template key would be added to **every** prediction
+A frozen draw from the template key would be added to every prediction
 alike. The corruption is exactly affine and full rank, so no shape check, no
-linearity check and no rank test can see it — which is why this is a refusal at
-the door rather than a diagnostic afterwards.
+linearity check and no rank test can see it. It is therefore refused on entry
+rather than diagnosed afterwards.
 :::
 
-The noise still exists; it has just moved to where it belongs. Here it entered
+The noise still exists; it has moved into the likelihood. Here it entered
 before the ADC's scaling, so the σ the likelihood needs is `ADC_SCALE *
 SIGMA_POST_GAIN`. Get that factor wrong and nothing complains: shapes are fine,
-the solve converges, and only the posterior *width* is wrong.
+the solve converges, and only the posterior width is wrong.
 
-## The engine: exact where the model is linear
+## The engine
 
 The four temperatures enter the system temperature additively, and every stage
-after them here — bandpass, gain, ADC scaling below saturation — is a multiply.
-So the prediction is **exactly affine** in them, and that is not a matter of
-taste about which sampler to use:
+after them here (bandpass, gain, ADC scaling below saturation) is a multiply.
+So the prediction is exactly affine in them:
 
 ```python
 errors = check_linearity(space, fit_twin, state, names=NAMES)
@@ -728,14 +725,14 @@ probe size, so it is not evidence either way.
   - a gradient sampler is what an unknown shape needs
 * - a mix
   - `SamplingPlan` with `Block`s
-  - each block's engine is *derived* from `linear=True`, never restated
+  - each block's engine is derived from `linear=True`, never restated
 * - no likelihood at all
   - `NeuralPosterior` (simulation-based)
   - you can simulate but not evaluate
 :::
 
-For this example the top row applies, so NUTS would be theatre — hundreds of
-gradient evaluations per draw to explore a Gaussian we can write down:
+For this example the top row applies. NUTS would spend hundreds of gradient
+evaluations per draw to explore a Gaussian we can write down:
 
 ```python
 from rheplicant.inference import gcr_sample, wiener_solve
@@ -755,27 +752,27 @@ draws = jax.vmap(lambda k: gcr_sample(
     prior_mean=PRIOR_MEAN, key=k, tol=1e-12, maxiter=4000)[0])(keys)
 ```
 
-`linear_operator` exports `A`, `Aᵀ` and the offset **without ever forming a
-matrix**; `wiener_solve` gives the posterior mean by conjugate gradients and
+`linear_operator` exports `A`, `Aᵀ` and the offset without forming a matrix;
+`wiener_solve` gives the posterior mean by conjugate gradients and
 `gcr_sample` gives exact draws, one solve each.
 
 :::{tip}
-**No burn-in, no `r_hat`, no thinning — and that is not an oversight.**
-`gcr_sample` is not a Markov chain. Each call solves the same system
-`wiener_solve` does with two white-noise terms added to the right-hand side, so
-the solution has the posterior mean *and* the posterior covariance exactly, and
-every call is independent of every other. Draws are i.i.d. by construction, so
-500 of them are 500 effective samples and the only knob is how many you want.
+**Burn-in, `r_hat` and thinning** do not apply: `gcr_sample` is not a Markov
+chain. Each call solves the same system `wiener_solve` does with two
+white-noise terms added to the right-hand side, so the solution has the
+posterior mean and the posterior covariance exactly, and every call is
+independent of every other. Draws are i.i.d. by construction, so 500 of them
+are 500 effective samples and the only knob is how many you want.
 
-Measured against the dense posterior of this very block: 20 000 whitened draws
-give per-coordinate std 0.991–1.008, worst off-diagonal correlation 0.028
-against a Monte-Carlo bound of 0.028, mean χ²₃₂ = 32.005 ± 0.057 and a KS
-p-value of 0.57.
+Measured against the dense posterior of this block: 20 000 whitened draws
+give per-coordinate std 0.994–1.008, worst off-diagonal correlation 0.020
+against a Monte-Carlo bound of 0.028, mean χ²₃₂ = 32.028 ± 0.057 and a KS
+p-value of 0.92.
 
-The moment a latent is *not* linear the exact route is gone and you are back to
-NUTS, where burn-in and `r_hat` are the whole game — see
+Once a latent is not linear the exact route is gone and the fit goes to NUTS,
+where burn-in and `r_hat` have to be checked. See
 [the gradient-posterior tutorial](tutorial-nuts.md), which opens with a run
-reporting `r_hat = 840`.
+reporting `r_hat = 846`.
 :::
 
 ## Reading the answer
@@ -802,8 +799,8 @@ t_rx  RMS err  1.136 K | posterior sigma  0.71.. 2.46 K | worst pull 3.10
 :width: 100%
 
 **The answer.** Truth dashed, posterior mean solid, band ±1σ from 500 GCR draws.
-Right: 32 × 500 pulls — 32 recovered numbers over 500 noise realisations — against
-a unit normal, χ²/dof = 0.98.
+Right: 32 × 500 pulls (32 recovered numbers over 500 noise realisations) against
+a unit normal, χ²/dof = 1.02.
 :::
 
 :::{figure} _static/tour-recovery-dark.svg
@@ -812,8 +809,8 @@ a unit normal, χ²/dof = 0.98.
 :width: 100%
 
 **The answer.** Truth dashed, posterior mean solid, band ±1σ from 500 GCR draws.
-Right: 32 × 500 pulls — 32 recovered numbers over 500 noise realisations — against
-a unit normal, χ²/dof = 0.98.
+Right: 32 × 500 pulls (32 recovered numbers over 500 noise realisations) against
+a unit normal, χ²/dof = 1.02.
 :::
 
 :::{figure} _static/tour-covariance-light.svg
@@ -821,10 +818,10 @@ a unit normal, χ²/dof = 0.98.
 :alt: The 32x32 posterior correlation matrix and the 4x4 block it is eight copies of
 :width: 100%
 
-**The covariance those draws carry.** Sixteen *diagonal stripes*, not sixteen
-dense blocks: within one family the eight channels are uncorrelated — each
-channel is its own 4 × 4 problem. What couples is the four families at one
-channel, and `T_unc` against `T_rx` at −0.93 is what the switching cycle fights.
+**The covariance those draws carry.** Sixteen diagonal stripes, not sixteen
+dense blocks: within one family the eight channels are uncorrelated, and each
+channel is its own 4 × 4 problem. The four families couple at one channel, and
+`T_unc` against `T_rx` at −0.94 is what the switching cycle works against.
 :::
 
 :::{figure} _static/tour-covariance-dark.svg
@@ -832,17 +829,17 @@ channel, and `T_unc` against `T_rx` at −0.93 is what the switching cycle fight
 :alt: The 32x32 posterior correlation matrix and the 4x4 block it is eight copies of
 :width: 100%
 
-**The covariance those draws carry.** Sixteen *diagonal stripes*, not sixteen
-dense blocks: within one family the eight channels are uncorrelated — each
-channel is its own 4 × 4 problem. What couples is the four families at one
-channel, and `T_unc` against `T_rx` at −0.93 is what the switching cycle fights.
+**The covariance those draws carry.** Sixteen diagonal stripes, not sixteen
+dense blocks: within one family the eight channels are uncorrelated, and each
+channel is its own 4 × 4 problem. The four families couple at one channel, and
+`T_unc` against `T_rx` at −0.94 is what the switching cycle works against.
 :::
 
-**The claim to take away is not "1 K accuracy" — it is that the errors sit inside
-the error bars the same machinery reports.** One run gives 32 pulls, which is far
-too few to judge that, so the histogram runs 500 of them. `T_unc` is loosest
-because it is multiplied by `|Γ_src|²|F|²`, small for the well-matched sources,
-so those rows carry little leverage on it.
+The result is that the errors sit inside the error bars the same machinery
+reports, not that the accuracy is 1 K. One run gives 32 pulls, too few to judge
+that, so the histogram runs 500 of them. `T_unc` is loosest because it is
+multiplied by `|Γ_src|²|F|²`, small for the well-matched sources, so those rows
+carry little leverage on it.
 
 
 Posterior σ runs from 0.5 to 11 K against a per-sample scatter of 2 K, because
@@ -851,17 +848,17 @@ orthogonal: four sources separate the columns only moderately. That amplificatio
 is the physics of noise-wave calibration, not a defect of the solve.
 
 :::{tip}
-**Four free temperature families need four switch positions.** The antenna counts
-as one, so three calibration loads are the minimum — with fewer, `t_rx` has to be
-held fixed. Collapse the four Γ's to one value and the design matrix drops from
-rank 32 to rank 8, with the posterior falling back onto the prior. The switching
-cycle *is* the calibration design.
+**Switch positions.** Four free temperature families need four of them. The
+antenna counts as one, so three calibration loads are the minimum; with fewer,
+`t_rx` has to be held fixed. Collapse the four Γ's to one value and the design
+matrix drops from rank 32 to rank 8, with the posterior falling back onto the
+prior. The switching cycle is the calibration design.
 :::
 
-One diagnostic no per-block residual can replace: **is the model identified at
-all?** `identifiability()` is a rank test on the Jacobian with respect to every
-latent at once — a degeneracy whose two halves live in different blocks leaves
-each conditional looking perfectly well posed.
+No per-block residual can tell whether the model is identified at all.
+`identifiability()` is a rank test on the Jacobian with respect to every
+latent at once: a degeneracy whose two halves live in different blocks leaves
+each conditional looking well posed.
 
 ```python
 from rheplicant.inference import identifiability
@@ -872,11 +869,11 @@ print(f"rank {report.rank} of {report.n_par} parameters, nullity {report.nullity
 
 ## When it is not linear: the same twin, by NUTS
 
-Everything above rested on one measured fact — the temperatures are affine, so
-the posterior is a Gaussian you can write down. Let the **foreground spectral
-index** go free and that fact is gone: it enters as `(ν/ν₀)^(−β)`, an exponent,
-so no reparameterisation makes it linear. Ask the same question of it and the
-same check that passed above refuses:
+Everything above rested on one measured fact: the temperatures are affine, so
+the posterior is a Gaussian you can write down. Let the foreground spectral
+index go free and that no longer holds: it enters as `(ν/ν₀)^(−β)`, an exponent,
+so no reparameterisation makes it linear. The check that passed above refuses
+it:
 
 ```python
 # needs-extra: numpyro
@@ -900,13 +897,13 @@ LinearityRefused: Latent 'fg_beta' is declared linear=True, but the prediction i
 ```
 
 `LinearityRefused` is a `ParameterSpaceError`, and so a `ValueError`. The
-refusal quotes three probe scales — `0.001x -> 4.65e-04, 1x -> 3.07e-01,
+refusal quotes three probe scales: `0.001x -> 4.65e-04, 1x -> 3.07e-01,
 1000x -> 1.92e+02`. Even the smallest probe departs by 4.65e-04, where the
 temperatures' departure was zero or below roundoff. That is curvature.
 
-So: NUTS. Two latents, because the amplitude–index pair is the fit anyone
-actually does — and note that `amplitude` alone *is* affine; it is
-`fn=jnp.exp` that makes `fg_log_amp` nonlinear too.
+So the fit goes to NUTS, with two latents, because the amplitude–index pair is
+the usual fit. `amplitude` alone is affine; `fn=jnp.exp` makes `fg_log_amp`
+nonlinear too.
 
 ```python
 # needs-extra: numpyro
@@ -954,10 +951,10 @@ prior-aware init       r_hat   1.002   n_eff   688   divergences 0
 :alt: Four NUTS chains failing, the same chains converging, and the two-dimensional posterior
 :width: 100%
 
-**The first run is the one worth staring at.** Four chains, left, crawling —
-they never reach the truth (dashed) and never meet each other. It returned a mean
-and a σ regardless; `r̂ = 36`, `n_eff = 2` of 4000 is what says not to believe
-them. Middle: the same sampler, prior-aware start. Note the y-axis — the failing
+**The two runs.** Left: the first run's four chains, which never reach the
+truth (dashed) and never meet each other. It returned a mean and a σ
+regardless; `r̂ = 36` and `n_eff = 2` of 4000 say not to believe them.
+Middle: the same sampler, prior-aware start. The y-axes differ: the failing
 run's whole range is 0 to 2.5, the healthy one's is 0.014 wide.
 :::
 
@@ -966,20 +963,19 @@ run's whole range is 0 to 2.5, the healthy one's is 0.014 wide.
 :alt: Four NUTS chains failing, the same chains converging, and the two-dimensional posterior
 :width: 100%
 
-**The first run is the one worth staring at.** Four chains, left, crawling —
-they never reach the truth (dashed) and never meet each other. It returned a mean
-and a σ regardless; `r̂ = 36`, `n_eff = 2` of 4000 is what says not to believe
-them. Middle: the same sampler, prior-aware start. Note the y-axis — the failing
+**The two runs.** Left: the first run's four chains, which never reach the
+truth (dashed) and never meet each other. It returned a mean and a σ
+regardless; `r̂ = 36` and `n_eff = 2` of 4000 say not to believe them.
+Middle: the same sampler, prior-aware start. The y-axes differ: the failing
 run's whole range is 0 to 2.5, the healthy one's is 0.014 wide.
 :::
 
 :::{danger}
-**A gradient sampler's output is not an answer until its diagnostics say so** —
-which is the whole difference from the conjugate route above, where there was
-nothing to diagnose. The failing run's "±1σ" for `log A` is 1.41; the converged
-one's is 0.00031.
+**A gradient sampler's output is not an answer until its diagnostics say so.**
+The conjugate route above had nothing to diagnose. The failing run's "±1σ" for
+`log A` is 1.41; the converged one's is 0.00031.
 
-The fix is the *starting point*, not the model: any prior-aware initialisation
+The fix is the starting point, not the model: any prior-aware initialisation
 converges, and `init_to_declared` is the one that reads the declaration you
 already wrote. [The gradient-posterior tutorial](tutorial-nuts.md) works a
 harder case, where the diagnosis is most of the page.
@@ -992,7 +988,7 @@ posterior by under 0.1σ.
 ## Both at once: one plan, two engines
 
 A real fit has both kinds of parameter. `SamplingPlan` takes the partition and
-**derives** each block's engine from what the latents already declared:
+derives each block's engine from what the latents already declared:
 
 ```python
 # needs-extra: numpyro
@@ -1024,23 +1020,25 @@ SamplingPlan(('t_unc', 't_cos', 't_sin', 't_rx'):conjugate, ('fg_log_amp', 'fg_b
 nullity 2 of 34
 ```
 
-Nobody wrote "conjugate" or "gradient" — `linear=True` already said it.
+Nobody wrote "conjugate" or "gradient"; `linear=True` already said it.
 
 :::{danger}
-**And the plan refuses to run.** Over *this* twin the six latents are exactly
+**The plan refuses to run.** Over this twin the six latents are exactly
 degenerate: per channel the four temperature families map one-to-one onto the
-four switch positions' levels, so between them they can produce **any**
-antenna-position spectrum — which is exactly what the foreground's two
-parameters produce. Singular values 1.6e-16 and 1.0e-16 against 1.82.
+four switch positions' levels, so between them they can produce any
+antenna-position spectrum, and an antenna-position spectrum is what the
+foreground's two parameters produce. Singular values 1.6e-16 and 1.0e-16
+against 1.82.
 
-`plan.estimate` names the directions and stops. The repair is **design, not
-tolerance**: three more calibration loads, seven switch positions, nullity 0.
+`identifiability` names the directions. The repair is design, not
+tolerance: three more calibration loads, seven switch positions, nullity 0.
 The switching cycle is the calibration design, and two more unknowns need more
 of it.
 :::
 
-[`examples/gibbs_plan.py`](https://github.com/RHINO-Experiment/rheplicant/blob/main/examples/gibbs_plan.py) runs the whole thing — the
-refusal, the seven-position repair, and both exits — in about 40 s.
+[`examples/gibbs_plan.py`](https://github.com/RHINO-Experiment/rheplicant/blob/main/examples/gibbs_plan.py) is this section as a script,
+with the seven-position repair and both exits. At 0.9.1 it stops at its
+estimate over the repaired twin; [the examples page](examples.md) says why.
 
 ## Where to go next
 
@@ -1051,8 +1049,8 @@ refusal, the seven-position repair, and both exits — in about 40 s.
 * - You want to…
   - Read
 * - declare something more elaborate than one latent per leaf
-  - [Inferring anything](inference.md) — tied and derived bindings, `fan=`
-* - fit a model that is *not* linear
+  - [Inferring anything](inference.md): tied and derived bindings, `fan=`
+* - fit a model that is not linear
   - [Tutorial: a gradient posterior](tutorial-nuts.md), and how to tell it is wrong
 * - see the exact route worked end to end
   - [Tutorial: an exact posterior for a big linear block](tutorial-gcr.md)
@@ -1061,7 +1059,7 @@ refusal, the seven-position repair, and both exits — in about 40 s.
 * - replace a stage with a neural surrogate
   - `NeuralOperator` at any node, trained through the same seam
 * - keep a campaign after the recordings are gone
-  - `BayesMemory` — accumulate likelihood factors, discard the data
+  - `BayesMemory`: accumulate likelihood factors, discard the data
 :::
 
 ---
@@ -1072,7 +1070,7 @@ refusal, the seven-position repair, and both exits — in about 40 s.
 |---|---|
 | Angles | degrees in public APIs, radians internally |
 | Data grid | radio convention: `data` is `(n_time, n_freq)`; `State` itself takes any pytree |
-| Randomness | `subkey, state = state.next_key()`, return the advanced state — and declare `"key"` in `requires`, which is what makes the stage findable |
-| Errors | every refusal derives from `DirtError` *and* from its closest builtin; all but `MissingKeyError`, a `RuntimeError`, are also `ValueError`s ([contracts](contracts.md#one-base-class-for-every-refusal)) |
+| Randomness | `subkey, state = state.next_key()`, return the advanced state, and declare `"key"` in `requires`, which makes the stage findable |
+| Errors | every refusal derives from `DirtError` and from its closest builtin; all but `MissingKeyError`, a `RuntimeError`, are also `ValueError`s ([contracts](contracts.md#one-base-class-for-every-refusal)) |
 | Protected channels | the operator injecting a calibrator writes the channels it wet to `aux['protected']`; flaggers clear them ([contracts](contracts.md#protected-channels-keeping-a-known-calibrator-out-of-the-flags)) |
 | Layering | `rheplicant.core` never imports `rheplicant.radio` / `rheplicant.inference` (enforced by test) |

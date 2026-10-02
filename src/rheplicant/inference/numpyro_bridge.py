@@ -394,9 +394,9 @@ def init_to_declared(space: ParameterSpace):
 
     **This is not a tuning knob.** On the ring toy of
     ``examples/tutorial_nuts.py`` — 1024 samples constraining three beam
-    parameters — the default initialization gives ``r_hat = 840`` and an
+    parameters — the default initialization gives ``r_hat = 846`` and an
     effective sample size of **2** out of 8000 draws, while the identical model
-    started here gives ``r_hat = 1.002`` and ``n_eff = 1327``. Neither
+    started here gives ``r_hat = 1.003`` and ``n_eff = 1259``. Neither
     tightening the priors nor tripling the warmup moved those numbers at all;
     only the starting point did.
 
@@ -404,7 +404,7 @@ def init_to_declared(space: ParameterSpace):
     than its prior is a needle, ``init_to_uniform`` lands in the haystack, and
     warmup adapts a step size for wherever it landed. The declared ``init`` does
     not have to be good — the one in that tutorial is deliberately mis-set, some
-    11000 nats below the peak — it only has to be somewhere a gradient can be
+    63 000 nats below the peak — it only has to be somewhere a gradient can be
     followed.
 
     Args:
