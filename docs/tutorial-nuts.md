@@ -101,6 +101,12 @@ broken posterior looks like from the outside.
 sampler telling you it failed, and discarding that quietly is how a biased
 posterior comes to look fine.
 
+numpyro's `summary` reports `r_hat` and `n_eff` per element. The latents here
+are scalars, so `float()` on them works. For a non-scalar latent read the
+largest `r_hat` and the smallest `n_eff`; `float()` on the array raises. The
+split `r_hat` needs at least four draws per chain
+(`num_samples // thinning >= 4`), and numpyro asserts it with no message.
+
 ## Step 5 — diagnose it: two hypotheses, both testable
 
 **Hypothesis 1 — multimodal, with chains in different modes.** Scan the
@@ -240,3 +246,8 @@ exact draw costs one linear solve.
 4. Read `r_hat`, `n_eff` and divergences **before** the means.
 5. Cross-check the widths against `fisher_information` where the model is near-linear.
 6. Check the posterior-predictive pull is ~N(0, 1).
+
+The same run can be declared in a document as `kind: nuts`, which starts from
+`init_to_declared` by default and returns `r_hat`, `n_eff` and the divergence
+count on its product. See
+[the two that sample a posterior](config-inference.md#the-two-that-sample-a-posterior).

@@ -20,10 +20,10 @@ messages are the only other place that says so.
 
 ## The document, section by section
 
-Twelve section names are recognised. Four are required, four are accepted and
-optional, and four are refused today — the loader's own refusal tables are what
-`json_schema()` reports as each section's `status`, so this table and the schema
-cannot drift apart.
+Twelve top-level names are recognised. Four sections are required, four names
+are accepted, and four are refused today. The loader's own refusal tables are
+what `rheplicant.config.schema.json_schema()` reports as each section's
+`status`.
 
 | Section | Status |
 |---|---|
@@ -32,15 +32,19 @@ cannot drift apart.
 | `defaults`, `plugins`, `outputs` | refused by the mapping API; the **command line** handles them |
 | `campaign` | reserved, refused — see above |
 
-That third row is the one that surprises people: `load_document` and the CLI are
-not the same surface. The CLI adds presets, plugins and the output tree on top
+`schema_version: 1` is listed as accepted because it is a key and not a
+section, but a document without it is refused: write it in every document.
+
+`load_document` and the CLI are not the same surface, which is what the third
+row says. The CLI adds presets, plugins and the output tree on top
 of the same orchestration.
 
 ## Reading order
 
-Start with the tutorial if you have not written a document before. The four
-reference pages after it are the document's own grammar, in the order they
-build on each other; the last two are the surfaces that consume it.
+Start with the tutorial if you have not written a document before. The five
+reference pages after it are the document's grammar, in the order they build
+on each other. The command line and the workbench, which consume a document,
+are in the next section.
 
 :::{list-table}
 :header-rows: 1

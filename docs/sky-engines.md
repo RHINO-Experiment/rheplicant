@@ -263,18 +263,19 @@ Three opt-ins sharpen it further, all preserving `jit`/`vmap`/`grad`:
 `forward_alms()` / `sky_to_alms()`
 : Analyse a **fixed sky** into harmonic space once, outside the loop, instead
   of on every call. Once the beam rotation is cached this is the whole
-  remaining cost — 91 % of the runtime and 99.5 % of the peak memory — so
-  hoisting it takes one forward from **163 ms / 122 MB to 1.1 ms / 11 MB**
-  (agreeing to 5e-16). `forward()` is now a thin wrapper that calls
+  remaining cost — 91 % of the runtime and 99.5 % of the peak memory. Measured
+  when it was introduced, hoisting it took one forward from
+  **163 ms / 122 MB to 1.1 ms / 11 MB** (agreeing to 5e-16). `forward()` is now a thin wrapper that calls
   `sky_to_alms()` for you; reach past it whenever the sky is not the thing
   you are fitting. `mmodes_alms()` is the same idea for the m-mode path.
 
 `to_reference_frame()`
 : Pays the `O(lmax³)` rotation **once** and returns an equivalent projector
   that skips it forever after. Its margin used to be large; it is now small,
-  because the per-call rotation reuses a Wigner plane built at trace time and
-  costs about 2 ms of the 63 ms an un-cached forward takes at `lmax` 191 —
-  4 %, where it was 81 %. Still free to use, and still the right default
+  because the per-call rotation reuses a Wigner plane built at trace time. At
+  `lmax` 191 the un-cached path runs within 4 % of the cached one (62.6 ms
+  against 60.4 ms), where it used to be 81 % slower. Still free to use, and
+  still the right default
   outside a fit. Gradients through the result are with respect to the
   reference-frame alms, so keep the original when the **beam** is what you
   are fitting; that case is why the rotation was made cheap rather than

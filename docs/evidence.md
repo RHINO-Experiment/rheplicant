@@ -1,6 +1,6 @@
 # Evidence: keeping a campaign after the data is gone
 
-```{include} _migration-to-bayesmith.md
+```{include} _bayesmith-note.md
 ```
 
 A night of recording is large and a likelihood factor is small. If the factor is
@@ -22,7 +22,9 @@ no anchor, no validity region, order-invariant, exact. Per-epoch nuisances are
 integrated out right there, analytically. `BayesMemory` accumulates the factors
 by QR in square-root information form, and applies the prior **exactly once**,
 at the end — which is why a stored term carries no prior at all and a tempered
-one is refused by name.
+one is refused by name. The Schur complement that integrates a nuisance out is
+`bayesmith.marginal.sqrtinfo`'s; the `SqrtInfo` type and the accumulation are
+this package's.
 
 ```python
 from rheplicant.inference import BayesMemory, Factorization, compress_linear
@@ -102,7 +104,8 @@ term = compress(
 memory = memory.remember(term)
 ```
 
-`n_basis` is refused above the whitened bank's **numerical rank** — 6 for the
+`n_basis` is refused above the whitened bank's **numerical rank**, measured by
+`bayesmith.exact.reduced_basis` — 6 for the
 four-latent fixture in `tests/evidence/rhino_bank.py`, and asking for more is an
 exception rather than a weaker answer. Above that cut the retained Gram matrix
 is singular in float64 and `c^T G c` returns a finite, occasionally negative
@@ -185,14 +188,17 @@ pinned at the value the first night happened to see.
 `smooth(memory.stacked, ...)` returns what the drift actually did, per epoch,
 with its width.
 
-The recursion's whole risk is its constants — six of them, and the shape, the
-gradient and the curvature are all correct with any one missing. Measured on the
-six-epoch fixture, dropping one costs +0.9189, +2.8618, +6.2764, +0.9855,
-+45.9502 or −6.8408 nats, and each has its own test carrying its own number. See
-[D32](design.md) for what they are and which two exist nowhere else in the
-package.
+The recursion and the smoother are `bayesmith.marginal.chain`'s
+(`chain_marginal`, `smooth`). The recursion carries six constants, and the
+shape, the gradient and the curvature are all correct with any one missing.
+Measured on the six-epoch fixture, dropping one costs +0.9189, +2.8618,
++6.2764, +0.9855, +45.9502 or −6.8408 nats, and each has its own test in
+`tests/evidence/`. See [D32](design.md) for what they are.
 
 ### What the diagnostics can and cannot see
+
+The shrinkage, held-out and template-mode diagnostics below are computed by
+`bayesmith.marginal.diagnostics`.
 
 `sigma ∝ N^-1/2` is **not** a check. For a Gaussian model `sigma_N` does not read
 the data, so the relation holds by construction: measured, the fitted power is

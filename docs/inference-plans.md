@@ -1,6 +1,6 @@
 # Plans and engines
 
-```{include} _migration-to-bayesmith.md
+```{include} _bayesmith-note.md
 ```
 
 One space can be stepped by several engines at once. A `SamplingPlan` declares
@@ -46,7 +46,10 @@ gain against a `(3, 4)` time × frequency coefficient basis, 54 data points and
 `Latent(..., linear=True)` already says which machinery a latent can take, so
 `Block` does not ask again. A block whose members are all declared linear is
 solved by the [conjugate routines](inference-linear.md#linear-blocks); anything
-else is stepped by gradient.
+else is stepped by gradient. In `estimate` a gradient block takes `steps` Adam
+steps (this package's own descent, with a per-latent step of
+`learning_rate × max|init|`) and then a Newton polish from
+`bayesmith.optimize.certify`. In `sample` it takes `steps` NUTS steps.
 
 There is a third engine, `log_conjugate`, and it is *not* derived — because
 there is no declaration to derive it from. A block is
@@ -101,7 +104,9 @@ report the second's answer as if the first had never run.
 
 Declaring the blocks stays available and stays the honest default for a model
 you know. When you would rather not, `auto_blocks` reads the partition off the
-model, and `SamplingPlan.automatic` is the one-liner over it:
+model, and `SamplingPlan.automatic` is the one-liner over it. The grouping
+loop is `bayesmith.dispatch.factor.first_fit`; this package supplies the
+pairwise probes it reads.
 
 ```python
 plan = SamplingPlan.automatic(space, twin, state, noise=noise)
@@ -197,13 +202,12 @@ Two things this example teaches beyond the partition:
 * **Where this package's plans stop.** A `Latent`'s prior is a fixed
   distribution; a prior *parameterised by another latent* — a field `w1`
   whose statistics a hyperparameter sets — has no spelling in a
-  `ParameterSpace`, and a plan cannot sweep what it cannot declare. That
-  hierarchical variant of this same model is the second worked example in
-  bayesmith's documentation (`docs/factor-partition-examples.md` in that
-  repository), where the graph paradigm carries it natively and the
-  partition rule it showcases — a hyperparameter is ejected from every exact
-  block, because an exact block solving only against data would silently
-  drop the `p(w1 | y)` factor — has no counterpart here to drift from.
+  `ParameterSpace`, and a plan cannot sweep what it cannot declare. Build
+  that model as a bayesmith graph directly. Its documentation works the
+  hierarchical variant of this same model (`docs/factor-partition-examples.md`
+  in that repository): a hyperparameter is ejected from every exact block,
+  because an exact block solving only against data would drop the
+  `p(w1 | y)` factor.
 
 **Pairs settle it.** For latents already known to be affine on their own, every
 diagonal block of the group's Hessian vanishes, so joint affinity is exactly the
@@ -285,8 +289,8 @@ each constant at the *same* value give `1.0` (nothing to mix), and halves each
 constant at *different* values give `inf` (a chain that moved once and stopped).
 
 **A trace too short to halve is refused, not answered**, and that is the part
-worth knowing before you call it. The minimum is `MIN_DRAWS = 4` — two halves of
-two, and it lives in `rheplicant.inference.plan`, not on the package surface.
+worth knowing before you call it. The minimum is `MIN_DRAWS = 4`, two halves of
+two, exported from `rheplicant.inference`.
 Below it the diagnostic is not weak but undefined:
 
 ```text
@@ -306,9 +310,9 @@ reads an undefined diagnostic as whichever answer it happened to test for.
 reaching this by that route is not possible; `split_rhat` enforces it anyway,
 because it is public and does not trust its one in-package caller.
 
-### Convergence is monitored on the joint χ², never a per-block residual
+### Convergence is judged on a joint quantity, never a per-block residual
 
-This is the module's reason for existing. A hand-rolled alternating solve over
+A hand-rolled alternating solve over
 this same bilinear model, with a free antenna temperature per `(time, frequency)`
 cell, lands hundreds to thousands of kelvin from the truth while **every
 per-block guard this package ships reports green**: `check_linearity` passes at
@@ -342,7 +346,9 @@ So the monitored quantity is a **joint** one at the current parameter tuple,
 across sweeps. For `plan.estimate` it is the joint negative log posterior `f`,
 `Conditioning.neg_log_posterior` — the objective every block update descends —
 and what certifies a run is the **Newton decrement** of `f` at the point it
-would return:
+would return. The stop rule is `bayesmith.optimize.certify`'s: the schedule,
+the decrement and the tightening of `solve_tol`. The plan supplies the joint
+objective and the sweep, and the constants named below are re-exports.
 
 * **the certificate**: `λ² = gᵀH⁻¹g` over every latent, for `g` and `H` the
   gradient and Hessian of `f`. Near its minimum `f` is quadratic,
@@ -423,7 +429,7 @@ a single conjugate block with Normal priors (or any partition of a jointly
 affine model), fewer latents than the dense limit, or float64 where the
 precision is what blocks the dense path.
 
-The T-002 third review found both halves of that by construction: a spectrum
+Both halves of that were found by construction: a spectrum
 clustered at 1 with one eigenvalue at 1e-8 and a gradient whose component
 along it sat just under the iteration's residual, where a condition number
 read off the iteration's own Lanczos matrix said 1.2 against a true 1e8 and
@@ -475,7 +481,7 @@ sweep 3 (`EARLIEST_CONVERGED_SWEEP`) whatever `min_sweeps` says below that, and
 for that is refused before it runs, by pre-flight check A25.
 
 The joint χ² is still recorded (`PlanDiagnostics.chi2`) and is no longer the
-test. It was until T-002, as a *decrease*: any sweep that did not lower χ² counted
+test. It was until 0.9.0, as a *decrease*: any sweep that did not lower χ² counted
 as converged. With a prior the MAP is not the χ² minimum, so a sweep moving
 towards the MAP raises χ², and the rule read that rise as convergence — measured
 1 to 15 posterior σ from the exact MAP, including a plan of two conjugate blocks
@@ -484,12 +490,12 @@ arithmetic's noise, so a rise beyond its resolution is never convergence.
 
 **Why a curvature check, and not the changes alone.** A tolerance relative to
 `|f|` certifies a distance of about `sqrt(2 t |f| / (1 − ρ))`, and `|f|` is
-about `N / 2` for `N` data. The first T-002 review measured the change test
+about `N / 2` for `N` data. Measured: the change test
 alone passing two collinear conjugate blocks 0.6 posterior σ from the MAP at
 `N = 1e6` in float64 and 16.5 σ in float32. Extrapolating the decreases at
 their contraction removes the `|f|` but not the second failure: `ρ` read from
 the decreases is the *fastest* mode still moving, so a slow mode hidden under a
-fast one passes. The second review measured that too — two correlated pairs,
+fast one passes. That was measured too — two correlated pairs,
 one started 30 σ off and one 1 σ off, certified 0.5 to 1.0 σ away, and 4618
 random dense precisions giving false certificates up to 1.33 σ. The decrement
 is a distance and has neither failure. Two collinear templates started 20 σ
@@ -522,7 +528,7 @@ for, and the float32 column above is the same grid that used to refuse on it.
 **When the inner solves are the obstacle.** A conjugate block solved to
 `solve_tol` has a fixed point that is not the MAP, and on correlated blocks the
 offset is not small: 0.11 posterior σ at the default `1e-6` on the bilinear
-fixture at noise 0.30 (second review). The decrement sees it as the distance it
+fixture at noise 0.30. The decrement sees it as the distance it
 is and refuses, so when a sweep shows inexactness — the objective rising beyond
 its resolution, or a candidate refused — the closed-form blocks' tolerance is
 divided by 100, down to a floor of `1e-12` in float64 and two machine epsilons
@@ -555,7 +561,7 @@ floor is 1.4e-14 and `tol` governs; the same fixture stops at sweep 133,
 0.003 σ, its conjugate solves tightened to `solve_tol = 1e-8` on the way.
 
 :::{important}
-**The joint χ² catches a slow partition, not a degenerate one.** Running the
+**A joint quantity catches a slow partition, not a degenerate one.** Running the
 free-per-cell parameterization with `check_identifiability=False` and `tol=None`
 for 40 sweeps:
 
@@ -567,9 +573,9 @@ max |gain  - truth|            0.308
 ```
 
 The joint χ² is *also* tiny, because a degenerate model fits the data exactly —
-it just does so at an arbitrary point of the null space. χ² is the right monitor
-for blocks that are identified but correlated; the rank test below is the only
-thing that sees the other failure. They are two guards, not one guard twice.
+it just does so at an arbitrary point of the null space. The joint objective
+and its certificate catch blocks that are identified but correlated; the rank
+test below is the only thing that sees the other failure.
 :::
 
 ### The identifiability check, and its cadence
@@ -788,9 +794,11 @@ is. And the cost is **amortized**: a second observation is a forward pass, not
 another chain.
 
 The density is a conditional Gaussian mixture (an MLP → weights, means,
-scales). A normalizing flow is more expressive; a mixture is a few dozen lines,
-is exact for a Gaussian posterior at one component, and keeps the failure modes
-legible.
+scales). A normalizing flow is more expressive; a mixture is exact for a
+Gaussian posterior at one component and keeps the failure modes legible. The
+density and its training are `bayesmith.amortize`, and `history` is its
+`TrainingHistory`. `simulate_pairs` is this package's, because the simulator
+is the twin.
 
 :::{danger}
 **An approximate posterior has no internal notion of being wrong.** A
@@ -850,16 +858,15 @@ to end, in the order you would actually do it, with the scripts' real output:
 
 ## Run it
 
+[`examples/gibbs_plan.py`](https://github.com/RHINO-Experiment/rheplicant/blob/main/examples/gibbs_plan.py)
+runs one `SamplingPlan` over six latents, with conjugate blocks and a gradient
+block. It needs `rhino-cal-jax` and numpyro.
+[`examples/three_ways_to_a_posterior.py`](https://github.com/RHINO-Experiment/rheplicant/blob/main/examples/three_ways_to_a_posterior.py)
+compares the routes on one model, and
 [`examples/inferring_anything.py`](https://github.com/RHINO-Experiment/rheplicant/blob/main/examples/inferring_anything.py)
-does all three on one twin, from truth to recovery: a beam derived from two
-scalars, a gain tied across two stages in log space, and a sky map declared
-linear and solved by CG. The instrument description is written once at the top
-and never edited.
+exercises the three binding shapes of [parameter spaces](inference-spaces.md)
+on one twin, from truth to recovery.
 
 ```bash
-.venv/bin/python examples/inferring_anything.py
+.venv/bin/python examples/gibbs_plan.py
 ```
-
-The figures on this page come from
-[`docs/_generate_inference_figures.py`](https://github.com/RHINO-Experiment/rheplicant/blob/main/docs/_generate_inference_figures.py),
-which runs the same code rather than illustrating it.

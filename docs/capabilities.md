@@ -1,6 +1,6 @@
 # Capabilities: what is real, what is a stand-in
 
-[Stability and the public surface](stability.md) says what this package
+[Stability and capabilities](stability.md) says what this package
 promises and for how long. This page says which parts of it are finished.
 
 The distinction matters more here than in most packages, because a placeholder

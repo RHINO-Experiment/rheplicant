@@ -91,6 +91,12 @@ CG reports a **residual**; what you need bounded is the **error**. They differ b
 κ. Choosing `tol` without knowing κ is choosing an accuracy you have not
 computed — see [Conditioning](inference-linear.md#conditioning-why-a-residual-is-not-an-accuracy).
 
+`condition_estimate` measures κ and is biased low, so a tolerance divided by
+it is too loose by that bias. On this well-conditioned block the difference
+does not matter. On a block the data does not identify, divide by
+`condition_bound` instead, which is an upper bound and the number the
+`require_convergence=` guard reads.
+
 ## Step 4 — the covariance is not given
 
 σ tracks the prediction, so the weights depend on the solution and the solution
@@ -179,7 +185,7 @@ same and told you none of this.
 | 3 | `tol` is a residual; κ·`tol` is the error | [Conditioning](inference-linear.md#conditioning-why-a-residual-is-not-an-accuracy) |
 | 4 | radiometer noise ⇒ the covariance must be found | [When the covariance is not given](inference-linear.md#when-the-covariance-is-not-given) |
 | 5 | one CG solve per independent draw | [Sampling it, exactly](inference-linear.md#sampling-it-exactly) |
-| 7 | the prior holds up what the data cannot see | [The noise model](inference-linear.md#the-noise-model) |
+| 7 | the prior holds up what the data cannot see | [Conditioning](inference-linear.md#conditioning-why-a-residual-is-not-an-accuracy) |
 
 ## Next
 

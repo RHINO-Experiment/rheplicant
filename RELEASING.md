@@ -31,16 +31,32 @@ protection rules under **Settings → Environments** for a manual approval gate.
 
 ## Cutting a release
 
-1. Bump `version` in `pyproject.toml` — the **single source of truth**. The
+1. Bump `version` in `pyproject.toml`, the single source of truth. The
    package's `__version__` is read back from the installed distribution
    metadata (`importlib.metadata.version`), so never hardcode a version string
-   anywhere else in the source. Update `CHANGELOG.md`, then commit.
-2. Tag it: `git tag -a vX.Y.Z -m "rheplicant X.Y.Z" && git push origin vX.Y.Z`.
-3. Publish a **GitHub Release** for that tag (Releases → Draft a new release →
+   anywhere else in the source. Update `CHANGELOG.md` and the README test
+   count, then commit.
+2. Read `README.md` as the page PyPI will show for this version: it is the
+   long description (`readme = "README.md"`), and it cannot be edited after
+   the upload. The install section says which version PyPI serves; update
+   that sentence in the commit that is tagged.
+3. Tag the last commit, after every documentation change:
+   `git tag -a vX.Y.Z -m "rheplicant X.Y.Z"`.
+4. Push the branch, then the tag: `git push origin main`, then
+   `git push origin vX.Y.Z`. Read the Docs builds `latest` from main.
+5. Publish a **GitHub Release** for that tag (Releases → Draft a new release →
    choose the tag → Publish). This triggers `publish.yml`, which builds the
-   sdist + wheel, runs `twine check`, and uploads to PyPI over OIDC.
+   sdist and wheel, installs the wheel into a fresh environment, checks that
+   the bootstrap imports without JAX and that `rheplicant validate` accepts a
+   document, runs `twine check`, and uploads to PyPI over OIDC.
+6. Confirm `pip install rheplicant==X.Y.Z` in a fresh environment.
 
 You can also run the workflow manually from **Actions → Publish to PyPI → Run
 workflow** (it builds and publishes whatever is on the default branch).
 
-Each PyPI version is immutable — a version number can be uploaded only once.
+A PyPI version number can be uploaded only once. A tag pushed without a
+Release uploads nothing.
+
+**Do not publish a Release for `v0.9.0`.** That tag fails on a vector latent
+under `kind: nuts` (see the 0.9.1 changelog entry). It is pushed so that the
+history is complete; 0.9.1 is the first 0.9 version to upload.

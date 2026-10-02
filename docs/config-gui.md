@@ -127,7 +127,7 @@ running, current, stale, refused or error. Findings can take you to the owning
 Config section or open YAML at the exact path.
 
 Execute keeps the workflow progressive: choose a target, resolve its safety
-state, enable only the products needed, and expand their controls. All 22
+state, enable only the products needed, and expand their controls. All 23
 product selectors remain searchable; report design appears only after
 **Write report** is enabled. Existing-owned, foreign, ambiguous-recovery,
 unsafe and unavailable targets keep the server's exact explanation. Run is
@@ -183,7 +183,7 @@ overflow, accessibility, console and network checks around them.
   forward-preview jobs;
 - explicit Run, Compare and Benchmark jobs through the same command and
   orchestration surface as the CLI;
-- exact requested and labelled preset-merged output views, all 22 product
+- exact requested and labelled preset-merged output views, all 23 product
   selectors, report design, predicted paths, clobber/recovery state and
   identity-checked terminal audit links.
 

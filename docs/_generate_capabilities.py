@@ -23,23 +23,19 @@ OUTPUT = ROOT / "docs" / "_generated" / "capabilities.md"
 #: The words are `_rheplicant_bootstrap.capability`'s own; only the audience
 #: is different, so they are quoted rather than paraphrased.
 MEANING = {
-    "maintained": (
-        "The implementation is the real physics or the real arithmetic, it is "
-        "tested against something independent, and a result through it is a "
-        "result."
-    ),
+    "maintained": "Documented contract, regression-tested within its declared domain.",
     "experimental": (
-        "Usable with stated limits and no general validity guarantee. Read the "
+        "Usable, with stated limits and no general validity guarantee. Read the "
         "limits before reading the number."
     ),
     "placeholder": (
-        "The CONTRACT is real and tested -- shapes, ordering, purity, PRNG "
-        "consumption -- and the NUMBERS are a stand-in. A run through one of "
-        "these is not a prediction."
+        "Correct plumbing and shapes, stand-in physics. The contract -- shapes, "
+        "ordering, purity, PRNG consumption -- is real and tested, and the "
+        "numbers are a stand-in. A run through one of these is not a prediction."
     ),
     "unavailable": (
-        "Not implemented on this surface. A document naming it is refused, "
-        "with the capability it belongs to."
+        "Named by the schema or API and refused with a typed error, which names "
+        "the capability it belongs to."
     ),
 }
 

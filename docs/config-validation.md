@@ -30,12 +30,10 @@ model forward. That is not a policy — it is what makes the pass free.
 document and once more per declared **variant**, because a variant *is* a
 different document and is checked as one. Cold — one call in a fresh process —
 the worked document below is **3.5 ms**, and a document with forty
-`plan.sample` runs and twenty variants is **58 ms**, against a budget of
-0.15 s. It is linear in the number of variants from there, so a document with
-several dozen of them costs several dozen passes; if you write one, time it.
-(These numbers moved at 2026-08-19, when the audit-evidence pipeline gained
-its hardened enumeration: the budget was re-measured against that contract,
-not the contract weakened to fit the old one.)
+`plan.sample` runs and twenty variants is **58 ms**; the suite asserts that
+case stays under 0.40 s. It is linear in the number of variants from there, so
+a document with several dozen of them costs several dozen passes; if you write
+one, time it.
 Nothing in the pass grows with the size of a *beam*, which is the comparison
 that matters: `build_resources` is 1.397 s of `load_document`'s 1.536 s on a
 toy nside-16 beam, and worse on a real CST directory.
@@ -45,8 +43,8 @@ problem, which makes a user with four errors pay four round trips; `preflight`
 runs every registered check and hands back all of them. The exception is
 structural: unknown section names, `schema_version`, the required sections and
 four whole sections this layer does not read — `outputs:`, `defaults:` and
-`plugins:`, which arrive with Plan 4, and `campaign:`, which is reserved with
-capability 4 — are refused immediately, because every other check assumes the
+`plugins:`, which the command line handles, and `campaign:`, which is reserved
+with capability 4 — are refused immediately, because every other check assumes the
 document's top level is well formed.
 
 ## What a Report carries
@@ -73,7 +71,7 @@ could not be evaluated at that probe.
 | `report.checks()` | the set of ids that fired |
 | `report.verdicts()` | the findings that say something is WRONG — refusals and warnings, with the informational ones left out |
 | `report.verdict_checks()` | the ids of those — what an "and nothing else" assertion reads |
-| `report.raise_if_refused()` | `ConfigError` with the first refusal verbatim, and a tail naming how many others there are |
+| `report.raise_if_refused()` | `ConfigError` with the first refusal verbatim, and a tail naming how many others there are; the whole `Report` is on the exception as `.report` |
 | `report.emit_warnings()` | each warning through `warnings.warn(..., ConfigWarning)` |
 
 `ConfigWarning` is a `UserWarning`, so `warnings.filterwarnings("error",
@@ -338,20 +336,23 @@ had to write `gates.get("linearity")` would write `.get("linearity", <its own
 default>)` instead, and then there would be two default tables and one of them
 would be wrong.
 
-### A refused document produces no record at all
+### Where a refused document's findings go
 
-This is a real limitation and not an oversight. `raise_if_refused` raises, so
-**no `ConfiguredRun` is returned and there is nowhere to hang the findings**.
-A user who wrote `{mode: refuse, report: true}` and was refused gets the
-refusal's own sentence — which carries the numbers — and nothing structured.
-A document that *loads* carries the whole thing: `run.report` holds every
-finding from all four passes, in pass order.
+A document that loads carries every finding from all four passes, in pass
+order, on `run.report`. A refused one returns no `ConfiguredRun`, and its
+findings are on the exception instead: `load_document` raises a `ConfigError`
+whose `.report` is the cumulative `Report`.
 
-Closing the gap needs either a `ConfigError` that carries the `Report` or a
-`load_document` that returns before raising. Both are API changes and both
-belong to the work that writes `diagnostics.json`, which **still does not
-exist** at this layer: `outputs:` is refused wholesale by the mapping API and
-handled by the [command line](config-cli.md) instead.
+```python
+try:
+    run = load_document(document)
+except ConfigError as refused:
+    refused.report.findings      # every finding up to the refusal
+```
+
+On the [command line](config-cli.md) the same findings are printed, and a
+refused `run` records them under `findings` in the refused tree's
+`diagnostics.json`.
 
 **Four unrelated things in this layer are spelled "report", and conflating
 any two of them is the likeliest way to ship something that reads right:**
@@ -491,6 +492,7 @@ report.raise_if_refused()
 ```
 
 `load_document` and `run_document` call the pass for you, so a document that
-reaches either has already been through it — the explicit call is for a
-front-end that wants the whole list rather than the first refusal — which is
-exactly what the [workbench](config-gui.md)'s Validate button asks for.
+reaches either has already been through it. The explicit call is for a
+front-end that wants the whole list rather than the first refusal: it is what
+the [workbench](config-gui.md)'s Quick checks call. The workbench's Validate
+button runs the full `validate` job.

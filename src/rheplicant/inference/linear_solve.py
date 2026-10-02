@@ -320,20 +320,21 @@ def wiener_solve(
             same as accuracy. See the note on conditioning below.
         maxiter: CG iteration cap. ``None`` lets JAX choose.
         require_convergence: raise unless the relative ERROR can be bounded by
-            this. Defaults to ``1e-3``; ``None`` disables the guard and returns
-            whatever CG produced. On by default because jax's ``cg`` reports no
-            convergence status, so an unconverged solve otherwise comes back
-            looking exactly like a converged one.
+            this. Off by default (``None``), which returns whatever CG
+            produced; pass a target such as ``1e-3`` to turn the guard on.
+            jax's ``cg`` reports no convergence status, so without the guard
+            an unconverged solve comes back looking like a converged one. The
+            Note below says why it is off by default.
 
             The bound is ``κ · relative_residual``, with ``κ`` bounded by
-            :func:`condition_estimate`. Guarding on the residual alone would
+            :func:`condition_bound`. Guarding on the residual alone would
             certify nothing in the regime that matters — see below — so this
             costs ``POWER_ITERATIONS`` extra operator applications. That is not
             free: on a well-conditioned block, where CG itself converges in a
             few iterations, it is a real fraction of the solve. In a Gibbs sweep,
             where the conditioning barely moves from sweep to sweep, call
-            :func:`condition_estimate` once outside the loop, choose ``tol``
-            from it, and pass ``require_convergence=None`` inside — the same
+            :func:`condition_bound` once outside the loop, choose ``tol``
+            from it, and leave the guard off inside — the same
             bargain :func:`~rheplicant.inference.linear.linear_operator`'s ``check`` offers.
 
     Returns:

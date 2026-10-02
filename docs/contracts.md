@@ -100,8 +100,11 @@ that one — into a traceback from wherever the state came from, which is not
 where the fix is. `except DirtError` catches all of them.
 
 **Where the names live.** All of them are defined in `rheplicant.core.errors`.
-Every one except `ParameterSpaceError` is re-exported from `rheplicant` and
-`rheplicant.core`; `AssemblyError` and `AmbiguousNodeError` are *additionally*
+Every one except `ParameterSpaceError` and its subclasses `LinearityRefused`
+and `LogSpaceUnavailable` is re-exported from `rheplicant` and
+`rheplicant.core`; those three are exported from `rheplicant.inference`.
+`ConfigError`, the configuration layer's refusal, is a `DirtError` and a
+`ValueError` defined in `rheplicant.config.errors`; `AssemblyError` and `AmbiguousNodeError` are *additionally*
 re-exported from `rheplicant.core.graph`, which is where they used to be
 defined, so `from rheplicant.core.graph import AssemblyError` still resolves.
 `ParameterSpaceError` is deliberately absent from `core`'s surface — a

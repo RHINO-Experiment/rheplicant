@@ -3,10 +3,9 @@
 What this package promises, what it does not, and how you can tell which is
 which without reading the source.
 
-Every number on this page is checked against the code by
-`tests/test_stability_page.py`. If one of them is wrong, that test is red —
-the page cannot drift quietly, which is the only reason it is worth writing
-numbers down at all.
+This page describes 0.9.1. `tests/test_stability_page.py` checks the counts of
+public names, capabilities and bootstrap modules, the contract versions, the
+bayesmith range and the classifier against the code.
 
 ## The layers, and which may depend on which
 
@@ -18,6 +17,10 @@ rheplicant.inference       -> core
 rheplicant.config          -> bootstrap, core, radio, inference
 rheplicant.gui             -> bootstrap, core, config, radio
 ```
+
+The table covers this project's packages. `rheplicant.inference` also imports
+[bayesmith](bayesmith.md), a required dependency, and is the only layer that
+does.
 
 Two properties matter more than the rest:
 
@@ -119,20 +122,20 @@ thing to do — the contract, the ordering and the differentiability are real,
 which is what makes the pipeline worth assembling before the physics arrives.
 What you must not do is read its numbers as a prediction.
 
-## The plugin registration protocol is not public yet
+## Registration hooks
 
-`config/` has five registration hooks — `register_kind`, `register_reader`,
-`register_form`, `register_derivation` and `register_formula_checked`. **None
-of them is on any `__all__`.**
+Three registration functions are public: `register_dimension` and
+`register_dimension_formula` in `rheplicant.config`, and `register_graph` in
+`rheplicant.core`.
 
-That is the honest status rather than an oversight being papered over. A
-protocol with no public surface has nothing to version, so there is no
-`PLUGIN_API_VERSION`: publishing one would declare a contract that no
-supported import reaches. Which registries should become public is an open
-question for after this baseline.
+`config/` has five more — `register_kind`, `register_reader`,
+`register_form`, `register_derivation` and `register_formula_checked` — and
+none of them is on any `__all__`. There is no `PLUGIN_API_VERSION`, because
+those five have no public surface to version. Which of them should become
+public is an open question for after this baseline.
 
-If you are writing something that calls one of these, you are reaching into
-internals, and they may move in a minor release. `docs/config-resources.md`
+If you are writing something that calls one of those five, you are reaching
+into internals, and they may move in a minor release. `docs/config-resources.md`
 mentions `register_reader(..., array=False)` while describing how the shipped
 readers are built; that is a description of internals, not an invitation.
 
@@ -271,7 +274,9 @@ the moment to reopen the question.
 
 This package is pre-1.0 and says so: `Development Status :: 3 - Alpha`.
 
-- A **patch** release changes no public name and no contract version.
+- A **patch** release changes no public name and no contract version. It may
+  add a refusal for input that already failed later in the run, and it may
+  change a value where the previous one raised.
 - A **minor** release may add public names and may raise a contract version.
   It may remove a name only where the removal is stated in the changelog.
 - Placeholder physics may be replaced in any release. Its *contract* —
@@ -284,9 +289,10 @@ This package is pre-1.0 and says so: `Development Status :: 3 - Alpha`.
 `bayesmith>=0.10,<0.11`.
 
 The floor and the ceiling are both load-bearing, and for different reasons.
-The floor is a capability floor: `rheplicant.inference.plan` imports
-`bayesmith.optimize.certify`, which 0.10 added, so an earlier bayesmith fails
-at import rather than at a call site. The ceiling is closed at the next minor
+The floor is a capability floor: `rheplicant.inference.engines` and
+`rheplicant.inference.plan_estimate` import `bayesmith.optimize.certify`,
+which 0.10 added, so an earlier bayesmith fails at import rather than at a
+call site. The ceiling is closed at the next minor
 because a pre-1.0 bayesmith minor may move the deep module paths this package
 imports — 0.10 did exactly that, turning `bayesmith.optimize` from a module
 into a package.

@@ -1,6 +1,6 @@
 # Noise, linear blocks, and conditioning
 
-```{include} _migration-to-bayesmith.md
+```{include} _bayesmith-note.md
 ```
 
 Giving the noise is giving the likelihood, and a block that is genuinely linear
@@ -69,8 +69,9 @@ rather than freezing it at an arbitrary point. That is the whole of the
 [`noise=` / `noise_std=` split](#noise-or-noise_std-the-keyword-is-the-type),
 below.
 
-`FlaggedNoise` is how RFI flags reach the covariance: by **wrapping a noise
-model**, not by threading a `flags=` keyword through five separate functions. An
+`FlaggedNoise` is how RFI flags reach the covariance in the solvers: by
+**wrapping a noise model**. (`fisher_information` and `to_numpyro_model` also
+take a `flags=` keyword.) An
 infinite σ is a self-describing encoding of "this sample was not observed", and
 every consumer turns it into a clean zero rather than a NaN.
 
@@ -189,16 +190,21 @@ calls take sky alms, where a gradient sampler is not an option.
 :::{admonition} Probe at extreme scales, not reasonable ones
 :class: important
 
-`check_linearity` probes at 10⁻³, 1 and 10³ times the latent's own magnitude,
-taken from `max|init|`. The span is the point: a knee, a saturation, or a small
+`check_linearity` probes at 10⁻³, 1 and 10³ times the latent's prior width,
+because the prior is where a sampler will go. A knee, a saturation or a small
 quadratic is indistinguishable from linear below some scale and grossly
-nonlinear above it, so a suite of "reasonable" probes signs off on exactly the
-blocks that fail in a sampler's tails.
+nonlinear above it, so probes at one moderate scale pass the blocks that fail
+in a sampler's tails.
 
-One sharp edge, since the examples above walk straight into it: an **all-zero
-`init` has no scale to take**, so the probes fall back to absolute. If the
-latent lives at 10⁶ — sky alms in kelvin — give a representative `init` or pass
-`scales=` explicitly, or the sweep never reaches the regime a sampler will.
+A latent with no Gaussian prior falls back to `max|init|`, and to 1.0 if that
+is zero, which makes the probes absolute. If such a latent lives at 10⁶ — sky
+alms in kelvin — give it a representative `init` or pass `scales=`, or the
+sweep never reaches the regime a sampler will.
+
+The check runs at the declared outside values and, by default, at two more
+points drawn from the outside latents' priors (`at_points=`). `noise=` adds a
+second criterion in units of sigma. The tolerances and the number of points
+are bayesmith's (`bayesmith.exact.linearity`).
 
 A block fails only if it exceeds both a relative tolerance *and* an absolute
 floor set by the arithmetic's own roundoff. Without that floor the relative
@@ -238,6 +244,12 @@ down at a probe, that probe is counted as a failure — `nan > rtol` is `False`,
 so treating it as a pass would be exactly backwards — and `nan` is what the
 table holds for it. It means "the linearization could not be evaluated here",
 which is not zero.
+
+An entry may also print as `unresolved:…`. That is
+`bayesmith.exact.linearity.Unresolved`, a float: a departure that sits below
+the arithmetic's roundoff floor and would otherwise have exceeded `rtol`.
+Re-run in float64 to resolve it, and do not format the table with `.1e`
+without checking for it.
 :::
 
 `linear_operator` never forms a matrix: `A` comes from `jax.linearize` and `Aᵀ`
@@ -442,7 +454,7 @@ which are the ones that go wrong.
 
 Both solvers above take `noise_std` and neither cares where it came from. Under
 `HomoscedasticNoise` it comes from you and there is nothing more to say. Under
-the default `RadiometerNoise` there is: σ tracks the prediction, so the weights
+`RadiometerNoise` there is: σ tracks the prediction, so the weights
 depend on the solution and the solution depends on the weights. Neither is
 available first.
 
@@ -458,11 +470,13 @@ draw, _ = gcr_sample(block, observed, noise_std=found.noise_std,
                      prior_std=PRIOR, key=key)
 ```
 
-It is the same iteratively-reweighted GLS as hydra-tod's
-`hydra_tod.linear_sampler.iterative_gls` — a test checks the two agree — but
-**matrix-free**: hydra-tod forms a dense `U` and `N_inv`, while here the
-algorithm runs on the block's JVP and VJP, which is what makes 10⁶ degrees of
-freedom possible at all.
+The reweighting loop is `bayesmith.exact.gls.iterative_gls`. It is the same
+iteratively-reweighted GLS as hydra-tod's
+`hydra_tod.linear_sampler.iterative_gls`, and `tests/inference/test_gls.py`
+checks it against a transcription of that function. hydra-tod forms a dense `U` and `N_inv`; this one is
+matrix-free on the block's JVP and VJP, which is what makes 10⁶ degrees of
+freedom possible. This package converts the block and supplies σ at each
+prediction.
 
 What comes back is a `GLSResult`, and it carries the fixed point's whole
 provenance rather than just the answer — on a 64×4 design at
@@ -740,56 +754,63 @@ the only thing holding that direction down, so `λ_min(M)` is exactly
 the well-constrained directions, which dominate the aggregate norm, while the
 prior-dominated directions sit at their starting value: a residual that
 *looks* converged is not, and a draw built from it comes back with far too
-little scatter. That is exactly what used to happen before this fix:
-`gcr_sample` on a badly-conditioned block reported a posterior σ three
-orders of magnitude too narrow, while its residual sat comfortably under the
-old, residual-only guard.
+little scatter. Measured: `gcr_sample` on a badly-conditioned block reported a
+posterior σ three orders of magnitude too narrow while its residual sat under
+a residual-only tolerance.
 
-`condition_estimate(block, noise_std=..., prior_std=...)` reports κ,
-matrix-free — the same two power iterations `wiener_solve`/`gcr_sample`
-already run internally to guard themselves, exposed so a caller can choose
-`tol` instead of guessing it:
+Two functions report κ, matrix-free, and they are for different jobs:
+
+- `condition_bound(block, noise_std=..., prior_std=...)` is an upper bound on
+  κ. It is the number to divide an accuracy target by, and the number the
+  guard below reads. It is conservative: on a block the data identifies in
+  every direction it can read orders of magnitude above the true κ.
+- `condition_estimate(...)` measures κ with a second power iteration and is
+  biased low. It is a diagnostic for seeing that a degeneracy is there. A
+  tolerance chosen from it is too loose by that bias.
 
 ```python
-kappa = condition_estimate(block, noise_std=0.5, prior_std=100.0)
+kappa = condition_bound(block, noise_std=0.5, prior_std=100.0)
 target_error = 1e-3
 solved, residual = wiener_solve(block, observed, noise_std=0.5, prior_std=100.0,
                                 tol=target_error / kappa, maxiter=4000)
 ```
 
-`require_convergence` (default `1e-3`) already bounds `κ · relative_residual`
-rather than the residual alone, so a block the data does not identify raises
-instead of returning a silently wrong answer, and names the remedy in the
-error. [`examples/noise_wave_gcr.py`](https://github.com/RHINO-Experiment/rheplicant/blob/main/examples/noise_wave_gcr.py)
-shows both ends: its three-load block (κ ≈ 2.69e1) passes at the library's
-default `tol=1e-6`; its `--one-source` variant (κ ≈ 4.35e6 — one load
-against three per-channel unknowns, so two of every three directions are
-prior-dominated) raises at that same default, and needs `tol=1e-10,
-maxiter=4000` to converge — which then reports per-channel σ ≈ 71–106 K
-against the 100 K prior, i.e. the prior width recovered *honestly* where the
-data says nothing, rather than the ≈0.03 K a residual-only guard used to let
-through.
+`require_convergence=` is the guard, and it is off by default. Pass a target
+(`require_convergence=1e-3`) and the solve raises unless
+`condition_bound × relative residual` is below it. Without it, a block the
+data does not identify returns whatever CG produced. The solve and the guard
+are `bayesmith.exact.solve`; the guard's error is raised inside bayesmith and
+is not one of this package's error classes.
+
+[`examples/noise_wave_gcr.py`](https://github.com/RHINO-Experiment/rheplicant/blob/main/examples/noise_wave_gcr.py)
+shows both ends. Its three-load block has κ ≈ 2.69e1. Its `--one-source`
+variant has κ ≈ 4.35e6: one load against three per-channel unknowns, so two
+of every three directions are prior-dominated. The script passes
+`tol=1e-10, maxiter=4000` for that case and reports per-channel σ ≈ 71–106 K
+against the 100 K prior, the prior width where the data says nothing. The
+script records what `tol=1e-6` gave on the same block: σ ≈ 0.03 K with a
+residual that looked converged. With `require_convergence=1e-3` passed, that
+solve raises instead.
 
 :::{admonition} The guard is not free
 :class: note
 
-Estimating κ costs `2 · POWER_ITERATIONS` operator applications — two power
-iterations per end of the spectrum — on top of the CG solve itself, which
-roughly **doubles** a well-conditioned solve where CG converges in a handful
-of iterations. In a Gibbs loop, where the conditioning barely moves sweep to
-sweep, estimate κ once outside the loop and pass `require_convergence=None`
-inside, the same bargain `linear_operator`'s `check` argument offers for
-`check_linearity`:
+The bound costs `POWER_ITERATIONS` (12) operator applications on top of the CG
+solve, which is a large fraction of a well-conditioned solve where CG
+converges in a handful of iterations. In a Gibbs loop, where the conditioning
+barely moves sweep to sweep, compute the bound once outside the loop and
+leave the guard off inside. `linear_operator`'s `check` argument offers the
+same trade for `check_linearity`:
 
 ```python
-kappa = condition_estimate(block, noise_std=sigma, prior_std=s)  # once
+kappa = condition_bound(block, noise_std=sigma, prior_std=s)  # once
 tol = target_error / kappa
 for _ in range(n_sweeps):
     block = linear_operator(space, twin, state, names=("sky_alms",),
                             at=values, check=False)
     drawn, _ = gcr_sample(block, observed, noise_std=sigma,
                           prior_std={"sky_alms": s}, tol=tol, maxiter=4000,
-                          require_convergence=None, key=next(keys))
+                          key=next(keys))
     values = {**values, **drawn}
 ```
 :::

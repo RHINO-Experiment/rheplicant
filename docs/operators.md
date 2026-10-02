@@ -44,6 +44,7 @@ that will replace the body. Graph topology and assembly rules: see
 | `AtmosphericEmissionOperator` *(P)* | `atmosphere` | beam-averaged atmospheric emission (`t_ant_sum` branch) | `t_atm` |
 | — | `ground_field` | *reserved leaf*: ground as a pre-beam field to convolve | — |
 | — | `atmosphere_field` | *reserved transform*: radiative transfer on the astro sky, pre-beam | — |
+| — | `beam` | *reserved transform*: the shared chromatic beam; no shipped operator declares it | — |
 | `BasisTemperatureOperator` | `t_sys_extra` (multi-instance) | effective T_sys smooth in (time, frequency) by construction: `time_basis @ coeff @ freq_basis.T`. Parameterized by COEFFICIENTS, not cells — which is what makes the CW tone worth anything at all (see `rheplicant.core.basis`) | `coeff` |
 
 ## Instrument (trunk order = graph order)
@@ -58,6 +59,7 @@ that will replace the body. Graph topology and assembly rules: see
 | `ReceiverOperator` *(P)* | `bandpass` | frequency-dependent bandpass — declare it with `unit_mean_bandpass` when the gain is free too | `bandpass` |
 | `GainOperator` *(P)* | `gain` | multiplicative gain, scalar or per-time; carries the absolute level by convention | `gain` |
 | `NoiseOperator` *(P)* | `noise` | post-gain thermal noise (PRNG protocol) | `sigma` |
+| `RadiometerNoiseOperator` | `noise` | radiometer noise drawn on the signal path, `d → d (1 + f w)`, from the channel width and the integration time (PRNG protocol) | — (`channel_width` and `integration_time` are static) |
 | `EMIOperator` *(P)* | `emi` | self-generated EMI frequency comb | `amplitude` |
 | `ADCOperator` *(P)* | `adc` | scale + clip digitisation | `scale` |
 | `NeuralOperator` | *(explicit `At(...)`)* | learned positive spectral response `exp(MLP(freq))` — hybrid physics+ML | MLP weights |
@@ -304,10 +306,10 @@ pip install "MomentEmu @ git+https://github.com/zzhang0123/MomentEmu" "MomentRFI
 
 ## Core combinators & utilities
 
-The first three are the only ways to compose, and none of them is an operator —
-they act *on* operators, which is why every rendering draws a cascade as an
-**arrow**, a sum as an **⊕** on the wire and a switch as a **◇**, never as
-another box. See [the canonical signal path](signal-path.md).
+The first three are the only ways to compose. Each is itself an operator that
+holds other operators, and no rendering gives one a box: a cascade is drawn as
+an **arrow**, a sum as an **⊕** on the wire and a switch as a **◇**. See
+[the canonical signal path](signal-path.md).
 
 | Component | Role |
 |---|---|
@@ -320,12 +322,16 @@ another box. See [the canonical signal path](signal-path.md).
 
 ## Inference layer
 
+A selection. The full surface is in [the API reference](api.md), the
+narrative in [the inference pages](inference.md), and what each of these
+delegates to bayesmith in [the bayesmith page](bayesmith.md).
+
 | Component | Role |
 |---|---|
 | `Latent`, `Bind`, `ParameterSpace` | what is inferred, and how it reaches the model — named, validated, re-parameterizable |
 | `ParameterSpace.forward_fn` | the seam over NAMED parameters: `f(dict) -> prediction` |
 | `build_forward_fn` | the seam over a whole subtree: `f(params) -> prediction` (filter_spec selects trainables) |
-| `GradientCalibrator` / `AdamCalibrator` | fixed-step GD / Adam (pure JAX), `lax.scan`-driven |
+| `GradientCalibrator` / `AdamCalibrator` | fixed-step gradient descent and Adam, as front ends over `bayesmith.optimize.minimize` |
 | `GaussianLikelihood` / `MaskedGaussianLikelihood` | (masked) independent Gaussian log-density |
 | `to_numpyro_model` | Bayesian bridge; sample sites named by their latents |
 | `predict_from_samples` | posterior predictive over MCMC samples |

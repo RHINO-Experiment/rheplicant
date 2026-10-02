@@ -1,13 +1,14 @@
 # Inference
 
-```{include} _migration-to-bayesmith.md
+```{include} _bayesmith-note.md
 ```
 
 A digital twin is only half a research tool. The other half is running it
 backwards: given data, what were the sky, the beam, the gain? RHEPLICANT does
-that through one object — a **parameter space** — that every inference engine
-reads: the two calibrators, the NumPyro bridge, Fisher forecasting, and the
-conjugate-Gaussian solver.
+that through one object, a **parameter space**, which every route reads: the
+calibrators, the NumPyro bridge, the Fisher forecast, the conjugate solves, a
+sampling plan and the amortized posterior. The arithmetic behind most of them
+is bayesmith's; this layer says what is free and how it enters the twin.
 
 The design question it answers is not "how do I fit a parameter", which JAX
 already answers. It is: **what if the thing you want to infer is not a number
@@ -42,6 +43,9 @@ belongs in the inference layer, not in the instrument description.
 Two tutorials work one problem each end to end, and are the fastest way in:
 [an exact posterior for a big linear block](tutorial-gcr.md) and
 [a gradient posterior, and how to tell it is wrong](tutorial-nuts.md).
+
+The same routes can be declared in a YAML document instead of written in
+Python: see [inference in a configuration document](config-inference.md).
 
 ```{toctree}
 :maxdepth: 2

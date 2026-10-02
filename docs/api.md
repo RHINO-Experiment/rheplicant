@@ -1,9 +1,10 @@
 # API reference
 
 Generated from the source docstrings. Layering rule: `rheplicant.core` is
-domain-agnostic; `rheplicant.radio` and `rheplicant.inference` build on it; and
-`rheplicant.config` sits above all three, importing them and imported by none of
-them.
+domain-agnostic; `rheplicant.radio` and `rheplicant.inference` build on it;
+`rheplicant.config` sits above all three, importing them and imported by none
+of them; and `rheplicant.gui` sits above `config`. The full table, including
+the bootstrap, is in [Stability](stability.md).
 
 For the prose behind these signatures: [the guided tour](tour.md) for the shape
 of a twin, [the operator catalog](operators.md) for what lives at each graph
@@ -235,6 +236,9 @@ coefficients the noise-wave model consumes.
 ```
 
 ## rheplicant.inference
+
+Many of these modules delegate to bayesmith, a required dependency;
+[the bayesmith page](bayesmith.md) lists which.
 
 ```{eval-rst}
 .. automodule:: rheplicant.inference.parameters

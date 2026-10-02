@@ -1,73 +1,88 @@
 # bayesmith: what this package uses it for, and which versions it accepts
 
 [bayesmith](https://pypi.org/project/bayesmith/) does Bayesian inference over
-an explicit graph, with no radio astronomy in it. `rheplicant.inference` uses
-it. That sentence is the whole relationship and it is worth stating plainly,
-because the two packages share arithmetic and the obvious readings are both
-wrong: this is not a fork, and it is not a migration.
+an explicit graph, with no radio astronomy in it. It is a required dependency
+of this package: `pyproject.toml` declares `bayesmith>=0.10,<0.11`, and
+`rheplicant.inference` imports it. `import rheplicant` on its own does not, so
+the forward model loads without it.
 
-**Nothing here is moving and nothing here is deprecated.**
-`rheplicant.inference` is the implementation of the inference pages. If you
-have a RHINO twin you are in the right place; if you have a model that is not
-this instrument, bayesmith is the general one.
+`rheplicant.inference` is the layer between a twin and bayesmith. It holds
+what depends on the instrument: the parameter space and its bindings into the
+twin, the noise models, the plan, and the accumulation of a campaign. It
+builds a bayesmith graph from those and calls bayesmith for the arithmetic
+that has no instrument in it.
 
-## Which parts are bayesmith's
+If you have a RHINO twin, use `rheplicant.inference`. If you have a model that
+is not an instrument twin, use bayesmith directly.
 
-`rheplicant.inference` delegates rather than reimplements wherever the
-arithmetic has no instrument in it:
+## What is delegated
 
-| Here | Delegates to |
-|---|---|
-| the block partition, the per-block engine and its tolerance | `bayesmith.dispatch` |
-| the iterative GLS solve | `bayesmith.exact.gls` |
-| the chain marginal and the smoother | `bayesmith.marginal.chain` |
-| the square-root information marginalisation | `bayesmith.marginal.sqrtinfo` |
-| the shrinkage and held-out diagnostics | `bayesmith.marginal.diagnostics` |
-| the convergence certificate | `bayesmith.optimize.certify` |
+Each row is a module of `rheplicant.inference` and the bayesmith module it
+imports.
 
-NumPyro supplies the chain; bayesmith decides the partition. The distinction
-matters when reading a refusal: a message about which latents share a block
-comes from bayesmith's dispatch, not from the sampler.
+| What | Module here | bayesmith module |
+|---|---|---|
+| the graph a twin is read as | `graph_bridge`, `numpyro_bridge`, `priors` | `bayesmith` (`trace`, `sample`, `det`, `observe`, `to_numpyro`) |
+| the block partition | `partition` | `bayesmith.dispatch.factor` |
+| the exact linear-Gaussian solve and draw, and the condition bound | `linear_solve` | `bayesmith.exact.solve`, `bayesmith.exact.block`, `bayesmith.exact.precision` |
+| the iterative GLS solve | `gls` | `bayesmith.exact.gls` |
+| the tolerances of the affinity check | `linear`, `linear_probe` | `bayesmith.exact.linearity` |
+| the log-space transform | `loglinear` | `bayesmith.exact.loglinear` |
+| the reduced basis | `reduced_basis` | `bayesmith.exact.reduced_basis` |
+| the Fisher matrix and covariance propagation | `uncertainty` | `bayesmith.exact.fisher`, `bayesmith.exact.gaussian`, `bayesmith.diagnose.local` |
+| identifiability | `identifiability` | `bayesmith.diagnose.identifiability` |
+| prior sensitivity | `sensitivity` | `bayesmith.diagnose.sensitivity` |
+| the chain marginal and the smoother | `chain_recursion` | `bayesmith.marginal.chain` |
+| the square-root information marginalisation | `sqrtinfo` | `bayesmith.marginal.sqrtinfo` |
+| the shrinkage and held-out diagnostics | `diagnostics` | `bayesmith.marginal.diagnostics`, `bayesmith.marginal.compress` |
+| training an amortized posterior | `npe` | `bayesmith.amortize` |
+| the calibrator's minimiser | `calibrate` | `bayesmith.optimize` |
+| the convergence certificate | `engines`, `plan_estimate`, `plan_settings` | `bayesmith.optimize.certify` |
 
-## Which parts are deliberately still here
+`tests/test_bayesmith_floor.py` reads the imports out of `src/` and fails if
+one is missing from this table.
 
-Some arithmetic exists on both sides, and that is a decision rather than a
-leftover. [The stability page](stability.md) lists each copy and the
-comparison in this repository's `tests/crosscheck/` that holds it in
-agreement, and says the cost out loud: a copy can drift, and one had. What makes it defensible is that
-a cross-check turns drift into a failing test rather than into two answers
-nobody compares.
+NumPyro supplies the chain; bayesmith decides the partition. A message about
+which latents share a block comes from bayesmith's dispatch, not from the
+sampler. The seams in `calibrate`, `chain_recursion`, `graph_bridge`,
+`identifiability` and `npe` catch a bayesmith refusal and re-raise it as one
+of this package's error classes.
 
-One case is not a copy but a refusal to delegate.
-`rheplicant.inference.engines`'s gradient engine could use bayesmith 0.10's
-`minimize`, which accepts every keyword it would need — and upstream's own
-stability page calls the descent engine inside `minimize` *Experimental
-(reference implementation)*. Delegating would put this package's gradient
-engine, which every non-conjugate block's point estimate runs through, on a
+## What is kept here
+
+The parameter space (`Latent`, `Bind`), the noise models, `SamplingPlan`, and
+the accumulation, compression and archive layers are this package's.
+
+Three pieces of arithmetic exist on both sides. [The stability
+page](stability.md) lists each copy and the test in this repository's
+`tests/crosscheck/` or `tests/evidence/` that holds it in agreement. A copy
+can drift, and one had; the comparison makes drift a failing test.
+
+The gradient engine in `rheplicant.inference.engines` is not delegated.
+bayesmith 0.10's `minimize` accepts every keyword it would need, and
+upstream's stability page calls the descent engine inside `minimize`
+*Experimental (reference implementation)*. Every non-conjugate block's point
+estimate runs through the gradient engine, so delegating would put it on a
 surface upstream does not promise to keep. `tests/test_bayesmith_floor.py`
-watches both halves of that reason and fails if either changes.
+checks that the keywords still exist and fails if upstream raises the level.
 
 ## Which versions are accepted
 
-The declared range is `bayesmith>=0.10,<0.11`.
+The declared range is `bayesmith>=0.10,<0.11`. 0.10.0 is on PyPI as of
+2026-10-02, so an install resolves the range from the index; [the install
+section](https://github.com/RHINO-Experiment/rheplicant#install) has the
+commands.
 
-**bayesmith has settled at 0.10.** It is not moving to 0.11 while this
-baseline is being cut, so the range describes a version that has stopped
-rather than one still in flight. 0.10.0 is on PyPI as of 2026-10-02, so an
-install resolves the range from the index; [the install section](https://github.com/RHINO-Experiment/rheplicant#install)
-has the commands.
-
-**It is closed at 0.11 because bayesmith is pre-1.0**, where a minor release
-may move the deep module paths this package imports — and 0.10 moved one:
+**The range is closed at 0.11 because bayesmith is pre-1.0**, where a minor
+release may move the deep module paths this package imports. 0.10 moved one:
 `bayesmith.optimize` became a package, so `from bayesmith.optimize import
 minimize` still resolves while the module file that name used to live in is
-gone. A range open at the top would have made that a runtime failure in
-somebody's environment rather than a resolver error at install time.
+gone. A range open at the top would make such a move a runtime failure in an
+installed environment; closed, it is a resolver error at install time.
 
-**The floor is 0.10 by capability, not by preference.** Each earlier release
-added a surface this package uses, and `tests/test_bayesmith_floor.py` asserts
-each one by capability rather than by version number — so the floor is a
-measurement that can be re-run, not a number somebody chose:
+**The floor is 0.10 by capability.** Each earlier release added a surface
+this package uses, and `tests/test_bayesmith_floor.py` asserts each one by
+capability, so the floor can be re-measured:
 
 | Release | What this package needs from it |
 |---|---|
@@ -84,8 +99,7 @@ is the case the capability tests exist for.
 
 ## What the documentation cannot link to
 
-bayesmith's own documentation is a hand-built HTML site rather than a Sphinx
-one, so it publishes no `objects.inv` and there is nothing for intersphinx to
-resolve against. References to bayesmith names in these pages are therefore
-plain literals, not links, and `docs/conf.py` says so where it silences them.
-That ends the day upstream publishes an inventory.
+bayesmith's own documentation is a hand-built HTML site and publishes no
+`objects.inv`, so intersphinx has nothing to resolve against. References to
+bayesmith names in these pages are plain literals, not links, and
+`docs/conf.py` says so where it silences them.

@@ -192,11 +192,11 @@ html_theme_options = {
     ],
 }
 
-# `_migration-to-bayesmith.md` is a snippet five pages `{include}`, not a page.
+# `_bayesmith-note.md` is a snippet five pages `{include}`, not a page.
 # Excluded so Sphinx does not also build it standalone and warn that it sits in
 # no toctree; `{include}` reads the file directly and is unaffected.
 exclude_patterns = ["_build", "superpowers", "_generated",
-                    "_migration-to-bayesmith.md"]
+                    "_bayesmith-note.md"]
 
 # The signal path's PROSE is a tracked source file, `docs/signal-path.md`. Only
 # the artefacts it embeds are generated here: the mermaid diagram of the live
@@ -281,7 +281,7 @@ def _example_svgs() -> dict[tuple[str, str], str]:
         NoiseOperator(sigma=jnp.array(0.5)),
     )
     titles = {
-        "partial": "Partial twin: beam-convolved sky through the gain",
+        "partial": "Partial twin: sky through the ionosphere and the gain",
         "fuller": "Fuller twin: sky, RFI, ground, atmosphere, cal loads",
     }
     twins = {"partial": partial, "fuller": fuller}

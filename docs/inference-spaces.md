@@ -1,6 +1,6 @@
 # Parameter spaces: what you infer, and how it enters
 
-```{include} _migration-to-bayesmith.md
+```{include} _bayesmith-note.md
 ```
 
 Declaring an inference problem is two separate statements, and keeping them

@@ -341,7 +341,7 @@ see it.
 `must_precede` is enforced by `assemble` — see the warning in the next section.
 
 The rest is descriptive **by decision, not omission**: `provides` is `("data",)`
-on 26 of 31 declaring classes, so enforcing it would distinguish nothing, and an
+on 25 of 31 declaring classes, so enforcing it would distinguish nothing, and an
 operator that reads a field *if present* would be wrongly refused.
 :::
 
@@ -497,10 +497,10 @@ terms **sum**, the antenna stages **chain**, and `receiver_input` is a
 position instead of adding to it.
 
 **One convention, three structures.** A **cascade** is an arrow. A **sum** and a
-**switch** are not operators but operations *on* operators, so neither is drawn
-as one: the wire runs *through* a symbol of its own — ⊕ adds the branches that
-reach it, the lever in the ◇ connects one of them per sample. Boxes are the
-operators; only a box is a slot you can place one in.
+**switch** are combinators, operators that hold other operators, and the
+drawing gives them no box: the wire runs *through* a symbol of its own — ⊕
+adds the branches that reach it, the lever in the ◇ connects one of them per
+sample. Only a box is a slot you can place an operator in.
 
 ```{mermaid}
 %%{init: {"themeVariables": {"fontSize": "22px"}}}%%
@@ -589,7 +589,7 @@ Two more things `assemble` refuses, and three escape hatches:
 The default template `RADIO_GRAPH` has 33 nodes and is **RHINO's** structure, not
 the framework's — `SignalGraph`, `register_graph` and `get_graph` are public and
 domain-agnostic. See [the canonical signal path](signal-path.md) for the rendered
-graph and the node table, and [the operator catalog](operators.md) for what lives
+graph, and [the operator catalog](operators.md) for what lives
 at each node.
 
 ---
@@ -627,8 +627,7 @@ Inference is declared in three layers, and it is worth keeping them apart:
 
 **▸ In this tour** — the sky and the beam are given; what were the receiver's
 four noise-wave temperatures? The answer arrives as
-[a figure with error bars](#reading-the-answer) five short sections
-from here.
+[a figure with error bars](#reading-the-answer) a few sections from here.
 
 ## The model: what is free, and how it enters
 
@@ -699,12 +698,20 @@ taste about which sampler to use:
 
 ```python
 errors = check_linearity(space, fit_twin, state, names=NAMES)
-print(f"worst relative departure from affine: {max(errors.values()):.1e}")
+for scale, departure in errors.items():
+    print(f"{scale:>6g}x  {float(departure):.1e}  {type(departure).__name__}")
 ```
 
 ```text
-worst relative departure from affine: 9.4e-11
+ 0.001x  1.9e-09  Unresolved
+     1x  0.0e+00  float
+  1000x  0.0e+00  float
 ```
+
+The table is the relative departure from the block's own linearization at
+three probe scales. The two larger probes depart by zero. The smallest reads
+`Unresolved`: its departure is below the arithmetic's roundoff floor at that
+probe size, so it is not evidence either way.
 
 :::{list-table}
 :header-rows: 1
@@ -783,10 +790,10 @@ for name in NAMES:
 ```
 
 ```text
-t_unc RMS err  2.345 K | posterior sigma  1.21..10.18 K | worst pull 2.88
-t_cos RMS err  0.734 K | posterior sigma  0.55.. 3.29 K | worst pull 2.05
-t_sin RMS err  1.395 K | posterior sigma  0.58.. 7.20 K | worst pull 2.33
-t_rx  RMS err  1.136 K | posterior sigma  0.73.. 2.37 K | worst pull 3.00
+t_unc RMS err  2.345 K | posterior sigma  1.13..10.60 K | worst pull 3.04
+t_cos RMS err  0.734 K | posterior sigma  0.55.. 3.44 K | worst pull 2.10
+t_sin RMS err  1.395 K | posterior sigma  0.57.. 7.48 K | worst pull 2.49
+t_rx  RMS err  1.136 K | posterior sigma  0.71.. 2.46 K | worst pull 3.10
 ```
 
 :::{figure} _static/tour-recovery-light.svg
@@ -838,7 +845,7 @@ because it is multiplied by `|Γ_src|²|F|²`, small for the well-matched source
 so those rows carry little leverage on it.
 
 
-Posterior σ runs from 0.5 to 10 K against a per-sample scatter of 2 K, because
+Posterior σ runs from 0.5 to 11 K against a per-sample scatter of 2 K, because
 the per-channel 4×4 system over the four coupling coefficients is square but not
 orthogonal: four sources separate the columns only moderately. That amplification
 is the physics of noise-wave calibration, not a defect of the solve.
@@ -869,7 +876,7 @@ Everything above rested on one measured fact — the temperatures are affine, so
 the posterior is a Gaussian you can write down. Let the **foreground spectral
 index** go free and that fact is gone: it enters as `(ν/ν₀)^(−β)`, an exponent,
 so no reparameterisation makes it linear. Ask the same question of it and the
-same check that passed at 9.4e-11 refuses:
+same check that passed above refuses:
 
 ```python
 # needs-extra: numpyro
@@ -889,13 +896,13 @@ except ValueError as exc:
 ```
 
 ```text
-ParameterSpaceError: Latent 'fg_beta' is declared linear=True, but the predi...
+LinearityRefused: Latent 'fg_beta' is declared linear=True, but the prediction is not affine in it: depart...
 ```
 
-The refusal quotes three probe scales — `0.001x -> 4.65e-04, 1x -> 3.07e-01,
-1000x -> 1.86e+01`. Even a probe a thousandth of the parameter's own size
-departs seven orders of magnitude further than the temperatures did. That is
-curvature, not roundoff.
+`LinearityRefused` is a `ParameterSpaceError`, and so a `ValueError`. The
+refusal quotes three probe scales — `0.001x -> 4.65e-04, 1x -> 3.07e-01,
+1000x -> 1.92e+02`. Even the smallest probe departs by 4.65e-04, where the
+temperatures' departure was zero or below roundoff. That is curvature.
 
 So: NUTS. Two latents, because the amplitude–index pair is the fit anyone
 actually does — and note that `amplitude` alone *is* affine; it is
@@ -1066,6 +1073,6 @@ refusal, the seven-position repair, and both exits — in about 40 s.
 | Angles | degrees in public APIs, radians internally |
 | Data grid | radio convention: `data` is `(n_time, n_freq)`; `State` itself takes any pytree |
 | Randomness | `subkey, state = state.next_key()`, return the advanced state — and declare `"key"` in `requires`, which is what makes the stage findable |
-| Errors | every refusal derives from `DirtError` *and* from its closest builtin — `except ValueError` catches all of them ([contracts](contracts.md#one-base-class-for-every-refusal)) |
+| Errors | every refusal derives from `DirtError` *and* from its closest builtin; all but `MissingKeyError`, a `RuntimeError`, are also `ValueError`s ([contracts](contracts.md#one-base-class-for-every-refusal)) |
 | Protected channels | the operator injecting a calibrator writes the channels it wet to `aux['protected']`; flaggers clear them ([contracts](contracts.md#protected-channels-keeping-a-known-calibrator-out-of-the-flags)) |
 | Layering | `rheplicant.core` never imports `rheplicant.radio` / `rheplicant.inference` (enforced by test) |

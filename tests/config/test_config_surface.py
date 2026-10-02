@@ -1730,7 +1730,7 @@ class TestPlan3CsSurfaceAndItsPage:
     CROSS = "### The cross-product, as one table"
     IN_CODE = "### What a gate is, in code"
     SLOTS = "## The three later slots, and what each one buys"
-    SPELLINGS = "### A refused document produces no record at all"
+    SPELLINGS = "### Where a refused document's findings go"
 
     #: The module's :data:`_NUMBER_WORDS` stops at eighteen
     #: and later prose counts reach twenty. Extended here rather than

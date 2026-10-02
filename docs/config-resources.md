@@ -127,7 +127,7 @@ because the maps are generated on the run's grid rather than declared against
 one. It takes `nside` only; there is no amplitude to scale, because the model
 decides it. It needs `pygdsm`, which is optional and arrives through limTOD's
 own extra — the missing-package refusal names `pip install "limTOD[gdsm]"`.
-The other four kinds are `uniform`, `power_law`, and the `python:` hatch.
+The other three kinds are `uniform`, `power_law` and the `python:` hatch.
 
 ### `resources.beams`
 
@@ -372,11 +372,8 @@ seen it.
    and which one is an implementation detail of document order. If two
    quantities really are the same number, declare one latent and give its
    `Bind` both targets with `fan: broadcast` instead.
-5. **A `twin.replace` target colliding with a binding's.** This is schema
-   check B8, and it is Plan 2's to implement — `twin.replace` and
-   `inference.parameters` are both `inference:` keys, and neither exists
-   until Plan 2. The comparison machinery (`refuse_duplicate_targets`) is
-   already in place for it to call once the replace targets exist.
+5. **A `twin.replace` target colliding with a binding's.** Refused, by check
+   B8; see [the fit twin](config-inference.md#the-fit-twin).
 6. **A multi-node region addressed by the wrong key.** `At((a, b, c), op)`
    covers a contiguous region, and the fold labels the covering operator with
    the region's **last** node — not its first, which is where slot kinds are

@@ -39,6 +39,7 @@ file replaced. Whether a capability is reachable holds in every environment.
 
 from __future__ import annotations
 
+import ast
 import inspect
 import pathlib
 import re
@@ -477,3 +478,93 @@ def test_the_page_lists_exactly_the_labelled_reference_implementations():
     for target in REFERENCE_IMPLEMENTATIONS:
         module_name, _, attribute = target.partition(":")
         assert attribute in body or module_name in body, target
+
+
+#: bayesmith modules imported for a type or an error class. They are not
+#: delegations and the page's table does not list them.
+NOT_A_DELEGATION = frozenset({"bayesmith.errors", "bayesmith.distributions"})
+
+
+def _bayesmith_imports() -> dict[str, set[str]]:
+    """``local module -> the bayesmith modules it imports``, read out of ``src/``."""
+    package = pathlib.Path(__file__).resolve().parents[1] / "src" / "rheplicant" / "inference"
+    found: dict[str, set[str]] = {}
+    for path in sorted(package.glob("*.py")):
+        modules: set[str] = set()
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            if isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+                modules.add(node.module)
+            elif isinstance(node, ast.Import):
+                modules.update(alias.name for alias in node.names)
+        modules = {name for name in modules if name.split(".")[0] == "bayesmith"}
+        modules -= NOT_A_DELEGATION
+        if modules:
+            found[path.stem] = modules
+    return found
+
+
+def _delegation_rows() -> list[tuple[set[str], set[str]]]:
+    """``(local modules, bayesmith names)`` for each row of the page's table."""
+    root = pathlib.Path(__file__).resolve().parents[1]
+    page = (root / "docs" / "bayesmith.md").read_text(encoding="utf-8")
+    section = page.split("## What is delegated", 1)
+    assert len(section) == 2, "docs/bayesmith.md no longer has that section"
+    rows = []
+    for line in section[1].split("## ", 1)[0].splitlines():
+        if not line.startswith("|"):
+            continue
+        cells = [cell.strip() for cell in line.strip("|").split("|")]
+        if len(cells) != 3:
+            continue
+        far = set(re.findall(r"`(bayesmith[\w.]*)`", cells[2]))
+        if far:
+            rows.append((set(re.findall(r"`([a-z_]+)`", cells[1])), far))
+    return rows
+
+
+def _names(listed: str, imported: str) -> bool:
+    """A row names an import by the module or by a member of it."""
+    return listed == imported or listed.startswith(imported + ".")
+
+
+def test_the_page_lists_every_bayesmith_module_this_package_imports():
+    """The delegation table is the imports, so a new one cannot go unlisted.
+
+    The table had six rows while 21 modules imported bayesmith: it was written
+    when the delegation was small and nothing compared it with ``src/`` after.
+    """
+    imports = _bayesmith_imports()
+    assert len(imports) >= 15, sorted(imports)
+    rows = _delegation_rows()
+    missing = [
+        f"{module}: {imported}"
+        for module, modules in sorted(imports.items())
+        for imported in sorted(modules)
+        if not any(
+            module in local and any(_names(listed, imported) for listed in far)
+            for local, far in rows
+        )
+    ]
+    assert not missing, (
+        "docs/bayesmith.md's delegation table does not list these imports:\n  "
+        + "\n  ".join(missing)
+    )
+
+
+def test_every_row_of_the_delegation_table_is_a_real_import():
+    """The other direction: a delegation that was removed leaves the table."""
+    imports = _bayesmith_imports()
+    rows = _delegation_rows()
+    assert len(rows) >= 12, rows
+    stale = []
+    for local, far in rows:
+        assert local, f"a row names no module of rheplicant.inference: {far}"
+        for module in sorted(local):
+            if module not in imports:
+                stale.append(f"{module} imports nothing from bayesmith")
+        for listed in sorted(far):
+            if not any(
+                _names(listed, imported) for module in local for imported in imports.get(module, ())
+            ):
+                stale.append(f"{sorted(local)} do not import {listed}")
+    assert not stale, "docs/bayesmith.md's delegation table is stale:\n  " + "\n  ".join(stale)

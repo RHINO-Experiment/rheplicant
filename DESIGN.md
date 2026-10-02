@@ -46,6 +46,18 @@ rheplicant.inference   likelihood / calibration        (treats pipelines as data
 framework proves reusable beyond radio astronomy, `core` graduates to its own
 package by moving one directory.
 
+Two things were added after this block was drawn. `rheplicant.config`,
+`rheplicant.gui` and the bootstrap sit around these three layers; the current
+table of who may import whom is in
+[Stability](https://rheplicant.readthedocs.io/en/latest/stability.html). And
+`rheplicant.inference` is built on
+[bayesmith](https://rheplicant.readthedocs.io/en/latest/bayesmith.html), a
+required dependency: this layer holds the parameter space, the noise models
+and the plan, and calls bayesmith for the partition, the exact solves, the
+Fisher matrix, the diagnostics and the convergence certificate. The decisions
+below were written while that arithmetic was still in this package, and some
+describe it as local.
+
 ## Decisions
 
 ### D1 — State is an `eqx.Module` with a static/traced split
@@ -551,7 +563,8 @@ Graph-guided assembly (D11)
 
 `rheplicant.core` is not part of that taxonomy — it is the layer the taxonomy
 is written in, and nothing in it names a radio element. Its own map, complete
-as of this listing (thirteen modules, `__init__.py` aside):
+as of this listing (thirteen modules, `__init__.py` aside; `capability.py`,
+`conditioning.py`, `graph_placement.py` and `graph_template.py` are not in it):
 
 ```
 Core layer (never imports radio / inference)  Module
@@ -1033,7 +1046,8 @@ and nothing in the output would have said so.
 The estimator is deliberately a conditional Gaussian mixture rather than a
 normalizing flow: exact at one component for a Gaussian posterior, which is
 what makes the check above sharp, and few enough moving parts that the failure
-modes stay legible. Adam is hand-rolled, as in `calibrate.py` — no optax.
+modes stay legible. The density and its training loop are now
+`bayesmith.amortize`'s.
 
 ### D25 — Beam ingestion is on the same line as beam physics
 

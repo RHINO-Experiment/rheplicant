@@ -11,9 +11,19 @@ the same: `rheplicant`.
 pip install rheplicant
 ```
 
-`limTOD` comes with it. It is a **dependency**, not an extra — the sky engines
-it carries are the forward model rather than an accessory — and since limTOD
-1.10.0 reached PyPI the `>= 1.10` floor resolves with no preparatory step.
+As of 2026-10-02 that line installs 0.2.0, the latest upload on PyPI, which
+predates the `rheplicant` command, the configuration layer and the workbench
+these pages describe. To install 0.9.1, name its tag:
+
+```bash
+pip install "rheplicant @ git+https://github.com/RHINO-Experiment/rheplicant@v0.9.1"
+```
+
+Two packages come with it as **dependencies**, not extras, and both resolve
+from PyPI. `limTOD` carries the sky engines, which are the forward model.
+`bayesmith` carries the inference arithmetic, and brings numpyro with it.
+`import rheplicant` imports neither bayesmith nor numpyro;
+`import rheplicant.inference` imports both.
 
 ## Extras
 
@@ -31,7 +41,8 @@ and you install it yourself.
   - Gives you
   - Install
 * - `numpyro`
-  - NUTS, and every gradient posterior
+  - Raises numpyro to the tested `>=0.21`. numpyro itself is already
+    installed, through bayesmith
   - `pip install "rheplicant[numpyro]"`
 * - `cal`
   - `NoiseWaveOperator` — the noise-wave receiver model, reflection couplings
@@ -62,8 +73,8 @@ and you install it yourself.
 
 ### Start the configuration workbench
 
-The `gui` extra contains the production assets, so an installed wheel needs no
-Node.js toolchain:
+The wheel contains the production assets, so an installed wheel needs no
+Node.js toolchain; the `gui` extra adds the server (FastAPI and uvicorn):
 
 ```bash
 pip install "rheplicant[gui]"
@@ -150,78 +161,57 @@ else and said nothing about it.
 
 ## Running the tests
 
-There **is** CI — `.github/workflows/test.yml` has run the suite on every push
-since `d65785b` (2026-08-24). Run the suite and the linter in the project venv
-anyway before pushing: the runner is Linux and this is often not, and the
-difference is not academic — several numeric assertions in this suite are
-currently red there and green here.
-The `dev` group carries what the tests need on top of the package — `numpyro`,
-because five modules import it unguarded, and `mdit-py-plugins`, because the
-docs-link guard computes anchors with myst's own slugifier. Both are runtime
-*extras* rather than dependencies, so nothing but the test suite pulls them in;
-without them `pytest` stops at collection, or reports every documentation link
-as broken.
+`.github/workflows/test.yml` runs the suite on every push to main and on pull
+requests. Run the suite and the linter in the project venv before pushing: the
+runner is Linux and your machine may not be.
 
 ```bash
-.venv/bin/python -m pytest                     # ~12 min with coverage
-.venv/bin/python -m pytest -n 16 -o addopts="" # the one to use while working
-JAX_ENABLE_X64=1 .venv/bin/python -m pytest tests/evidence   # the float64 half
+.venv/bin/python -m pytest -n 4 --ignore=tests/gui/e2e
+.venv/bin/python -m pytest tests/gui/e2e -n 2
 .venv/bin/python -m ruff check src tests
 ```
 
-The second line is the one to use while working. `pytest-xdist` is in the `dev`
-group and the run is identical — same counts — because nothing here depends on
-execution order.
+Run it in those two phases. A single `pytest -n 8` over everything has
+exhausted 96 GB on a shared machine: the parent's workers, the float64
+sessions' own workers and the Playwright browsers of `tests/gui/e2e` run at
+once. Measured, the two phases take 337 s and 60 s against 258 s for the one
+command, and memory stays flat.
 
-**How many workers, and why the number stops mattering.** Measured on a
-28-core machine: `-n 8` 183 s, `-n 16` **146 s**, `-n 24` 150 s. The knee is
-around 16 and past it the workers contend rather than help, so `-n auto` on a
-big box is slower than picking a number. On a smaller machine use the core
-count; the suite does not care.
+`pytest-xdist` is in the `dev` group, and the counts are the same with or
+without it because nothing depends on execution order. Coverage is not
+measured by default; CI measures it in a separate serial job.
 
-What sets the floor is one test, not the worker count. `tests/evidence/` runs
-as a second pytest session with `JAX_ENABLE_X64=1` (see the admonition above),
-and inside it
-`test_chain_conditioning.py::test_the_accumulated_fisher_plus_the_prior_is_positive_definite[5.0-1000]`
-alone takes ~49 s. That session is itself parallelised — four workers, chosen
-because 8 measured no faster and the parent is already an `-n` session — which
-took it from 175 s to 78 s and the whole suite from 291 s to 146 s. Nothing
-short of shrinking that one test moves the floor further.
+**What a complete test environment holds.** `uv pip install -e . --group dev`
+is enough to import the package and run most of the suite. Several test
+modules stand down behind `pytest.importorskip`, so a thinner environment
+collects fewer tests and still passes. The reference install is the one in
+`.github/workflows/test.yml`: the `rhino`, `numpyro`, `gui`, `gui-react` and
+`uvbeam` extras, `pygdsm`, `rhino-cal-jax`, `MomentRFI` with `MomentEmu`, and
+the Node toolchain (`npm ci` in `tools/gui/react`) for the GUI type checks and
+the Playwright suite.
 
-:::{admonition} Why parallel rather than fewer tests
+:::{admonition} Why the suite is three sessions
 :class: note
-The suite is not slow because it is large. Of a 692 s serial run, the four
-heaviest items account for 249 s; the other ~2700 tests come to roughly 290 s
-between them, a tenth of a second each. Deleting tests therefore buys almost
-nothing and costs coverage — and most of these tests are regression evidence for
-a specific failure, which is the last thing to trade for a minute.
+Two parts of the suite need float64. `tests/evidence` does because a stored
+factor's offset scalar is the time–bandwidth product, ~7.2e11 for one night,
+against a difference of ~1e5, which float32 annihilates. `tests/seam` does
+because it compares against a dense solve at `rtol < 1e-12`. The rest of the
+suite must stay at float32, because tests there assert refusals that only
+float32 forces. `jax_enable_x64` is process-global, so the three cannot share
+an interpreter.
 
-The four are worth knowing, because they are where a slowdown would show up:
-the float64 subsession (159 s — a whole second pytest run, and the floor on any
-parallel time, since one worker must carry it alone), the beam-spill closure at
-two resolutions (70 s), the NPE training (28 s), and the tour executed as a
-script (16 s). Each verifies something nothing else can.
-:::
+Plain `pytest` runs all three: `tests/test_evidence_session.py` and
+`tests/test_seam_session.py` each run their directory as a subprocess with
+`JAX_ENABLE_X64=1`, which is why those directories show as skips in the main
+count. To run one directly when a test in it fails:
 
-The second line is **not** optional work you might skip — plain `pytest` already
-runs it for you, in a subprocess, via `tests/test_evidence_session.py`. It is
-written out because that is how you run those tests directly when one of them
-fails.
+```bash
+JAX_ENABLE_X64=1 .venv/bin/python -m pytest tests/evidence
+JAX_ENABLE_X64=1 .venv/bin/python -m pytest tests/seam
+```
 
-:::{admonition} Why the suite is two sessions
-:class: note
-The evidence layer needs float64: a stored factor's offset scalar is the
-time–bandwidth product, ~7.2e11 for one night, against a difference of ~1e5 —
-which float32 annihilates rather than rounds. The rest of the suite must stay at
-float32, because a population of tests assert refusals that only float32 forces
-— `tests/test_evidence_session.py` names them and the command that reproduces
-them. And
-`jax_enable_x64` is process-global, so the two cannot share an interpreter.
-
-That split is also why the reported coverage is what it is: the second session
-runs `--no-cov` in its own process, so its passing tests contribute nothing to
-the default report, and most of the default report's uncovered statements are
-the seven evidence-layer files.
+The float64 sessions run with `--no-cov`, so the modules only they exercise
+show as uncovered in the default coverage report.
 :::
 
 ## Check it worked

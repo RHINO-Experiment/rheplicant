@@ -1,19 +1,22 @@
 # Examples
 
 Fifteen runnable scripts in
-[`examples/`](https://github.com/RHINO-Experiment/rheplicant/tree/main/examples).
-Each prints its own results; none needs a real recording. Every wall clock below
-was measured by running the script, on CPU.
+[`examples/`](https://github.com/RHINO-Experiment/rheplicant/tree/main/examples),
+and one configured example in a directory of its own, described at the end of
+this page. Each script prints its own results; none needs a real recording.
+Every wall clock below was measured by running the script, on CPU. The scripts
+are in the repository and not in the wheel, so run them from a clone.
 
 ```bash
 .venv/bin/python examples/radio_digital_twin.py
 ```
 
 :::{warning}
-Two are slow enough to plan around — `driftscan_mmode.py` at **61 s** and
-`sky_to_noise_wave.py` at **59 s**, both dominated by JIT compilation rather
-than by the work — and `tutorial_nuts.py` runs NUTS twice for **185 s**. Every
-other script finishes in under ten seconds.
+Five scripts take 20 s or more. `tutorial_nuts.py` runs NUTS twice and takes
+**185 s**. `driftscan_mmode.py` (**61 s**) and `sky_to_noise_wave.py`
+(**59 s**) are dominated by JIT compilation. `three_ways_to_a_posterior.py`
+takes 26 s and `gibbs_plan.py` 20 s. The other ten finish in under ten
+seconds.
 :::
 
 ## Forward modelling
@@ -35,7 +38,9 @@ other script finishes in under ten seconds.
 * - `sky_to_noise_wave.py`
   - RHINO's horn end to end: CST beam → HEALPix → drift-scan `T_src` → horizon
     spill, ohmic loss, mismatch → a three-position switch cycle → noise waves
-    solved back out. Cross-checked against the same sum written by hand
+    solved back out. Cross-checked against the same sum written by hand. The
+    CST exports are not redistributable: name a directory with `--beam-dir` or
+    `RHEPLICANT_RHINO_BEAMS`, otherwise a Gaussian beam stands in
   - **59 s**
   - `cal`
 * - `driftscan_mmode.py`
@@ -88,7 +93,7 @@ other script finishes in under ten seconds.
   - Why a frozen noise σ leaves the point estimate exactly unmoved but moves
     the error bars by −8 % to +8 %
   - 5.9 s
-  - —
+  - `cal`
 * - `noise_wave_gcr.py`
   - The noise-wave model as a checked linear block: Wiener mean, exact GCR
     draws, and κ jumping from 27 to ~4e6 when one source is dropped
@@ -137,11 +142,33 @@ other script finishes in under ten seconds.
 
 ## What "Needs" means
 
-`—` is a default install, limTOD included: it is a dependency rather than an
-extra, and it is on PyPI. **`cal`** is `rhino-cal-jax`, which is not, so it
-installs from git; **numpyro** is `pip install "rheplicant[numpyro]"`. See
-[Install](install.md) for the commands.
+`—` is a default install. limTOD and bayesmith come with it: both are
+dependencies rather than extras, and both are on PyPI. **`cal`** is
+`rhino-cal-jax`, which is not on PyPI, so it installs from git; **numpyro** is
+`pip install "rheplicant[numpyro]"`. See [Install](install.md) for the
+commands.
 
 Note that limTOD and `rhino_cal_jax` are imported **lazily** — importing
 `rheplicant.radio` does not pull either. A script needs them only when it
 actually calls a sky engine or constructs a `NoiseWaveOperator`.
+
+## A configured example: global 21 cm separation
+
+[`examples/global21cm/`](https://github.com/RHINO-Experiment/rheplicant/tree/main/examples/global21cm)
+is a directory, not a script. It fits two foreground strategies and an oracle
+to one simulated drift scan and scores each recovered 21 cm curve against the
+injected one. Everything is declared in six YAML documents (`oracle`,
+`beamconv`, `physical` and a `_quick` form of each) that `rheplicant run`
+executes; the Python beside them is the plugin and the hooks the documents
+load, and the analysis of the published run trees.
+
+Its [README](https://github.com/RHINO-Experiment/rheplicant/blob/main/examples/global21cm/README.md)
+gives the commands, the time each step takes, and the results. It needs
+`global21cm_jax`, from the 21cmVAE-jax repository, and `pygdsm`.
+
+A fresh checkout cannot run the pipeline. The simulation step reads one data
+file that is not public and RHINO beam files that are not redistributable, and
+the simulated arrays the six documents read are not kept in git. What a fresh
+checkout can do is read the kept analysis products under `results/analysis*/`
+and run the example's own tests, which the repository's suite does not
+collect.

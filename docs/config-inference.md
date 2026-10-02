@@ -215,6 +215,14 @@ Kind-specific keys travel untouched, and each executor sweeps its own.
 `runs:` is read from the BASE document — a variant patching it changes what
 that variant accepts, never which runs execute.
 
+Most of what these runs compute is done by
+[bayesmith](bayesmith.md), a required dependency, through
+`rheplicant.inference`: the Fisher matrix of `fisher`, the solves of the
+conjugate family, `condition`, `identifiability`, the training of `npe`, the
+convergence certificate of `plan.estimate`, and the checks under
+[`inference.checks`](#checks). The
+blocks of a plan are the ones the document writes.
+
 ### The five that fit
 
 - `forward` — the twin on the state; no kind-specific keys.
@@ -228,7 +236,7 @@ that variant accepts, never which runs execute.
 - `plan.estimate` — a blockwise point estimate; `blocks:` is required, and a
   seed is refused (the asymmetry is the package's own; check A29). `tol:` is
   the relative change of the joint negative log posterior between sweeps
-  (default `1e-8`, floored at 64 machine epsilons); since T-002 that change
+  (default `1e-8`, floored at 64 machine epsilons); since 0.9.0 that change
   only schedules the verdict, and what gives it is the Newton decrement of
   that objective at the point the run would return, which must be within 0.1
   posterior σ of its minimum whatever the number of data. Its threshold is
@@ -236,7 +244,7 @@ that variant accepts, never which runs execute.
   whose sweeps stall short of that — a float32 objective below its own
   rounding, a conjugate solve too loose, a frozen prediction-dependent sigma —
   refuses at `max_iter` saying which, and names `JAX_ENABLE_X64=1` where the
-  precision is the cause ([the monitoring section](inference-plans.md#convergence-is-monitored-on-the-joint-χ²-never-a-per-block-residual)).
+  precision is the cause ([the monitoring section](inference-plans.md#convergence-is-judged-on-a-joint-quantity-never-a-per-block-residual)).
 - `plan.sample` — blockwise posterior draws; `blocks:`, a named `seed:` and
   `n_sweeps:` are required; `warm_start: {kind: plan.estimate, blocks:,
   move:}` moves only the named inits.
@@ -353,8 +361,9 @@ rather than failing.
   reads **one chain**: `get_samples()` concatenates the chains in order, so the
   tail of the flat stack is the last chain's tail — ask for more than
   `num_samples` and you get the whole of the last chain plus the tail of the
-  one before it. The samples route also needs
-  numpyro, which the covariance route does not. A `predict` that declares a
+  one before it. The samples route also imports
+  numpyro, which the covariance route does not; numpyro is installed with
+  bayesmith, and the `numpyro` extra raises it to the tested `>=0.21`. A `predict` that declares a
   different `variant:` from the run it reuses is refused by name: pushing one
   build's product through another build's model mixes two builds, and the
   answer would come back finite, correctly shaped and about 1 % wrong — the

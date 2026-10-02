@@ -1,6 +1,6 @@
 # Configuration command line
 
-RHEPLICANT has one installed command and three forms. If you have not run one
+The `rheplicant` command has three forms. If you have not run one
 before, [the tutorial](config-tutorial.md#running-it-from-the-command-line)
 walks a document from `validate` to a published tree; this page is the
 reference for what each form does and what lands on disk.
@@ -24,19 +24,41 @@ resolved target.
 declared JAX runtime, imports named plugins, and validates the base plus every
 variant. Every run kind parses its options before any run executes. Validation
 does not create an output parent, lock, journal, result, or failure directory.
+It builds every layer, so it reads resource files and its cost is one load per
+variant.
 
 `run` performs the same preparation, executes the base schedule in declaration
-order, and publishes the audit tree plus any requested scientific products. A file named `config.yaml`
-defaults to `config.results/`; an explicit relative `outputs.dir` is resolved
-against the config file's directory. `run -` needs an explicit `outputs.dir`.
+order, and publishes the audit tree plus any requested scientific products. A
+file `NAME.yaml` publishes to `NAME.results/` beside it (`config.yaml` to
+`config.results/`); an explicit relative `outputs.dir` is resolved against the
+config file's directory. `run -` needs an explicit `outputs.dir`.
 A program embedding a document can override the directory per invocation
-instead — see "Placing one run's tree without editing the document".
+instead — see [Placing one run's tree without editing the document](#placing-one-runs-tree-without-editing-the-document).
 
 | Status | Meaning |
 |---|---|
 | `0` | validation, execution, or script generation succeeded |
 | `2` | usage, YAML, or configuration refusal |
 | `1` | unexpected package or internal failure; a traceback is printed |
+
+For `run`, the exit status, the tree that is published and the `status` in
+its `diagnostics.json` go together:
+
+| Exit | Tree | `status` | Cause |
+|---|---|---|---|
+| `0` | `NAME.results/` | `ok` | every run finished, or was an `expect: refuse` run that raised |
+| `2` | `NAME.results.refused-<id>/` | `refused` | a `ConfigError` or `AssemblyError`, including an `expect: refuse` run that succeeded |
+| `1` | `NAME.results.error-<id>/` | `error` | any other exception raised by a run; the traceback is on stderr |
+
+The first run that is refused or fails ends the schedule, and no success tree
+is published. A refusal before the output target is verified (usage, YAML, the
+checks `validate` reaches) publishes nothing.
+
+In `diagnostics.json`, `runs[].exception_type`, `runs[].exception_message` and
+`error.message` are never empty for a raised exception: an exception with no
+message is recorded under its qualified type name. `expect: refuse` captures
+any exception, not only a refusal; such a run has status `expected_refusal`
+and `capture_scope: arbitrary_exception`.
 
 `outputs.stdout` is `none`, `summary`, or `verbose` and defaults to `summary`.
 It controls success/progress text only. Warnings and errors always use standard
@@ -67,6 +89,8 @@ page is stable, and they are spelled once in the code
 | stdout | `configuration run complete: PATH` | `run` published a tree at `PATH` |
 | stderr | `refused audit: PATH` | a refusal published its sibling at `PATH` |
 | stderr | `error audit: PATH` | an internal failure published its sibling |
+
+`outputs.stdout: none` suppresses the two stdout lines.
 
 The two `audit:` lines are written **before** the failure unwinds and prints
 itself, so a long traceback pushes them out of any bounded excerpt of the
@@ -103,8 +127,8 @@ checked against a real run by
 `tests/config/test_config_cli.py::test_the_documented_output_tree_lists_what_a_run_publishes`.
 
 A refusal or internal error after publication trust is established uses a
-non-clobbering sibling such as `config.results.refused-<stamp>-<pid>/` or
-`config.results.error-<stamp>-<pid>/`, with the same mandatory metadata and
+non-clobbering sibling such as `config.results.refused-<32 hex digits>/` or
+`config.results.error-<32 hex digits>/`, with the same mandatory metadata and
 every resolved layer that actually completed. No later boundary or file is
 claimed. An ambiguity during recovery preserves every named path and starts no
 second transaction.
@@ -147,7 +171,7 @@ The selectors and default formats are:
 | Default | Selectors |
 |---|---|
 | NPZ | `arrays`, `aux`, `taps`, `estimates`, `parameters`, `draws`, `losses`, `gradients`, `covariance`, `prediction_bands`, `posterior_predictives`, `scores`, `training_history`, `chains` |
-| JSON | `assembly`, `identifiability`, `recovery`, `timings`, `compare`, `benchmark` |
+| JSON | `assembly`, `identifiability`, `recovery`, `timings`, `compare`, `benchmark`, `run_diagnostics` |
 | text | `refusals` |
 | SVG | `signal_paths` (also `html` or `mermaid`) |
 

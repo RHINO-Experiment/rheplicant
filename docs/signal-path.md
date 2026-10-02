@@ -28,10 +28,11 @@ A signal path is not a special kind of object. It is **operators** — each one 
 
 :::{admonition} How to read the pictures
 :class: tip
-A cascade is an **arrow**. A sum and a switch are not operators — they are
-operations *on* operators — so neither is drawn as one: the wire runs *through*
-a symbol of its own, ⊕ for the sum and a lever in a ◇ for the switch. Every
-**box** is an operator, and a box is the only thing you can place one in.
+A cascade is an **arrow**. A sum and a switch are combinators, operators that
+hold other operators, and the drawing gives them no box: the wire runs
+*through* a symbol of its own, ⊕ for the sum and a lever in a ◇ for the
+switch. Every **box** is a slot, and a box is the only place you can put an
+operator.
 :::
 
 Nodes come in the matching four kinds: a **source** creates data (in-degree 0), a **transform** changes it (in-degree 1), a **junction** sums its inputs and a **selector** switches between them (both in-degree ≥ 2). That is the entire vocabulary. `assemble(*operators)` lights the sub-path your operators induce and folds it into exactly those three combinators, so the composition is a consequence of the physics you declared rather than something you wrote out.
@@ -72,34 +73,34 @@ The single-antenna path every assembly lights up. The diagram itself is generate
 
 `assemble(*operators)` never shows you only the piece you built — rendering always draws the *full* template, with the provided operators lit (colored, amber signal path), traversed-as-identity nodes half-lit, and everything else dimmed. Reserved placeholder leaves are dashed. Both examples below are real renders, generated at build time with `assembly.to_svg()` (`to_html()` produces the same figure as a standalone page).
 
-A partial twin — five operators, `assemble(global_signal, foregrounds, ionosphere, beam, gain)`; every junction on the way passes through and the rest of the receiver chain is identity:
+A partial twin — four operators, `assemble(global_signal, foregrounds, ionosphere, gain)`; every junction on the way passes through and the rest of the receiver chain is identity:
 
 :::{figure} signal-path-partial-light.svg
 :figclass: only-light
-:alt: Partial twin with five lit operators
+:alt: Partial twin with four lit operators
 
-Partial twin: the beam-convolved sky through the gain.
+Partial twin: the sky through the ionosphere and the gain.
 :::
 
 :::{figure} signal-path-partial-dark.svg
 :figclass: only-dark
-:alt: Partial twin with five lit operators
+:alt: Partial twin with four lit operators
 
-Partial twin: the beam-convolved sky through the gain.
+Partial twin: the sky through the ionosphere and the gain.
 :::
 
-A fuller twin — nine operators including RFI, ground pickup, atmospheric emission, and switched calibration loads (the ◇ selector node); note the two dashed entrances (`atmosphere_field` and `ground_field`) staying dim. Dashed means *reserved* — the node is part of the physics and no shipped operator declares it yet — which is a stronger claim than merely unlit, and one that goes stale the moment an operator lands. `t_sys_extra` was dashed until `BasisTemperatureOperator` arrived on it; the flag is now derived against the operator registry by a test, so the drawing cannot claim absent physics that is in fact present.
+A fuller twin — eight operators including RFI, ground pickup, atmospheric emission, and one switched calibration load (the ◇ selector node); note the three dashed nodes (`atmosphere_field`, `ground_field` and `beam`) staying dim. Dashed means *reserved* — the node is part of the physics and no shipped operator declares it yet — which is a stronger claim than merely unlit, and one that goes stale the moment an operator lands. `t_sys_extra` was dashed until `BasisTemperatureOperator` arrived on it; the flag is now derived against the operator registry by a test, so the drawing cannot claim absent physics that is in fact present.
 
 :::{figure} signal-path-fuller-light.svg
 :figclass: only-light
-:alt: Fuller twin with nine lit operators
+:alt: Fuller twin with eight lit operators
 
 Fuller twin: sky, RFI, ground, atmosphere, and calibration loads.
 :::
 
 :::{figure} signal-path-fuller-dark.svg
 :figclass: only-dark
-:alt: Fuller twin with nine lit operators
+:alt: Fuller twin with eight lit operators
 
 Fuller twin: sky, RFI, ground, atmosphere, and calibration loads.
 :::

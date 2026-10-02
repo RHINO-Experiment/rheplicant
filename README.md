@@ -43,13 +43,17 @@ the core is domain-agnostic by construction.
 None of the four is a separate mode. They all read the **same twin object**,
 which is what makes the calibration you fit the simulator you trust.
 
-**2 and 4 have a sibling, and it is a separate package rather than a
-successor.** [bayesmith](https://pypi.org/project/bayesmith/) does inference
-over a graph with no radio astronomy in it, and the capabilities it shares with
-this package are held in agreement by a cross-check suite rather than by shared
-code. Nothing here is moving or deprecated: `rheplicant.inference` is the
-implementation. If you have a RHINO twin you are in the right place; if you
-have a model that is not this instrument, bayesmith is the general one. The
+**2 and 4 are built on [bayesmith](https://pypi.org/project/bayesmith/).**
+bayesmith does Bayesian inference over an explicit graph and has no radio
+astronomy in it. It is a required dependency of this package
+(`bayesmith>=0.10,<0.11`). `rheplicant.inference` holds what depends on the
+instrument (the parameter space, the noise models, the plan and the
+accumulation of a campaign), builds a bayesmith graph from a twin, and calls
+bayesmith for the block partition, the exact linear-Gaussian solves, the
+Fisher matrix, the diagnostics and the convergence certificate. If you have a
+model that is not an instrument twin, use bayesmith directly. The
+[bayesmith page](https://rheplicant.readthedocs.io/en/latest/bayesmith.html)
+lists each delegation and the accepted versions, and the
 [inference pages](https://rheplicant.readthedocs.io/en/latest/inference.html)
 carry the detail.
 
@@ -138,10 +142,15 @@ Each is argued at length in
 ## Install
 
 ```bash
-# limTOD carries the sky engines and is a dependency, not an extra. It is on
-# PyPI as of 1.10.0, so it comes with the install.
+# limTOD (the sky engines) and bayesmith (the inference arithmetic) are
+# dependencies, not extras, and both are on PyPI, so they come with the install.
 pip install rheplicant
-pip install "rheplicant[cal]"     # + the noise-wave model (rhino-cal-jax)
+
+# the release this page describes, from its tag:
+pip install "rheplicant @ git+https://github.com/RHINO-Experiment/rheplicant@v0.9.1"
+
+# the noise-wave model is not on PyPI; it installs from git:
+pip install "rhino-cal-jax @ git+https://github.com/RHINO-Experiment/rhino-cal@feat/rhino-cal-jax"
 
 # or, for development:
 git clone https://github.com/RHINO-Experiment/rheplicant
@@ -150,13 +159,12 @@ uv venv                          # NOT `uv sync`, which cannot work here
 uv pip install -e . --group dev
 ```
 
-**The development install resolves from PyPI; `pip install rheplicant` gives
-an older release.** `rheplicant` requires `bayesmith>=0.10,<0.11`, and
-bayesmith 0.10.0 is on PyPI as of 2026-10-02, so the clone-and-install lines
-need nothing beside the index. This package's own latest upload is 0.2.0:
-0.9.x is tagged in the repository and not uploaded, so the first line installs
-0.2.0 until it is. [The bayesmith page](https://rheplicant.readthedocs.io/en/latest/bayesmith.html)
-says what the range is for.
+**Which version `pip install rheplicant` gives.** As of 2026-10-02 the latest
+upload on PyPI is 0.2.0, which has no `rheplicant` command, no configuration
+layer and no browser editor. The second line above installs 0.9.1 from its
+tag, and so does the development install. Both resolve every dependency from
+PyPI, including `bayesmith>=0.10,<0.11`; [the bayesmith page](https://rheplicant.readthedocs.io/en/latest/bayesmith.html)
+says what that range is for.
 
 Requires Python ≥ 3.11, `jax ≥ 0.5`, `equinox ≥ 0.13`. Distribution and import
 name are the same: `rheplicant`. Full instructions, the optional integrations
@@ -213,7 +221,9 @@ NUTS posteriors, Fisher forecasts, exact conjugate draws, neural surrogates —
 is one worked example carried end to end in
 **[the guided tour](https://rheplicant.readthedocs.io/en/latest/tour.html)**,
 and fifteen runnable scripts with measured wall clocks in
-[`examples/`](https://github.com/RHINO-Experiment/rheplicant/tree/main/examples).
+[`examples/`](https://github.com/RHINO-Experiment/rheplicant/tree/main/examples),
+beside one configured example,
+[`examples/global21cm/`](https://github.com/RHINO-Experiment/rheplicant/tree/main/examples/global21cm).
 
 ## What is in the box
 
@@ -269,21 +279,20 @@ nodes the first two occupy. Conventions:
 degrees in public APIs, radians internally; strings in `meta` (static),
 numbers in `coords`/`env`/`aux` (traced); one seed reproduces a run.
 
-CI runs the suite on every push and pull request, and measures coverage in a separate **serial** job (a parallel run and a serial run of this suite do not measure the same thing)
-([`.github/workflows/test.yml`](https://github.com/RHINO-Experiment/rheplicant/blob/main/.github/workflows/test.yml)); it prints what the
-environment collects rather than asserting on it, because a public runner cannot
-hold the `RHEPLICANT_RHINO_*` datasets and so legitimately collects fewer tests
-than a complete machine. The suite is two pytest sessions rather than one — the evidence
-layer needs float64 while a population of tests elsewhere assert refusals that
-only float32 forces (`tests/test_evidence_session.py` records which, and the
-command that reproduces them), and `jax_enable_x64` is process-global. Plain `pytest` runs both
-for you. That split is also why the reported coverage is what it is rather than
-the 99.7 % it was before the evidence layer landed: the second session runs
-`--no-cov` in its own process, so its passing tests contribute nothing to the
-default report, and most of the default report's uncovered statements are the
-evidence-layer files that session covers. The
+CI runs the suite on every push to main and on pull requests, and measures
+coverage in a separate serial job
+([`.github/workflows/test.yml`](https://github.com/RHINO-Experiment/rheplicant/blob/main/.github/workflows/test.yml)).
+It prints what the environment collects rather than asserting on it, because a
+public runner cannot hold the `RHEPLICANT_RHINO_*` datasets and so collects
+fewer tests than a complete machine. The suite is three pytest sessions: the
+main one, and two that need float64 (`tests/evidence` and `tests/seam`), each
+run as a subprocess by its own driver because `jax_enable_x64` is
+process-global and tests in the main session assert refusals that only
+float32 forces. Plain `pytest` runs all three. The float64 sessions run with
+`--no-cov`, so the modules only they exercise show as uncovered in the default
+report. The
 [install page](https://rheplicant.readthedocs.io/en/latest/install.html#running-the-tests)
-makes the same argument at length.
+has the commands.
 
 Neither `uv sync` nor `uv run` works here, with or without `--frozen`: locking
 resolves every declared extra and two of them name packages that are not on

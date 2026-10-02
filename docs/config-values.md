@@ -58,6 +58,7 @@ inferred from the Python type: write `{list: [1, 2, 3]}`.
 
 The units are a closed table — `Hz`, `s`, `K`, `deg`, `m`, `ohm`,
 `dimensionless`, `count`, `samples`, `bits`, `channels`, `cycles`, `adc_count`,
+`unix_s`,
 plus the prefixed and alternative spellings the package's own readers already
 accept (`MHz`, `ms`, `celsius`, `rad`, …). A compound unit is a product, or a
 quotient with at most one `/`: `adc_count/K` is a unit, `K/s*s` is how a second
@@ -89,7 +90,8 @@ freq_grid: {linspace: {start: 60, stop: 85, num: n_freq, endpoint: false},
             unit: MHz}
 ```
 
-Also `zeros`, `full`, `list`, `arange`, `modulo` and `from_grid`. Every shape
+Also `zeros`, `full`, `list`, `arange`, `modulo` and `from_grid`, and
+`basis_fit`, which is described with [the bases](config-resources.md#resourcesbases). Every shape
 position takes an integer *or* a shape symbol — `n_time`, `n_freq`, `n_source`,
 `n_pix`, `n_alm`, `n_load` — optionally with an integer multiple and an integer
 offset: `2 * n_freq - 1`. That is a symbol table, not an expression language.
@@ -124,8 +126,9 @@ The format is stated, never guessed from the extension: two producers of the
 same extension disagree often enough that guessing is how a run reads the wrong
 thing quietly. Every file reference is hashed on read, and an optional
 `sha256:` is checked against the bytes actually seen. Paths expand `~` and
-`${ENV}`, and are tried against the document's directory, then the declared
-roots, then as written.
+`${ENV}`, and are tried against the document's directory, then as written. A
+Python caller may add roots through `ResolutionContext(roots=...)`; no
+document key declares them.
 
 ### 5. A reference to a named resource
 
@@ -229,8 +232,11 @@ Three rules follow, and all three are enforced:
 * `float64` is refused when `jax_enable_x64` is off in this process, because
   `astype("float64")` then silently returns `float32`, every later dtype check
   compares downcast values against each other and agrees, and the sky transforms
-  carry O(10%) errors at float32. Set `runtime.jax_enable_x64: true`, or export
-  `JAX_ENABLE_X64=1`, before any array exists.
+  carry O(10%) errors at float32. Declare `runtime.jax_enable_x64: true`. The
+  command line applies it to the process. Under `load_document` the process
+  must already agree: set `JAX_ENABLE_X64=1`, or call
+  `jax.config.update("jax_enable_x64", True)` before any array exists. A
+  document and a process that disagree are refused.
 
 ## Three things this grammar will not do
 

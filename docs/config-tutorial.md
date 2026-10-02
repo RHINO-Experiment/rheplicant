@@ -51,7 +51,7 @@ runs:
 hand: the 16 times and 8 frequencies here become the shape of everything
 downstream. `model:` names two nodes of the canonical radio graph and gives
 each its fields; every node you do not name is simply absent. `kind: forward`
-runs the twin once and hands back a `State`, so `run.data` comes out
+runs the twin once, and the run's product is a `State` whose `data` is
 `(16, 8)` — the absorption trough at 75 MHz, times the gain.
 
 Two habits the grammar enforces from the first line. **A number carries its
@@ -154,9 +154,9 @@ rheplicant run observation.yaml
 `validate` parses, applies presets, establishes the runtime, imports plugins
 and validates the base plus every variant — including every run kind's options
 — without creating a directory, a lock or a result. Only `run` publishes
-anything. A file named `config.yaml` defaults to `config.results/`; anything
-else needs `outputs.dir`, which is one of the three sections the command line
-owns and `load_document` refuses.
+anything. A file `NAME.yaml` publishes to `NAME.results/` beside it unless
+`outputs.dir` says otherwise, and `run -` requires `outputs.dir`. `outputs:` is
+one of the three sections the command line owns and `load_document` refuses.
 
 A package preset is an exact, hashed YAML layer rather than a replacement for
 the user document. `rhino_v1` intentionally leaves instrument-specific facts

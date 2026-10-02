@@ -51,15 +51,17 @@ T_RX, T_SRC, NOISE, PRIOR = 290.0, 300.0, 0.5, 100.0
 # S^-1) severely ill-conditioned: 2 of 3 directions carry no data at all, and
 # condition_estimate() below reports kappa ~ 4e6 for this run (kappa ~ 27 for
 # the default, well-conditioned three-load run). wiener_solve/gcr_sample's
-# guard (require_convergence, default 1e-3) bounds kappa * relative_residual,
+# guard (require_convergence, off unless a target is passed) bounds an upper
+# bound on kappa times the relative residual,
 # not the residual alone -- because a residual that LOOKS converged (CG
 # settles on the one well-constrained direction, which dominates the
 # aggregate residual, while the other two sit unresolved at their starting
 # value) is not evidence the solution is right. At the library's own default
-# tol=1e-6, kappa * residual is order-unity here, nowhere near 1e-3, so the
-# guard correctly RAISES rather than silently handing back the badly-wrong
-# posterior this script used to print for --one-source (~0.03 K reported
-# instead of the ~75-100 K the physics demands). Tightening tol here -- to
+# tol=1e-6, kappa * residual is order-unity here, nowhere near 1e-3. With the
+# guard on (require_convergence=1e-3) the solve raises; with it off, which is
+# the default, it hands back the badly-wrong posterior this script used to
+# print for --one-source (~0.03 K reported instead of the ~75-100 K the
+# physics demands). Tightening tol here -- to
 # roughly require_convergence / kappa -- is what makes --one-source's numbers
 # trustworthy without disabling the guard; see condition_estimate()'s
 # docstring in rheplicant/inference/linear.py for how to choose it for a new
@@ -151,7 +153,7 @@ print(f"linearity check: worst relative departure {max(errors.values()):.1e}")
 block = linear_operator(space, start, state)
 kappa = condition_estimate(block, noise_std=NOISE, prior_std=PRIOR)
 print(f"condition_estimate: kappa = {float(kappa):.2e} "
-      f"(what require_convergence's guard multiplies the residual by)")
+      f"(measured, and biased low; require_convergence reads condition_bound)")
 
 solved, residual = wiener_solve(
     block, observed, noise_std=NOISE, prior_std=PRIOR, tol=CG_TOL, maxiter=CG_MAXITER

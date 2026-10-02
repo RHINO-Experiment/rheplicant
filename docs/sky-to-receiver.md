@@ -15,6 +15,11 @@ named there rather than from the script.
 .venv/bin/python examples/sky_to_noise_wave.py
 ```
 
+The script needs `rhino-cal-jax` (the `cal` extra, installed from git). The
+numbers below use RHINO's CST horn exports, which are not redistributable:
+pass `--beam-dir` or set `RHEPLICANT_RHINO_BEAMS`. Without them the script
+uses a Gaussian beam and prints different numbers.
+
 - [The one identification](#the-one-identification) — what makes the two halves one model
 - [The path, as the graph builds it](#the-path-as-the-graph-builds-it)
 - [Step 1 — the horn](#step-1--the-horn)
@@ -431,9 +436,10 @@ three distinct $\Gamma$ make the per-channel $3\times 3$ square, and the antenna
 counts as a source like any other because its $T_\mathrm{src}$ is known. Fit
 $T_{rx}$ as well and the per-channel system is $4\times 4$ and wants a fourth
 load. Drop to one source and $\kappa$
-jumps to $\sim 4\times 10^{6}$, at which point `wiener_solve`'s guard
-[refuses to answer](inference-linear.md#conditioning-why-a-residual-is-not-an-accuracy)
-rather than returning a prior-driven posterior that looks converged.
+rises to $\sim 4\times 10^{6}$. The solve then returns a prior-driven answer
+whose residual looks converged, unless `require_convergence=` is passed, in
+which case it
+[refuses](inference-linear.md#conditioning-why-a-residual-is-not-an-accuracy).
 
 ---
 
